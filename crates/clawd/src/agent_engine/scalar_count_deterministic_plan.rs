@@ -1,41 +1,6 @@
 use super::*;
 
 #[cfg(test)]
-pub(super) fn path_metadata_compare_deterministic_plan_result(
-    goal: &str,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-) -> Option<PlanResult> {
-    let route = route_result?;
-    if loop_state.round_no > 1
-        || loop_state.has_tool_or_skill_output
-        || route.needs_clarify
-        || route.output_contract.delivery_required
-        || !route.output_contract.requires_content_evidence
-        || !route_requests_path_metadata_compare(route)
-    {
-        return None;
-    }
-    let (left, right) = two_route_locator_targets(route)?;
-    let actions = vec![AgentAction::CallTool {
-        tool: "fs_basic".to_string(),
-        args: serde_json::json!({
-            "action": "compare_paths",
-            "left_path": left,
-            "right_path": right,
-        }),
-    }];
-    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
-        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
-    Some(build_plan_result(
-        goal,
-        &raw_plan_text,
-        PlanKind::Single,
-        &actions,
-    ))
-}
-
-#[cfg(test)]
 pub(super) fn resolve_directory_locator_for_dir_compare(
     workspace_root: &Path,
     raw: &str,

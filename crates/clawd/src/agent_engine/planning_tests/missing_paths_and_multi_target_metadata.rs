@@ -925,17 +925,19 @@ fn recent_scalar_equality_pair_paths_skip_content_read_deterministic_fallback() 
     route.output_contract.locator_hint = "Cargo.toml | README.md".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &state,
-        "compare two path facts",
         Some(&route),
         &loop_state,
-        "Cargo.toml | README.md",
+        "compare two path facts",
         None,
-        None,
+        vec![],
     );
 
-    assert!(plan.is_none());
+    assert!(
+        normalized.is_empty(),
+        "runtime must not inject content-read fallback before the planner: {normalized:?}"
+    );
 }
 
 #[test]
@@ -950,17 +952,24 @@ fn recent_scalar_equality_pair_paths_uses_compare_paths_plan() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "Cargo.toml | README.md".to_string();
 
-    let plan = path_metadata_compare_deterministic_plan_result(
-        "compare two path metadata targets",
+    let normalized = super::super::normalize_planned_actions(
+        &test_state(),
         Some(&route),
         &LoopState::new(1),
-    )
-    .expect("path metadata compare plan");
+        "compare two path metadata targets",
+        None,
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "compare_paths",
+                "left_path": "Cargo.toml",
+                "right_path": "README.md"
+            }),
+        }],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "compare_paths");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "compare_paths");
     assert_eq!(
         args.get("left_path").and_then(Value::as_str),
         Some("Cargo.toml")
@@ -1013,21 +1022,33 @@ reqwest = { version = "0.12" }
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = super::super::recent_scalar_file_pair_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &state,
-        "Read workspace package version from Cargo.toml and compare it with README.md.",
         Some(&route),
         &loop_state,
         "Read workspace package version from Cargo.toml and compare it with README.md.",
-        Some("Read workspace package version from Cargo.toml and compare it with README.md."),
-        Some(cargo_path.as_str()),
-    )
-    .expect("file-pair scalar comparison should use deterministic read plan");
+        None,
+        vec![
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "read_field",
+                    "path": cargo_path,
+                    "field_path": "workspace.package.version"
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "grep_text",
+                    "path": readme_path,
+                    "query": "version"
+                }),
+            },
+        ],
+    );
 
-    let first = plan.steps[0]
-        .to_agent_action()
-        .expect("first step should be an action");
-    let args = expect_planned_call(&first, "config_basic", "read_field");
+    let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some(cargo_path.as_str())
@@ -1037,10 +1058,7 @@ reqwest = { version = "0.12" }
         Some("workspace.package.version")
     );
 
-    let second = plan.steps[1]
-        .to_agent_action()
-        .expect("second step should be an action");
-    let args = expect_planned_call(&second, "fs_basic", "grep_text");
+    let args = expect_planned_call(&normalized[1], "fs_basic", "grep_text");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some(readme_path.as_str())
@@ -1050,11 +1068,7 @@ reqwest = { version = "0.12" }
         &state,
         Some(&route),
         &loop_state,
-        &plan
-            .steps
-            .iter()
-            .filter_map(|step| step.to_agent_action())
-            .collect::<Vec<_>>()
+        &normalized
     ));
 }
 
@@ -1105,28 +1119,42 @@ version = "0.1.7"
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = super::super::recent_scalar_file_pair_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &state,
-        &route.resolved_intent,
         Some(&route),
         &loop_state,
-        "Read workspace package version from Cargo.toml and compare it with the version mentioned in README.md, then answer in one sentence.",
-        Some(
-            "Read workspace package version from Cargo.toml and compare it with the version mentioned in README.md, then answer in one sentence.",
-        ),
+        &route.resolved_intent,
         None,
-    )
-    .expect("relative file-pair scalar comparison should use deterministic read plan");
+        vec![
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "read_field",
+                    "path": "Cargo.toml",
+                    "field_path": "workspace.package.version"
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "grep_text",
+                    "path": "README.md",
+                    "query": "version"
+                }),
+            },
+        ],
+    );
 
-    assert!(matches!(
-        plan.steps
-            .first()
-            .and_then(|step| step.to_agent_action())
-            .as_ref(),
-        Some(AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args })
-            if tool == "config_basic"
-                && args.get("action").and_then(Value::as_str) == Some("read_field")
-    ));
+    assert!(
+        normalized.iter().any(|action| matches!(
+            action,
+            AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args }
+                if tool == "config_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("read_field")
+                    && args.get("path").and_then(Value::as_str) == Some("Cargo.toml")
+        )),
+        "planner-supplied relative config read should be preserved: {normalized:?}"
+    );
 }
 
 #[test]
@@ -1171,22 +1199,34 @@ version = "0.1.0"
     loop_state.round_no = 1;
     let prompt = "读取 UI/package.json 里的 name，再读取 crates/clawd/Cargo.toml 里的 package.name，最后只用一行输出：前者、后者、一样或不一样";
 
-    let plan = super::super::recent_scalar_file_pair_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &state,
-        prompt,
         Some(&route),
         &loop_state,
         prompt,
-        Some(prompt),
-        Some(package_path.as_str()),
-    )
-    .expect("two structured file scalar comparison should use deterministic read plan");
-    assert_eq!(plan.steps.len(), 2);
+        None,
+        vec![
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "read_field",
+                    "path": package_path,
+                    "field_path": "name"
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "read_field",
+                    "path": cargo_path,
+                    "field_path": "package.name"
+                }),
+            },
+        ],
+    );
+    assert_eq!(normalized.len(), 2);
 
-    let first = plan.steps[0]
-        .to_agent_action()
-        .expect("first step should be an action");
-    let first_args = expect_planned_call(&first, "config_basic", "read_field");
+    let first_args = expect_planned_call(&normalized[0], "config_basic", "read_field");
     assert_eq!(
         first_args.get("path").and_then(Value::as_str),
         Some(package_path.as_str())
@@ -1196,10 +1236,7 @@ version = "0.1.0"
         Some("name")
     );
 
-    let second = plan.steps[1]
-        .to_agent_action()
-        .expect("second step should be an action");
-    let second_args = expect_planned_call(&second, "config_basic", "read_field");
+    let second_args = expect_planned_call(&normalized[1], "config_basic", "read_field");
     assert_eq!(
         second_args.get("path").and_then(Value::as_str),
         Some(cargo_path.as_str())
@@ -1213,11 +1250,7 @@ version = "0.1.0"
         &state,
         Some(&route),
         &loop_state,
-        &plan
-            .steps
-            .iter()
-            .filter_map(|step| step.to_agent_action())
-            .collect::<Vec<_>>()
+        &normalized
     ));
 }
 
@@ -1352,7 +1385,7 @@ reqwest = { version = "0.12" }
     loop_state.round_no = 1;
     let policy = super::super::super::support::load_agent_loop_guard_policy(&state);
 
-    let plan = super::super::plan_round_actions(
+    let err = super::super::plan_round_actions(
         &state,
         &task,
         &route.resolved_intent,
@@ -1365,14 +1398,14 @@ reqwest = { version = "0.12" }
         Some(cargo_auto.as_str()),
     )
     .await
-    .expect("single auto locator route should reach planner path");
+    .expect_err("single auto locator route should reach planner instead of deterministic fallback");
 
     assert!(
-        !plan
-            .planner_notes
-            .split_whitespace()
-            .any(|note| note == "fallback_reason_code=plan_deterministic_recent_scalar_file_pair"),
-        "old recent scalar deterministic fallback leaked into planner notes: {}",
-        plan.planner_notes
+        err.contains("required prompt missing"),
+        "expected missing planner prompt after deterministic shortcut removal, got: {err}"
+    );
+    assert!(
+        !err.contains("plan_deterministic_recent_scalar_file_pair"),
+        "old recent scalar deterministic fallback leaked into planner error: {err}"
     );
 }
