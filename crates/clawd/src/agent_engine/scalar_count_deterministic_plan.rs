@@ -435,14 +435,6 @@ pub(super) fn explicit_command_plan_needs_terminal_synthesis(
     })
 }
 
-#[cfg(test)]
-pub(super) fn contract_hint_preferred_action_ref(
-    original_user_text: &str,
-) -> Option<crate::evidence_policy::ActionRef> {
-    crate::intent_router::contract_test_hint_value(original_user_text, "preferred_action_ref")
-        .and_then(|value| crate::evidence_policy::ActionRef::parse(&value))
-}
-
 pub(super) fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }

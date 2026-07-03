@@ -13,25 +13,24 @@ fn rustclaw_main_config_content_excerpt_direct_guard_prefers_config_basic_guard(
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
-    let actions = vec![AgentAction::CallTool {
-        tool: "config_edit".to_string(),
-        args: json!({
-            "action": "guard_config",
-            "path": "/home/guagua/rustclaw/configs/config.toml",
-            "format": "toml",
-        }),
-    }];
+    route.route_reason = "capability_ref=config.guard_rustclaw_config".to_string();
 
-    let normalized = normalize_planned_actions(
+    let args = assert_planner_supplied_tool_call_preserved(
         &state,
-        Some(&route),
+        &route,
         &LoopState::new(1),
         "Assess the main config with structured current-task evidence.",
         Some("/home/guagua/rustclaw/configs/config.toml"),
-        actions,
+        Some(&route.route_reason),
+        "config_basic",
+        "guard_rustclaw_config",
+        json!({
+            "action": "guard_rustclaw_config",
+            "path": "configs/config.toml",
+            "format": "toml",
+        }),
     );
 
-    let args = expect_planned_call(&normalized[0], "config_basic", "guard_rustclaw_config");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some("configs/config.toml")
@@ -804,30 +803,32 @@ planner_kind = "tool"
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = registry_path.clone();
-    route.route_reason = "structured_identifier_presence_requires_content_evidence".to_string();
+    route.route_reason =
+        "capability_ref=config.read_field structured_identifier_presence_requires_content_evidence"
+            .to_string();
     route.resolved_intent =
         "Read skills_registry.toml and answer whether fs_basic is registered.".to_string();
     let request = "Read skills_registry.toml and answer whether fs_basic is registered.";
 
-    let plan = super::super::scalar_content_auto_locator_deterministic_plan_result(
+    let args = assert_planner_supplied_tool_call_preserved(
         &state,
-        request,
-        Some(&route),
+        &route,
         &LoopState::new(1),
         request,
         Some(request),
-        Some(registry_path.as_str()),
-    )
-    .expect("structured identity presence should bypass broad file reads");
+        Some(request),
+        "config_basic",
+        "read_field",
+        json!({
+            "action": "read_field",
+            "path": registry_path.clone(),
+            "field_path": "fs_basic.name",
+        }),
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let first = plan.steps[0]
-        .to_agent_action()
-        .expect("first step should be an action");
-    let args = expect_planned_call(&first, "config_basic", "read_field");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
-        Some(registry_path.as_str())
+        Some(registry_path.as_str()),
     );
     assert_eq!(
         args.get("field_path").and_then(Value::as_str),
@@ -865,45 +866,37 @@ planner_kind = "tool"
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = registry_path.clone();
+    route.route_reason = "capability_ref=config.read_field".to_string();
     route.resolved_intent =
         "Locate the run_cmd configuration in skills_registry.toml and report planner_kind."
             .to_string();
     let request =
         "在 configs/skills_registry.toml 里找到 run_cmd 相关配置位置，并告诉我它的 planner_kind 是什么";
 
-    let plan = structured_scalar_field_auto_locator_deterministic_plan_result(
+    let args = assert_planner_supplied_tool_call_preserved(
         &state,
-        request,
-        Some(&route),
+        &route,
         &LoopState::new(1),
         request,
         Some(request),
-        Some(registry_path.as_str()),
-    )
-    .expect("structured scalar field should bypass broad content reads");
+        Some(request),
+        "config_basic",
+        "read_field",
+        json!({
+            "action": "read_field",
+            "path": registry_path.clone(),
+            "field_path": "run_cmd.planner_kind",
+        }),
+    );
 
-    assert_eq!(plan.steps.len(), 3);
-    let first = plan.steps[0]
-        .to_agent_action()
-        .expect("first step should be an action");
-    let args = expect_planned_call(&first, "config_basic", "read_field");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
-        Some(registry_path.as_str())
+        Some(registry_path.as_str()),
     );
     assert_eq!(
         args.get("field_path").and_then(Value::as_str),
         Some("run_cmd.planner_kind")
     );
-    assert!(matches!(
-        plan.steps[1].to_agent_action().as_ref(),
-        Some(AgentAction::SynthesizeAnswer { evidence_refs })
-            if evidence_refs == &vec!["last_output".to_string()]
-    ));
-    assert!(matches!(
-        plan.steps[2].to_agent_action().as_ref(),
-        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
-    ));
 }
 
 #[test]
@@ -1112,28 +1105,34 @@ fn contract_hint_preferred_run_cmd_uses_machine_hint_not_request_words() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.resolved_intent = "capability_ref=package.detect_manager".to_string();
+    route.route_reason = "capability_ref=package.detect_manager".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::None;
     let request =
             "arbitrary multilingual surface\n[CONTRACT_TEST_HINT]\npreferred_action_ref=run_cmd\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "detect package manager",
         Some(&route),
         &LoopState::new(1),
-        request,
+        "detect package manager",
+        Some(request),
+        Some(&route.route_reason),
         None,
-    )
-    .expect("machine hint should select run_cmd");
+        vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({
+                "command": "node --version || npm --version || pnpm --version",
+            }),
+        }],
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
-    assert!(plan.steps[0]
-        .args
-        .get("command")
-        .and_then(Value::as_str)
-        .is_some());
+    match normalized.first() {
+        Some(AgentAction::CallSkill { skill, args }) => {
+            assert_eq!(skill, "run_cmd");
+            assert!(args.get("command").and_then(Value::as_str).is_some());
+        }
+        other => panic!("planner-supplied run_cmd should be preserved: {other:?}"),
+    }
 }
 
 #[test]
@@ -1148,17 +1147,19 @@ fn contract_hint_preferred_run_cmd_sqlite_without_database_capability_is_rejecte
         "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
     let request = "[CONTRACT_TEST_HINT]\npreferred_action_ref=run_cmd\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "inspect sqlite database kind",
         Some(&route),
         &LoopState::new(1),
-        request,
+        "inspect sqlite database kind",
+        Some(request),
+        Some(request),
         None,
+        Vec::new(),
     );
 
     assert!(
-        plan.is_none(),
+        normalized.is_empty(),
         "sqlite semantic marker alone must not authorize a run_cmd database probe"
     );
 }
@@ -1176,30 +1177,35 @@ fn contract_hint_preferred_db_basic_does_not_claim_structured_keys_config_file()
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
+    route.route_reason = "capability_ref=config.list_keys".to_string();
     let request = "[CONTRACT_TEST_HINT]\npreferred_action_ref=db_basic\n[/CONTRACT_TEST_HINT]";
 
-    assert!(contract_hint_preferred_action_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "list structured keys",
         Some(&route),
         &LoopState::new(1),
-        request,
+        "list structured keys",
+        Some(request),
         Some(&config_path),
-    )
-    .is_none());
+        None,
+        Vec::new(),
+    );
+    assert!(normalized.is_empty());
 
-    let plan = structured_keys_deterministic_plan_result(
+    let args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "list structured keys",
-        "list structured keys",
-        Some(&route),
+        &route,
         &LoopState::new(1),
+        "list structured keys",
+        Some("list structured keys"),
         Some(&config_path),
-    )
-    .expect("structured keys should fall back to config_basic list_keys");
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "config_basic", "list_keys");
+        "config_basic",
+        "list_keys",
+        json!({
+            "action": "list_keys",
+            "path": config_path.clone(),
+        }),
+    );
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some(config_path.as_str())
@@ -1222,25 +1228,28 @@ fn contract_hint_workspace_summary_list_dir_prefers_text_excerpt_evidence() {
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
-    let request =
-        "[CONTRACT_TEST_HINT]\npreferred_action_ref=fs_basic.list_dir\n[/CONTRACT_TEST_HINT]";
+    route.route_reason = "capability_ref=filesystem.read_text_range".to_string();
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let read_path = root.path.join("README.md").display().to_string();
+    let args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "summarize workspace",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        request,
+        "summarize workspace",
+        Some("summarize workspace"),
         Some(&root_path),
-    )
-    .expect("workspace summary should use readable text evidence");
-
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "read_text_range");
+        "fs_basic",
+        "read_text_range",
+        json!({
+            "action": "read_text_range",
+            "path": read_path.clone(),
+            "mode": "head",
+            "n": 80,
+        }),
+    );
     assert_eq!(
         args.get("path").and_then(Value::as_str),
-        Some(root.path.join("README.md").display().to_string().as_str())
+        Some(read_path.as_str())
     );
 }
 
@@ -1260,24 +1269,28 @@ fn contract_hint_workspace_summary_git_basic_prefers_text_excerpt_evidence() {
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
-    let request = "[CONTRACT_TEST_HINT]\npreferred_action_ref=git_basic\n[/CONTRACT_TEST_HINT]";
+    route.route_reason = "capability_ref=filesystem.read_text_range".to_string();
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let read_path = root.path.join("README.md").display().to_string();
+    let args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "summarize workspace",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        request,
+        "summarize workspace",
+        Some("summarize workspace"),
         Some(&root_path),
-    )
-    .expect("workspace summary should use readable text evidence");
-
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "read_text_range");
+        "fs_basic",
+        "read_text_range",
+        json!({
+            "action": "read_text_range",
+            "path": read_path.clone(),
+            "mode": "head",
+            "n": 80,
+        }),
+    );
     assert_eq!(
         args.get("path").and_then(Value::as_str),
-        Some(root.path.join("README.md").display().to_string().as_str())
+        Some(read_path.as_str())
     );
 }
 
@@ -1298,22 +1311,24 @@ fn contract_hint_generic_path_content_stat_paths_prefers_text_excerpt_evidence()
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = doc_path.clone();
-    let request =
-        "[CONTRACT_TEST_HINT]\npreferred_action_ref=fs_basic.stat_paths\n[/CONTRACT_TEST_HINT]";
+    route.route_reason = "capability_ref=filesystem.read_text_range".to_string();
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "summarize file",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        request,
+        "summarize file",
+        Some("summarize file"),
         Some(&doc_path),
-    )
-    .expect("generic file summary should use readable text evidence");
-
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "read_text_range");
+        "fs_basic",
+        "read_text_range",
+        json!({
+            "action": "read_text_range",
+            "path": doc_path.clone(),
+            "mode": "head",
+            "n": 80,
+        }),
+    );
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some(doc_path.as_str())
@@ -1330,23 +1345,25 @@ fn contract_hint_preferred_fs_stat_paths_uses_locator_contract() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
         "scripts/nl_tests/fixtures/device_local/package.json".to_string();
-    let request =
-        "[CONTRACT_TEST_HINT]\npreferred_action_ref=fs_basic.stat_paths\n[/CONTRACT_TEST_HINT]";
+    route.route_reason = "capability_ref=filesystem.stat_paths".to_string();
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "return path",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        request,
-        None,
-    )
-    .expect("machine hint should select fs_basic.stat_paths");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "fs_basic");
+        "return path",
+        Some("return path"),
+        Some(&route.route_reason),
+        "fs_basic",
+        "stat_paths",
+        json!({
+            "action": "stat_paths",
+            "paths": ["scripts/nl_tests/fixtures/device_local/package.json"],
+            "include_missing": true,
+        }),
+    );
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("stat_paths")
     );
 }
@@ -1359,23 +1376,21 @@ fn contract_hint_scalar_equality_without_locator_falls_back_to_git_branch() {
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.locator_kind = OutputLocatorKind::None;
-    let request = "[CONTRACT_TEST_HINT]\nsemantic_kind=recent_scalar_equality_check\ncandidate_wrong_action_ref=db_basic\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "check scalar equality",
         Some(&route),
         &LoopState::new(1),
-        request,
+        "check scalar equality",
+        Some("check scalar equality"),
+        Some("semantic_kind=recent_scalar_equality_check candidate_wrong_action_ref=db_basic"),
         None,
-    )
-    .expect("matrix fallback should select git_basic when no path locator exists");
+        Vec::new(),
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "git_basic");
-    assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
-        Some("current_branch")
+    assert!(
+        normalized.is_empty(),
+        "scalar equality marker alone must not synthesize a git action: {normalized:?}"
     );
 }
 
@@ -1397,27 +1412,30 @@ fn contract_hint_matrix_preferred_workspace_summary_reads_text_evidence() {
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "fixture_project".to_string();
-    let request =
-        "[CONTRACT_TEST_HINT]\nsemantic_kind=workspace_project_summary\n[/CONTRACT_TEST_HINT]";
+    route.route_reason = "capability_ref=filesystem.read_text_range".to_string();
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let read_path = fixture_dir.join("README.md").display().to_string();
+    let args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "summarize project",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        request,
-        None,
-    )
-    .expect("matrix preferred action should select readable text evidence");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "fs_basic");
+        "summarize project",
+        Some("summarize project"),
+        Some("fixture_project"),
+        "fs_basic",
+        "read_text_range",
+        json!({
+            "action": "read_text_range",
+            "path": read_path,
+            "mode": "head",
+            "n": 80,
+        }),
+    );
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("read_text_range")
     );
-    assert!(plan.steps[0]
-        .args
+    assert!(args
         .get("path")
         .and_then(Value::as_str)
         .is_some_and(|path| path.ends_with("fixture_project/README.md")));
@@ -1431,19 +1449,24 @@ fn contract_hint_preferred_docker_logs_does_not_use_legacy_semantic_fast_path() 
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.resolved_intent = "capability_ref=docker.read_logs".to_string();
+    route.route_reason = "capability_ref=docker.read_logs".to_string();
     let request = "[CONTRACT_TEST_HINT]\npreferred_action_ref=docker_basic\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "inspect docker logs",
         Some(&route),
         &LoopState::new(1),
-        request,
+        "inspect docker logs",
+        Some(request),
+        Some(&route.route_reason),
         None,
+        Vec::new(),
     );
 
-    assert!(plan.is_none());
+    assert!(
+        normalized.is_empty(),
+        "docker capability hint must not synthesize docker actions without planner output"
+    );
 }
 
 #[test]
@@ -1619,27 +1642,37 @@ fn contract_hint_preferred_run_cmd_uses_docker_capability_ref_with_semantic_none
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.resolved_intent = "capability_ref=docker.list_images".to_string();
+    route.route_reason = "capability_ref=docker.list_images".to_string();
     let request =
         "arbitrary multilingual surface\n[CONTRACT_TEST_HINT]\npreferred_action_ref=run_cmd\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let run_args = json!({
+        "command": "docker images 2>&1 || true",
+    });
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "list docker images",
         Some(&route),
         &LoopState::new(1),
-        request,
+        "list docker images",
+        Some(request),
+        Some(&route.route_reason),
         None,
-    )
-    .expect("machine hint and capability ref should select run_cmd");
+        vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: run_args,
+        }],
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
-    assert!(plan.steps[0]
-        .args
-        .get("command")
-        .and_then(Value::as_str)
-        .is_some_and(|command| command.contains("docker images")));
+    match normalized.first() {
+        Some(AgentAction::CallSkill { skill, args }) => {
+            assert_eq!(skill, "run_cmd");
+            assert!(args
+                .get("command")
+                .and_then(Value::as_str)
+                .is_some_and(|command| command.contains("docker images")));
+        }
+        other => panic!("planner-supplied docker run_cmd should be preserved: {other:?}"),
+    }
 }
 
 #[test]
@@ -1673,30 +1706,58 @@ fn contract_hint_matrix_existence_summary_reads_stat_and_content_from_route_cont
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "package.json".to_string();
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let read_path = fixture.display().to_string();
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "describe package",
         Some(&route),
         &LoopState::new(1),
-        "sanitized user request without machine hint block",
+        "describe package",
+        Some("describe package"),
+        Some("package.json"),
         None,
-    )
-    .expect("route-level contract hint should select deterministic two-step plan");
+        vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "stat_paths",
+                    "paths": ["package.json"],
+                    "include_missing": true,
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": read_path,
+                    "mode": "head",
+                    "n": 80,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 4);
-    assert_eq!(plan.steps[0].skill, "fs_basic");
-    assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
-        Some("stat_paths")
-    );
-    assert_eq!(plan.steps[1].skill, "fs_basic");
-    assert_eq!(
-        plan.steps[1].args.get("action").and_then(Value::as_str),
-        Some("read_text_range")
-    );
-    assert!(plan.steps[1]
-        .args
-        .get("path")
-        .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with("package.json")));
+    assert!(matches!(
+        normalized.as_slice(),
+        [
+            AgentAction::CallTool { tool: stat_tool, args: stat_args },
+            AgentAction::CallTool { tool: read_tool, args: read_args },
+            AgentAction::SynthesizeAnswer { evidence_refs },
+            AgentAction::Respond { content },
+        ] if stat_tool == "fs_basic"
+            && stat_args.get("action").and_then(Value::as_str) == Some("stat_paths")
+            && read_tool == "fs_basic"
+            && read_args.get("action").and_then(Value::as_str) == Some("read_text_range")
+            && read_args
+                .get("path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| path.ends_with("package.json"))
+            && evidence_refs == &vec!["step_1".to_string(), "step_2".to_string()]
+            && content == "{{last_output}}"
+    ));
 }

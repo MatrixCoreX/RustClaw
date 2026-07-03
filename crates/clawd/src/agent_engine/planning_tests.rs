@@ -19,7 +19,6 @@ use super::{
     content_excerpt_explicit_file_targets_deterministic_plan_result,
     content_excerpt_summary_auto_locator_deterministic_plan_result,
     content_excerpt_summary_directory_log_slice_deterministic_plan_result,
-    contract_hint_preferred_action_deterministic_plan_result,
     contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
     directory_entry_groups_auto_locator_deterministic_plan_result,
     directory_purpose_auto_locator_deterministic_plan_result,
@@ -91,7 +90,6 @@ use super::{
     strip_unresolved_template_reads_after_inventory_dir,
     structured_dry_run_response_deterministic_plan_result, structured_field_selectors,
     structured_keys_deterministic_plan_result,
-    structured_scalar_field_auto_locator_deterministic_plan_result,
     subagent_bounded_batch_surface_deterministic_plan_result,
     subagent_review_boundary_surface_deterministic_plan_result, LoopState, PlanningPromptClass,
 };
@@ -225,6 +223,60 @@ fn assert_planner_supplied_skill_call_preserved(
         .unwrap_or_else(|| {
             panic!(
                 "planner-supplied {skill}.{action_name} action should be preserved: {normalized:?}"
+            )
+        })
+}
+
+fn assert_planner_supplied_tool_call_preserved(
+    state: &AppState,
+    route: &RouteResult,
+    loop_state: &LoopState,
+    goal: &str,
+    user_text: Option<&str>,
+    context_text: Option<&str>,
+    tool: &str,
+    action_name: &str,
+    args: Value,
+) -> Value {
+    let action = AgentAction::CallTool {
+        tool: tool.to_string(),
+        args,
+    };
+    let AgentAction::CallTool {
+        tool: policy_tool,
+        args: policy_args,
+    } = &action
+    else {
+        unreachable!("test action is a tool call");
+    };
+    assert!(
+        crate::evidence_policy::capability_ref_action_policy_for_route(
+            Some(route),
+            policy_tool,
+            policy_args
+        )
+        .is_some_and(|policy| policy.is_allowed())
+    );
+
+    let normalized = normalize_planned_actions_with_original_and_context(
+        state,
+        Some(route),
+        loop_state,
+        goal,
+        user_text,
+        context_text,
+        None,
+        vec![action],
+    );
+    normalized
+        .iter()
+        .find_map(|action| {
+            planned_call_is(action, tool, action_name)
+                .then(|| expect_planned_call(action, tool, action_name).clone())
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "planner-supplied {tool}.{action_name} action should be preserved: {normalized:?}"
             )
         })
 }
