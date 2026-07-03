@@ -126,6 +126,22 @@ def scan_repo() -> list[str]:
     return scan_pre_llm_prefix() + scan_deterministic_helper_visibility()
 
 
+def scan_test_direct_deterministic_calls() -> list[str]:
+    findings: list[str] = []
+    for path in sorted(AGENT_ENGINE_ROOT.rglob("*.rs")):
+        if not path.is_file() or not is_test_path(path):
+            continue
+        for index, line in enumerate(read(path).splitlines(), start=1):
+            stripped = line.strip()
+            if stripped.startswith("//") or DETERMINISTIC_PLAN_FN.search(line):
+                continue
+            if DETERMINISTIC_PLAN_CALL.search(line):
+                findings.append(
+                    f"{rel(path)}:{index}: test_direct_deterministic_plan_call"
+                )
+    return findings
+
+
 def run_self_test() -> int:
     assert DETERMINISTIC_PLAN_CALL.search("service_status_deterministic_plan_result(")
     assert PRE_LLM_FORBIDDEN_PATTERNS[1][1].search("build_plan_result(")
@@ -137,12 +153,22 @@ def run_self_test() -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument(
+        "--strict-tests",
+        action="store_true",
+        help="also report tests that still call deterministic plan helpers directly",
+    )
     args = parser.parse_args(argv)
     if args.self_test:
         return run_self_test()
 
     findings = scan_repo()
-    print(f"PLANNER_PRE_LLM_DETERMINISTIC_FAST_PATH_CHECK findings={len(findings)}")
+    if args.strict_tests:
+        findings.extend(scan_test_direct_deterministic_calls())
+    print(
+        "PLANNER_PRE_LLM_DETERMINISTIC_FAST_PATH_CHECK "
+        f"strict_tests={str(args.strict_tests).lower()} findings={len(findings)}"
+    )
     for finding in findings:
         print(f"  - {finding}")
     return 1 if findings else 0
