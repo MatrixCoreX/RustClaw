@@ -112,7 +112,6 @@ fn contract_repair_judge_rejects_scalar_semantic_repair_without_machine_marker()
         clarify_question: String::new(),
         reason: "direct answer candidate lacked current evidence".to_string(),
         confidence: 0.5,
-        decision: "direct_answer".to_string(),
         schedule_intent: None,
         output_contract: Some(super::IntentOutputContractOut::default()),
         execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
@@ -128,7 +127,6 @@ fn contract_repair_judge_rejects_scalar_semantic_repair_without_machine_marker()
         validated.value
     ));
 
-    assert_eq!(out.decision, "direct_answer");
     let contract = super::parse_output_contract(out.output_contract, false);
     assert_eq!(contract.response_shape, OutputResponseShape::Free);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
@@ -150,7 +148,6 @@ fn contract_repair_judge_rejects_directory_semantic_repair_without_machine_marke
         clarify_question: String::new(),
         reason: "malformed recipe text was ignored".to_string(),
         confidence: 0.5,
-        decision: "direct_answer".to_string(),
         schedule_intent: None,
         output_contract: Some(super::IntentOutputContractOut::default()),
         execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
@@ -195,7 +192,6 @@ fn contract_repair_judge_rejects_directory_semantic_repair_without_machine_marke
 
     assert!(!super::apply_contract_repair_judge_output(&mut out, repair));
 
-    assert_eq!(out.decision, "direct_answer");
     assert_eq!(out.confidence, 0.5);
     assert!(!out.reason.contains("contract_repair_applied"));
     assert!(!out.reason.contains("contract_repair_note_present"));
@@ -221,7 +217,6 @@ fn contract_repair_judge_machine_marker_restores_execution_failed_step_contract(
         clarify_question: String::new(),
         reason: "active task binding used non-canonical tokens".to_string(),
         confidence: 0.5,
-        decision: "clarify".to_string(),
         schedule_intent: None,
         output_contract: Some(super::IntentOutputContractOut::default()),
         execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
@@ -268,7 +263,6 @@ fn contract_repair_judge_machine_marker_restores_execution_failed_step_contract(
 
     assert!(super::apply_contract_repair_judge_output(&mut out, repair));
 
-    assert_eq!(out.decision, "planner_execute");
     assert!(!out.needs_clarify);
     assert!(out.clarify_question.is_empty());
     let contract = super::parse_output_contract(out.output_contract, false);
@@ -297,7 +291,6 @@ fn contract_repair_judge_generated_file_delivery_runtime_target_overrides_clarif
         clarify_question: "需要保存到哪个文件路径？".to_string(),
         reason: "generated artifact delivery".to_string(),
         confidence: 0.5,
-        decision: "clarify".to_string(),
         schedule_intent: None,
         output_contract: Some(super::IntentOutputContractOut::default()),
         execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
@@ -344,7 +337,6 @@ fn contract_repair_judge_generated_file_delivery_runtime_target_overrides_clarif
 
     assert!(super::apply_contract_repair_judge_output(&mut out, repair));
 
-    assert_eq!(out.decision, "planner_execute");
     assert!(!out.needs_clarify);
     assert!(out.clarify_question.is_empty());
     assert!(out.wants_file_delivery);
@@ -425,7 +417,6 @@ fn contract_repair_judge_machine_marker_reuses_active_completed_task_status() {
         clarify_question: String::new(),
         reason: "active task binding used non-canonical tokens".to_string(),
         confidence: 0.5,
-        decision: "clarify".to_string(),
         schedule_intent: None,
         output_contract: Some(super::IntentOutputContractOut::default()),
         execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
@@ -470,7 +461,6 @@ fn contract_repair_judge_machine_marker_reuses_active_completed_task_status() {
 
     assert!(super::apply_contract_repair_judge_output(&mut out, repair));
 
-    assert_eq!(out.decision, "direct_answer");
     assert!(!out.needs_clarify);
     assert!(out.clarify_question.is_empty());
     assert_eq!(out.turn_type, "status_query");
@@ -500,7 +490,6 @@ fn contract_repair_judge_missing_turn_binding_forces_missing_locator_clarify() {
         clarify_question: String::new(),
         reason: "memory alias selected path".to_string(),
         confidence: 0.5,
-        decision: "planner_execute".to_string(),
         schedule_intent: None,
         output_contract: Some(super::IntentOutputContractOut::default()),
         execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
@@ -550,7 +539,6 @@ fn contract_repair_judge_missing_turn_binding_forces_missing_locator_clarify() {
 
     assert!(super::apply_contract_repair_judge_output(&mut out, repair));
 
-    assert_eq!(out.decision, "clarify");
     assert!(out.needs_clarify);
     let contract = super::parse_output_contract(out.output_contract, false);
     assert!(contract.requires_content_evidence);
@@ -579,7 +567,6 @@ fn contract_repair_judge_output_clears_stale_file_delivery_flag() {
         clarify_question: String::new(),
         reason: "malformed output contract".to_string(),
         confidence: 0.5,
-        decision: "planner_execute".to_string(),
         schedule_intent: None,
         output_contract: Some(super::IntentOutputContractOut {
             response_shape: "file_token".to_string(),
@@ -657,7 +644,6 @@ fn contract_repair_judge_output_rejects_low_confidence() {
         clarify_question: String::new(),
         reason: String::new(),
         confidence: 0.8,
-        decision: "direct_answer".to_string(),
         schedule_intent: None,
         output_contract: Some(super::IntentOutputContractOut::default()),
         execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
@@ -696,7 +682,6 @@ fn contract_repair_judge_output_rejects_low_confidence() {
     };
 
     assert!(!super::apply_contract_repair_judge_output(&mut out, repair));
-    assert_eq!(out.decision, "direct_answer");
     assert_eq!(out.resolved_user_intent, "总结刚才的对话");
 }
 
@@ -713,7 +698,6 @@ fn contract_repair_judge_rejects_decision_change_without_machine_contract_signal
         clarify_question: String::new(),
         reason: String::new(),
         confidence: 0.8,
-        decision: "direct_answer".to_string(),
         schedule_intent: None,
         output_contract: Some(super::IntentOutputContractOut::default()),
         execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
@@ -740,7 +724,6 @@ fn contract_repair_judge_rejects_decision_change_without_machine_contract_signal
     };
 
     assert!(!super::apply_contract_repair_judge_output(&mut out, repair));
-    assert_eq!(out.decision, "direct_answer");
     assert!(out.output_contract.is_some());
     assert!(out.execution_recipe.is_some());
 }

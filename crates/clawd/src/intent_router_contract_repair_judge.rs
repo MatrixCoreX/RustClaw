@@ -5,9 +5,9 @@ use tracing::info;
 use super::{
     append_route_reason, is_meaningful_state_patch, normalize_schema_token, parse_output_contract,
     parse_output_delivery_intent, parse_output_response_shape, parse_output_semantic_kind,
-    parse_target_task_policy, parse_turn_type, ContractRepairReport, FirstLayerDecision,
-    IntentExecutionRecipeOut, IntentNormalizerOut, IntentOutputContractOut, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, TargetTaskPolicy, TurnType,
+    parse_target_task_policy, parse_turn_type, ContractRepairReport, IntentExecutionRecipeOut,
+    IntentNormalizerOut, IntentOutputContractOut, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputSemanticKind, TargetTaskPolicy, TurnType,
 };
 use crate::{llm_gateway, AppState, ClaimedTask};
 
@@ -237,9 +237,6 @@ pub(super) fn apply_contract_repair_judge_output(
         return false;
     }
 
-    let decision =
-        contract_repair_trace_decision(needs_clarify, &output_contract, &execution_recipe);
-    out.decision = decision.as_str().to_string();
     out.needs_clarify = needs_clarify;
     out.clarify_question = clarify_question;
     if !repair.resolved_user_intent.trim().is_empty() {
@@ -349,22 +346,6 @@ fn contract_repair_judge_output_is_schema_backed(
         return true;
     }
     false
-}
-
-fn contract_repair_trace_decision(
-    needs_clarify: bool,
-    output_contract: &IntentOutputContractOut,
-    execution_recipe: &IntentExecutionRecipeOut,
-) -> FirstLayerDecision {
-    if needs_clarify {
-        FirstLayerDecision::Clarify
-    } else if repaired_contract_has_execution_signal(output_contract)
-        || repaired_recipe_has_execution_signal(execution_recipe)
-    {
-        FirstLayerDecision::PlannerExecute
-    } else {
-        FirstLayerDecision::DirectAnswer
-    }
 }
 
 fn contract_repair_reason_has_allowed_machine_override(reason: &str) -> bool {

@@ -25,6 +25,9 @@ PIPELINE_TYPES_FILE = SRC_ROOT / "pipeline_types.rs"
 RUNTIME_ASK_MODE_FILE = SRC_ROOT / "runtime/ask_mode.rs"
 RUNTIME_TYPES_FILE = SRC_ROOT / "runtime/types.rs"
 INTENT_ROUTER_FILE = SRC_ROOT / "intent_router.rs"
+INTENT_ROUTER_CONTRACT_REPAIR_JUDGE_FILE = (
+    SRC_ROOT / "intent_router_contract_repair_judge.rs"
+)
 PREFERRED_RUN_CMD_FILE = SRC_ROOT / "agent_engine/scalar_count_deterministic_plan.rs"
 PREFERRED_STRUCTURED_ACTION_FILE = SRC_ROOT / "agent_engine/preferred_structured_action.rs"
 MIGRATION_CLASS_FILE = SRC_ROOT / "agent_engine/migration_class.rs"
@@ -738,6 +741,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_normalizer_run_route_trace_decision_type())
     findings.extend(scan_runtime_journal_route_trace_decision_type())
     findings.extend(scan_first_layer_decision_test_only_boundary())
+    findings.extend(scan_intent_normalizer_legacy_decision_field_deleted())
     findings.extend(scan_contract_repair_schema_ordinary_semantic_tokens())
     findings.extend(scan_skill_registry_metadata_ordinary_semantic_tokens())
     findings.extend(scan_preferred_run_cmd_registry_bridge_fallback())
@@ -1540,6 +1544,57 @@ def scan_first_layer_decision_test_only_boundary_text(
                     message,
                 )
             )
+    return findings
+
+
+def scan_intent_normalizer_legacy_decision_field_deleted() -> list[Finding]:
+    findings: list[Finding] = []
+    findings.extend(
+        scan_intent_normalizer_legacy_decision_field_deleted_text(
+            rel(INTENT_ROUTER_FILE),
+            INTENT_ROUTER_FILE.read_text(encoding="utf-8"),
+        )
+    )
+    findings.extend(
+        scan_intent_normalizer_legacy_decision_field_deleted_text(
+            rel(INTENT_ROUTER_CONTRACT_REPAIR_JUDGE_FILE),
+            INTENT_ROUTER_CONTRACT_REPAIR_JUDGE_FILE.read_text(encoding="utf-8"),
+        )
+    )
+    return findings
+
+
+def scan_intent_normalizer_legacy_decision_field_deleted_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    match = re.search(
+        r"struct\s+IntentNormalizerOut\s*\{(?P<body>.*?)\n\}",
+        text,
+        flags=re.DOTALL,
+    )
+    if match:
+        body = match.group("body")
+        body_start = match.start("body")
+        field_match = re.search(r"\bdecision\s*:\s*String\b", body)
+        if field_match:
+            findings.append(
+                Finding(
+                    rel_path,
+                    text.count("\n", 0, body_start + field_match.start()) + 1,
+                    "intent_normalizer_out_legacy_decision_field",
+                    "IntentNormalizerOut must not keep legacy decision field",
+                )
+            )
+    for assignment in re.finditer(r"\bout\.decision\s*=", text):
+        findings.append(
+            Finding(
+                rel_path,
+                text.count("\n", 0, assignment.start()) + 1,
+                "intent_normalizer_out_legacy_decision_write",
+                "repair code must not write legacy normalizer decision",
+            )
+        )
     return findings
 
 
@@ -3651,6 +3706,30 @@ def run_self_test() -> int:
     assert not scan_first_layer_decision_test_only_boundary_text(
         "crates/clawd/src/intent_router.rs",
         "#[cfg(test)]\nuse crate::FirstLayerDecision;\n",
+    )
+    blocked_normalizer_decision_field = (
+        scan_intent_normalizer_legacy_decision_field_deleted_text(
+            "crates/clawd/src/intent_router.rs",
+            "struct IntentNormalizerOut {\n    decision: String,\n}\n",
+        )
+    )
+    assert any(
+        item.kind == "intent_normalizer_out_legacy_decision_field"
+        for item in blocked_normalizer_decision_field
+    )
+    blocked_normalizer_decision_write = (
+        scan_intent_normalizer_legacy_decision_field_deleted_text(
+            "crates/clawd/src/intent_router_contract_repair_judge.rs",
+            "fn repair(out: &mut IntentNormalizerOut) {\n    out.decision = \"act\".to_string();\n}\n",
+        )
+    )
+    assert any(
+        item.kind == "intent_normalizer_out_legacy_decision_write"
+        for item in blocked_normalizer_decision_write
+    )
+    assert not scan_intent_normalizer_legacy_decision_field_deleted_text(
+        "crates/clawd/src/intent_router.rs",
+        "struct IntentNormalizerOut {\n    needs_clarify: bool,\n}\n",
     )
     assert not scan_normalizer_route_result_boundary()
     assert not scan_journal_output_contract_ref_boundary()

@@ -395,9 +395,6 @@ struct IntentNormalizerOut {
     #[serde(default)]
     confidence: f64,
     #[serde(default)]
-    #[allow(dead_code)]
-    decision: String,
-    #[serde(default)]
     schedule_intent: Option<crate::ScheduleIntentOutput>,
     #[serde(default)]
     output_contract: Option<IntentOutputContractOut>,
