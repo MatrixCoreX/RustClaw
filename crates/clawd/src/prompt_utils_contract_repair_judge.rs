@@ -183,6 +183,12 @@ pub(super) fn canonicalize_contract_repair_judge_object(
         canonicalize_contract_repair_judge_confidence(map.remove("confidence"));
     normalized |= confidence_normalized;
     map.insert("confidence".to_string(), confidence);
+    if map
+        .insert("decision".to_string(), Value::String(String::new()))
+        .is_some()
+    {
+        normalized = true;
+    }
 
     if let Some(output_contract) = map.remove("output_contract") {
         let (output_contract, contract_normalized) = canonicalize_output_contract(output_contract);

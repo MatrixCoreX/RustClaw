@@ -557,6 +557,9 @@ fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value,
     match (schema_id, value) {
         (PromptSchemaId::IntentNormalizer, Value::Object(mut map)) => {
             let mut normalized = false;
+            if map.remove("decision").is_some() {
+                normalized = true;
+            }
             let mut execution_recipe_locator_hint: Option<Value> = None;
             let mut execution_recipe_self_extension: Option<Value> = None;
             if let Some(Value::Object(execution_recipe)) = map.get_mut("execution_recipe") {

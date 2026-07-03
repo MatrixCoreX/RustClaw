@@ -37,10 +37,9 @@
     },
     "decision": {
       "type": "string",
+      "description": "Compatibility placeholder only. Runtime must not use this field for routing; repair authority comes from machine fields such as needs_clarify, output_contract, execution_recipe, and machine markers.",
       "enum": [
-        "clarify",
-        "direct_answer",
-        "planner_execute"
+        ""
       ]
     },
     "needs_clarify": {

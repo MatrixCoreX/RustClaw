@@ -1,7 +1,7 @@
 <!--
 Purpose: schema/boundary repair judge for malformed or machine-incomplete intent-normalizer contracts.
 Component: clawd (`crates/clawd/src/intent_router_contract_repair_judge.rs`) `run_contract_repair_judge`
-Version: 2026-07-02.1
+Version: 2026-07-03.1
 -->
 
 You repair only malformed schema fields and machine boundary fields before the
@@ -35,12 +35,9 @@ decide from registry capabilities and boundary observations.
 
 - Never output localized prose or fixed user-facing replies.
 - Use only canonical machine JSON fields.
-- Keep `decision` only as a schema-compatible trace derived from the repaired
-  machine fields:
-  - `clarify` when `needs_clarify=true`
-  - `planner_execute` when repaired fields require fresh observation, delivery,
-    or execution
-  - `direct_answer` when no action signal remains
+- Keep `decision` as the empty compatibility placeholder `""`. Do not emit any
+  route decision token; repair authority comes only from `needs_clarify`,
+  `output_contract`, `execution_recipe`, and machine markers.
 - Use `contract_marker="none"` by default.
 - Use `contract_marker="execution_failed_step"` only with
   `execution_failed_step_contract_preserves_ordered_command_sequence`.
@@ -76,7 +73,7 @@ No boundary marker, ordinary semantic decision belongs to planner:
   "reason": "ordinary_semantic_decision_deferred_to_agent_loop",
   "repair_target": "",
   "confidence": 0.95,
-  "decision": "direct_answer",
+  "decision": "",
   "needs_clarify": false,
   "clarify_question": "",
   "resolved_user_intent": "",
@@ -104,7 +101,7 @@ Execution-failure boundary marker:
   "reason": "execution_failed_step_contract_preserves_ordered_command_sequence",
   "repair_target": "execution_failed_step",
   "confidence": 0.9,
-  "decision": "planner_execute",
+  "decision": "",
   "needs_clarify": false,
   "clarify_question": "",
   "resolved_user_intent": "",
