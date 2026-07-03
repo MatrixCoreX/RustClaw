@@ -1,5 +1,5 @@
-use super::*;
 use super::super::language_closeout::delivery_text_has_exact_marker_line;
+use super::*;
 
 #[test]
 fn execution_recipe_closeout_note_mentions_external_workspace_for_english_code_change() {

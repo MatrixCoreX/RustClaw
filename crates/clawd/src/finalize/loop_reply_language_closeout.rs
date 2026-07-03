@@ -1,9 +1,9 @@
-use crate::agent_engine::{AgentRunContext, LoopState};
+use crate::agent_engine::{append_delivery_message, AgentRunContext, LoopState};
 use crate::{AppState, ClaimedTask};
 
 use super::{
-    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
-    message_is_non_answer_separator,
+    log_deterministic_delivery_record, looks_like_raw_command_snapshot,
+    looks_like_structured_machine_output, message_is_non_answer_separator,
 };
 
 pub(super) fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
@@ -244,6 +244,48 @@ pub(super) fn execution_recipe_closeout_note(
         }
         note
     })
+}
+
+pub(super) fn attach_execution_recipe_done_machine_closeout(
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    if !loop_state.delivery_messages.is_empty()
+        || !matches!(
+            loop_state.execution_recipe.phase,
+            crate::execution_recipe::ExecutionRecipePhase::Done
+        )
+    {
+        return false;
+    }
+    let Some(answer) = execution_recipe_closeout_note(None, user_text, loop_state) else {
+        return false;
+    };
+    *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        parsed: true,
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+    loop_state.last_user_visible_respond = Some(answer.clone());
+    append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+    log_deterministic_delivery_record(
+        &task.task_id,
+        "execution_recipe_done_machine_closeout",
+        "attached",
+        agent_run_context,
+        loop_state.executed_step_results.len(),
+    );
+    true
 }
 
 fn render_execution_recipe_closeout(
