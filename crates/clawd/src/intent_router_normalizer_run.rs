@@ -92,7 +92,7 @@ pub(crate) async fn run_intent_normalizer(
     let parsed = model_success.parsed;
     if let Some(mut out) = parsed {
         let (repaired_out, contract_repair_report) =
-            apply_answer_candidate_and_contract_judge_repair(
+            apply_boundary_contract_judge_repair(
                 state,
                 task,
                 req,

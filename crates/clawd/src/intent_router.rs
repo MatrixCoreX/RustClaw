@@ -313,10 +313,10 @@ use structural_schedule::{
 };
 
 #[cfg(test)]
-#[path = "intent_router_answer_candidate_binding.rs"]
-mod answer_candidate_binding;
+#[path = "intent_router_contract_repair_context.rs"]
+mod contract_repair_context;
 #[cfg(test)]
-use answer_candidate_binding::active_task_invalid_turn_binding_context;
+use contract_repair_context::active_task_invalid_turn_binding_context;
 
 #[path = "intent_router_route_output.rs"]
 mod route_output;
@@ -333,9 +333,9 @@ use normalizer_failure::{
     normalizer_prompt_missing_fallback_output,
 };
 
-#[path = "intent_router_normalizer_answer_repair.rs"]
-mod normalizer_answer_repair;
-use normalizer_answer_repair::apply_answer_candidate_and_contract_judge_repair;
+#[path = "intent_router_normalizer_boundary_repair.rs"]
+mod normalizer_boundary_repair;
+use normalizer_boundary_repair::apply_boundary_contract_judge_repair;
 
 #[path = "intent_router_normalizer_model.rs"]
 mod normalizer_model;

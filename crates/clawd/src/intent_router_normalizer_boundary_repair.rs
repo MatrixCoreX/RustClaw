@@ -1,5 +1,5 @@
 #[cfg(test)]
-use super::answer_candidate_binding::{
+use super::contract_repair_context::{
     active_task_invalid_turn_binding_context, append_contract_repair_context,
 };
 #[cfg(test)]
@@ -8,7 +8,7 @@ use super::{ContractRepairReport, IntentNormalizerOut};
 use crate::intent::surface_signals::PromptSurfaceSignals;
 use crate::{AppState, ClaimedTask};
 
-pub(super) async fn apply_answer_candidate_and_contract_judge_repair(
+pub(super) async fn apply_boundary_contract_judge_repair(
     state: &AppState,
     task: &ClaimedTask,
     req: &str,
