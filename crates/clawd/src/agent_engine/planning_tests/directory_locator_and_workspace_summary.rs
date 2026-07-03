@@ -1,5 +1,29 @@
 use super::*;
 
+fn assert_empty_planner_actions_stay_empty(
+    route: &RouteResult,
+    loop_state: &LoopState,
+    goal: &str,
+    user_text: Option<&str>,
+    auto_locator_path: Option<&str>,
+) {
+    let state = test_state();
+    let normalized = normalize_planned_actions_with_original_and_context(
+        &state,
+        Some(route),
+        loop_state,
+        goal,
+        user_text,
+        None,
+        auto_locator_path,
+        vec![],
+    );
+    assert!(
+        normalized.is_empty(),
+        "runtime must not inject a pre-LLM deterministic directory plan: {normalized:?}"
+    );
+}
+
 #[test]
 fn file_paths_directory_locator_builds_structured_list_dir_plan() {
     let root = TempDirGuard::new("file_paths_directory_locator");
@@ -24,36 +48,39 @@ fn file_paths_directory_locator_builds_structured_list_dir_plan() {
     route.resolved_intent =
         "legacy first-layer summary selector_limit=9 selector_sort_by=mtime_desc".to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.list_dir".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = file_paths_locator_deterministic_plan_result(
-        "list the largest files under a directory",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
-        Some(&root_path),
-    )
-    .expect("directory locator should use structured directory listing");
+        "list the largest files under a directory",
+        Some("list the largest files under a directory"),
+        None,
+        "fs_basic",
+        "list_dir",
+        json!({
+            "action": "list_dir",
+            "path": root_path.clone(),
+            "files_only": true,
+            "max_entries": 3,
+            "sort_by": "size_desc",
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert!(plan.steps.len() >= 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
-            assert_eq!(
-                args.get("path").and_then(Value::as_str),
-                Some(root_path.as_str())
-            );
-            assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
-            assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(3));
-            assert_eq!(
-                args.get("sort_by").and_then(Value::as_str),
-                Some("size_desc")
-            );
-        }
-        other => panic!("expected fs_basic list_dir action, got {other:?}"),
-    }
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(root_path.as_str())
+    );
+    assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(3));
+    assert_eq!(
+        args.get("sort_by").and_then(Value::as_str),
+        Some("size_desc")
+    );
 }
 
 #[test]
@@ -73,39 +100,42 @@ fn file_paths_directory_locator_with_extension_token_uses_recursive_find_entries
     route.resolved_intent =
         "Find all TOML files in this repository and mention representative ones".to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = file_paths_locator_deterministic_plan_result(
-        "find toml files in this repo and briefly mention a few representative ones",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
-        Some(&root_path),
-    )
-    .expect("directory locator with extension token should use recursive file search");
+        "find toml files in this repo and briefly mention a few representative ones",
+        Some("find toml files in this repo and briefly mention a few representative ones"),
+        None,
+        "fs_basic",
+        "find_entries",
+        json!({
+            "action": "find_entries",
+            "root": root_path.clone(),
+            "ext": "toml",
+            "target_kind": "file",
+            "recursive": true,
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert!(plan.steps.len() >= 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("find_entries")
-            );
-            assert_eq!(
-                args.get("root").and_then(Value::as_str),
-                Some(root_path.as_str())
-            );
-            assert_eq!(args.get("ext").and_then(Value::as_str), Some("toml"));
-            assert_eq!(
-                args.get("target_kind").and_then(Value::as_str),
-                Some("file")
-            );
-            assert_eq!(args.get("recursive").and_then(Value::as_bool), Some(true));
-        }
-        other => panic!("expected fs_basic find_entries action, got {other:?}"),
-    }
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("find_entries")
+    );
+    assert_eq!(
+        args.get("root").and_then(Value::as_str),
+        Some(root_path.as_str())
+    );
+    assert_eq!(args.get("ext").and_then(Value::as_str), Some("toml"));
+    assert_eq!(
+        args.get("target_kind").and_then(Value::as_str),
+        Some("file")
+    );
+    assert_eq!(args.get("recursive").and_then(Value::as_bool), Some(true));
 }
 
 #[test]
@@ -125,13 +155,13 @@ fn scalar_path_auto_locator_does_not_use_deterministic_plan_for_directory_search
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    assert!(scalar_path_auto_locator_deterministic_plan_result(
-        "find a named item inside the resolved directory",
-        Some(&route),
+    assert_empty_planner_actions_stay_empty(
+        &route,
         &loop_state,
+        "find a named item inside the resolved directory",
+        Some("find a named item inside the resolved directory"),
         Some(&root_path),
-    )
-    .is_none());
+    );
 }
 
 #[test]
@@ -148,36 +178,37 @@ fn scalar_path_directory_locator_search_uses_structural_name_target() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = scalar_path_directory_locator_search_deterministic_plan_result(
-        "find a named item inside the resolved directory",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
-        Some(&root_path),
-        &format!("去 {root_path} 找 abcd，只输出路径"),
-    )
-    .expect("directory-scoped scalar path lookup should not need LLM planning");
+        "find a named item inside the resolved directory",
+        Some(&format!("去 {root_path} 找 abcd，只输出路径")),
+        None,
+        "fs_basic",
+        "find_entries",
+        json!({
+            "action": "find_entries",
+            "root": root_path.clone(),
+            "pattern": "abcd",
+            "target_kind": "any",
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("find_entries")
-            );
-            assert_eq!(
-                args.get("root").and_then(Value::as_str),
-                Some(root_path.as_str())
-            );
-            assert_eq!(args.get("pattern").and_then(Value::as_str), Some("abcd"));
-            assert_eq!(args.get("target_kind").and_then(Value::as_str), Some("any"));
-        }
-        other => panic!("expected fs_basic find_entries action, got {other:?}"),
-    }
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("find_entries")
+    );
+    assert_eq!(
+        args.get("root").and_then(Value::as_str),
+        Some(root_path.as_str())
+    );
+    assert_eq!(args.get("pattern").and_then(Value::as_str), Some("abcd"));
+    assert_eq!(args.get("target_kind").and_then(Value::as_str), Some("any"));
 }
 
 #[test]
@@ -194,29 +225,34 @@ fn scalar_path_directory_locator_search_resolves_unique_entry_token_without_phra
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = scalar_path_directory_locator_search_deterministic_plan_result(
-        "find a named item inside the resolved directory",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
-        Some(&root_path),
-        &format!("Inside {root_path}, find abcd and return only the path"),
-    )
-    .expect("unique existing token should define the directory-scoped lookup target");
+        "find a named item inside the resolved directory",
+        Some(&format!(
+            "Inside {root_path}, find abcd and return only the path"
+        )),
+        None,
+        "fs_basic",
+        "find_entries",
+        json!({
+            "action": "find_entries",
+            "root": root_path.clone(),
+            "pattern": "abcd",
+            "target_kind": "any",
+        }),
+    );
 
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("find_entries")
-            );
-            assert_eq!(args.get("pattern").and_then(Value::as_str), Some("abcd"));
-        }
-        other => panic!("expected fs_basic find_entries action, got {other:?}"),
-    }
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("find_entries")
+    );
+    assert_eq!(args.get("pattern").and_then(Value::as_str), Some("abcd"));
 }
 
 #[test]
@@ -238,15 +274,14 @@ fn scalar_path_directory_locator_search_rejects_ambiguous_current_quoted_targets
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    assert!(
-        scalar_path_directory_locator_search_deterministic_plan_result(
-            "find a named item inside the resolved directory",
-            Some(&route),
-            &loop_state,
-            Some(&root_path),
-            &format!(r#"Inside {root_path}, find "ABCD" or "WXYZ" and return only the path"#),
-        )
-        .is_none()
+    assert_empty_planner_actions_stay_empty(
+        &route,
+        &loop_state,
+        "find a named item inside the resolved directory",
+        Some(&format!(
+            r#"Inside {root_path}, find "ABCD" or "WXYZ" and return only the path"#
+        )),
+        Some(&root_path),
     );
 }
 
