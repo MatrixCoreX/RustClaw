@@ -545,10 +545,10 @@ fn intent_normalizer_schema_drift() {
         "schema root must be object"
     );
 
-    // §3.5c-小切口 步骤 2：每个 IntentNormalizerOut 字段必须在 properties 里登记。
+    // §3.5c-小切口 步骤 2：每个 live IntentNormalizerOut schema 字段必须在 properties 里登记。
+    // Parser-only legacy fields such as answer_candidate stay runtime-compatible but are not exposed to the model.
     const STRUCT_FIELDS: &[&str] = &[
         "resolved_user_intent",
-        "answer_candidate",
         "resume_behavior",
         "schedule_kind",
         "wants_file_delivery",
@@ -589,6 +589,10 @@ fn intent_normalizer_schema_drift() {
     assert!(
         !properties.contains_key("decision"),
         "intent_normalizer schema must not expose legacy decision"
+    );
+    assert!(
+        !properties.contains_key("answer_candidate"),
+        "intent_normalizer schema must not expose legacy answer_candidate"
     );
 
     // §3.5c-小切口 步骤 3：枚举值 → parse_* 函数必须落到非默认 variant
