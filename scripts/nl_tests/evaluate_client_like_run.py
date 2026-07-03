@@ -14,8 +14,8 @@ Expectation JSONL rows are intentionally small and optional. Supported fields:
     "routed_mode": "Act",
     "route_gate": "execute",
     "route_gate_any": ["chat", "execute"],
-    "first_layer": "planner_execute",
-    "first_layer_any": ["direct_answer", "planner_execute"],
+    "first_layer": "act",
+    "first_layer_any": ["respond", "act"],
     "capability_any": ["filesystem.list_entries", "fs_basic"],
     "planned_action_any": ["fs_basic.list_dir"],
     "planned_action_all": ["fs_basic.list_dir"],
@@ -92,12 +92,23 @@ def compact(value: Any, max_chars: int = 300) -> str:
 def route_trace_decision(route: Any) -> str:
     if not isinstance(route, dict):
         return ""
-    return str(
+    raw = str(
         route.get("route_trace_decision")
         or route.get("legacy_first_layer_decision")
         or route.get("first_layer_decision")
         or ""
     )
+    return normalize_route_trace_decision(raw)
+
+
+def normalize_route_trace_decision(value: str) -> str:
+    token = value.strip().lower()
+    return {
+        "planner_execute": "act",
+        "direct_answer": "respond",
+        "chat": "respond",
+        "askclarify": "clarify",
+    }.get(token, token)
 
 
 def route_boundary_mode(route: Any) -> str:

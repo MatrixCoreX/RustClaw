@@ -158,14 +158,19 @@ def classify(obj: dict) -> tuple[str, str]:
         return "skill_output", kind or "skill execution failed without structured error_kind"
 
     if status != "succeeded" and route:
-        if not plan_steps and str(route.get("route_gate_kind") or "").lower() in {"execute", "planner_execute"}:
+        route_gate = str(route.get("route_gate_kind") or "").lower()
+        execute_gates = {"execute", "act", "planner_execute"}
+        if not plan_steps and route_gate in execute_gates:
             if not steps and final_answer:
-                return "planner_bypass_without_evidence", "execute route produced a final answer without planner/tool evidence"
+                return (
+                    "planner_bypass_without_evidence",
+                    "execute route produced a final answer without planner/tool evidence",
+                )
             return "planner", "execute route produced no executable plan"
         if route.get("needs_clarify") is True:
             return "normalizer", "route requested clarification"
-        if str(route.get("route_gate_kind") or "").lower() not in {"execute", "planner_execute"}:
-            return "route_miss", "request did not reach planner_execute route"
+        if route_gate not in execute_gates:
+            return "route_miss", "request did not reach execute/act route"
 
     if status != "succeeded":
         if not route:
