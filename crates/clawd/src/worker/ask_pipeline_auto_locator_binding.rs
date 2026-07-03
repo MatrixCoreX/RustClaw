@@ -1,3 +1,20 @@
+#[derive(Clone, Copy)]
+enum AutoLocatorBindingMarker {
+    StructuredFieldRead,
+}
+
+impl AutoLocatorBindingMarker {
+    fn route_reason(self) -> &'static str {
+        match self {
+            Self::StructuredFieldRead => "structured_field_read_bound_to_auto_locator",
+        }
+    }
+
+    fn record(self, route_result: &mut crate::RouteResult) {
+        super::append_route_reason(route_result, self.route_reason());
+    }
+}
+
 pub(super) fn bind_structured_field_read_to_auto_locator(
     post_route: &mut crate::post_route_policy::PostRoutePolicyResult,
 ) -> bool {
@@ -41,10 +58,7 @@ pub(super) fn bind_structured_field_read_to_auto_locator(
     }
     contract.locator_kind = crate::OutputLocatorKind::Path;
     contract.locator_hint = path.to_string();
-    super::append_route_reason(
-        &mut post_route.execution_route_result,
-        "structured_field_read_bound_to_auto_locator",
-    );
+    AutoLocatorBindingMarker::StructuredFieldRead.record(&mut post_route.execution_route_result);
     true
 }
 

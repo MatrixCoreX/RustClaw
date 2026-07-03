@@ -25,6 +25,9 @@ PREFERRED_STRUCTURED_ACTION_FILE = SRC_ROOT / "agent_engine/preferred_structured
 MIGRATION_CLASS_FILE = SRC_ROOT / "agent_engine/migration_class.rs"
 ASK_PREPARE_FILE = SRC_ROOT / "worker/ask_prepare.rs"
 ASK_PIPELINE_FILE = SRC_ROOT / "worker/ask_pipeline.rs"
+ASK_PIPELINE_AUTO_LOCATOR_BINDING_FILE = (
+    SRC_ROOT / "worker/ask_pipeline_auto_locator_binding.rs"
+)
 ASK_PIPELINE_CONTRACT_REPAIR_FILE = SRC_ROOT / "worker/ask_pipeline_contract_repair.rs"
 ASK_PIPELINE_BOUNDARY_PREFLIGHT_FILE = (
     SRC_ROOT / "worker/ask_pipeline_boundary_preflight.rs"
@@ -312,6 +315,21 @@ EXECUTION_CONTEXT_SANITIZATION_FORBIDDEN_BLOCK_PATTERNS: tuple[
         re.compile(
             r"append_route_reason\s*\([^;]*?"
             rf'"(?:{quoted_token_alternation(EXECUTION_CONTEXT_SANITIZATION_ROUTE_REASONS)})"',
+            re.DOTALL,
+        ),
+    ),
+)
+AUTO_LOCATOR_BINDING_ROUTE_REASONS: tuple[str, ...] = (
+    "structured_field_read_bound_to_auto_locator",
+)
+AUTO_LOCATOR_BINDING_FORBIDDEN_BLOCK_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "auto_locator_binding_direct_route_reason",
+        re.compile(
+            r"append_route_reason\s*\([^;]*?"
+            rf'"(?:{quoted_token_alternation(AUTO_LOCATOR_BINDING_ROUTE_REASONS)})"',
             re.DOTALL,
         ),
     ),
@@ -614,6 +632,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_file_delivery_boundary_deferral_typing())
     findings.extend(scan_default_config_contract_deferral_typing())
     findings.extend(scan_execution_context_sanitization_typing())
+    findings.extend(scan_auto_locator_binding_marker_typing())
     findings.extend(scan_post_route_boundary_candidate_typing())
     findings.extend(scan_prompt_layer_ordinary_semantic_tokens())
     findings.extend(scan_planner_prompt_legacy_semantic_kind_keys())
@@ -1465,6 +1484,34 @@ def scan_execution_context_sanitization_typing_text(
             )
         )
     for kind, pattern in EXECUTION_CONTEXT_SANITIZATION_FORBIDDEN_BLOCK_PATTERNS:
+        for match in pattern.finditer(text):
+            line_no = text[: match.start()].count("\n") + 1
+            findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
+    return findings
+
+
+def scan_auto_locator_binding_marker_typing() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_AUTO_LOCATOR_BINDING_FILE)
+    return scan_auto_locator_binding_marker_typing_text(
+        rel_path,
+        ASK_PIPELINE_AUTO_LOCATOR_BINDING_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_auto_locator_binding_marker_typing_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    if "enum AutoLocatorBindingMarker" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "auto_locator_binding_marker_enum_missing",
+                "AutoLocatorBindingMarker enum is required for auto-locator binding markers",
+            )
+        )
+    for kind, pattern in AUTO_LOCATOR_BINDING_FORBIDDEN_BLOCK_PATTERNS:
         for match in pattern.finditer(text):
             line_no = text[: match.start()].count("\n") + 1
             findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
@@ -3228,6 +3275,32 @@ def run_self_test() -> int:
         "fn f(item: ExecutionContextSanitization) { append_route_reason(route, item.route_reason()); }\n",
     )
     assert not scan_execution_context_sanitization_typing()
+    blocked_auto_locator_binding_string = scan_auto_locator_binding_marker_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_auto_locator_binding.rs",
+        "enum AutoLocatorBindingMarker {}\n"
+        'append_route_reason(route, "structured_field_read_bound_to_auto_locator");\n',
+    )
+    assert (
+        blocked_auto_locator_binding_string
+        and blocked_auto_locator_binding_string[0].kind
+        == "auto_locator_binding_direct_route_reason"
+    )
+    missing_auto_locator_binding_enum = scan_auto_locator_binding_marker_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_auto_locator_binding.rs",
+        'append_route_reason(route, "x");\n',
+    )
+    assert (
+        missing_auto_locator_binding_enum
+        and missing_auto_locator_binding_enum[0].kind
+        == "auto_locator_binding_marker_enum_missing"
+    )
+    assert not scan_auto_locator_binding_marker_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_auto_locator_binding.rs",
+        "enum AutoLocatorBindingMarker {}\n"
+        "impl AutoLocatorBindingMarker { fn route_reason(self) -> &'static str { \"structured_field_read_bound_to_auto_locator\" } }\n"
+        "fn f(item: AutoLocatorBindingMarker) { append_route_reason(route, item.route_reason()); }\n",
+    )
+    assert not scan_auto_locator_binding_marker_typing()
     blocked_post_route_candidate_string = scan_post_route_boundary_candidate_typing_text(
         "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
         "enum BoundaryClarifyCandidate {}\n"
