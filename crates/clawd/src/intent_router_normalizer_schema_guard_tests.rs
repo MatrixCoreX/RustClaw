@@ -1554,12 +1554,7 @@ fn normalizer_schema_normalization_discards_scalar_output_contract_answer_candid
         "刚才我让你记住的测试编号是什么？只回答编号。",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value
-            .get("answer_candidate")
-            .and_then(|value| value.as_str()),
-        Some("")
-    );
+    assert!(value.get("answer_candidate").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/response_shape")
@@ -1602,12 +1597,7 @@ fn normalizer_schema_normalization_treats_mime_output_contract_as_schema_token()
         "不对，目标用户改成开发者，不是老板。只输出修正后的正文。",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value
-            .get("answer_candidate")
-            .and_then(|value| value.as_str()),
-        Some("")
-    );
+    assert!(value.get("answer_candidate").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/response_shape")
@@ -1645,12 +1635,7 @@ fn normalizer_schema_normalization_discards_object_answer_candidate_and_ignores_
         "刚才我让你记住的测试编号是什么？只回答编号。",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value
-            .get("answer_candidate")
-            .and_then(|value| value.as_str()),
-        Some("")
-    );
+    assert!(value.get("answer_candidate").is_none());
     assert_eq!(
         value
             .pointer("/output_contract/response_shape")
@@ -1710,12 +1695,7 @@ fn normalizer_schema_normalization_recovers_command_output_contract_with_unknown
             .and_then(|value| value.as_str()),
         Some("none")
     );
-    assert_eq!(
-        value
-            .get("answer_candidate")
-            .and_then(|value| value.as_str()),
-        Some("")
-    );
+    assert!(value.get("answer_candidate").is_none());
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
         crate::prompt_utils::PromptSchemaId::IntentNormalizer,

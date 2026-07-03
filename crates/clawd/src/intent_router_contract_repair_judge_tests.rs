@@ -103,7 +103,6 @@ fn contract_repair_judge_rejects_scalar_semantic_repair_without_machine_marker()
 
     let mut out = super::IntentNormalizerOut {
         resolved_user_intent: "read package.json name field".to_string(),
-        answer_candidate: "rustclaw-nl-fixture".to_string(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
         wants_file_delivery: false,
@@ -142,7 +141,6 @@ fn contract_repair_judge_rejects_scalar_semantic_repair_without_machine_marker()
 fn contract_repair_judge_rejects_directory_semantic_repair_without_machine_marker() {
     let mut out = super::IntentNormalizerOut {
         resolved_user_intent: "列出 document 目录下的所有文件名".to_string(),
-        answer_candidate: String::new(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
         wants_file_delivery: false,
@@ -214,7 +212,6 @@ fn contract_repair_judge_rejects_directory_semantic_repair_without_machine_marke
 fn contract_repair_judge_machine_marker_restores_execution_failed_step_contract() {
     let mut out = super::IntentNormalizerOut {
         resolved_user_intent: "Review the prior observed execution failure.".to_string(),
-        answer_candidate: String::new(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
         wants_file_delivery: false,
@@ -291,7 +288,6 @@ fn contract_repair_judge_machine_marker_restores_execution_failed_step_contract(
 fn contract_repair_judge_generated_file_delivery_runtime_target_overrides_clarify() {
     let mut out = super::IntentNormalizerOut {
         resolved_user_intent: "写一个脚本，保存并发送给用户".to_string(),
-        answer_candidate: String::new(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
         wants_file_delivery: true,
@@ -420,7 +416,6 @@ fn delivery_contract_clears_spurious_attachment_processing_without_semantic_kind
 fn contract_repair_judge_machine_marker_reuses_active_completed_task_status() {
     let mut out = super::IntentNormalizerOut {
         resolved_user_intent: "Continue from the prior task.".to_string(),
-        answer_candidate: String::new(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
         wants_file_delivery: false,
@@ -496,7 +491,6 @@ fn contract_repair_judge_machine_marker_reuses_active_completed_task_status() {
 fn contract_repair_judge_missing_turn_binding_forces_missing_locator_clarify() {
     let mut out = super::IntentNormalizerOut {
         resolved_user_intent: "read remembered log alias".to_string(),
-        answer_candidate: String::new(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
         wants_file_delivery: false,
@@ -576,7 +570,6 @@ fn contract_repair_judge_missing_turn_binding_forces_missing_locator_clarify() {
 fn contract_repair_judge_output_clears_stale_file_delivery_flag() {
     let mut out = super::IntentNormalizerOut {
         resolved_user_intent: "Write a short release note for RustClaw".to_string(),
-        answer_candidate: String::new(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
         wants_file_delivery: true,
@@ -655,7 +648,6 @@ fn contract_repair_judge_output_clears_stale_file_delivery_flag() {
 fn contract_repair_judge_output_rejects_low_confidence() {
     let mut out = super::IntentNormalizerOut {
         resolved_user_intent: "总结刚才的对话".to_string(),
-        answer_candidate: String::new(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
         wants_file_delivery: false,
@@ -712,7 +704,6 @@ fn contract_repair_judge_output_rejects_low_confidence() {
 fn contract_repair_judge_rejects_decision_change_without_machine_contract_signal() {
     let mut out = super::IntentNormalizerOut {
         resolved_user_intent: "summarize the prior discussion".to_string(),
-        answer_candidate: String::new(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
         wants_file_delivery: false,

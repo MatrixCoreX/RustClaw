@@ -40,7 +40,7 @@ pub(super) fn normalize_plain_intent_normalizer_text_for_schema(raw: &str, req: 
 pub(super) fn normalize_intent_normalizer_scalar_types_for_schema(
     obj: &mut serde_json::Map<String, Value>,
 ) {
-    normalize_answer_candidate_field(obj);
+    remove_legacy_answer_candidate_field(obj);
     normalize_optional_string_field(obj, "clarify_question");
     normalize_optional_string_field(obj, "agent_display_name_hint");
     normalize_optional_string_field(obj, "reason");
@@ -49,8 +49,8 @@ pub(super) fn normalize_intent_normalizer_scalar_types_for_schema(
     normalize_confidence_field(obj, "confidence");
 }
 
-fn normalize_answer_candidate_field(obj: &mut serde_json::Map<String, Value>) {
-    obj.insert("answer_candidate".to_string(), Value::String(String::new()));
+fn remove_legacy_answer_candidate_field(obj: &mut serde_json::Map<String, Value>) {
+    obj.remove("answer_candidate");
 }
 
 fn normalize_string_field_with_default(
@@ -151,8 +151,7 @@ pub(super) fn normalize_intent_normalizer_top_level_for_schema(
     normalize_bool_field_with_default(obj, "should_refresh_long_term_memory", false);
     obj.entry("agent_display_name_hint".to_string())
         .or_insert_with(|| Value::String(String::new()));
-    obj.entry("answer_candidate".to_string())
-        .or_insert_with(|| Value::String(String::new()));
+    obj.remove("answer_candidate");
     obj.entry("needs_clarify".to_string())
         .or_insert(Value::Bool(false));
     normalize_bool_field_with_default(obj, "needs_clarify", false);

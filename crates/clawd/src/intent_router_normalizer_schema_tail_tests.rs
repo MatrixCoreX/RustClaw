@@ -56,10 +56,7 @@ fn normalizer_schema_normalization_does_not_recover_filename_listing_from_string
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
     assert!(value.get("decision").is_none());
-    assert_eq!(
-        value.get("answer_candidate").and_then(|v| v.as_str()),
-        Some("")
-    );
+    assert!(value.get("answer_candidate").is_none());
     let contract = value
         .get("output_contract")
         .and_then(|value| value.as_object())
@@ -290,10 +287,7 @@ fn normalizer_schema_normalization_does_not_recover_files_listing_from_string_co
         "列出 logs 目录下的前 10 个文件名，不要读内容",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value.get("answer_candidate").and_then(|v| v.as_str()),
-        Some("")
-    );
+    assert!(value.get("answer_candidate").is_none());
     let validated = crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
         crate::prompt_utils::PromptSchemaId::IntentNormalizer,
@@ -336,12 +330,7 @@ fn legacy_planner_unknown_scalar_output_contract_does_not_trigger_repair_without
         "查找当前仓库里所有 sh 脚本所在的目录，去重后列出来",
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert_eq!(
-        value
-            .get("answer_candidate")
-            .and_then(|value| value.as_str()),
-        Some("")
-    );
+    assert!(value.get("answer_candidate").is_none());
     assert!(!report
         .details
         .contains("executable_route_unknown_scalar_output_contract"));
