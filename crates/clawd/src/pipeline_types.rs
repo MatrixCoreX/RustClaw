@@ -1,7 +1,7 @@
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::runtime::ask_mode::{ActFinalizeStyle, AskMode};
-use crate::runtime::types::{AgentAction, FirstLayerDecision, ScheduleIntentOutput};
+use crate::runtime::types::{AgentAction, AskRouteTraceDecision, ScheduleIntentOutput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum OutputResponseShape {
@@ -505,7 +505,7 @@ impl RouteResult {
         self.set_ask_mode(AskMode::Act { finalize });
     }
 
-    pub(crate) fn route_trace_decision_for_journal(&self) -> FirstLayerDecision {
+    pub(crate) fn route_trace_decision_for_journal(&self) -> AskRouteTraceDecision {
         self.ask_mode.route_trace_decision_for_journal()
     }
 

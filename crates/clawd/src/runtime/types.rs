@@ -111,6 +111,15 @@ pub(crate) enum AgentAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AskRouteTraceDecision {
+    Respond,
+    #[cfg(test)]
+    Clarify,
+    Act,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FirstLayerDecision {
     Clarify,
     DirectAnswer,
@@ -125,6 +134,18 @@ pub(crate) enum RouteGateKind {
     Execute,
 }
 
+impl AskRouteTraceDecision {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Respond => "respond",
+            #[cfg(test)]
+            Self::Clarify => "clarify",
+            Self::Act => "act",
+        }
+    }
+}
+
+#[cfg(test)]
 impl FirstLayerDecision {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
