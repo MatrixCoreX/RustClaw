@@ -910,7 +910,9 @@ fn route_capability_ref_compact_prompt_line_does_not_inherit_wrong_semantic_matr
     assert!(line.contains("capability_policy"));
     assert!(line.contains("match=capability_ref"));
     assert!(line.contains("capability_refs=config.validate"));
-    assert!(line.contains("allowed_actions=config_basic.validate"));
+    assert!(line.contains("available_action_refs=config_basic.validate"));
+    assert!(line.contains("preferred_action_refs=config_basic.validate"));
+    assert!(!line.contains("allowed_actions="));
     assert!(!line.contains("contract_matrix"));
     assert!(!line.contains("fs_basic.list_dir"));
 }
@@ -925,7 +927,9 @@ fn unknown_route_capability_ref_does_not_fall_back_to_semantic_matrix_actions() 
 
     let line = compact_prompt_line_for_route(&route).expect("unknown capability compact line");
     assert!(line.contains("capability_refs=unknown.future_action"));
-    assert!(line.contains("allowed_actions=none"));
+    assert!(line.contains("available_action_refs=none"));
+    assert!(line.contains("preferred_action_refs=none"));
+    assert!(!line.contains("allowed_actions="));
     assert!(!line.contains("fs_basic.list_dir"));
 }
 

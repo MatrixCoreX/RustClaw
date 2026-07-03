@@ -126,31 +126,31 @@ fn compact_prompt_line_for_route_capability_ref(route: &RouteResult) -> Option<S
     } else {
         required_evidence.join(",")
     };
-    let allowed_actions = route_capability_ref_action_refs(route, false)
+    let available_action_refs = route_capability_ref_action_refs(route, false)
         .into_iter()
         .map(|action| action.as_key())
         .collect::<Vec<_>>();
-    let allowed_actions = if allowed_actions.is_empty() {
+    let available_action_refs = if available_action_refs.is_empty() {
         "none".to_string()
     } else {
-        allowed_actions.join(",")
+        available_action_refs.join(",")
     };
-    let preferred_actions = route_capability_ref_action_refs(route, true)
+    let preferred_action_refs = route_capability_ref_action_refs(route, true)
         .into_iter()
         .map(|action| action.as_key())
         .collect::<Vec<_>>();
-    let preferred_actions = if preferred_actions.is_empty() {
-        allowed_actions.clone()
+    let preferred_action_refs = if preferred_action_refs.is_empty() {
+        available_action_refs.clone()
     } else {
-        preferred_actions.join(",")
+        preferred_action_refs.join(",")
     };
     let final_answer_shape = final_answer_shape_for_route_capability_ref(route)
         .unwrap_or(FinalAnswerShape::Free)
         .as_str();
 
     Some(format!(
-        "- capability_policy source=registry match=capability_ref capability_refs={} evidence_profile=capability_ref required_evidence={} final_answer_shape={} allowed_actions={} preferred_actions={}",
-        capability_refs, required_evidence, final_answer_shape, allowed_actions, preferred_actions,
+        "- capability_policy source=registry match=capability_ref capability_refs={} evidence_profile=capability_ref required_evidence={} final_answer_shape={} available_action_refs={} preferred_action_refs={}",
+        capability_refs, required_evidence, final_answer_shape, available_action_refs, preferred_action_refs,
     ))
 }
 
