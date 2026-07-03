@@ -744,30 +744,52 @@ fn workspace_summary_auto_locator_lists_structure_and_reads_readme() {
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
+    route.route_reason =
+        "capability_ref=filesystem.list_dir capability_ref=filesystem.read_text_range".to_string();
 
-    let plan = directory_tree_auto_locator_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &test_state(),
-        "summarize workspace structure",
         Some(&route),
         &LoopState::new(1),
         "summarize workspace structure",
         Some("summarize workspace structure"),
-        Some(&root_path),
-    )
-    .expect("workspace summary plan should be available");
+        None,
+        None,
+        vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "list_dir",
+                    "path": root_path.clone(),
+                    "dirs_only": true,
+                    "max_entries": 100,
+                    "sort_by": "name",
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": root.path.join("README.md").display().to_string(),
+                    "mode": "head",
+                    "n": 80,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 4);
-    let actions = plan
-        .steps
-        .iter()
-        .map(|step| step.to_agent_action().expect("agent action"))
-        .collect::<Vec<_>>();
-    let list_idx = actions
+    assert_eq!(normalized.len(), 4);
+    let list_idx = normalized
         .iter()
         .position(|action| planned_call_is(action, "fs_basic", "list_dir"))
         .expect("list_dir evidence action");
-    let list_args = expect_planned_call(&actions[list_idx], "fs_basic", "list_dir");
+    let list_args = expect_planned_call(&normalized[list_idx], "fs_basic", "list_dir");
     assert_eq!(
         list_args.get("path").and_then(Value::as_str),
         Some(root_path.as_str())
@@ -777,7 +799,7 @@ fn workspace_summary_auto_locator_lists_structure_and_reads_readme() {
         Some(true)
     );
 
-    let read_idx = actions
+    let read_idx = normalized
         .iter()
         .position(|action| {
             planned_call(action).is_some_and(|(skill, args)| {
@@ -793,13 +815,13 @@ fn workspace_summary_auto_locator_lists_structure_and_reads_readme() {
         .expect("README evidence action");
 
     assert!(matches!(
-        actions.get(2),
+        normalized.get(2),
         Some(AgentAction::SynthesizeAnswer { evidence_refs })
             if evidence_refs.contains(&format!("step_{}", list_idx + 1))
                 && evidence_refs.contains(&format!("step_{}", read_idx + 1))
     ));
     assert!(matches!(
-        actions.get(3),
+        normalized.get(3),
         Some(AgentAction::Respond { content }) if content == "{{last_output}}"
     ));
 }
@@ -819,57 +841,78 @@ fn directory_purpose_auto_locator_lists_directory_and_reads_text_candidates() {
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = docs_path.clone();
+    route.route_reason =
+        "capability_ref=filesystem.list_dir capability_ref=filesystem.read_text_range".to_string();
 
-    let plan = directory_purpose_auto_locator_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &test_state(),
-        "summarize directory purpose",
         Some(&route),
         &LoopState::new(1),
         "summarize directory purpose",
         Some("summarize directory purpose"),
-        Some(&docs_path),
-    )
-    .expect("directory purpose plan should be available");
+        None,
+        None,
+        vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "list_dir",
+                    "path": docs_path.clone(),
+                    "names_only": false,
+                    "max_entries": 100,
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": root.path.join("docs").join("README.txt").display().to_string(),
+                    "mode": "head",
+                    "n": 80,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 4);
-    let list_action = plan.steps[0].to_agent_action().expect("list action");
-    let list_args = expect_planned_call(&list_action, "fs_basic", "list_dir");
+    assert_eq!(normalized.len(), 4);
+    let list_args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
     assert_eq!(
         list_args.get("path").and_then(Value::as_str),
         Some(docs_path.as_str())
     );
 
-    let read_action = plan.steps[1].to_agent_action().expect("read action");
-    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
+    let read_args = expect_planned_call(&normalized[1], "fs_basic", "read_text_range");
     assert!(read_args
         .get("path")
         .and_then(Value::as_str)
         .is_some_and(|path| path.ends_with("README.txt")));
     assert!(matches!(
-        plan.steps.get(1).and_then(|step| step.to_agent_action()),
+        normalized.get(1),
         Some(AgentAction::CallTool { .. })
     ));
     assert!(matches!(
-        plan.steps.get(2).and_then(|step| step.to_agent_action()),
+        normalized.get(2),
         Some(AgentAction::SynthesizeAnswer { evidence_refs })
-            if evidence_refs == vec!["step_1".to_string(), "step_2".to_string()]
+            if *evidence_refs == vec!["step_1".to_string(), "step_2".to_string()]
     ));
     assert!(matches!(
-        plan.steps.get(3).and_then(|step| step.to_agent_action()),
+        normalized.get(3),
         Some(AgentAction::Respond { content }) if content == "{{last_output}}"
     ));
 
-    assert!(directory_tree_auto_locator_deterministic_plan_result(
-        &test_state(),
-        "summarize directory purpose",
-        Some(&route),
+    assert_empty_planner_actions_stay_empty(
+        &route,
         &LoopState::new(1),
         "summarize directory purpose",
         Some("summarize directory purpose"),
         Some(&docs_path),
-    )
-    .is_none());
+    );
 }
 
 #[test]
