@@ -58,6 +58,69 @@ impl BoundaryClarifyCandidate {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BoundaryContractDeferral {
+    AutoLocatorScalarFileWithoutCurrentLocator,
+    DirectoryFileDeliveryRequiresStructuredSelection,
+}
+
+impl BoundaryContractDeferral {
+    fn observation_token(self) -> &'static str {
+        match self {
+            Self::AutoLocatorScalarFileWithoutCurrentLocator => {
+                "auto_locator_scalar_file_without_current_locator"
+            }
+            Self::DirectoryFileDeliveryRequiresStructuredSelection => {
+                "directory_file_delivery_requires_structured_selection"
+            }
+        }
+    }
+
+    fn gate_reason_code(self) -> &'static str {
+        match self {
+            Self::AutoLocatorScalarFileWithoutCurrentLocator => {
+                "post_route_auto_locator_scalar_file_deferred_to_agent_loop"
+            }
+            Self::DirectoryFileDeliveryRequiresStructuredSelection => {
+                "post_route_directory_file_delivery_deferred_to_agent_loop"
+            }
+        }
+    }
+
+    fn clears_boundary_clarify_state(self) -> bool {
+        matches!(self, Self::DirectoryFileDeliveryRequiresStructuredSelection)
+    }
+
+    fn defer_to_agent_loop(
+        self,
+        pre_loop_clarify_candidates: &mut Vec<&'static str>,
+        post_route: &mut crate::post_route_policy::PostRoutePolicyResult,
+    ) {
+        if self.clears_boundary_clarify_state() {
+            post_route.execution_route_result.needs_clarify = false;
+            post_route.execution_route_result.clarify_question.clear();
+        }
+        post_route
+            .execution_route_result
+            .output_contract
+            .locator_kind = crate::OutputLocatorKind::None;
+        post_route
+            .execution_route_result
+            .output_contract
+            .locator_hint
+            .clear();
+        post_route.auto_locator_path = None;
+        post_route.auto_locator_hint = None;
+        post_route.auto_locator_resolved_direct = false;
+        post_route.missing_locator_for_path_scoped_content = true;
+        push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, self.observation_token());
+        post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
+            self.gate_reason_code(),
+            crate::post_route_policy::PostRoutePolicyOutcome::RefineContract,
+        );
+    }
+}
+
 pub(super) fn apply_post_route_refinements(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -80,27 +143,8 @@ pub(super) fn apply_post_route_refinements(
         &post_route.execution_route_result,
         post_route.auto_locator_path.as_deref(),
     ) {
-        post_route
-            .execution_route_result
-            .output_contract
-            .locator_kind = crate::OutputLocatorKind::None;
-        post_route
-            .execution_route_result
-            .output_contract
-            .locator_hint
-            .clear();
-        post_route.auto_locator_path = None;
-        post_route.auto_locator_hint = None;
-        post_route.auto_locator_resolved_direct = false;
-        post_route.missing_locator_for_path_scoped_content = true;
-        push_pre_loop_clarify_candidate(
-            pre_loop_clarify_candidates,
-            "auto_locator_scalar_file_without_current_locator",
-        );
-        post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
-            "post_route_auto_locator_scalar_file_deferred_to_agent_loop",
-            crate::post_route_policy::PostRoutePolicyOutcome::RefineContract,
-        );
+        BoundaryContractDeferral::AutoLocatorScalarFileWithoutCurrentLocator
+            .defer_to_agent_loop(pre_loop_clarify_candidates, post_route);
     }
     if post_route.missing_locator_for_path_scoped_content
         && !route_reason_has_marker(
@@ -166,29 +210,8 @@ pub(super) fn apply_post_route_refinements(
         "directory_file_delivery_requires_structured_selection",
     ) && !route_has_structured_list_selector(&post_route.execution_route_result)
     {
-        post_route.execution_route_result.needs_clarify = false;
-        post_route.execution_route_result.clarify_question.clear();
-        post_route
-            .execution_route_result
-            .output_contract
-            .locator_kind = crate::OutputLocatorKind::None;
-        post_route
-            .execution_route_result
-            .output_contract
-            .locator_hint
-            .clear();
-        post_route.auto_locator_path = None;
-        post_route.auto_locator_hint = None;
-        post_route.auto_locator_resolved_direct = false;
-        post_route.missing_locator_for_path_scoped_content = true;
-        push_pre_loop_clarify_candidate(
-            pre_loop_clarify_candidates,
-            "directory_file_delivery_requires_structured_selection",
-        );
-        post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
-            "post_route_directory_file_delivery_deferred_to_agent_loop",
-            crate::post_route_policy::PostRoutePolicyOutcome::RefineContract,
-        );
+        BoundaryContractDeferral::DirectoryFileDeliveryRequiresStructuredSelection
+            .defer_to_agent_loop(pre_loop_clarify_candidates, post_route);
     }
     defer_boundary_clarify_to_agent_loop(pre_loop_clarify_candidates, post_route);
 }
