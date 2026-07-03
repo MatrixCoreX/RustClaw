@@ -60,21 +60,6 @@ fn registry_capability_refs_from_route(
     refs
 }
 
-fn contract_marker_for_semantic_kind(semantic_kind: crate::OutputSemanticKind) -> &'static str {
-    match semantic_kind {
-        crate::OutputSemanticKind::CommandOutputSummary => "contract:command_output_summary",
-        crate::OutputSemanticKind::RawCommandOutput => "contract:raw_command_output",
-        crate::OutputSemanticKind::SqliteDatabaseKindJudgment => {
-            "contract:sqlite_database_kind_judgment"
-        }
-        crate::OutputSemanticKind::SqliteSchemaVersion => "contract:sqlite_schema_version",
-        crate::OutputSemanticKind::SqliteTableListing => "contract:sqlite_table_listing",
-        crate::OutputSemanticKind::SqliteTableNamesOnly => "contract:sqlite_table_names_only",
-        crate::OutputSemanticKind::ConfigRiskAssessment => "contract:config_risk_assessment",
-        _ => semantic_kind.as_str(),
-    }
-}
-
 pub(super) fn contract_repair_candidate_observations(
     state: &crate::AppState,
     prompt: &str,
@@ -121,13 +106,13 @@ pub(super) fn contract_repair_candidate_observations(
 
 fn contract_candidate_json(
     source: &'static str,
-    semantic_kind: crate::OutputSemanticKind,
+    contract_ref: &'static str,
     locator_hint: Option<String>,
     response_shape: Option<crate::OutputResponseShape>,
 ) -> Value {
     json!({
         "source": source,
-        "contract_ref": contract_marker_for_semantic_kind(semantic_kind),
+        "contract_ref": contract_ref,
         "locator_hint": locator_hint.unwrap_or_default(),
         "response_shape": response_shape.map(|shape| shape.as_str()).unwrap_or(""),
     })
@@ -143,14 +128,14 @@ fn command_observation_marker_contract_candidate(
     {
         return None;
     }
-    let semantic_kind = if super::route_reason_has_marker(
+    let contract_ref = if super::route_reason_has_marker(
         route_result,
         "explicit_command_requires_command_output_summary_execution",
     ) || super::route_reason_has_marker(
         route_result,
         "command_payload_requires_command_output_summary_execution",
     ) {
-        crate::OutputSemanticKind::CommandOutputSummary
+        "contract:command_output_summary"
     } else if super::route_reason_has_marker(
         route_result,
         "explicit_command_requires_fresh_execution",
@@ -158,14 +143,14 @@ fn command_observation_marker_contract_candidate(
         route_result,
         "command_payload_requires_raw_output_execution",
     ) {
-        crate::OutputSemanticKind::RawCommandOutput
+        "contract:raw_command_output"
     } else {
         return None;
     };
 
     Some(contract_candidate_json(
         "command_observation_marker",
-        semantic_kind,
+        contract_ref,
         None,
         None,
     ))
@@ -198,7 +183,7 @@ fn sqlite_path_excerpt_judgment_contract_candidate(
     };
     Some(contract_candidate_json(
         "sqlite_path_excerpt_judgment",
-        crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+        "contract:sqlite_database_kind_judgment",
         Some(path),
         None,
     ))
@@ -225,7 +210,7 @@ fn sqlite_structured_version_contract_candidate(
     };
     Some(contract_candidate_json(
         "sqlite_structured_version",
-        crate::OutputSemanticKind::SqliteSchemaVersion,
+        "contract:sqlite_schema_version",
         Some(path),
         Some(crate::OutputResponseShape::Scalar),
     ))
@@ -252,7 +237,7 @@ fn sqlite_structured_table_listing_contract_candidate(
     };
     Some(contract_candidate_json(
         "sqlite_structured_table_listing",
-        crate::OutputSemanticKind::SqliteTableListing,
+        "contract:sqlite_table_listing",
         Some(path),
         Some(crate::OutputResponseShape::Strict),
     ))
@@ -271,10 +256,10 @@ fn sqlite_route_reason_table_contract_candidate(
     {
         return None;
     }
-    let semantic_kind = if super::route_reason_has_marker(route_result, "sqlite_table_names_only") {
-        crate::OutputSemanticKind::SqliteTableNamesOnly
+    let contract_ref = if super::route_reason_has_marker(route_result, "sqlite_table_names_only") {
+        "contract:sqlite_table_names_only"
     } else if super::route_reason_has_marker(route_result, "sqlite_table_listing") {
-        crate::OutputSemanticKind::SqliteTableListing
+        "contract:sqlite_table_listing"
     } else {
         return None;
     };
@@ -285,7 +270,7 @@ fn sqlite_route_reason_table_contract_candidate(
     };
     Some(contract_candidate_json(
         "sqlite_route_reason_table",
-        semantic_kind,
+        contract_ref,
         Some(path),
         Some(crate::OutputResponseShape::Strict),
     ))
@@ -312,7 +297,7 @@ fn config_validation_findings_contract_candidate(
     };
     Some(contract_candidate_json(
         "config_validation_findings",
-        crate::OutputSemanticKind::ConfigRiskAssessment,
+        "contract:config_risk_assessment",
         Some(path),
         Some(crate::OutputResponseShape::Free),
     ))
