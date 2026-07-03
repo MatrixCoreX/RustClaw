@@ -135,7 +135,7 @@ fn output_contract_ref_for_route_uses_effective_contract_marker() {
 
     let output_contract_ref = super::decision_envelope::output_contract_ref_for_route(&route);
 
-    assert!(output_contract_ref.contains("semantic:workspace_project_summary"));
+    assert!(output_contract_ref.contains("contract_marker:workspace_project_summary"));
 }
 
 #[test]
