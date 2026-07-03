@@ -233,6 +233,7 @@ fn summary_json_includes_finalizer_and_task_metrics() {
         "initial_gate_ref",
         "initial_hint_ref",
         "legacy_first_layer_decision",
+        "legacy_route_label",
     ] {
         assert!(
             summary
@@ -242,13 +243,6 @@ fn summary_json_includes_finalizer_and_task_metrics() {
             "route_result should not expose legacy field `{legacy_field}`"
         );
     }
-    assert_eq!(
-        summary
-            .get("route_result")
-            .and_then(|v| v.get("legacy_route_label"))
-            .and_then(Value::as_str),
-        Some("Act")
-    );
     assert!(summary
         .get("route_result")
         .and_then(|v| v.get("first_layer_decision"))

@@ -572,7 +572,6 @@ fn route_result_json(route: &crate::RouteResult) -> Value {
     json!({
         "boundary_mode": route.gate_kind().as_str(),
         "route_trace_decision": route.route_trace_decision_for_journal().as_str(),
-        "legacy_route_label": route.legacy_route_label_for_trace(),
         "needs_clarify": route.needs_clarify,
         "should_refresh_long_term_memory": route.should_refresh_long_term_memory,
         "agent_display_name_hint": route.agent_display_name_hint,
