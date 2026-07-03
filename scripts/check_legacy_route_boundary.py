@@ -19,6 +19,7 @@ SOURCE_ROOT = REPO_ROOT / "crates" / "clawd" / "src"
 LEGACY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("FirstLayerDecision", re.compile(r"\bFirstLayerDecision\b")),
     ("first_layer_decision", re.compile(r"\bfirst_layer_decision\b")),
+    ("legacy_route_label", re.compile(r"\blegacy_route_label\b")),
     ("derived_route_label", re.compile(r"\bderived_route_label\b")),
     ("route_label_call", re.compile(r"\.route_label\s*\(")),
 )
@@ -73,6 +74,10 @@ def is_intent_router_compat_file(rel_path: str) -> bool:
 
 
 def is_allowed(rel_path: str, kind: str, line_text: str) -> bool:
+    if kind == "legacy_route_label":
+        # New production traces must use route_trace_label. Historical artifact
+        # readers live outside production Rust and are not scanned here.
+        return False
     if kind == "derived_route_label":
         # Production code should use boundary_mode, route_trace_decision, or route_trace_label.
         return False
@@ -129,6 +134,10 @@ def run_self_test() -> int:
     assert scan_text(
         "crates/clawd/src/ask_flow.rs",
         "let label = route.derived_route_label();",
+    )
+    assert scan_text(
+        "crates/clawd/src/task_journal.rs",
+        'json!({ "legacy_route_label": "Act" });',
     )
     assert scan_text(
         "crates/clawd/src/ask_flow.rs",
