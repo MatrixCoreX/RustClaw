@@ -16,7 +16,10 @@ pub(crate) use crate::contract_matrix::{
     FinalAnswerShapeClass,
 };
 
-pub(crate) use crate::task_contract::TaskOperation as EvidenceOperation;
+pub(crate) use crate::task_contract::{
+    TaskDeliveryShape as EvidenceDeliveryShape, TaskOperation as EvidenceOperation,
+    TaskTargetObject as EvidenceTargetObject,
+};
 
 pub(crate) fn evidence_policy_context_prompt_line_for_route(route: &crate::RouteResult) -> String {
     crate::task_contract::evidence_policy_context_prompt_line_for_route(route)
@@ -24,6 +27,11 @@ pub(crate) fn evidence_policy_context_prompt_line_for_route(route: &crate::Route
 
 pub(crate) fn evidence_required_for_route(route: &crate::RouteResult) -> bool {
     crate::task_contract::evidence_required_for_route(route)
+}
+
+#[allow(dead_code)]
+pub(crate) fn delivery_shape_for_route(route: &crate::RouteResult) -> EvidenceDeliveryShape {
+    crate::task_contract::delivery_shape_for_route(route)
 }
 
 pub(crate) fn missing_parameters_for_route(route: &crate::RouteResult) -> Vec<String> {
@@ -42,6 +50,11 @@ pub(crate) fn required_evidence_fields_for_output_contract(
 
 pub(crate) fn required_evidence_fields_for_route(route: &crate::RouteResult) -> Vec<String> {
     crate::task_contract::required_evidence_fields_for_route(route)
+}
+
+#[allow(dead_code)]
+pub(crate) fn target_object_for_route(route: &crate::RouteResult) -> EvidenceTargetObject {
+    crate::task_contract::target_object_for_route(route)
 }
 
 pub(crate) fn target_locators_for_route(route: &crate::RouteResult) -> Vec<String> {
