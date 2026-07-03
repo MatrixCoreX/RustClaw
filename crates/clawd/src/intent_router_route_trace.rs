@@ -14,7 +14,7 @@ pub(crate) struct RouteTraceRecord {
 
 fn route_trace_output_contract_ref(contract: &IntentOutputContract) -> String {
     format!(
-        "shape={};semantic={};locator={};delivery_required={};content_evidence={}",
+        "shape={};contract_marker={};locator={};delivery_required={};content_evidence={}",
         contract.response_shape.as_str(),
         contract.semantic_kind.as_str(),
         contract.locator_kind.as_str(),
@@ -143,7 +143,9 @@ mod tests {
         assert_eq!(execute.reason_code, "planner_execute_trace_inferred");
         assert_eq!(execute.outcome, "allowed");
         assert_eq!(execute.owner_layer, "intent_normalizer_route_trace");
-        assert!(execute.output_contract_ref.contains("semantic=file_paths"));
+        assert!(execute
+            .output_contract_ref
+            .contains("contract_marker=file_paths"));
         assert_eq!(
             execute.repair_codes,
             vec!["executable_contract_preserved_for_agent_loop"]

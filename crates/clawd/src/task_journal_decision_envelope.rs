@@ -257,7 +257,18 @@ pub(super) fn agent_loop_decision_envelope_json(
 pub(super) fn output_contract_ref_for_route(route: &crate::RouteResult) -> String {
     let contract = route.effective_output_contract();
     format!(
-        "semantic:{}|shape:{}|locator:{}|delivery:{}|content_evidence:{}",
+        concat!(
+            "contract_marker:",
+            "{}",
+            "|shape:",
+            "{}",
+            "|locator:",
+            "{}",
+            "|delivery:",
+            "{}",
+            "|content_evidence:",
+            "{}"
+        ),
         contract.semantic_kind.as_str(),
         contract.response_shape.as_str(),
         contract.locator_kind.as_str(),
