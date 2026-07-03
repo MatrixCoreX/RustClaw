@@ -60,9 +60,6 @@ use scalar_count_filter::{apply_scalar_count_filter_hint, scalar_count_filter_hi
 
 #[path = "action_route_locator_artifact.rs"]
 mod action_route_locator_artifact;
-#[cfg(test)]
-#[path = "archive_database_aggregate_plan.rs"]
-mod archive_database_aggregate_plan;
 #[path = "concrete_respond_structural_observation.rs"]
 mod concrete_respond_structural_observation;
 #[path = "config_guard_capability_repair.rs"]
@@ -119,8 +116,6 @@ mod system_basic_action_path;
 #[path = "value_string_list.rs"]
 mod value_string_list;
 use action_route_locator_artifact::*;
-#[cfg(test)]
-use archive_database_aggregate_plan::*;
 use concrete_respond_structural_observation::*;
 use config_guard_capability_repair::*;
 use configured_command_prefix::*;

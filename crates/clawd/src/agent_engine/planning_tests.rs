@@ -10,7 +10,6 @@ use claw_core::skill_registry::SkillsRegistry;
 use super::{
     action_supports_structured_direct_observed_finalize, action_targets_config_edit,
     actions_use_ad_hoc_command_without_route_preferred_skill,
-    archive_database_aggregate_deterministic_plan_result,
     archive_list_auto_locator_deterministic_plan_result, archive_pack_deterministic_plan_result,
     archive_read_deterministic_plan_result, archive_unpack_deterministic_plan_result,
     async_job_start_deterministic_plan_result, broaden_default_read_range_for_structured_text,

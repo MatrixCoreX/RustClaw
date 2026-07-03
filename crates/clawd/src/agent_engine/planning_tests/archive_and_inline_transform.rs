@@ -2,78 +2,7 @@ use super::*;
 use std::collections::BTreeSet;
 
 #[test]
-fn archive_read_contract_recovers_explicit_archive_path_when_locator_hint_is_empty() {
-    let state = test_state_with_enabled_skills(&["archive_basic"]);
-    let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
-    let request = format!("读取 {archive} 里的 notes.txt 内容片段，并简短总结。");
-    let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
-    route.resolved_intent = request.clone();
-    route.route_reason = "capability_ref=archive.read".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.locator_hint.clear();
-    let loop_state = LoopState::new(1);
-
-    let plan = archive_read_deterministic_plan_result(
-        "read archive member",
-        &state,
-        Some(&route),
-        &loop_state,
-        Some("/home/guagua/rustclaw/tmp/contract_matrix_unpacked/notes.txt"),
-        &request,
-    )
-    .expect("archive read plan should recover explicit archive path");
-
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "archive_basic", "read");
-    assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
-    assert_eq!(
-        args.get("member").and_then(Value::as_str),
-        Some("notes.txt")
-    );
-}
-
-#[test]
-fn archive_read_contract_prefers_complete_request_path_over_basename_locator_hint() {
-    let state = test_state_with_enabled_skills(&["archive_basic"]);
-    let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
-    let request = format!("读取 {archive} 里的 notes.txt 内容片段，并简短总结。");
-    let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
-    route.resolved_intent = request.clone();
-    route.route_reason = "capability_ref=archive.read".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.locator_hint = "test_bundle.zip | notes.txt".to_string();
-    let loop_state = LoopState::new(1);
-
-    let plan = archive_read_deterministic_plan_result(
-        "read archive member",
-        &state,
-        Some(&route),
-        &loop_state,
-        Some("/home/guagua/rustclaw/tmp/contract_matrix_unpacked/notes.txt"),
-        &request,
-    )
-    .expect("archive read plan should restore full archive path");
-
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "archive_basic", "read");
-    assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
-    assert_eq!(
-        args.get("member").and_then(Value::as_str),
-        Some("notes.txt")
-    );
-}
-
-#[test]
-fn archive_read_capability_ref_splits_archive_member_locator_without_semantic_kind() {
-    let state = test_state_with_enabled_skills(&["archive_basic"]);
+fn archive_read_capability_ref_allows_planner_supplied_member_args() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
@@ -83,31 +12,69 @@ fn archive_read_capability_ref_splits_archive_member_locator_without_semantic_ki
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.locator_hint = format!("{archive} | notes.txt");
-    let loop_state = LoopState::new(1);
+    route.output_contract.locator_hint = archive.to_string();
 
-    let plan = archive_read_deterministic_plan_result(
-        "read archive member",
-        &state,
+    let policy = crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(&route),
-        &loop_state,
-        Some(archive),
-        "read archive member",
+        "archive_basic",
+        &json!({
+            "action": "read",
+            "archive": archive,
+            "member": "notes.txt",
+        }),
     )
-    .expect("archive read capability ref should split archive/member locator");
+    .expect("archive.read capability ref should expose archive_basic.read");
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert!(policy.action_matches_preferred(), "{policy:?}");
+}
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "archive_basic", "read");
-    assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
+#[test]
+fn archive_read_capability_ref_uses_policy_not_archive_read_semantic_kind() {
+    let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.resolved_intent = "capability_ref=archive.read".to_string();
+    route.route_reason = "capability_ref=archive.read".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.locator_hint = "test_bundle.zip | notes.txt".to_string();
+
+    let policy = crate::evidence_policy::capability_ref_action_policy_for_route(
+        Some(&route),
+        "archive_basic",
+        &json!({
+            "action": "read",
+            "archive": archive,
+            "member": "notes.txt",
+        }),
+    )
+    .expect("archive.read capability ref should work without ArchiveRead semantic kind");
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert!(policy.action_matches_preferred(), "{policy:?}");
+}
+
+#[test]
+fn archive_read_semantic_kind_without_capability_ref_does_not_expose_action_refs() {
+    let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.locator_hint = format!("{archive} | notes.txt");
+
     assert_eq!(
-        args.get("member").and_then(Value::as_str),
-        Some("notes.txt")
+        crate::evidence_policy::capability_ref_action_refs_for_route(&route, false).len(),
+        0,
+        "ArchiveRead output marker alone must not choose archive.read before the planner"
     );
 }
 
 #[test]
-fn archive_read_structural_member_target_plans_direct_read_without_semantic_label() {
-    let state = test_state_with_enabled_skills(&["archive_basic"]);
+fn archive_read_structural_member_target_waits_for_planner_capability_ref() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
@@ -119,86 +86,29 @@ fn archive_read_structural_member_target_plans_direct_read_without_semantic_labe
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.locator_hint = archive.to_string();
-    let loop_state = LoopState::new(1);
 
-    let plan = archive_read_deterministic_plan_result(
-        "read archive member",
-        &state,
-        Some(&route),
-        &loop_state,
-        Some(archive),
-        &format!("Read {archive} member notes.txt"),
-    )
-    .expect("archive read plan from structural member target");
-
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "archive_basic", "read");
-    assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
-    assert_eq!(
-        args.get("member").and_then(Value::as_str),
-        Some("notes.txt")
+    assert!(
+        crate::evidence_policy::capability_ref_action_refs_for_route(&route, false).is_empty(),
+        "structural archive/member text without a machine capability_ref must be left to the planner"
     );
 }
 
 #[test]
 fn archive_read_contract_rejects_unsafe_member_locator() {
-    let state = test_state_with_enabled_skills(&["archive_basic"]);
-    let mut route = base_route_result();
-    route.route_reason = "capability_ref=archive.read".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.locator_hint =
-        "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | ../secret.txt".to_string();
-    let loop_state = LoopState::new(1);
-
-    assert!(archive_read_deterministic_plan_result(
-        "read archive member",
-        &state,
-        Some(&route),
-        &loop_state,
-        Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"),
-        "Read member ../secret.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
-    )
-    .is_none());
+    assert!(!super::super::directory_unique_entry::archive_member_path_is_safe("../secret.txt"));
+    assert!(!super::super::directory_unique_entry::archive_member_path_is_safe("/tmp/secret.txt"));
+    assert!(super::super::directory_unique_entry::archive_member_path_is_safe("notes.txt"));
 }
 
 #[test]
-fn archive_read_semantic_kind_without_capability_ref_does_not_plan() {
-    let state = test_state_with_enabled_skills(&["archive_basic"]);
-    let mut route = base_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.locator_hint =
-        "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | notes.txt".to_string();
-    let loop_state = LoopState::new(1);
-
-    assert!(archive_read_deterministic_plan_result(
-        "read archive member",
-        &state,
-        Some(&route),
-        &loop_state,
-        Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"),
-        "Read member notes.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
-    )
-    .is_none());
-}
-
-#[test]
-fn archive_database_aggregate_uses_structured_skills_for_compound_archive_list_route() {
-    let state = test_state_with_enabled_skills(&["archive_basic", "db_basic"]);
+fn archive_database_aggregate_capability_refs_allow_structured_observation_actions() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let db_path = "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite";
-    let request = format!("列出 {archive} 的成员并读取 notes.txt；再查看 {db_path} 的表列表。");
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::direct_answer();
-    route.resolved_intent = format!(
-        "archive.list archive.read database.list_tables archive={archive} member=notes.txt db_path={db_path}"
-    );
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.resolved_intent =
+        "capability_ref=archive.list capability_ref=archive.read capability_ref=database.list_tables"
+            .to_string();
     route.route_reason =
         "capability_ref=archive.list capability_ref=archive.read capability_ref=database.list_tables"
             .to_string();
@@ -208,42 +118,39 @@ fn archive_database_aggregate_uses_structured_skills_for_compound_archive_list_r
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.locator_hint = format!("{archive} | {db_path}");
-    let loop_state = LoopState::new(1);
 
-    let plan = archive_database_aggregate_deterministic_plan_result(
-        &state,
-        "archive plus sqlite aggregate",
+    let list_policy = crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(&route),
-        &loop_state,
-        &request,
-        None,
+        "archive_basic",
+        &json!({"action": "list", "archive": archive}),
     )
-    .expect("multi-source archive/sqlite request should use structured tools");
+    .expect("archive.list capability ref should expose archive_basic.list");
+    assert!(list_policy.is_allowed(), "{list_policy:?}");
+    assert!(list_policy.action_matches_preferred(), "{list_policy:?}");
 
-    assert_eq!(plan.steps.len(), 5);
-    let list_action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&list_action, "archive_basic", "list");
-    assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
-    let read_action = plan.steps[1].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&read_action, "archive_basic", "read");
-    assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
-    assert_eq!(
-        args.get("member").and_then(Value::as_str),
-        Some("notes.txt")
-    );
-    let db_action = plan.steps[2].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&db_action, "db_basic", "list_tables");
-    assert_eq!(args.get("db_path").and_then(Value::as_str), Some(db_path));
-    assert_eq!(plan.steps[3].action_type, "synthesize_answer");
-    assert_eq!(plan.steps[4].action_type, "respond");
+    let read_policy = crate::evidence_policy::capability_ref_action_policy_for_route(
+        Some(&route),
+        "archive_basic",
+        &json!({"action": "read", "archive": archive, "member": "notes.txt"}),
+    )
+    .expect("archive.read capability ref should expose archive_basic.read");
+    assert!(read_policy.is_allowed(), "{read_policy:?}");
+    assert!(read_policy.action_matches_preferred(), "{read_policy:?}");
+
+    let db_policy = crate::evidence_policy::capability_ref_action_policy_for_route(
+        Some(&route),
+        "db_basic",
+        &json!({"action": "list_tables", "db_path": db_path}),
+    )
+    .expect("database.list_tables capability ref should expose db_basic.list_tables");
+    assert!(db_policy.is_allowed(), "{db_policy:?}");
+    assert!(db_policy.action_matches_preferred(), "{db_policy:?}");
 }
 
 #[test]
-fn archive_database_aggregate_without_capability_refs_does_not_plan_from_content_excerpt() {
-    let state = test_state_with_enabled_skills(&["archive_basic", "db_basic"]);
+fn archive_database_aggregate_without_capability_refs_does_not_expose_action_refs() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let db_path = "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite";
-    let request = format!("列出 {archive} 的成员并读取 notes.txt；再查看 {db_path} 的表列表。");
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
@@ -256,19 +163,9 @@ fn archive_database_aggregate_without_capability_refs_does_not_plan_from_content
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.locator_hint = format!("{archive} | {db_path}");
-    let loop_state = LoopState::new(1);
-
-    let plan = archive_database_aggregate_deterministic_plan_result(
-        &state,
-        "archive plus sqlite fallback aggregate",
-        Some(&route),
-        &loop_state,
-        &request,
-        None,
-    );
 
     assert!(
-        plan.is_none(),
+        crate::evidence_policy::capability_ref_action_refs_for_route(&route, false).is_empty(),
         "content-excerpt fallback route must not choose compound archive/database skills without capability refs"
     );
 }
