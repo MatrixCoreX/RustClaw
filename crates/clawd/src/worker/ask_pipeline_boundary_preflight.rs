@@ -11,6 +11,94 @@ pub(super) fn defer_locator_binding_to_agent_loop(route_result: &mut crate::Rout
     route_result.output_contract.requires_content_evidence = false;
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BoundaryPreflightDeferral {
+    DeicticMemoryOnly,
+    UnboundModelContextTarget,
+    BareTopicModelSuppliedLocator,
+    ImplicitWorkspaceFileLocator,
+    ModelCompletedWorkspaceFileLocator,
+    InferredMissingWorkspaceLocator,
+    ActiveAnchorFileDeliveryWithoutStructuredReference,
+    BackgroundOnlyLocator,
+    LocatorlessObservation,
+    UnboundTargetedEvidence,
+}
+
+impl BoundaryPreflightDeferral {
+    fn observation_token(self) -> &'static str {
+        match self {
+            Self::DeicticMemoryOnly => "deictic_memory_only",
+            Self::UnboundModelContextTarget => "unbound_model_context_target",
+            Self::BareTopicModelSuppliedLocator => "bare_topic_model_supplied_locator",
+            Self::ImplicitWorkspaceFileLocator => "implicit_workspace_file_locator",
+            Self::ModelCompletedWorkspaceFileLocator => "model_completed_workspace_file_locator",
+            Self::InferredMissingWorkspaceLocator => "inferred_missing_workspace_locator",
+            Self::ActiveAnchorFileDeliveryWithoutStructuredReference => {
+                "active_anchor_file_delivery_without_structured_reference"
+            }
+            Self::BackgroundOnlyLocator => "background_only_locator",
+            Self::LocatorlessObservation => "locatorless_observation",
+            Self::UnboundTargetedEvidence => "unbound_targeted_evidence",
+        }
+    }
+
+    fn reason_code(self) -> &'static str {
+        match self {
+            Self::DeicticMemoryOnly => "deictic_memory_only_deferred_to_agent_loop",
+            Self::UnboundModelContextTarget => {
+                "unbound_model_context_target_deferred_to_agent_loop"
+            }
+            Self::BareTopicModelSuppliedLocator => {
+                "bare_topic_model_supplied_locator_deferred_to_agent_loop"
+            }
+            Self::ImplicitWorkspaceFileLocator => {
+                "implicit_workspace_file_locator_deferred_to_agent_loop"
+            }
+            Self::ModelCompletedWorkspaceFileLocator => {
+                "model_completed_workspace_file_locator_deferred_to_agent_loop"
+            }
+            Self::InferredMissingWorkspaceLocator => {
+                "inferred_missing_workspace_locator_deferred_to_agent_loop"
+            }
+            Self::ActiveAnchorFileDeliveryWithoutStructuredReference => {
+                "active_anchor_file_delivery_deferred_to_agent_loop"
+            }
+            Self::BackgroundOnlyLocator => "background_only_locator_deferred_to_agent_loop",
+            Self::LocatorlessObservation => "locatorless_observation_deferred_to_agent_loop",
+            Self::UnboundTargetedEvidence => "unbound_targeted_evidence_deferred_to_agent_loop",
+        }
+    }
+
+    fn clears_locator_binding(self) -> bool {
+        !matches!(
+            self,
+            Self::UnboundModelContextTarget | Self::LocatorlessObservation
+        )
+    }
+
+    fn record(
+        self,
+        task: &crate::ClaimedTask,
+        pre_loop_clarify_candidates: &mut Vec<&'static str>,
+        route_result: &mut crate::RouteResult,
+    ) {
+        let before_gate_kind = route_result.gate_kind();
+        if self.clears_locator_binding() {
+            defer_locator_binding_to_agent_loop(route_result);
+        }
+        push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, self.observation_token());
+        log_route_guard_record(
+            task,
+            "worker_locator_guard",
+            self.reason_code(),
+            "deferred",
+            before_gate_kind,
+            route_result,
+        );
+    }
+}
+
 pub(super) fn boundary_safety_preflight(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -26,15 +114,9 @@ pub(super) fn boundary_safety_preflight(
         turn_analysis,
         session_snapshot,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        defer_locator_binding_to_agent_loop(route_result);
-        push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, "deictic_memory_only");
-        log_route_guard_record(
+        BoundaryPreflightDeferral::DeicticMemoryOnly.record(
             task,
-            "worker_locator_guard",
-            "deictic_memory_only_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
+            pre_loop_clarify_candidates,
             route_result,
         );
     }
@@ -45,17 +127,9 @@ pub(super) fn boundary_safety_preflight(
         turn_analysis,
         session_snapshot,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        push_pre_loop_clarify_candidate(
-            pre_loop_clarify_candidates,
-            "unbound_model_context_target",
-        );
-        log_route_guard_record(
+        BoundaryPreflightDeferral::UnboundModelContextTarget.record(
             task,
-            "worker_locator_guard",
-            "unbound_model_context_target_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
+            pre_loop_clarify_candidates,
             route_result,
         );
     }
@@ -65,18 +139,9 @@ pub(super) fn boundary_safety_preflight(
         turn_analysis,
         session_snapshot,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        defer_locator_binding_to_agent_loop(route_result);
-        push_pre_loop_clarify_candidate(
-            pre_loop_clarify_candidates,
-            "bare_topic_model_supplied_locator",
-        );
-        log_route_guard_record(
+        BoundaryPreflightDeferral::BareTopicModelSuppliedLocator.record(
             task,
-            "worker_locator_guard",
-            "bare_topic_model_supplied_locator_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
+            pre_loop_clarify_candidates,
             route_result,
         );
     }
@@ -87,18 +152,9 @@ pub(super) fn boundary_safety_preflight(
         turn_analysis,
         session_snapshot,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        defer_locator_binding_to_agent_loop(route_result);
-        push_pre_loop_clarify_candidate(
-            pre_loop_clarify_candidates,
-            "implicit_workspace_file_locator",
-        );
-        log_route_guard_record(
+        BoundaryPreflightDeferral::ImplicitWorkspaceFileLocator.record(
             task,
-            "worker_locator_guard",
-            "implicit_workspace_file_locator_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
+            pre_loop_clarify_candidates,
             route_result,
         );
     }
@@ -120,18 +176,9 @@ pub(super) fn boundary_post_binding_locator_preflight(
         turn_analysis,
         session_snapshot,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        defer_locator_binding_to_agent_loop(route_result);
-        push_pre_loop_clarify_candidate(
-            pre_loop_clarify_candidates,
-            "model_completed_workspace_file_locator",
-        );
-        log_route_guard_record(
+        BoundaryPreflightDeferral::ModelCompletedWorkspaceFileLocator.record(
             task,
-            "worker_locator_guard",
-            "model_completed_workspace_file_locator_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
+            pre_loop_clarify_candidates,
             route_result,
         );
     }
@@ -142,18 +189,9 @@ pub(super) fn boundary_post_binding_locator_preflight(
         turn_analysis,
         session_snapshot,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        defer_locator_binding_to_agent_loop(route_result);
-        push_pre_loop_clarify_candidate(
-            pre_loop_clarify_candidates,
-            "inferred_missing_workspace_locator",
-        );
-        log_route_guard_record(
+        BoundaryPreflightDeferral::InferredMissingWorkspaceLocator.record(
             task,
-            "worker_locator_guard",
-            "inferred_missing_workspace_locator_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
+            pre_loop_clarify_candidates,
             route_result,
         );
     }
@@ -163,18 +201,9 @@ pub(super) fn boundary_post_binding_locator_preflight(
         turn_analysis,
         session_snapshot,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        defer_locator_binding_to_agent_loop(route_result);
-        push_pre_loop_clarify_candidate(
-            pre_loop_clarify_candidates,
-            "active_anchor_file_delivery_without_structured_reference",
-        );
-        log_route_guard_record(
+        BoundaryPreflightDeferral::ActiveAnchorFileDeliveryWithoutStructuredReference.record(
             task,
-            "worker_locator_guard",
-            "active_anchor_file_delivery_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
+            pre_loop_clarify_candidates,
             route_result,
         );
     }
@@ -184,18 +213,9 @@ pub(super) fn boundary_post_binding_locator_preflight(
         turn_analysis,
         session_snapshot,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        defer_locator_binding_to_agent_loop(route_result);
-        push_pre_loop_clarify_candidate(
-            pre_loop_clarify_candidates,
-            "bare_topic_model_supplied_locator",
-        );
-        log_route_guard_record(
+        BoundaryPreflightDeferral::BareTopicModelSuppliedLocator.record(
             task,
-            "worker_locator_guard",
-            "bare_topic_model_supplied_locator_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
+            pre_loop_clarify_candidates,
             route_result,
         );
     }
@@ -221,15 +241,9 @@ pub(super) fn boundary_context_locator_preflight(
         turn_analysis,
         session_snapshot,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        defer_locator_binding_to_agent_loop(route_result);
-        push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, "background_only_locator");
-        log_route_guard_record(
+        BoundaryPreflightDeferral::BackgroundOnlyLocator.record(
             task,
-            "worker_locator_guard",
-            "background_only_locator_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
+            pre_loop_clarify_candidates,
             route_result,
         );
     }
@@ -241,14 +255,9 @@ pub(super) fn boundary_context_locator_preflight(
         turn_analysis,
         session_snapshot,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, "locatorless_observation");
-        log_route_guard_record(
+        BoundaryPreflightDeferral::LocatorlessObservation.record(
             task,
-            "worker_locator_guard",
-            "locatorless_observation_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
+            pre_loop_clarify_candidates,
             route_result,
         );
     }
@@ -258,15 +267,9 @@ pub(super) fn boundary_context_locator_preflight(
         session_snapshot,
         recent_execution_context,
     ) {
-        let before_gate_kind = route_result.gate_kind();
-        defer_locator_binding_to_agent_loop(route_result);
-        push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, "unbound_targeted_evidence");
-        log_route_guard_record(
+        BoundaryPreflightDeferral::UnboundTargetedEvidence.record(
             task,
-            "worker_locator_guard",
-            "unbound_targeted_evidence_deferred_to_agent_loop",
-            "deferred",
-            before_gate_kind,
+            pre_loop_clarify_candidates,
             route_result,
         );
     }
