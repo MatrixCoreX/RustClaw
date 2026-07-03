@@ -53,17 +53,13 @@ pub(crate) struct BoundaryEnvelope {
     pub(crate) active_task_reference: Option<String>,
     pub(crate) session_binding: Option<String>,
     pub(crate) safety_budget_hint: Option<String>,
-    /// Machine token for request length. Runtime-created envelopes store
-    /// `raw_chars:<n>` here instead of the user's raw natural language.
-    pub(crate) raw_user_request: String,
+    /// Request length only; never carry the raw natural-language request.
+    pub(crate) raw_chars: usize,
 }
 
 impl BoundaryEnvelope {
     pub(crate) fn raw_char_count(&self) -> usize {
-        self.raw_user_request
-            .strip_prefix("raw_chars:")
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or_else(|| self.raw_user_request.chars().count())
+        self.raw_chars
     }
 
     pub(crate) fn compact_prompt_line(&self) -> String {
@@ -114,7 +110,7 @@ impl IntentNormalizerOutput {
             session_binding: resume_behavior_boundary_token(self.resume_behavior)
                 .map(str::to_string),
             safety_budget_hint: None,
-            raw_user_request: format!("raw_chars:{}", self.raw_user_request.chars().count()),
+            raw_chars: self.raw_user_request.chars().count(),
         }
     }
 }
