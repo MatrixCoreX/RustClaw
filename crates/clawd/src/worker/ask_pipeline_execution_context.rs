@@ -16,6 +16,29 @@ fn should_preserve_original_inline_structured_input(
     !resolved_trimmed.contains(inline_value.trim())
 }
 
+#[derive(Clone, Copy)]
+enum ExecutionContextSanitization {
+    FreeformRewrite,
+    AnswerCandidate,
+}
+
+impl ExecutionContextSanitization {
+    fn route_reason(self) -> &'static str {
+        match self {
+            Self::FreeformRewrite => {
+                "untrusted_normalizer_freeform_rewrite_removed_from_execution_context"
+            }
+            Self::AnswerCandidate => {
+                "untrusted_normalizer_answer_candidate_removed_from_execution_context"
+            }
+        }
+    }
+
+    fn record(self, route_result: &mut crate::RouteResult) {
+        super::append_route_reason(route_result, self.route_reason());
+    }
+}
+
 pub(in crate::worker) fn execution_user_request<'a>(
     prompt: &'a str,
     resolved_prompt_for_execution: &'a str,
@@ -52,10 +75,7 @@ pub(super) fn sanitize_untrusted_normalizer_freeform_rewrite_for_direct_chat_exe
     prompt_with_context.push_str(prompt);
     prompt_with_context.push_str(&prompt_context_suffix);
     *prompt_with_memory_for_execution = prompt_with_context;
-    super::append_route_reason(
-        route_result,
-        "untrusted_normalizer_freeform_rewrite_removed_from_execution_context",
-    );
+    ExecutionContextSanitization::FreeformRewrite.record(route_result);
 }
 
 fn trusted_execution_context_suffix(text: &str) -> String {
@@ -146,10 +166,7 @@ pub(super) fn sanitize_untrusted_normalizer_answer_candidate_for_execution(
         strip_embedded_answer_candidate_block(resolved_prompt_for_execution);
     *prompt_with_memory_for_execution =
         strip_embedded_answer_candidate_block(prompt_with_memory_for_execution);
-    super::append_route_reason(
-        route_result,
-        "untrusted_normalizer_answer_candidate_removed_from_execution_context",
-    );
+    ExecutionContextSanitization::AnswerCandidate.record(route_result);
 }
 
 fn embedded_normalizer_answer_candidate_block(text: &str) -> Option<String> {
