@@ -218,8 +218,9 @@ fn normalizer_schema_normalization_coerces_output_contract_scalar_and_aliases() 
         contract
             .get("requires_content_evidence")
             .and_then(|v| v.as_bool()),
-        Some(true)
+        Some(false)
     );
+    assert!(!contract.contains_key("semantic"));
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
         crate::prompt_utils::PromptSchemaId::IntentNormalizer,

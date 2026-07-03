@@ -163,14 +163,6 @@ fn normalize_output_contract_aliases(contract: &mut serde_json::Map<String, Valu
             }
         }
     }
-    if !contract.contains_key("contract_marker") {
-        for alias in ["semantic", "kind", "answer_kind", "semantic_type"] {
-            if let Some(value) = contract.get(alias).cloned() {
-                contract.insert("contract_marker".to_string(), value);
-                break;
-            }
-        }
-    }
 }
 
 pub(super) fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>) {

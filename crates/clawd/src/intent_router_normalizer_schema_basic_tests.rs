@@ -202,6 +202,51 @@ fn normalizer_schema_normalization_demotes_registry_bridge_without_capability_re
 }
 
 #[test]
+fn normalizer_schema_normalization_drops_legacy_contract_marker_aliases() {
+    let raw = r#"{
+          "resolved_user_intent":"list files",
+          "needs_clarify":false,
+          "decision":"planner_execute",
+          "output_contract":{
+            "response_shape":"strict",
+            "semantic":"file_names",
+            "kind":"archive_list",
+            "answer_kind":"weather_query",
+            "semantic_type":"raw_command_output",
+            "requires_content_evidence":false,
+            "delivery_required":false,
+            "locator_kind":"none",
+            "delivery_intent":"none",
+            "locator_hint":""
+          },
+          "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "list files");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+    let contract = value
+        .get("output_contract")
+        .and_then(|value| value.as_object())
+        .expect("output contract");
+
+    assert_eq!(
+        contract.get("contract_marker").and_then(|value| value.as_str()),
+        Some("none")
+    );
+    for legacy_key in ["semantic", "kind", "answer_kind", "semantic_type"] {
+        assert!(
+            !contract.contains_key(legacy_key),
+            "{legacy_key} should not survive boundary normalization"
+        );
+    }
+    assert_eq!(
+        contract
+            .get("requires_content_evidence")
+            .and_then(|value| value.as_bool()),
+        Some(false)
+    );
+}
+
+#[test]
 fn normalizer_schema_normalization_preserves_object_resolved_intent() {
     let raw = r#"{"resolved_user_intent":{"test_id":"client-like-continuous-123"},"needs_clarify":false,"decision":"direct_answer"}"#;
     let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
