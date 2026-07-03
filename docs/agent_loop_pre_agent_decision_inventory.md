@@ -1,20 +1,20 @@
 # Agent Loop Pre-agent Decision Inventory
 
-Last updated: 2026-06-21
+Last updated: 2026-07-03
 
-This inventory supports `plan/agent_loop_ideal_state_convergence_plan_20260615.md`.
-It records the current pre-agent decision surface after `semantic_route_authority`
-became `agent_loop_default`, and separates boundary duties from ordinary semantic
-decisions that should continue moving into the agent loop.
+This inventory supports the Codex/Claude-style agent loop migration. It records
+the current pre-agent decision surface after route-authority runtime switches were
+removed, and separates boundary duties from ordinary semantic decisions that now
+belong in the agent loop.
 
 ## Current Authority Model
 
-- Live config uses `semantic_route_authority = "agent_loop_default"`.
-- `agent_loop_default` uses the current agent-loop authority path instead of
-  requiring a single configured canary class. Canary debug selection uses
-  `agent_loop_canary_bucket`; legacy `agent_decides_migration_class` is an
-  ignored historical config key.
-- The legacy selected-class fields remain for compatibility and are now derived
+- Live runtime no longer has a route-authority switch. Ordinary ask/chat fallback
+  uses the agent loop by default.
+- Old route-authority and canary keys are historical log/test compatibility only;
+  the guard script rejects their return to production Rust or config bodies.
+- The legacy selected-class fields remain only for compatibility attribution and
+  are now derived
   from `agent_loop_eligibility()`:
   - `structured_field_read`
   - `exact_path_list`
@@ -36,18 +36,15 @@ decisions that should continue moving into the agent loop.
 - `low_risk_tool_discovery` is context-only: it does not require content
   evidence, and is selected only from structured `tool_discovery` machine
   semantics plus planner context availability.
-- `agent_decides_semantic_route` and `agent_decides_migration_class` remain only
-  in historical docs, logs, and regression tests. Runtime config loading ignores
-  them; policy and rollout attribution use `semantic_route_authority`, and canary
-  selection uses `agent_loop_canary_bucket`.
+- `agent_decides_semantic_route`, `agent_decides_migration_class`, the removed
+  route-authority key, and the removed canary bucket remain only in historical
+  docs, logs, guard self-tests, and regression fixtures.
 - Boundary context already records machine-readable roles:
   - `normalizer_role = "initial_hint"`
   - `post_route_role = "boundary_machine_gate"`
-  - `direct_answer_gate_role = "fallback_safety_check"` for the top-level
-    semantic routing role; detailed
-    `pre_agent_gates.direct_answer_gate.ownership_class` may be
-    `fallback_safety_check`, `contract_boundary`, `evidence_projection`,
-    `agent_loop_activation`, or `semantic_policy_candidate`.
+  - historical direct-answer gate role/class fields may appear only in old logs,
+    guard fixtures, and compatibility readers. Current runtime must not recreate
+    a pre-planner direct-answer semantic gate from these fields.
   - `agent_loop_authority_enabled`
   - `chosen_authority`
   - `selected_migration_class`
@@ -62,9 +59,7 @@ decisions that should continue moving into the agent loop.
 4. `worker::ask_prepare::prepare_ask_execution_context()`
 5. `worker::ask_pipeline::apply_ask_post_route()`
 6. `worker::ask_pipeline::execute_ask_dispatch()`
-7. `ask_flow::execute_ask_routed()`
-8. `agent_engine::run_agent_with_tools()` for selected agent-loop authority or
-   planner-execute fallback
+7. `agent_engine::run_agent_with_tools()` through the default agent-loop entry
 
 ## Decision Surface Inventory
 
@@ -83,10 +78,10 @@ decisions that should continue moving into the agent loop.
 | Evidence-policy context | `EvidencePolicyContext` prompt lines and bundled policy snapshots | Projects required evidence, output shape, target/operation hints, and compatibility markers. | boundary/evidence policy | Keep as machine evidence/output policy used by loop/verifier/finalizer; do not use it as ordinary capability-selection authority. |
 | Direct existing file delivery | `direct_existing_file_delivery_token()` path | Publishes already verified local file token. | deterministic delivery shortcut | Keep only for verified path/delivery machine state. |
 | Runtime-grounded direct candidates | `ask_flow` direct candidates for scalar/status observations | Returns observed machine values without planner when evidence is already available. | deterministic evidence shortcut | Keep if all inputs are machine fields and final shape is contract-bound. |
-| Direct-answer preflight | `run_direct_answer_gate()` and `DirectAnswerGate*` helpers | Decides direct answer, clarification, or promotion to execution. | ordinary semantic / fallback safety | Demote to fallback safety for non-selected/rollback paths; loop decides selected cases. |
+| Deleted direct-answer preflight | historical direct-answer gate prompt/schema/parser path | Removed from current runtime; no pre-planner LLM gate decides direct answer, clarification, or promotion to execution. | historical compatibility only | Keep deleted. Direct-answer behavior is planner-loop terminal intent plus verifier/finalizer checks. |
 | Clarify question generation | `generate_or_reuse_clarify_question()` | Generates or reuses user-visible clarification text from structured reason. | final rendering | Keep rendering, but decision must come from machine `terminal_intent` / missing slot. |
 | Self-extension handler | `self_extension::maybe_handle_ask_self_extension()` | Handles extension protocol and handoff. | special protocol boundary | Keep protocol boundary; no natural-language skill branches in main flow. |
-| Agent-loop authority selection | `agent_loop_authority_selected_migration_class()` | Selects eligible class and records boundary context. | migration control | Replace class whitelist with generic eligibility buckets, then delete long-term canary plumbing. |
+| Agent-loop authority attribution | `agent_loop_authority_selected_migration_class()` compatibility helpers | Records derived eligibility class and boundary context for old logs/tests. | compatibility attribution | Keep only while historical attribution readers need it; do not make it a runtime route selector. |
 | Planner/runtime loop | `agent_engine::run_agent_with_tools()` | Plans, calls capabilities/tools/skills, observes, verifies, synthesizes, responds. | target ordinary semantic authority | Expand to answer/clarify/tool/skill/continue/stop decisions. |
 | PlanVerifier / contract action gate | `PlanVerifier`, verifier modules | Blocks disabled capabilities, missing args, risk/effect violations, confirmation needs, and unsafe mutations. | boundary/safety | Keep as main execution guard. |
 | Evidence coverage / Answer Verifier | answer verifier, observed-output finalizer, finalizer modules | Checks required evidence, answer shape, grounding, delivery consistency. | boundary/final guard | Keep; make issue output machine-readable and language-neutral. |
@@ -157,19 +152,20 @@ from runtime code.
 
 ## Deletion Order
 
-1. Add route-authority baseline metrics for selected class, chosen authority,
-   agent-loop authority enabled, planner first action, verifier state, and
-   delivery consistency.
-2. Replace `agent_decides_eligible_migration_class()` whitelist with generic
-   `AgentLoopEligibility` buckets. The compatibility wrapper remains until
-   legacy selected-class attribution is deleted.
-3. Move clarify/direct-answer terminal intent into `AgentLoopDecisionEnvelope`.
-4. Split `post_route_policy` into boundary gates and legacy semantic repair.
-5. Demote intent-router repair to schema/hint output for selected cases.
-6. Keep `agent_decides_semantic_route` / `agent_decides_migration_class` out of
-   runtime config parsing; remove remaining historical references only when
-   log-reader and regression-test compatibility no longer need them.
-7. Delete legacy semantic repair paths for selected/default agent-loop cases.
+1. Keep planner first action, verifier state, delivery consistency, and loop
+   outcome metrics as the primary behavior comparison surface.
+2. Keep generic `AgentLoopEligibility` buckets as attribution only, not as a
+   runtime route selector.
+3. Represent clarify/direct-answer terminal intent through structured planner
+   `respond` fields, verifier issues, and `needs_user` state.
+4. Keep `post_route_policy` limited to boundary locator/contract/delivery gates.
+5. Keep intent-router repair as schema/hint repair; ordinary semantic recovery
+   belongs in loop-internal bounded recovery.
+6. Keep removed route-authority keys out of runtime config parsing and production
+   docs; historical references are allowed only in isolated inventories, guard
+   self-tests, log readers, and regression fixtures.
+7. Delete remaining legacy semantic repair paths after affected focused tests and
+   compact release-gate-equivalent NL coverage pass.
 
 ## Validation Gates
 

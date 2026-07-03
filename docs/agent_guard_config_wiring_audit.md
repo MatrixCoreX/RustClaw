@@ -1,6 +1,6 @@
 # Agent Guard Config Wiring Audit
 
-Last updated: 2026-06-21
+Last updated: 2026-07-01
 
 This document supports
 `plan/agent_loop_ideal_state_convergence_plan_20260615.md`. It classifies
@@ -10,9 +10,9 @@ This document supports
 
 - Core loop budgets and budget profiles are wired through
   `agent_engine::support::load_agent_loop_guard_policy()`.
-- `semantic_route_authority` is parsed by `AgentLoopGuardPolicy` and currently
-  defaults to `agent_loop_default`; older `agent_decides_*` names are ignored
-  historical config keys and are not mapped during runtime config load.
+- Route-authority runtime switches have been removed from
+  `AgentLoopGuardPolicy`; old route-authority, canary, and `agent_decides_*`
+  names are ignored historical keys and must not return to production config.
 - `structured_evidence_required_for_selected_contracts` is default-on for
   selected agent-loop contracts; `registry_idempotency_guard_scope` and
   `answer_verifier_enforce_required_scope` are machine-token scopes. Current
@@ -44,10 +44,10 @@ This document supports
 | `agent.loop_guard.ops_closed_loop` | Parsed and selected for `ops_closed_loop` execution recipes. | Wired behavior. | Ops closed-loop budget/repair guard. | Keep. |
 | `agent.loop_guard.answer_verifier_enforce_required_scope` | Parsed as machine token `off \| selected_agent_loop \| all`; current config uses `all`, so required-evidence force-failure behavior can apply beyond selected agent-loop routes. | Wired behavior. | Answer Verifier rollout gate. | Keep route-delta/verifier attribution review active; roll back to `selected_agent_loop` or `off` if false verifier blocks appear. |
 | `agent.loop_guard.answer_verifier_enforce_required` | Historical bool name; current runtime config loader does not parse it. | Ignored legacy key. | Config migration. | Do not document or extend as a config field; use `answer_verifier_enforce_required_scope`. |
-| `agent.loop_guard.semantic_route_authority` | Parsed and consumed by route-authority selection. Current default is `agent_loop_default`; `legacy` is emergency rollback, `shadow` / `agent_loop_canary` are rollout/debug. | Wired behavior. | Agent-loop route authority lifecycle. | Keep `agent_loop_default`; do not delete global legacy fallback until focused tests, compressed release-gate-equivalent NL coverage, and route-delta gate pass. |
-| `agent.loop_guard.agent_loop_canary_bucket` | Parsed for `agent_loop_canary`; ignored by `agent_loop_default`. | Debug/canary compatibility. | Agent-loop route authority lifecycle. | Use only for targeted rollback/debug. |
-| `agent.loop_guard.agent_decides_semantic_route` | Historical name ignored by current runtime config load. | Ignored legacy key. | Config migration. | Do not document or extend as a config field. |
-| `agent.loop_guard.agent_decides_migration_class` | Historical name ignored by current runtime config load. | Ignored legacy key. | Config migration. | Do not document or extend as a config field. |
+| `agent.loop_guard.semantic_route_authority` | Retired historical key; current runtime config loader must not parse it. | Removed legacy key. | Config migration guard. | Do not add to new configs; `check_route_authority_legacy_keys.py` rejects production/config reentry. |
+| `agent.loop_guard.agent_loop_canary_bucket` | Retired historical key; current runtime config loader must not parse it. | Removed legacy key. | Config migration guard. | Do not add to new configs; use focused tests/replay diffs for targeted debugging. |
+| `agent.loop_guard.agent_decides_semantic_route` | Historical name ignored by current runtime config load. | Ignored legacy key. | Config migration guard. | Do not document or extend as a config field. |
+| `agent.loop_guard.agent_decides_migration_class` | Historical name ignored by current runtime config load. | Ignored legacy key. | Config migration guard. | Do not document or extend as a config field. |
 | `agent.loop_guard.registry_idempotency_guard_scope` | Parsed as machine token `off \| selected_agent_loop \| all`; current config uses `all`, so execution-loop repeat guard can apply beyond selected agent-loop routes. | Wired behavior. | Registry rollout gate. | Keep route-delta/repeat-block attribution review active; roll back to `selected_agent_loop` or `off` if false repeat blocks appear. |
 | `agent.loop_guard.registry_idempotency_guard` | Historical bool name; current runtime config loader does not parse it. | Ignored legacy key. | Config migration. | Do not document or extend as a config field; use `registry_idempotency_guard_scope`. |
 | `agent.loop_guard.structured_evidence_required_for_selected_contracts` | Parsed and consumed by selected agent-loop contract evidence gate. Current default is true. | Wired behavior. | Evidence coverage gate. | Keep enabled; rollback only if canary shows false evidence gaps. |
@@ -101,6 +101,6 @@ Before any behavior migration based on this audit:
 ```bash
 cargo test -p clawd support -- --nocapture
 cargo test -p clawd loop_control -- --nocapture
-bash scripts/nl_tests/run_suite.sh contract_matrix_offline
+bash scripts/nl_tests/run_suite.sh evidence_policy_offline
 bash scripts/nl_tests/run_suite.sh runtime_capability_boundary
 ```

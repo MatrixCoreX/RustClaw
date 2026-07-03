@@ -1,12 +1,12 @@
 # Agent Upgrade Rollout Guardrails
 
-Last updated: 2026-06-21
+Last updated: 2026-07-01
 
 This document is the P0 rollout guardrail for the agent generalization plan. It records what can be safely changed now, what is only planned, how to test each change, and how to roll it back.
 
 ## Scope
 
-The current upgrade work touches the agent loop, verifier, finalizer, registry metadata, and natural-language execution paths. These changes must stay observable, reversible, and dry-run safe before any semantic routing responsibility moves from the first-layer route into the agent loop.
+The current upgrade work touches the agent loop, verifier, finalizer, registry metadata, and natural-language execution paths. Ordinary semantic routing responsibility has moved into the agent loop; further changes must stay observable, reversible through code/config rollback where a wired control exists, and dry-run safe.
 
 Non-negotiable boundaries:
 
@@ -36,16 +36,16 @@ These controls are read by current code and can be used for rollback after confi
 | `budget_profiles.*` | `[agent.loop_guard.budget_profiles.*]` | profile-specific | Per-task-class loop budgets. | Revert profile values and restart. |
 | `ops_closed_loop.*` | `[agent.loop_guard.ops_closed_loop]` | profile-specific | Larger budget for check-modify-validate-repair flows. | Revert profile values and restart. |
 
-### Rollout Controls
+### Rollout Controls And Retired Route-Authority Keys
 
-These controls are read from `configs/agent_guard.toml` and logged as machine tokens / task-journal attribution where relevant. Treat each control separately: `semantic_route_authority` is the current route-authority lifecycle token, `registry_idempotency_guard_scope` and `answer_verifier_enforce_required_scope` are machine-token rollout scopes, `structured_evidence_required_for_selected_contracts` is default-on for selected agent-loop contracts, and older bool names are ignored historical config keys.
+These controls are read from `configs/agent_guard.toml` and logged as machine tokens / task-journal attribution where relevant. Treat each control separately: `registry_idempotency_guard_scope` and `answer_verifier_enforce_required_scope` are machine-token rollout scopes, `structured_evidence_required_for_selected_contracts` is default-on for selected agent-loop contracts, and old route-authority / bool names are ignored historical config keys.
 
 | Control | Current Default | Intended Effect | Required Before Behavior Use |
 | --- | --- | --- | --- |
 | `answer_verifier_enforce_required_scope` | `all` | Convert high-confidence required-evidence verifier failures into structured block/retry outcomes. | Focused Rust tests and compressed release-gate-equivalent NL passed before defaulting to `all`; keep attribution review active and roll back to `selected_agent_loop` or `off` if false verifier blocks appear. |
 | `answer_verifier_enforce_required` | ignored | Historical bool name; current runtime config load does not parse it. | Do not add it to new configs; use `answer_verifier_enforce_required_scope` instead. |
-| `semantic_route_authority` | `agent_loop_default` | Move ordinary semantic authority into the agent loop; keep `legacy` only as short-term emergency rollback and `shadow` / `agent_loop_canary` only for rollout/debug. | Do not physically delete remaining legacy rollback code until focused tests, compressed release-gate-equivalent NL coverage, and route-delta review show no unexplained mismatch. |
-| `agent_loop_canary_bucket` | unset / `none` | Narrow `agent_loop_canary` to one bucket for debugging. `agent_loop_default` ignores this and uses the current agent-loop authority path. | Use only for targeted rollout/debug; do not treat it as the long-term architecture. |
+| `semantic_route_authority` | retired | Historical route-authority key; current runtime config load must not parse it. | Do not add it to new configs; use static route-authority guard and replay/NL evidence instead of a semantic route switch. |
+| `agent_loop_canary_bucket` | retired | Historical canary bucket key; current runtime config load must not parse it. | Do not add it to new configs; use focused test subsets and replay diff artifacts for targeted debugging. |
 | `registry_idempotency_guard_scope` | `all` | Drive once/dedup/idempotency from registry metadata. | Focused tests and compressed release-gate-equivalent NL passed before defaulting to `all`; keep repeat-block attribution review active and roll back to `selected_agent_loop` or `off` if false repeat blocks appear. |
 | `registry_idempotency_guard` | ignored | Historical bool name; current runtime config load does not parse it. | Do not add it to new configs; use `registry_idempotency_guard_scope` instead. |
 | `structured_evidence_required_for_selected_contracts` | `true` | Require structured evidence for selected agent-loop contracts before final answer. | Keep route-delta and verifier attribution in canary runs; temporarily disable only as a rollback if selected contracts show false evidence gaps. |
@@ -94,7 +94,7 @@ Current behavior-level rollout attribution:
 
 - `answer_verifier_enforce_required_scope` required-evidence blocks write `switch_name`, `event`, `outcome`, `reason_code`, `failure_attribution`, `missing_evidence_fields`, and `confidence`.
 - `registry_idempotency_guard_scope` action-level repeat blocks write `switch_name`, `event`, `outcome`, `reason_code`, `skill`, `action`, `dedup_scope`, `fingerprint`, `repeat_count`, and `limit`.
-- `semantic_route_authority` writes boundary-context semantic-routing fields, selected eligibility bucket, `route_gate_kind`, `initial_gate_ref`, `initial_hint_ref`, compatibility `old_first_layer_decision`, and first planner-action delta attribution. Under `agent_loop_default`, ordinary semantic decisions are owned by the planner loop; `legacy` is the emergency rollback token.
+- Retired route-authority fields may appear only in historical logs, guard self-tests, or regression fixtures. Current behavior attribution should use `route_gate_kind`, `initial_gate_ref`, `initial_hint_ref`, compatibility `old_first_layer_decision`, planner action, verifier issue, loop outcome, and capability/evidence deltas.
 
 ## Test Gates
 
@@ -105,7 +105,7 @@ Minimum local gate:
 ```bash
 python3 scripts/check_no_nl_hardmatch.py
 cargo check -p clawd -p claw-core
-bash scripts/nl_tests/run_suite.sh contract_matrix_offline
+bash scripts/nl_tests/run_suite.sh evidence_policy_offline
 ```
 
 Targeted Rust tests by area:
@@ -168,7 +168,7 @@ Rollback procedure:
 ## Current Known Risks
 
 - `answer_verifier_enforce_required_scope` is now config-read and current config uses `all`. The required-evidence failure payload is structured and behavior attribution is available in `rollout_attribution[]`; if false blocks appear, roll back to `selected_agent_loop` or `off`.
-- `semantic_route_authority=agent_loop_default` is the current default. Remaining legacy rollback deletion work is release-gated: do not remove global legacy fallback / rollback paths until focused tests, compressed release-gate-equivalent NL coverage, and route-delta review show no unexplained mismatch.
+- Route-authority runtime rollback switches are retired. Remaining compatibility deletion work is still release-gated: do not remove a residual ordinary semantic fallback until focused tests, compressed release-gate-equivalent NL coverage, and route-delta/replay review show no unexplained mismatch.
 - Some finalizer paths still emit structured machine fields directly. This is allowed for exact machine contracts, but directory/user-summary classes need continued audit under P1/P5.
 - Directory summary requests have a focused repair for non-explicit command-output routes with machine `directory_purpose` repair markers, and `system_basic.inventory_dir` now exposes `size_summary`. Composite directory requests can still straddle `directory_entry_groups` and `directory_purpose_summary`; keep this boundary under P1/P2 review before expanding directory-summary canaries.
 - The `prompts/schemas` focused case now passes by emitting structured `largest.*`, `size_bytes`, `content_excerpt`, and `directory_purpose_summary` evidence when model synthesis conflicts with observed file sizes. This is safer than a wrong prose answer, but user-facing readability remains a P1/P5 follow-up; do not solve it with runtime zh/en fixed templates.
