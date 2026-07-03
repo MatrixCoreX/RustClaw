@@ -1,48 +1,6 @@
 use super::*;
 
 #[cfg(test)]
-pub(super) fn scalar_count_filter_deterministic_plan_result(
-    goal: &str,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-    auto_locator_path: Option<&str>,
-) -> Option<PlanResult> {
-    let route = route_result?;
-    if loop_state.round_no > 1
-        || loop_state.has_tool_or_skill_output
-        || route.needs_clarify
-        || !route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
-        || !scalar_count_contract_allows_count_shape(route)
-        || !route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
-    {
-        return None;
-    }
-    let hint = scalar_count_filter_hint_for_route_or_turn(route, turn_analysis)?;
-    let path = route_directory_locator_path(route, auto_locator_path)?;
-    let mut args = serde_json::json!({
-        "action": "count_entries",
-        "path": path,
-    });
-    if let Some(obj) = args.as_object_mut() {
-        apply_scalar_count_filter_hint(obj, &hint);
-    }
-    let actions = vec![AgentAction::CallTool {
-        tool: "fs_basic".to_string(),
-        args,
-    }];
-    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
-        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
-    Some(build_plan_result(
-        goal,
-        &raw_plan_text,
-        PlanKind::Single,
-        &actions,
-    ))
-}
-
-#[cfg(test)]
 pub(super) fn path_metadata_compare_deterministic_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,

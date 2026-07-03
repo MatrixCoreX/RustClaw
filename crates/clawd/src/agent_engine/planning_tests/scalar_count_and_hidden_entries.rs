@@ -159,7 +159,7 @@ fn scalar_count_uses_current_workspace_scope_target_without_route_prebind() {
 }
 
 #[test]
-fn scalar_count_preferred_count_entries_inherits_dirs_filter_from_rejected_list_dir() {
+fn scalar_count_planner_count_entries_inherits_dirs_filter_from_machine_contract() {
     let root = TempDirGuard::new("scalar_count_rejected_list_dir_dirs_filter");
     fs::create_dir_all(root.path.join(".git")).expect("create git dir");
     fs::create_dir_all(root.path.join("child")).expect("create child dir");
@@ -173,19 +173,23 @@ fn scalar_count_preferred_count_entries_inherits_dirs_filter_from_rejected_list_
         true,
         OutputResponseShape::Scalar,
     );
-    route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+    route.route_reason = "capability_ref=filesystem.count_entries".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root_path.clone();
     route.output_contract.delivery_required = false;
+    route.output_contract.self_extension.scalar_count_filter = crate::OutputScalarCountFilter {
+        target_kind: crate::OutputScalarCountTargetKind::Dir,
+        include_hidden: Some(false),
+        recursive: Some(false),
+        extensions: Vec::new(),
+    };
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
             args: json!({
-                "action": "list_dir",
+                "action": "count_entries",
                 "path": root_path.clone(),
-                "dirs_only": true,
-                "include_hidden": true,
-                "names_only": true,
             }),
         },
         AgentAction::SynthesizeAnswer {
@@ -224,13 +228,14 @@ fn scalar_count_preferred_count_entries_inherits_dirs_filter_from_rejected_list_
                 args.get("include_hidden").and_then(Value::as_bool),
                 Some(false)
             );
+            assert_eq!(args.get("recursive").and_then(Value::as_bool), Some(false));
         }
         other => panic!("expected fs_basic count_entries action, got {other:?}"),
     }
 }
 
 #[test]
-fn scalar_count_state_patch_filter_plans_structured_dir_count() {
+fn scalar_count_state_patch_filter_exposes_structured_dir_count_hint() {
     let root = TempDirGuard::new("scalar_count_state_patch_filter");
     fs::create_dir_all(root.path.join(".git")).expect("create git dir");
     fs::create_dir_all(root.path.join("child")).expect("create child dir");
@@ -259,18 +264,17 @@ fn scalar_count_state_patch_filter_plans_structured_dir_count() {
         attachment_processing_required: false,
     };
 
-    let plan = scalar_count_filter_deterministic_plan_result(
-        "count workspace dirs",
-        Some(&route),
-        &LoopState::new(1),
-        Some(&turn_analysis),
-        Some(&root_path),
-    )
-    .expect("structured scalar count plan");
+    let hint = scalar_count_filter_hint_for_route_or_turn(&route, Some(&turn_analysis))
+        .expect("structured scalar count hint");
+    let mut args = json!({
+        "action": "count_entries",
+        "path": root_path.clone(),
+    })
+    .as_object()
+    .cloned()
+    .expect("args object");
+    apply_scalar_count_filter_hint(&mut args, &hint);
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "count_entries");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some(root_path.as_str())
@@ -291,7 +295,7 @@ fn scalar_count_state_patch_filter_plans_structured_dir_count() {
 }
 
 #[test]
-fn scalar_count_strict_single_sentence_shape_plans_structured_file_count() {
+fn scalar_count_strict_single_sentence_shape_exposes_structured_file_count_hint() {
     let root = TempDirGuard::new("scalar_count_strict_single_sentence");
     fs::create_dir_all(root.path.join("child")).expect("create child dir");
     fs::write(root.path.join("a.txt"), "a").expect("write file");
@@ -312,18 +316,17 @@ fn scalar_count_strict_single_sentence_shape_plans_structured_file_count() {
         recursive: Some(false),
         extensions: Vec::new(),
     };
-    let plan = scalar_count_filter_deterministic_plan_result(
-        "count workspace files and explain briefly",
-        Some(&route),
-        &LoopState::new(1),
-        None,
-        Some(&root_path),
-    )
-    .expect("structured strict scalar count plan");
+    let hint = scalar_count_filter_hint_for_route_or_turn(&route, None)
+        .expect("structured strict scalar count hint");
+    let mut args = json!({
+        "action": "count_entries",
+        "path": root_path.clone(),
+    })
+    .as_object()
+    .cloned()
+    .expect("args object");
+    apply_scalar_count_filter_hint(&mut args, &hint);
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "count_entries");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some(root_path.as_str())
@@ -1047,7 +1050,7 @@ fn service_status_contract_rewrites_systemctl_status_to_service_control_systemd(
 }
 
 #[test]
-fn normalize_prefers_registry_repair_over_legacy_service_rewrite() {
+fn normalize_service_status_capability_ref_keeps_planner_action_and_requests_repair() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
     let mut route = route_result(
@@ -1055,7 +1058,8 @@ fn normalize_prefers_registry_repair_over_legacy_service_rewrite() {
         true,
         OutputResponseShape::OneSentence,
     );
-    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.route_reason = "capability_ref=service.status".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args: json!({"command": "systemctl status clawd"}),
@@ -1071,10 +1075,13 @@ fn normalize_prefers_registry_repair_over_legacy_service_rewrite() {
         actions,
     );
 
-    assert!(matches!(
-        &normalized[0],
-        AgentAction::CallSkill { skill, .. } if skill == "run_cmd"
-    ));
+    assert!(
+        matches!(
+            &normalized[0],
+            AgentAction::CallSkill { skill, .. } if skill == "run_cmd"
+        ),
+        "normalized actions: {normalized:?}"
+    );
     assert!(should_force_actionable_plan_repair(
         &state,
         Some(&route),

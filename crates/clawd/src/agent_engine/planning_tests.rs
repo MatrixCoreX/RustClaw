@@ -9,7 +9,7 @@ use claw_core::skill_registry::SkillsRegistry;
 
 use super::{
     action_supports_structured_direct_observed_finalize, action_targets_config_edit,
-    actions_use_ad_hoc_command_without_route_preferred_skill,
+    actions_use_ad_hoc_command_without_route_preferred_skill, apply_scalar_count_filter_hint,
     archive_list_auto_locator_deterministic_plan_result, archive_read_deterministic_plan_result,
     async_job_start_deterministic_plan_result, broaden_default_read_range_for_structured_text,
     build_lightweight_skill_playbooks_text, build_lightweight_skill_quick_index_text,
@@ -80,7 +80,7 @@ use super::{
     rewrite_unresolved_template_arg_multi_file_read_plan, round1_prompt_spec_for_class,
     route_contract_defers_literal_command_to_planner, route_uses_runtime_owned_observed_finalizer,
     scalar_content_auto_locator_deterministic_plan_result,
-    scalar_content_auto_locator_observation_plan, scalar_count_filter_deterministic_plan_result,
+    scalar_content_auto_locator_observation_plan, scalar_count_filter_hint_for_route_or_turn,
     scalar_path_auto_locator_deterministic_plan_result, scalar_path_auto_locator_observation_plan,
     scalar_path_current_workspace_deterministic_plan_result,
     scalar_path_directory_locator_search_deterministic_plan_result,
