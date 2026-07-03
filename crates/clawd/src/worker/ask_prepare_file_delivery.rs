@@ -3,6 +3,8 @@ use std::path::Path;
 
 const UNRESOLVED_FILE_DELIVERY_REQUIRES_LOCATOR_MARKER: &str =
     "unresolved_file_delivery_requires_locator";
+const ACTIVE_DELIVERY_CONTENT_TARGET_MARKER: &str = "active_delivery_content_target_bound";
+const ACTIVE_DELIVERY_CONTENT_TARGET_KEY: &str = "active_delivery_content_target";
 
 pub(super) fn route_requests_file_delivery(route_result: &crate::RouteResult) -> bool {
     route_result.wants_file_delivery
@@ -71,6 +73,73 @@ fn replace_route_reason_structural_value(
         })
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+fn append_route_reason_structural_marker(route_result: &mut crate::RouteResult, marker: &str) {
+    if route_result.route_reason.trim().is_empty() {
+        route_result.route_reason = marker.to_string();
+    } else if !route_reason_has_structural_marker(route_result, marker) {
+        route_result.route_reason.push_str("; ");
+        route_result.route_reason.push_str(marker);
+    }
+}
+
+fn resolved_intent_has_structural_value(resolved_intent: &str, value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && resolved_intent.lines().map(str::trim).any(|line| {
+            line == value
+                || line
+                    .rsplit_once(':')
+                    .is_some_and(|(_, suffix)| suffix.trim() == value)
+        })
+}
+
+fn replace_resolved_intent_structural_value(
+    resolved_intent: &str,
+    old_value: &str,
+    new_value: &str,
+) -> String {
+    let old_value = old_value.trim();
+    if old_value.is_empty() {
+        return resolved_intent.to_string();
+    }
+    resolved_intent
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim();
+            if trimmed == old_value {
+                return new_value.to_string();
+            }
+            if let Some((prefix, suffix)) = trimmed.rsplit_once(':') {
+                if suffix.trim() == old_value {
+                    return format!("{}: {}", prefix.trim_end(), new_value);
+                }
+            }
+            line.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn active_delivery_target_line(target: &str) -> String {
+    let mut line =
+        String::with_capacity(ACTIVE_DELIVERY_CONTENT_TARGET_KEY.len() + ": ".len() + target.len());
+    line.push_str(ACTIVE_DELIVERY_CONTENT_TARGET_KEY);
+    line.push_str(": ");
+    line.push_str(target);
+    line
+}
+
+fn append_active_delivery_resolved_target(route_result: &mut crate::RouteResult, target: &str) {
+    if route_result.resolved_intent.trim().is_empty() {
+        route_result.resolved_intent = active_delivery_target_line(target);
+    } else if !resolved_intent_has_structural_value(&route_result.resolved_intent, target) {
+        route_result.resolved_intent.push('\n');
+        route_result
+            .resolved_intent
+            .push_str(&active_delivery_target_line(target));
+    }
 }
 
 fn file_delivery_has_concrete_locator(route_result: &crate::RouteResult) -> bool {
@@ -303,19 +372,17 @@ pub(super) fn bind_content_read_to_active_delivery_target(
 
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route_result.output_contract.locator_hint = target.clone();
-    if route_result.resolved_intent.trim().is_empty() {
-        route_result.resolved_intent = format!("active_delivery_content_target: {target}");
-    } else if !route_result.resolved_intent.contains(&target) {
-        if !previous_hint.is_empty() && route_result.resolved_intent.contains(&previous_hint) {
-            route_result.resolved_intent = route_result
-                .resolved_intent
-                .replace(&previous_hint, &target);
-        } else {
-            route_result
-                .resolved_intent
-                .push_str(&format!("\nactive_delivery_content_target: {target}"));
-        }
+    if !previous_hint.is_empty()
+        && !resolved_intent_has_structural_value(&route_result.resolved_intent, &target)
+        && resolved_intent_has_structural_value(&route_result.resolved_intent, &previous_hint)
+    {
+        route_result.resolved_intent = replace_resolved_intent_structural_value(
+            &route_result.resolved_intent,
+            &previous_hint,
+            &target,
+        );
     }
+    append_active_delivery_resolved_target(route_result, &target);
     if !previous_hint.is_empty() {
         route_result.route_reason = replace_route_reason_structural_value(
             &route_result.route_reason,
@@ -323,9 +390,7 @@ pub(super) fn bind_content_read_to_active_delivery_target(
             &target,
         );
     }
-    route_result
-        .route_reason
-        .push_str("; active_delivery_content_target_bound");
+    append_route_reason_structural_marker(route_result, ACTIVE_DELIVERY_CONTENT_TARGET_MARKER);
     true
 }
 
@@ -333,7 +398,7 @@ pub(super) fn append_active_delivery_content_target_token(
     runtime_prompt: &mut String,
     route_result: &crate::RouteResult,
 ) {
-    if !route_reason_has_structural_marker(route_result, "active_delivery_content_target_bound") {
+    if !route_reason_has_structural_marker(route_result, ACTIVE_DELIVERY_CONTENT_TARGET_MARKER) {
         return;
     }
     let target = route_result.output_contract.locator_hint.trim();
