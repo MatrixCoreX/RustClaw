@@ -781,28 +781,45 @@ fn run_cmd_service_status_does_not_use_resolved_intent_as_process_filter() {
 }
 
 #[test]
-fn service_status_url_request_uses_http_basic_plan() {
+fn service_status_url_request_allows_planner_supplied_http_get() {
     let state = test_state_with_enabled_skills(&["process_basic", "http_basic"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.resolved_intent =
-        "capability_ref=http_basic.get url=http://127.0.0.1:8787/v1/health".to_string();
+        "capability_ref=http.get url=http://127.0.0.1:8787/v1/health".to_string();
     let loop_state = LoopState::new(1);
+    let action = AgentAction::CallSkill {
+        skill: "http_basic".to_string(),
+        args: json!({"action": "get", "url": "http://127.0.0.1:8787/v1/health"}),
+    };
+    let AgentAction::CallSkill { skill, args } = &action else {
+        unreachable!("test action is a skill call");
+    };
+    assert!(
+        crate::evidence_policy::capability_ref_action_policy_for_route(Some(&route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
+    );
 
-    let plan = service_status_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "observe local health URL",
         Some(&route),
         &loop_state,
-        "health request",
-    )
-    .expect("URL status request should use http_basic");
+        "observe local health URL",
+        Some("health request"),
+        Some(&route.resolved_intent),
+        None,
+        vec![action],
+    );
 
-    assert_eq!(plan.steps.len(), 3);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "http_basic", "get");
+    let args = normalized
+        .iter()
+        .find_map(|action| {
+            planned_call_is(action, "http_basic", "get")
+                .then(|| expect_planned_call(action, "http_basic", "get"))
+        })
+        .expect("planner-supplied http_basic get action should be preserved");
     assert_eq!(
         args.get("url").and_then(Value::as_str),
         Some("http://127.0.0.1:8787/v1/health")
@@ -810,7 +827,7 @@ fn service_status_url_request_uses_http_basic_plan() {
 }
 
 #[test]
-fn service_status_url_request_ignores_user_text_without_machine_capability() {
+fn service_status_url_request_without_machine_capability_leaves_empty_plan_empty() {
     let state = test_state_with_enabled_skills(&["process_basic", "http_basic"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -819,16 +836,19 @@ fn service_status_url_request_ignores_user_text_without_machine_capability() {
     route.resolved_intent = "local health request".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = service_status_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "observe local health URL",
         Some(&route),
         &loop_state,
-        "check http://127.0.0.1:8787/v1/health",
+        "observe local health URL",
+        Some("check http://127.0.0.1:8787/v1/health"),
+        Some(&route.resolved_intent),
+        None,
+        Vec::new(),
     );
 
     assert!(
-        plan.is_none(),
+        normalized.is_empty(),
         "user-visible URL text must not act as deterministic route authority"
     );
 }
