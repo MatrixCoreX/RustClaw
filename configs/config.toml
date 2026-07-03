@@ -199,9 +199,9 @@ timeout_seconds = 60
 # 图像编辑不是 M3 能力，不能把 M3 填到 image_generation/image_edit 模型.
 [llm.minimax]
 api_key = ""
-# Endpoint note: MiniMax global docs show https://api.minimax.io/v1; this
-# deployment keeps the user-provided https://api.minimaxi.com/v1 endpoint.
-# Switch only when the account region / gateway requires the global endpoint.
+# Endpoint note: this deployment uses the user-provided
+# https://api.minimaxi.com/v1 MiniMax-compatible endpoint. Switch only when
+# the account region / gateway explicitly requires a different endpoint.
 base_url = "https://api.minimaxi.com/v1"
 max_concurrency = 2
 model = "MiniMax-M3"
