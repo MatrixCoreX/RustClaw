@@ -579,7 +579,7 @@ fn fs_basic_read_text_range_negative_start_line_count_becomes_tail_count() {
 }
 
 #[test]
-fn service_status_process_request_uses_process_basic_filter_plan() {
+fn service_status_process_request_allows_planner_supplied_process_filter() {
     let state = test_state_with_enabled_skills(&["process_basic"]);
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::direct_answer();
@@ -588,21 +588,66 @@ fn service_status_process_request_uses_process_basic_filter_plan() {
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     let loop_state = LoopState::new(1);
+    let action = AgentAction::CallSkill {
+        skill: "process_basic".to_string(),
+        args: json!({"action": "ps", "filter": "clawd", "limit": 200}),
+    };
+    let AgentAction::CallSkill { skill, args } = &action else {
+        unreachable!("test action is a skill call");
+    };
+    assert!(
+        crate::evidence_policy::capability_ref_action_policy_for_route(Some(&route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
+    );
 
-    let plan = service_status_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "check clawd process",
         Some(&route),
         &loop_state,
-        "ordinary request text",
-    )
-    .expect("process status should use deterministic process_basic plan");
+        "check clawd process",
+        Some("ordinary request text"),
+        Some(&route.resolved_intent),
+        None,
+        vec![action],
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "process_basic", "ps");
+    let args = normalized
+        .iter()
+        .find_map(|action| {
+            planned_call_is(action, "process_basic", "ps")
+                .then(|| expect_planned_call(action, "process_basic", "ps"))
+        })
+        .expect("planner-supplied process_basic ps action should be preserved");
     assert_eq!(args.get("filter").and_then(Value::as_str), Some("clawd"));
     assert_eq!(args.get("limit").and_then(Value::as_u64), Some(200));
+}
+
+#[test]
+fn service_status_process_request_without_machine_filter_leaves_empty_plan_empty() {
+    let state = test_state_with_enabled_skills(&["process_basic"]);
+    let mut route = base_route_result();
+    route.resolved_intent = "capability_ref=process.ps".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_hint.clear();
+    let loop_state = LoopState::new(1);
+
+    let normalized = normalize_planned_actions_with_original_and_context(
+        &state,
+        Some(&route),
+        &loop_state,
+        "check clawd process",
+        Some("ordinary request text"),
+        Some(&route.resolved_intent),
+        None,
+        Vec::new(),
+    );
+
+    assert!(
+        normalized.is_empty(),
+        "route/user text must not synthesize an ambient process filter: {normalized:?}"
+    );
 }
 
 #[test]
@@ -631,28 +676,6 @@ fn async_job_protocol_without_loop_command_does_not_parse_text_command() {
         normalized.is_empty(),
         "route/user text must not synthesize async run_cmd: {normalized:?}"
     );
-}
-
-#[test]
-fn async_job_protocol_without_command_skips_service_status_shortcut() {
-    let state = test_state_with_enabled_skills(&["process_basic", "run_cmd"]);
-    let mut route = base_route_result();
-    route.resolved_intent =
-        "async_job_protocol adapter_result.type=pending_async_job next_step=poll_async_job"
-            .to_string();
-    route.route_reason = "async_job_protocol required_job_fields=job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key checkpoint_states=waiting|background".to_string();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
-
-    assert!(service_status_deterministic_plan_result(
-        &state,
-        "start async job",
-        Some(&route),
-        &LoopState::new(1),
-        "start runtime async job",
-    )
-    .is_none());
 }
 
 #[test]
@@ -704,27 +727,6 @@ fn async_job_protocol_injects_async_start_into_planned_run_cmd() {
             .and_then(Value::as_str),
         Some("async_job_protocol")
     );
-}
-
-#[test]
-fn service_status_process_request_without_machine_filter_does_not_use_ambient_process_table() {
-    let state = test_state_with_enabled_skills(&["process_basic"]);
-    let mut route = base_route_result();
-    route.resolved_intent = "capability_ref=process.ps".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_hint.clear();
-    let loop_state = LoopState::new(1);
-
-    assert!(service_status_deterministic_plan_result(
-        &state,
-        "check clawd process",
-        Some(&route),
-        &loop_state,
-        "clawd",
-    )
-    .is_none());
 }
 
 #[test]
