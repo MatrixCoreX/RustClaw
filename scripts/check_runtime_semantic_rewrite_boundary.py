@@ -477,34 +477,45 @@ def scan_journal_output_contract_ref_boundary() -> list[Finding]:
 
 
 def scan_static_capability_compat_boundary() -> list[Finding]:
-    path = SRC_ROOT / "capability_resolver.rs"
-    rel_path = rel(path)
-    text = path.read_text(encoding="utf-8")
+    paths = (
+        SRC_ROOT / "capability_resolver.rs",
+        SRC_ROOT / "capability_resolver_tests.rs",
+        SRC_ROOT / "agent_engine" / "dispatch_support.rs",
+    )
     forbidden_tokens = [
+        "resolve_static_capability",
         "resolve_static_capability_action_for_state",
         "static_capability_compat_enabled",
+        "static_capability",
+        "static_capabilities",
         "registry_capability_surface_available",
         "capability_resolver_static_compat_resolved",
+        "capability_resolver_unresolved",
         '"static_compat"',
     ]
     findings: list[Finding] = []
-    for line_no, line in enumerate(text.splitlines(), start=1):
-        for token in forbidden_tokens:
-            if token not in line:
-                continue
-            findings.append(
-                Finding(
-                    rel_path,
-                    line_no,
-                    "static_capability_compat_forbidden",
-                    line.strip(),
+    for path in paths:
+        rel_path = rel(path)
+        text = path.read_text(encoding="utf-8")
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            for token in forbidden_tokens:
+                if token not in line:
+                    continue
+                findings.append(
+                    Finding(
+                        rel_path,
+                        line_no,
+                        "static_capability_compat_forbidden",
+                        line.strip(),
+                    )
                 )
-            )
     return findings
 
 
 def scan_contract_repair_judge_boundary() -> list[Finding]:
     path = SRC_ROOT / "intent_router_normalizer_answer_repair.rs"
+    if not path.exists():
+        return []
     return scan_contract_repair_judge_boundary_text(rel(path), path.read_text(encoding="utf-8"))
 
 
@@ -829,6 +840,8 @@ def scan_execution_contract_registry_bridge_repairs() -> list[Finding]:
 def scan_binding_repair_registry_bridge_markers() -> list[Finding]:
     findings: list[Finding] = []
     for path in INTENT_ROUTER_BINDING_REPAIR_FILES:
+        if not path.exists():
+            continue
         findings.extend(
             scan_token_list_text(
                 rel(path),
@@ -1161,6 +1174,8 @@ def scan_loop_recovery_contract_marker_fields() -> list[Finding]:
 
 
 def scan_dry_run_contract_plan_marker_payloads() -> list[Finding]:
+    if not DRY_RUN_CONTRACT_PLAN_FILE.exists():
+        return []
     rel_path = rel(DRY_RUN_CONTRACT_PLAN_FILE)
     text = DRY_RUN_CONTRACT_PLAN_FILE.read_text(encoding="utf-8")
     findings: list[Finding] = []
@@ -2023,6 +2038,8 @@ def scan_web_search_user_text_query_text(rel_path: str, text: str) -> list[Findi
 
 
 def scan_runtime_surface_user_text_token_selection() -> list[Finding]:
+    if not RUNTIME_SURFACE_PLAN_FILE.exists():
+        return []
     return scan_runtime_surface_user_text_token_text(
         rel(RUNTIME_SURFACE_PLAN_FILE),
         RUNTIME_SURFACE_PLAN_FILE.read_text(encoding="utf-8"),
