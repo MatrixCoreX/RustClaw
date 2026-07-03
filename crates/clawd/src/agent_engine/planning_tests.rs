@@ -19,7 +19,6 @@ use super::{
     content_excerpt_explicit_file_targets_deterministic_plan_result,
     content_excerpt_summary_auto_locator_deterministic_plan_result,
     contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
-    directory_entry_groups_auto_locator_deterministic_plan_result,
     directory_purpose_auto_locator_deterministic_plan_result,
     directory_purpose_extension_inventory_deterministic_plan_result,
     directory_purpose_representative_reads_after_find_result,
