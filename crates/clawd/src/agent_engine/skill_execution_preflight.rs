@@ -393,7 +393,7 @@ fn generated_media_path_run_cmd_policy_error(
             "message_key": "clawd.contract.media_artifact_requires_media_skill",
             "failure_attribution": crate::evidence_policy::FailureAttribution::ModelError.as_str(),
             "decision": crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed.as_str(),
-            "policy_decision": crate::policy_decision::PolicyDecision::from_contract_action_policy(
+            "policy_decision": crate::policy_decision::PolicyDecision::from_evidence_action_policy(
                 crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed
             ).as_token(),
             "action": "run_cmd",
@@ -873,7 +873,7 @@ pub(super) fn evidence_policy_arg_policy_error(
             "reason_code": "contract_arg_rejected",
             "failure_attribution": crate::evidence_policy::FailureAttribution::ModelError.as_str(),
             "decision": policy.decision.as_str(),
-            "policy_decision": crate::policy_decision::PolicyDecision::from_contract_arg_policy(
+            "policy_decision": crate::policy_decision::PolicyDecision::from_evidence_arg_policy(
                 policy.decision
             ).as_token(),
             "action": policy.action_key,
