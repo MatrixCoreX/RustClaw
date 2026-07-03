@@ -2945,7 +2945,14 @@ def scan_runtime_status_recipe_contract_marker() -> list[Finding]:
 
 def scan_prompt_utils_contract_repair_judge_marker_only() -> list[Finding]:
     rel_path = rel(PROMPT_UTILS_CONTRACT_REPAIR_JUDGE_FILE)
-    text = PROMPT_UTILS_CONTRACT_REPAIR_JUDGE_FILE.read_text(encoding="utf-8")
+    return scan_prompt_utils_contract_repair_judge_marker_only_text(
+        rel_path, PROMPT_UTILS_CONTRACT_REPAIR_JUDGE_FILE.read_text(encoding="utf-8")
+    )
+
+
+def scan_prompt_utils_contract_repair_judge_marker_only_text(
+    rel_path: str, text: str
+) -> list[Finding]:
     findings: list[Finding] = []
     if '.get("contract_marker")' not in text:
         findings.append(
@@ -2963,6 +2970,15 @@ def scan_prompt_utils_contract_repair_judge_marker_only() -> list[Finding]:
                 1,
                 "contract_repair_judge_semantic_kind_fallback",
                 "contract repair judge must not fall back to legacy output_contract.semantic_kind",
+            )
+        )
+    if 'decision == "planner_execute"' in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "contract_repair_judge_planner_execute_decision_gate",
+                "contract repair judge apply inference must use machine fields, not legacy decision=planner_execute",
             )
         )
     return findings
@@ -4684,6 +4700,18 @@ def run_self_test() -> int:
         and blocked_prompt_utils[0].kind == "prompt_utils_output_contract_registry_bridge_token"
     )
     assert not scan_prompt_utils_output_contract_registry_bridge_tokens()
+    blocked_contract_repair_judge_decision_gate = (
+        scan_prompt_utils_contract_repair_judge_marker_only_text(
+            rel(PROMPT_UTILS_CONTRACT_REPAIR_JUDGE_FILE),
+            'contract.get("contract_marker");\n'
+            'if decision == "planner_execute" { return true; }\n',
+        )
+    )
+    assert any(
+        item.kind == "contract_repair_judge_planner_execute_decision_gate"
+        for item in blocked_contract_repair_judge_decision_gate
+    )
+    assert not scan_prompt_utils_contract_repair_judge_marker_only()
     blocked_execution_recipe = scan_token_list_text(
         rel(SRC_ROOT / "intent_router_execution_recipe_schema.rs"),
         '"package_manager_detection"\n',

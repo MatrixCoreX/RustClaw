@@ -111,14 +111,7 @@ fn canonicalize_contract_repair_judge_target_task_policy(value: Option<Value>) -
 }
 
 fn infer_contract_repair_judge_apply(map: &serde_json::Map<String, Value>) -> bool {
-    let decision = map
-        .get("decision")
-        .and_then(Value::as_str)
-        .map(normalize_schema_token_for_contract)
-        .unwrap_or_default();
-    if decision == "planner_execute"
-        || map.get("needs_clarify").and_then(Value::as_bool) == Some(true)
-    {
+    if map.get("needs_clarify").and_then(Value::as_bool) == Some(true) {
         return true;
     }
     let Some(contract) = map.get("output_contract").and_then(Value::as_object) else {
