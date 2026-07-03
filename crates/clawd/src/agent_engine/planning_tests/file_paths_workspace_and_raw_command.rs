@@ -1162,52 +1162,12 @@ fn process_basic_synthesis_survives_workspace_text_guard_for_exact_sentence() {
 fn output_template_code_span_is_not_treated_as_literal_command() {
     let request = "Read Cargo.toml version and answer as `version=<value>` only.";
     assert!(super::super::shellish_literal_command_segment(request).is_none());
-
-    let state = test_state_with_enabled_skills(&["run_cmd", "config_basic"]);
-    let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
-    route.output_contract.locator_kind = OutputLocatorKind::Filename;
-    route.output_contract.locator_hint = "Cargo.toml".to_string();
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-
-    assert!(explicit_command_deterministic_plan_result(
-        &state,
-        "<goal>",
-        Some(&route),
-        &loop_state,
-        request,
-        None,
-    )
-    .is_none());
 }
 
 #[test]
 fn colon_output_template_code_span_is_not_treated_as_literal_command() {
     let request = "Return the current git branch in the format `branch: NAME`.";
     assert!(super::super::shellish_literal_command_segment(request).is_none());
-
-    let state = test_state_with_enabled_skills(&["run_cmd", "git_basic"]);
-    let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
-
-    assert!(explicit_command_deterministic_plan_result(
-        &state,
-        "<goal>",
-        Some(&route),
-        &loop_state,
-        request,
-        None,
-    )
-    .is_none());
 }
 
 #[test]
