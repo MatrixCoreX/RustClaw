@@ -11,7 +11,7 @@ fn direct_answer_maps_to_direct_answer_trace() {
     );
     assert!(m.is_chat_gate());
     assert!(m.is_direct_answer_trace());
-    assert_eq!(m.route_trace_label_for_log(), "Chat");
+    assert_eq!(m.route_trace_label_for_log(), "respond");
 }
 
 #[test]
@@ -26,14 +26,14 @@ fn clarify_maps_to_clarify_trace() {
     assert!(m.is_clarify_gate());
     assert!(m.is_clarify_only());
     assert!(!m.is_execute_gate());
-    assert_eq!(m.route_trace_label_for_log(), "AskClarify");
+    assert_eq!(m.route_trace_label_for_log(), "clarify");
 }
 
 #[test]
 fn resume_discussion_override_keeps_chat_label() {
     let m = AskMode::direct_answer().with_resume_overrides(true, false);
     assert!(m.is_resume_discussion());
-    assert_eq!(m.route_trace_label_for_log(), "Chat");
+    assert_eq!(m.route_trace_label_for_log(), "respond_resume_discussion");
 }
 
 #[test]
@@ -41,7 +41,7 @@ fn resume_execution_override_wins_over_discussion() {
     let m = AskMode::direct_answer().with_resume_overrides(true, true);
     assert!(m.resume_execution());
     assert!(m.is_execute_gate());
-    assert_eq!(m.route_trace_label_for_log(), "Act");
+    assert_eq!(m.route_trace_label_for_log(), "act_resume_continue");
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn planner_execute_plain_maps_to_plain() {
     );
     assert!(m.is_execute_gate());
     assert!(!m.finalize_chat_wrapped());
-    assert_eq!(m.route_trace_label_for_log(), "Act");
+    assert_eq!(m.route_trace_label_for_log(), "act_plain_finalizer");
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn planner_execute_with_chat_finalizer_maps_to_chat_wrapped() {
     );
     assert!(m.is_execute_gate());
     assert!(m.finalize_chat_wrapped());
-    assert_eq!(m.route_trace_label_for_log(), "ChatAct");
+    assert_eq!(m.route_trace_label_for_log(), "act_chat_finalizer");
 }
 
 #[test]
@@ -125,15 +125,18 @@ fn resume_overrides_layer_on_top_of_normalized_mode() {
 
 #[test]
 fn route_trace_labels_match_log_names() {
-    assert_eq!(AskMode::direct_answer().route_trace_label_for_log(), "Chat");
-    assert_eq!(AskMode::clarify().route_trace_label_for_log(), "AskClarify");
+    assert_eq!(
+        AskMode::direct_answer().route_trace_label_for_log(),
+        "respond"
+    );
+    assert_eq!(AskMode::clarify().route_trace_label_for_log(), "clarify");
     assert_eq!(
         AskMode::planner_execute_plain().route_trace_label_for_log(),
-        "Act"
+        "act_plain_finalizer"
     );
     assert_eq!(
         AskMode::planner_execute_with_chat_finalizer().route_trace_label_for_log(),
-        "ChatAct"
+        "act_chat_finalizer"
     );
 }
 

@@ -617,6 +617,12 @@ FORBIDDEN_NORMALIZER_ROUTE_TRACE_LABELS: tuple[str, ...] = (
     "Chat",
     "Act",
 )
+FORBIDDEN_ASK_MODE_ROUTE_TRACE_LABELS: tuple[str, ...] = (
+    "AskClarify",
+    "ChatAct",
+    "Chat",
+    "Act",
+)
 FORBIDDEN_PREFERRED_RUN_CMD_SEMANTIC_ENUMS: tuple[str, ...] = (
     "OutputSemanticKind::PackageManagerDetection",
     "OutputSemanticKind::DockerPs",
@@ -751,6 +757,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_normalizer_run_route_trace_decision_type())
     findings.extend(scan_normalizer_route_trace_label_tokens())
     findings.extend(scan_runtime_journal_route_trace_decision_type())
+    findings.extend(scan_ask_mode_route_trace_label_tokens())
     findings.extend(scan_first_layer_decision_test_only_boundary())
     findings.extend(scan_intent_normalizer_legacy_decision_field_deleted())
     findings.extend(scan_legacy_route_trace_reason_tokens())
@@ -1573,6 +1580,49 @@ def scan_runtime_journal_route_trace_decision_type_text(
                     "route_trace_decision_for_journal must not construct FirstLayerDecision variants",
                 )
             )
+    return findings
+
+
+def scan_ask_mode_route_trace_label_tokens() -> list[Finding]:
+    return scan_ask_mode_route_trace_label_tokens_text(
+        rel(RUNTIME_ASK_MODE_FILE),
+        RUNTIME_ASK_MODE_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_ask_mode_route_trace_label_tokens_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    match = re.search(
+        r"fn\s+route_trace_label_for_log\b(?P<body>.*?)(?=\n\s*pub\(crate\)\s+fn\s+route_trace_decision_for_journal\b|\Z)",
+        text,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "ask_mode_route_trace_label_helper_missing",
+                "AskMode::route_trace_label_for_log helper not found",
+            )
+        ]
+    body = match.group("body")
+    body_start = match.start("body")
+    for token in FORBIDDEN_ASK_MODE_ROUTE_TRACE_LABELS:
+        pattern = f'"{token}"'
+        offset = body.find(pattern)
+        if offset < 0:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                text.count("\n", 0, body_start + offset) + 1,
+                "ask_mode_route_trace_legacy_label",
+                pattern,
+            )
+        )
     return findings
 
 
@@ -3821,6 +3871,30 @@ def run_self_test() -> int:
         "pub(crate) fn route_trace_decision_for_journal(&self) -> AskRouteTraceDecision {\n"
         "    AskRouteTraceDecision::Respond\n"
         "}\n",
+    )
+    blocked_ask_mode_route_trace_label = scan_ask_mode_route_trace_label_tokens_text(
+        "crates/clawd/src/runtime/ask_mode.rs",
+        'pub(crate) fn route_trace_label_for_log(&self) -> &\'static str {\n'
+        '    "ChatAct"\n'
+        "}\n"
+        "pub(crate) fn route_trace_decision_for_journal(&self) {}\n",
+    )
+    assert (
+        blocked_ask_mode_route_trace_label
+        and blocked_ask_mode_route_trace_label[0].kind
+        == "ask_mode_route_trace_legacy_label"
+    )
+    assert not scan_ask_mode_route_trace_label_tokens_text(
+        "crates/clawd/src/runtime/ask_mode.rs",
+        'pub(crate) fn route_trace_label_for_log(&self) -> &\'static str {\n'
+        '    "respond";\n'
+        '    "clarify";\n'
+        '    "respond_resume_discussion";\n'
+        '    "act_plain_finalizer";\n'
+        '    "act_chat_finalizer";\n'
+        '    "act_resume_continue";\n'
+        "}\n"
+        "pub(crate) fn route_trace_decision_for_journal(&self) {}\n",
     )
     blocked_first_layer_enum = scan_first_layer_decision_test_only_boundary_text(
         "crates/clawd/src/runtime/types.rs",
