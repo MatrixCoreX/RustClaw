@@ -77,9 +77,6 @@ mod directory_unique_entry;
 mod dry_run_contract_plan;
 #[path = "explicit_observed_paths.rs"]
 mod explicit_observed_paths;
-#[cfg(test)]
-#[path = "filesystem_mutation_plan.rs"]
-mod filesystem_mutation_plan;
 #[path = "inline_transform_contract.rs"]
 mod inline_transform_contract;
 #[path = "legacy_file_config_capabilities.rs"]
@@ -130,8 +127,6 @@ use directory_unique_entry::*;
 #[cfg(test)]
 use dry_run_contract_plan::*;
 use explicit_observed_paths::*;
-#[cfg(test)]
-use filesystem_mutation_plan::*;
 use inline_transform_contract::*;
 use legacy_file_config_capabilities::*;
 use media_artifact_plan::*;
