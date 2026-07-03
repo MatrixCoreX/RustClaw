@@ -207,13 +207,7 @@ pub(super) fn contract_repair_report_from_before_after(
     if output_contract_schema_field_changed(
         before_contract,
         after_contract,
-        &[
-            "contract_marker",
-            "semantic",
-            "kind",
-            "answer_kind",
-            "semantic_type",
-        ],
+        &["contract_marker"],
         "contract_marker",
         normalize_output_semantic_kind_for_schema,
         "none",
@@ -361,15 +355,8 @@ fn output_contract_unknown_semantic_was_ignored(
 ) -> bool {
     let before_text = before_contract
         .and_then(|obj| {
-            [
-                "contract_marker",
-                "semantic",
-                "kind",
-                "answer_kind",
-                "semantic_type",
-            ]
-            .iter()
-            .find_map(|key| obj.get(*key).and_then(scalar_json_value_text))
+            obj.get("contract_marker")
+                .and_then(scalar_json_value_text)
         })
         .unwrap_or_default();
     if before_text.trim().is_empty()
