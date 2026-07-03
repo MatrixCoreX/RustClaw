@@ -453,10 +453,10 @@ fn build_turn_analysis_prompt_block(
     }
     if let Some(route) = route_result {
         lines.push(crate::evidence_policy::evidence_policy_context_prompt_line_for_route(route));
-        if let Some(contract_matrix_line) =
+        if let Some(evidence_policy_line) =
             crate::evidence_policy::compact_prompt_line_for_route(route)
         {
-            lines.push(contract_matrix_line);
+            lines.push(evidence_policy_line);
         }
     }
     if lines.is_empty() {
