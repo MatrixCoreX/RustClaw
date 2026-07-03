@@ -97,6 +97,7 @@ fn contract_repair_detail_class(detail: &str) -> &'static str {
         | "execution_recipe_service_status_observation"
         | "execution_recipe_structured_read_observation"
         | "output_contract_delivery_intent_normalized"
+        | "output_contract_marker_normalized"
         | "output_contract_response_shape_normalized"
         | "output_contract_semantic_kind_normalized"
         | "turn_type_enum_normalized"
