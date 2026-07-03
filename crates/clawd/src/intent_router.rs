@@ -38,9 +38,9 @@ use boundary_contract_cleanup::clear_spurious_generated_file_delivery_attachment
 #[path = "intent_router_contract_repair_judge.rs"]
 mod contract_repair_judge;
 #[cfg(test)]
-use contract_repair_judge::ContractRepairJudgeOut;
-#[cfg(test)]
 use contract_repair_judge::apply_contract_repair_judge_output;
+#[cfg(test)]
+use contract_repair_judge::ContractRepairJudgeOut;
 
 #[path = "intent_router_route_trace.rs"]
 mod route_trace;
@@ -78,11 +78,11 @@ use path_tokens::{
 #[path = "intent_router_schema_parse.rs"]
 mod schema_parse;
 use schema_parse::{
-    IntentExecutionRecipeOut, IntentOutputContractOut, infer_missing_turn_type_from_policy,
-    parse_execution_recipe_plan_hint, parse_output_contract, parse_output_delivery_intent,
-    parse_output_locator_kind, parse_output_response_shape, parse_output_semantic_kind,
-    parse_positive_usize_value, parse_resume_behavior, parse_runtime_async_job_start_plan_hint,
-    parse_schedule_kind, parse_target_task_policy, parse_turn_type,
+    infer_missing_turn_type_from_policy, parse_execution_recipe_plan_hint, parse_output_contract,
+    parse_output_delivery_intent, parse_output_locator_kind, parse_output_response_shape,
+    parse_output_semantic_kind, parse_positive_usize_value, parse_resume_behavior,
+    parse_runtime_async_job_start_plan_hint, parse_schedule_kind, parse_target_task_policy,
+    parse_turn_type, IntentExecutionRecipeOut, IntentOutputContractOut,
 };
 #[cfg(test)]
 use schema_parse::{parse_self_extension_mode, parse_self_extension_trigger};
@@ -339,7 +339,7 @@ use normalizer_boundary_repair::apply_boundary_contract_judge_repair;
 
 #[path = "intent_router_normalizer_model.rs"]
 mod normalizer_model;
-use normalizer_model::{NormalizerModelOutcome, run_intent_normalizer_model_step};
+use normalizer_model::{run_intent_normalizer_model_step, NormalizerModelOutcome};
 
 #[path = "intent_router_normalizer_final_gate.rs"]
 mod normalizer_final_gate;
@@ -374,9 +374,6 @@ struct RouteDecision {
 struct IntentNormalizerOut {
     #[serde(default)]
     resolved_user_intent: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    answer_candidate: String,
     #[serde(default)]
     resume_behavior: String,
     #[serde(default)]

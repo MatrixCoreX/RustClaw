@@ -543,7 +543,7 @@ fn intent_normalizer_schema_drift() {
     );
 
     // §3.5c-小切口 步骤 2：每个 live IntentNormalizerOut schema 字段必须在 properties 里登记。
-    // Parser-only legacy fields such as answer_candidate stay runtime-compatible but are not exposed to the model.
+    // Removed legacy fields such as answer_candidate must stay out of both the live schema and parser model.
     const STRUCT_FIELDS: &[&str] = &[
         "resolved_user_intent",
         "resume_behavior",
