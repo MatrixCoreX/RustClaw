@@ -287,6 +287,23 @@ WORKER_LOOP_BOUNDARY_FORBIDDEN_BLOCK_PATTERNS: tuple[
         ),
     ),
 )
+WORKER_ROUTE_MARKER_REASON_CODES: tuple[str, ...] = (
+    "agent_loop_default_entry",
+    "bare_topic_contextual_clarify_sanitized",
+    "auto_locator_suppressed_multiple_explicit_paths",
+)
+WORKER_ROUTE_MARKER_FORBIDDEN_BLOCK_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "worker_route_marker_direct_route_reason",
+        re.compile(
+            r"append_route_reason\s*\([^;]*?"
+            rf'"(?:{quoted_token_alternation(WORKER_ROUTE_MARKER_REASON_CODES)})"',
+            re.DOTALL,
+        ),
+    ),
+)
 FILE_DELIVERY_BOUNDARY_REASON_CODES: tuple[str, ...] = (
     "post_route_unresolved_file_delivery_deferred_to_agent_loop",
     "post_route_file_delivery_current_request_locator_deferred_to_loop",
@@ -655,6 +672,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_contract_repair_loop_observation_boundary())
     findings.extend(scan_boundary_preflight_deferral_typing())
     findings.extend(scan_worker_loop_boundary_deferral_typing())
+    findings.extend(scan_worker_route_marker_typing())
     findings.extend(scan_subagent_boundary_deferral_helper())
     findings.extend(scan_file_delivery_boundary_deferral_typing())
     findings.extend(scan_default_config_contract_deferral_typing())
@@ -1396,6 +1414,32 @@ def scan_worker_loop_boundary_deferral_typing_text(
             )
         )
     for kind, pattern in WORKER_LOOP_BOUNDARY_FORBIDDEN_BLOCK_PATTERNS:
+        for match in pattern.finditer(text):
+            line_no = text[: match.start()].count("\n") + 1
+            findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
+    return findings
+
+
+def scan_worker_route_marker_typing() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_FILE)
+    return scan_worker_route_marker_typing_text(
+        rel_path,
+        ASK_PIPELINE_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_worker_route_marker_typing_text(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    if "enum WorkerRouteMarker" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "worker_route_marker_enum_missing",
+                "WorkerRouteMarker enum is required for main worker route markers",
+            )
+        )
+    for kind, pattern in WORKER_ROUTE_MARKER_FORBIDDEN_BLOCK_PATTERNS:
         for match in pattern.finditer(text):
             line_no = text[: match.start()].count("\n") + 1
             findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
@@ -3197,6 +3241,33 @@ def run_self_test() -> int:
         "fn f(item: WorkerLoopBoundaryDeferral) { log_route_guard_record(task, \"worker_locator_guard\", item.guard_reason_code().unwrap_or(\"\"), \"deferred\", before, route); }\n",
     )
     assert not scan_worker_loop_boundary_deferral_typing()
+    blocked_worker_route_marker_string = scan_worker_route_marker_typing_text(
+        "crates/clawd/src/worker/ask_pipeline.rs",
+        "enum WorkerRouteMarker {}\n"
+        'append_route_reason(route, "agent_loop_default_entry");\n'
+        'append_route_reason(route, "bare_topic_contextual_clarify_sanitized");\n'
+        'append_route_reason(route, "auto_locator_suppressed_multiple_explicit_paths");\n',
+    )
+    assert blocked_worker_route_marker_string and all(
+        item.kind == "worker_route_marker_direct_route_reason"
+        for item in blocked_worker_route_marker_string
+    )
+    missing_worker_route_marker_enum = scan_worker_route_marker_typing_text(
+        "crates/clawd/src/worker/ask_pipeline.rs",
+        'append_route_reason(route, "x");\n',
+    )
+    assert (
+        missing_worker_route_marker_enum
+        and missing_worker_route_marker_enum[0].kind
+        == "worker_route_marker_enum_missing"
+    )
+    assert not scan_worker_route_marker_typing_text(
+        "crates/clawd/src/worker/ask_pipeline.rs",
+        "enum WorkerRouteMarker {}\n"
+        "impl WorkerRouteMarker { fn route_reason(self) -> &'static str { \"agent_loop_default_entry\" } }\n"
+        "fn f(item: WorkerRouteMarker) { append_route_reason(route, item.route_reason()); }\n",
+    )
+    assert not scan_worker_route_marker_typing()
     missing_subagent_boundary_helper = scan_subagent_boundary_deferral_helper_text(
         "crates/clawd/src/worker/ask_pipeline.rs",
         'fn other() { append_route_reason(route, "subagent_boundary_clarify_deferred_to_agent_loop"); }\n',
