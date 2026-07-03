@@ -47,8 +47,14 @@ RULES: tuple[BoundaryRule, ...] = (
         ),
     ),
     BoundaryRule(
-        name="action_policy_router",
-        pattern=re.compile(r"\bcontract_matrix::capability_ref_action_policy_for_route\b"),
+        name="direct_contract_matrix_access",
+        pattern=re.compile(
+            r"\b("
+            r"(?:crate::|super::)*contract_matrix::|"
+            r"(?:crate::|super::)*task_contract::|"
+            r"TaskContract"
+            r")\b"
+        ),
     ),
 )
 
@@ -89,11 +95,13 @@ def scan_repo() -> list[str]:
 def run_self_test() -> int:
     action_rule = next(rule for rule in RULES if rule.name == "planner_action_emission")
     dispatch_rule = next(rule for rule in RULES if rule.name == "runtime_dispatch")
-    policy_rule = next(rule for rule in RULES if rule.name == "action_policy_router")
+    policy_rule = next(rule for rule in RULES if rule.name == "direct_contract_matrix_access")
     assert action_rule.pattern.search("AgentAction::CallSkill")
     assert action_rule.pattern.search('"call_capability"')
     assert dispatch_rule.pattern.search("CapabilityResolver")
     assert policy_rule.pattern.search("contract_matrix::capability_ref_action_policy_for_route")
+    assert policy_rule.pattern.search("crate::task_contract::target_locators_for_route")
+    assert policy_rule.pattern.search("TaskContract")
     print("SELF_TEST_OK")
     return 0
 
