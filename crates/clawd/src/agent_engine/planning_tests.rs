@@ -69,8 +69,8 @@ use super::{
     strip_terminal_discussion_for_observed_finalize,
     strip_terminal_discussion_for_scalar_path_observation,
     strip_terminal_placeholder_respond_for_exact_listing_contract,
-    strip_unresolved_template_reads_after_inventory_dir, structured_field_selectors,
-    structured_keys_deterministic_plan_result, LoopState, PlanningPromptClass,
+    strip_unresolved_template_reads_after_inventory_dir, structured_field_selectors, LoopState,
+    PlanningPromptClass,
 };
 use crate::agent_engine::{
     CLAWD_CONTINUE_ON_ERROR_ARG, CLAWD_LITERAL_COMMAND_ARG, CLAWD_RUNTIME_ASYNC_JOB_START_ARG,

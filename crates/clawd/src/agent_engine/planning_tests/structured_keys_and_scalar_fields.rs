@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn structured_keys_contract_uses_deterministic_list_keys_plan() {
+fn structured_keys_contract_preserves_planner_list_keys_action() {
     let root = TempDirGuard::new("structured_keys_deterministic_plan");
     let config_path = root.path.join("config.toml");
     fs::write(&config_path, "alpha = 1\n[beta]\nvalue = 2\n").expect("write config");
@@ -18,20 +18,24 @@ fn structured_keys_contract_uses_deterministic_list_keys_plan() {
 
     let state = test_state_with_enabled_skills(&["config_basic"]);
     let loop_state = LoopState::new(2);
-    let plan = structured_keys_deterministic_plan_result(
+    let normalized = normalize_planned_actions(
         &state,
-        "list structured keys",
-        "list structured keys",
         Some(&route),
         &loop_state,
+        "list structured keys",
         Some(&config_path),
-    )
-    .expect("structured keys deterministic plan");
+        vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "list_keys",
+                "path": config_path,
+                "max_keys": 1000,
+            }),
+        }],
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "config_basic", "list_keys");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "config_basic", "list_keys");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some(config_path.as_str())
@@ -60,18 +64,24 @@ fn structured_keys_plan_ignores_background_field_selectors() {
     route.resolved_intent = "list top-level keys".to_string();
 
     let state = test_state_with_enabled_skills(&["config_basic"]);
-    let plan = structured_keys_deterministic_plan_result(
+    let normalized = normalize_planned_actions(
         &state,
-        "BACKGROUND: configs/config.toml llm.selected_vendor is minimax",
-        "list top-level keys",
         Some(&route),
         &LoopState::new(1),
+        "list top-level keys",
         Some(&config_path),
-    )
-    .expect("structured keys deterministic plan");
+        vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "list_keys",
+                "path": config_path,
+                "max_keys": 1000,
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "config_basic", "list_keys");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "config_basic", "list_keys");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some(config_path.as_str())
@@ -80,7 +90,7 @@ fn structured_keys_plan_ignores_background_field_selectors() {
 }
 
 #[test]
-fn structured_keys_deterministic_plan_preserves_nested_field_path() {
+fn structured_keys_planner_action_preserves_nested_field_path() {
     let root = TempDirGuard::new("structured_keys_nested_field_plan");
     let config_path = root.path.join("package.json");
     fs::write(
@@ -101,18 +111,25 @@ fn structured_keys_deterministic_plan_preserves_nested_field_path() {
     route.resolved_intent = "list keys under scripts".to_string();
 
     let state = test_state_with_enabled_skills(&["config_basic"]);
-    let plan = structured_keys_deterministic_plan_result(
+    let normalized = normalize_planned_actions(
         &state,
-        "list keys under scripts",
-        "list keys under scripts",
         Some(&route),
         &LoopState::new(1),
+        "list keys under scripts",
         Some(&config_path),
-    )
-    .expect("structured keys nested field plan");
+        vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "list_keys",
+                "path": config_path,
+                "field_path": "scripts",
+                "max_keys": 1000,
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "config_basic", "list_keys");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "config_basic", "list_keys");
     assert_eq!(
         args.get("field_path").and_then(Value::as_str),
         Some("scripts")
@@ -120,7 +137,7 @@ fn structured_keys_deterministic_plan_preserves_nested_field_path() {
 }
 
 #[test]
-fn structured_keys_deterministic_plan_reads_identity_scalar_field_value() {
+fn structured_keys_planner_action_reads_identity_scalar_field_value() {
     let root = TempDirGuard::new("structured_keys_identity_scalar_plan");
     let config_dir = root.path.join("configs");
     fs::create_dir_all(&config_dir).expect("create config dir");
@@ -143,7 +160,7 @@ planner_kind = "tool"
     let mut route = route_result(
         crate::AskMode::planner_execute_plain(),
         true,
-        OutputResponseShape::Strict,
+        OutputResponseShape::Scalar,
     );
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -153,18 +170,24 @@ planner_kind = "tool"
         "Find the run_cmd related configuration and report planner_kind.".to_string();
 
     let state = test_state_with_enabled_skills(&["config_basic"]);
-    let plan = structured_keys_deterministic_plan_result(
+    let normalized = normalize_planned_actions(
         &state,
-        "Find run_cmd planner_kind in configs/skills_registry.toml.",
-        "Find run_cmd planner_kind in configs/skills_registry.toml.",
         Some(&route),
         &LoopState::new(1),
+        "Find run_cmd planner_kind in configs/skills_registry.toml.",
         Some(&config_path),
-    )
-    .expect("structured keys scalar field plan");
+        vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "read_field",
+                "path": config_path,
+                "field_path": "run_cmd.planner_kind",
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "config_basic", "read_field");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
     assert_eq!(
         args.get("field_path").and_then(Value::as_str),
         Some("run_cmd.planner_kind")
@@ -172,7 +195,7 @@ planner_kind = "tool"
 }
 
 #[test]
-fn structured_keys_deterministic_plan_resolves_unique_suffix_field_value() {
+fn structured_keys_planner_action_preserves_unique_suffix_field_value() {
     let root = TempDirGuard::new("structured_keys_suffix_scalar_plan");
     let config_dir = root.path.join("configs");
     fs::create_dir_all(&config_dir).expect("create config dir");
@@ -189,7 +212,7 @@ selected_vendor = "minimax"
     let mut route = route_result(
         crate::AskMode::planner_execute_plain(),
         true,
-        OutputResponseShape::Strict,
+        OutputResponseShape::Scalar,
     );
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -198,18 +221,24 @@ selected_vendor = "minimax"
     route.resolved_intent = "读取当前选用的大模型 vendor 字段值".to_string();
 
     let state = test_state_with_enabled_skills(&["config_basic"]);
-    let plan = structured_keys_deterministic_plan_result(
+    let normalized = normalize_planned_actions(
         &state,
-        "读取 configs/config.toml 里当前选用的大模型 vendor，只输出字段和值",
-        "读取 configs/config.toml 里当前选用的大模型 vendor，只输出字段和值",
         Some(&route),
         &LoopState::new(1),
+        "读取 configs/config.toml 里当前选用的大模型 vendor，只输出字段和值",
         Some(&config_path),
-    )
-    .expect("structured keys suffix scalar plan");
+        vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "read_field",
+                "path": config_path,
+                "field_path": "llm.selected_vendor",
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "config_basic", "read_field");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
     assert_eq!(
         args.get("field_path").and_then(Value::as_str),
         Some("llm.selected_vendor")
@@ -255,19 +284,24 @@ fn structured_keys_retry_after_validation_uses_list_keys_plan() {
     });
 
     let state = test_state_with_enabled_skills(&["config_basic"]);
-    let plan = structured_keys_deterministic_plan_result(
+    let normalized = normalize_planned_actions(
         &state,
-        "list structured keys",
-        "list structured keys",
         Some(&route),
         &loop_state,
+        "list structured keys",
         Some(&config_path),
-    )
-    .expect("retry should collect structured keys evidence");
+        vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "list_keys",
+                "path": config_path,
+                "max_keys": 1000,
+            }),
+        }],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Incremental);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "config_basic", "list_keys");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "config_basic", "list_keys");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some(config_path.as_str())
