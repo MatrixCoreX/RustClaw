@@ -129,10 +129,63 @@ def scan_text(rel_path: str, text: str) -> list[Finding]:
     return findings
 
 
+def line_number_for_offset(text: str, offset: int) -> int:
+    return text.count("\n", 0, max(offset, 0)) + 1
+
+
+def scan_boundary_envelope_type_contract_text(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    match = re.search(
+        r"struct\s+BoundaryEnvelope\s*\{(?P<body>.*?)\n\}",
+        text,
+        flags=re.DOTALL,
+    )
+    if not match:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "boundary_envelope_struct_missing",
+                "BoundaryEnvelope struct not found",
+            )
+        )
+        return findings
+
+    body = match.group("body")
+    body_start = match.start("body")
+    raw_offset = body.find("raw_user_request")
+    if raw_offset >= 0:
+        findings.append(
+            Finding(
+                rel_path,
+                line_number_for_offset(text, body_start + raw_offset),
+                "boundary_envelope_raw_user_request_field",
+                "BoundaryEnvelope must not carry raw_user_request",
+            )
+        )
+    if not re.search(r"\braw_chars\s*:\s*usize\b", body):
+        findings.append(
+            Finding(
+                rel_path,
+                line_number_for_offset(text, match.start()),
+                "boundary_envelope_raw_chars_missing",
+                "BoundaryEnvelope must expose raw_chars: usize",
+            )
+        )
+    return findings
+
+
 def scan_repo() -> list[Finding]:
     findings: list[Finding] = []
     for path in production_rust_files():
         findings.extend(scan_text(rel(path), path.read_text(encoding="utf-8")))
+    output_types = SOURCE_ROOT / "intent_router_output_types.rs"
+    findings.extend(
+        scan_boundary_envelope_type_contract_text(
+            rel(output_types),
+            output_types.read_text(encoding="utf-8"),
+        )
+    )
     return findings
 
 
@@ -183,6 +236,18 @@ def run_self_test() -> int:
     assert not scan_text(
         "crates/clawd/src/intent_router_output_types.rs",
         "raw_chars: self.raw_user_request.chars().count(),",
+    )
+    assert scan_boundary_envelope_type_contract_text(
+        "crates/clawd/src/intent_router_output_types.rs",
+        "pub(crate) struct BoundaryEnvelope {\n    pub(crate) raw_user_request: String,\n}",
+    )
+    assert scan_boundary_envelope_type_contract_text(
+        "crates/clawd/src/intent_router_output_types.rs",
+        "pub(crate) struct BoundaryEnvelope {\n    pub(crate) session_binding: Option<String>,\n}",
+    )
+    assert not scan_boundary_envelope_type_contract_text(
+        "crates/clawd/src/intent_router_output_types.rs",
+        "pub(crate) struct BoundaryEnvelope {\n    pub(crate) raw_chars: usize,\n}",
     )
     print("SELF_TEST_OK")
     return 0
