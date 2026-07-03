@@ -273,7 +273,6 @@ pub(super) fn normalize_action_schema_aliases(
     let actions = normalize_fs_basic_schema_aliases(actions);
     let actions = normalize_system_basic_schema_aliases(actions);
     let actions = rewrite_readonly_runtime_status_run_cmd_to_system_basic(state, actions);
-    let actions = rewrite_raw_runtime_status_to_run_cmd(state, route_result, actions);
     let actions = normalize_git_basic_schema_aliases(route_result, actions);
     let actions = fill_missing_read_range_path_from_route_locator(route_result, actions);
     let actions = rewrite_filtered_list_dir_to_inventory_dir(state, route_result, actions);
@@ -382,82 +381,6 @@ fn runtime_status_kind_for_single_command(command: &str) -> Option<&'static str>
         "uname" if tokens.get(1) == Some(&"-r") => Some("kernel_release"),
         _ => None,
     }
-}
-
-pub(super) fn rewrite_raw_runtime_status_to_run_cmd(
-    state: &AppState,
-    route_result: Option<&RouteResult>,
-    actions: Vec<AgentAction>,
-) -> Vec<AgentAction> {
-    let Some(route) = route_result else {
-        return actions;
-    };
-    if route.needs_clarify
-        || !route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
-        || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput
-        || !run_cmd_available_for_plan(state)
-        || system_basic_available_for_plan(state)
-    {
-        return actions;
-    }
-    actions
-        .into_iter()
-        .map(|action| {
-            let Some((skill, args)) = (match &action {
-                AgentAction::CallSkill { skill, args } => Some((skill.as_str(), args)),
-                AgentAction::CallTool { tool, args } => Some((tool.as_str(), args)),
-                _ => None,
-            }) else {
-                return action;
-            };
-            if state.resolve_canonical_skill_name(skill) != "system_basic" {
-                return action;
-            }
-            let action_name = args
-                .get("action")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .unwrap_or_default();
-            if !action_name.eq_ignore_ascii_case("runtime_status") {
-                return action;
-            }
-            let Some(command) = args
-                .get("kind")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .and_then(runtime_status_query_run_cmd_command)
-            else {
-                return action;
-            };
-            let mut run_args = serde_json::json!({
-                "command": command,
-                "cwd": state.skill_rt.workspace_root.display().to_string(),
-            });
-            run_args[super::super::CLAWD_LITERAL_COMMAND_ARG] = Value::Bool(true);
-            if !crate::evidence_policy::capability_ref_action_policy_for_route(
-                Some(route),
-                "run_cmd",
-                &run_args,
-            )
-            .is_some_and(|policy| policy.is_allowed())
-            {
-                return action;
-            }
-            info!(
-                "plan_rewrite_raw_runtime_status_to_run_cmd kind={}",
-                args.get("kind")
-                    .and_then(|value| value.as_str())
-                    .map(str::trim)
-                    .unwrap_or_default()
-            );
-            AgentAction::CallSkill {
-                skill: "run_cmd".to_string(),
-                args: run_args,
-            }
-        })
-        .collect()
 }
 
 pub(super) fn broaden_default_read_range_for_structured_text(

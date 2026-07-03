@@ -1,5 +1,41 @@
 use super::*;
 
+fn assert_empty_planner_actions_stay_empty(
+    route: &RouteResult,
+    loop_state: &LoopState,
+    goal: &str,
+) {
+    let normalized =
+        normalize_planned_actions(&test_state(), Some(route), loop_state, goal, None, vec![]);
+    assert!(
+        normalized.is_empty(),
+        "runtime must not inject a git/runtime-status plan before the planner: {normalized:?}"
+    );
+}
+
+fn assert_runtime_status_planner_action(
+    state: &AppState,
+    route: &RouteResult,
+    loop_state: &LoopState,
+    goal: &str,
+    kind: &str,
+) -> Value {
+    assert_planner_supplied_tool_call_preserved(
+        state,
+        route,
+        loop_state,
+        goal,
+        Some(goal),
+        None,
+        "system_basic",
+        "runtime_status",
+        json!({
+            "action": "runtime_status",
+            "kind": kind,
+        }),
+    )
+}
+
 #[test]
 fn chat_wrapped_execution_route_keeps_health_check_observation_only_plan() {
     let loop_state = LoopState::new(2);
@@ -110,21 +146,21 @@ fn git_repository_state_remote_request_plans_git_remote_action() {
     );
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.resolved_intent = "capability_ref=git.remote".to_string();
+    route.route_reason = "capability_ref=git.remote".to_string();
 
-    let plan = git_repository_state_deterministic_plan_result(
-        "git remote capability",
-        Some(&route),
+    let args = assert_planner_supplied_skill_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
-        "ordinary request text",
-    )
-    .expect("git repository state plan");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "git_basic");
-    assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
-        Some("remote")
+        "git remote capability",
+        Some("ordinary request text"),
+        None,
+        "git_basic",
+        "remote",
+        json!({"action": "remote"}),
     );
+
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("remote"));
 }
 
 #[test]
@@ -138,14 +174,7 @@ fn git_repository_state_contract_without_machine_token_defers_to_planner() {
     route.output_contract.semantic_kind = OutputSemanticKind::GitRepositoryState;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
 
-    let plan = git_repository_state_deterministic_plan_result(
-        "semantic contract only",
-        Some(&route),
-        &loop_state,
-        "git status",
-    );
-
-    assert!(plan.is_none());
+    assert_empty_planner_actions_stay_empty(&route, &loop_state, "semantic contract only");
 }
 
 #[test]
@@ -158,21 +187,21 @@ fn git_repository_state_status_capability_ref_plans_git_status_action() {
     );
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.resolved_intent = "capability_ref=git.status".to_string();
+    route.route_reason = "capability_ref=git.status".to_string();
 
-    let plan = git_repository_state_deterministic_plan_result(
-        "git status capability",
-        Some(&route),
+    let args = assert_planner_supplied_skill_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
-        "ordinary request text",
-    )
-    .expect("git repository state plan");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "git_basic");
-    assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
-        Some("status")
+        "git status capability",
+        Some("ordinary request text"),
+        None,
+        "git_basic",
+        "status",
+        json!({"action": "status"}),
     );
+
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("status"));
 }
 
 #[test]
@@ -186,14 +215,7 @@ fn git_repository_state_one_sentence_branch_summary_defers_to_planner() {
     route.output_contract.semantic_kind = OutputSemanticKind::GitRepositoryState;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
 
-    let plan = git_repository_state_deterministic_plan_result(
-        "semantic contract only",
-        Some(&route),
-        &loop_state,
-        "branch",
-    );
-
-    assert!(plan.is_none());
+    assert_empty_planner_actions_stay_empty(&route, &loop_state, "semantic contract only");
 }
 
 #[test]
@@ -207,14 +229,7 @@ fn git_repository_state_strict_branch_summary_defers_to_planner() {
     route.output_contract.semantic_kind = OutputSemanticKind::GitRepositoryState;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
 
-    let plan = git_repository_state_deterministic_plan_result(
-        "semantic contract only",
-        Some(&route),
-        &loop_state,
-        "branch",
-    );
-
-    assert!(plan.is_none());
+    assert_empty_planner_actions_stay_empty(&route, &loop_state, "semantic contract only");
 }
 
 #[test]
@@ -229,18 +244,34 @@ fn recent_scalar_current_workspace_plans_git_branch_without_nl_matching() {
     route.output_contract.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
 
-    let plan = super::super::recent_scalar_current_workspace_deterministic_plan_result(
+    route.route_reason = "capability_ref=git.current_branch".to_string();
+    let normalized = normalize_planned_actions(
         &state,
-        "semantic contract only",
         Some(&route),
         &loop_state,
-    )
-    .expect("recent scalar current workspace plan");
+        "semantic contract only",
+        None,
+        vec![
+            AgentAction::CallSkill {
+                skill: "git_basic".to_string(),
+                args: json!({"action": "current_branch"}),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 3);
-    assert_eq!(plan.steps[0].skill, "git_basic");
+    assert_eq!(normalized.len(), 3);
+    let AgentAction::CallSkill { skill, args } = &normalized[0] else {
+        panic!("expected git_basic action, got {:?}", normalized[0]);
+    };
+    assert_eq!(skill, "git_basic");
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("current_branch")
     );
 }
@@ -308,33 +339,22 @@ fn runtime_status_scalar_patch_plans_current_user_system_basic_status() {
     );
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
-    let analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: Some(json!({
-            "runtime_status_query": {"kind": "current_user", "scope": "system"}
-        })),
-        attachment_processing_required: false,
-    };
+    route.route_reason = "capability_ref=system.runtime_status".to_string();
 
-    let plan = super::super::runtime_status_scalar_deterministic_plan_result(
+    let args = assert_runtime_status_planner_action(
         &state,
-        "return current user",
-        Some(&route),
+        &route,
         &loop_state,
-        Some(&analysis),
-    )
-    .expect("runtime status patch should produce deterministic plan");
+        "return current user",
+        "current_user",
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "system_basic");
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("runtime_status")
     );
     assert_eq!(
-        plan.steps[0].args.get("kind").and_then(Value::as_str),
+        args.get("kind").and_then(Value::as_str),
         Some("current_user")
     );
 }
@@ -350,33 +370,22 @@ fn runtime_status_scalar_string_patch_plans_current_user_system_basic_status() {
     );
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
-    let analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: Some(json!({
-            "runtime_status_query": "current_user"
-        })),
-        attachment_processing_required: false,
-    };
+    route.route_reason = "capability_ref=system.runtime_status".to_string();
 
-    let plan = super::super::runtime_status_scalar_deterministic_plan_result(
+    let args = assert_runtime_status_planner_action(
         &state,
-        "return current user",
-        Some(&route),
+        &route,
         &loop_state,
-        Some(&analysis),
-    )
-    .expect("runtime status string patch should produce deterministic plan");
+        "return current user",
+        "current_user",
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "system_basic");
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("runtime_status")
     );
     assert_eq!(
-        plan.steps[0].args.get("kind").and_then(Value::as_str),
+        args.get("kind").and_then(Value::as_str),
         Some("current_user")
     );
 }
@@ -392,27 +401,20 @@ fn runtime_status_scalar_patch_does_not_depend_on_route_trace() {
     );
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
-    let analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: Some(json!({
-            "runtime_status_query": {"kind": "current_user", "scope": "system"}
-        })),
-        attachment_processing_required: false,
-    };
+    route.route_reason = "capability_ref=system.runtime_status".to_string();
 
-    let plan = super::super::runtime_status_scalar_deterministic_plan_result(
+    let args = assert_runtime_status_planner_action(
         &state,
-        "return current user",
-        Some(&route),
+        &route,
         &loop_state,
-        Some(&analysis),
-    )
-    .expect("runtime status patch should use machine contract, not route trace");
+        "return current user",
+        "current_user",
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "system_basic");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("runtime_status")
+    );
 }
 
 #[test]
@@ -426,33 +428,22 @@ fn runtime_status_scalar_patch_prefers_system_basic_when_available() {
     );
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
-    let analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: Some(json!({
-            "runtime_status_query": {"kind": "current_user", "scope": "system"}
-        })),
-        attachment_processing_required: false,
-    };
+    route.route_reason = "capability_ref=system.runtime_status".to_string();
 
-    let plan = super::super::runtime_status_scalar_deterministic_plan_result(
+    let args = assert_runtime_status_planner_action(
         &state,
-        "return current user",
-        Some(&route),
+        &route,
         &loop_state,
-        Some(&analysis),
-    )
-    .expect("runtime status patch should prefer dedicated runtime status capability");
+        "return current user",
+        "current_user",
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "system_basic");
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("runtime_status")
     );
     assert_eq!(
-        plan.steps[0].args.get("kind").and_then(Value::as_str),
+        args.get("kind").and_then(Value::as_str),
         Some("current_user")
     );
 }
@@ -468,35 +459,21 @@ fn runtime_status_scalar_patch_plans_hostname_system_basic_status() {
     );
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
-    let analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: Some(json!({
-            "runtime_status_query": {"kind": "host_name", "scope": "system"}
-        })),
-        attachment_processing_required: false,
-    };
+    route.route_reason = "capability_ref=system.runtime_status".to_string();
 
-    let plan = super::super::runtime_status_scalar_deterministic_plan_result(
+    let args = assert_runtime_status_planner_action(
         &state,
-        "return current hostname",
-        Some(&route),
+        &route,
         &loop_state,
-        Some(&analysis),
-    )
-    .expect("runtime status patch should plan hostname status query");
+        "return current hostname",
+        "host_name",
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "system_basic");
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("runtime_status")
     );
-    assert_eq!(
-        plan.steps[0].args.get("kind").and_then(Value::as_str),
-        Some("host_name")
-    );
+    assert_eq!(args.get("kind").and_then(Value::as_str), Some("host_name"));
 }
 
 #[tokio::test]
@@ -576,33 +553,22 @@ fn runtime_status_scalar_patch_maps_kernel_release_to_uname_r() {
     );
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
-    let analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
-        target_task_policy: None,
-        should_interrupt_active_run: false,
-        state_patch: Some(json!({
-            "runtime_status_query": {"kind": "kernel_release", "scope": "system"}
-        })),
-        attachment_processing_required: false,
-    };
+    route.route_reason = "capability_ref=system.runtime_status".to_string();
 
-    let plan = super::super::runtime_status_scalar_deterministic_plan_result(
+    let args = assert_runtime_status_planner_action(
         &state,
-        "return kernel release",
-        Some(&route),
+        &route,
         &loop_state,
-        Some(&analysis),
-    )
-    .expect("runtime status patch should plan kernel release status query");
+        "return kernel release",
+        "kernel_release",
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "system_basic");
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("runtime_status")
     );
     assert_eq!(
-        plan.steps[0].args.get("kind").and_then(Value::as_str),
+        args.get("kind").and_then(Value::as_str),
         Some("kernel_release")
     );
 }
@@ -652,7 +618,7 @@ fn raw_command_output_runtime_status_plan_keeps_system_basic_when_available() {
 }
 
 #[test]
-fn raw_command_output_runtime_status_plan_rewrites_to_run_cmd_only_without_system_basic() {
+fn raw_command_output_runtime_status_planner_tool_choice_is_not_fallback_rewritten() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
@@ -680,15 +646,18 @@ fn raw_command_output_runtime_status_plan_rewrites_to_run_cmd_only_without_syste
 
     assert_eq!(normalized.len(), 1);
     match &normalized[0] {
-        AgentAction::CallSkill { skill, args } => {
-            assert_eq!(skill, "run_cmd");
-            assert_eq!(args.get("command").and_then(Value::as_str), Some("id -un"));
+        AgentAction::CallTool { tool, args } => {
+            assert_eq!(tool, "system_basic");
             assert_eq!(
-                args.get(CLAWD_LITERAL_COMMAND_ARG).and_then(Value::as_bool),
-                Some(true)
+                args.get("action").and_then(Value::as_str),
+                Some("runtime_status")
+            );
+            assert_eq!(
+                args.get("kind").and_then(Value::as_str),
+                Some("current_user")
             );
         }
-        other => panic!("expected run_cmd rewrite, got {other:?}"),
+        other => panic!("expected planner-supplied system_basic action, got {other:?}"),
     }
 }
 

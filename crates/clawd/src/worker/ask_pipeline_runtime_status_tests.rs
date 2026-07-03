@@ -678,7 +678,7 @@ fn runtime_status_scalar_path_query_enters_planner_without_locator_prebind() {
         route_without_analysis.output_contract.locator_kind,
         crate::OutputLocatorKind::None
     );
-    assert!(locatorless_observation_route_should_defer_to_agent_loop(
+    assert!(!locatorless_observation_route_should_defer_to_agent_loop(
         &state,
         "return cwd",
         &route_without_analysis,

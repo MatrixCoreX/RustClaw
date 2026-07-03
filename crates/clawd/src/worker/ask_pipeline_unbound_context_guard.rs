@@ -239,8 +239,7 @@ pub(super) fn runtime_status_query_route_can_plan_without_locator(
         && !route_result.wants_file_delivery
         && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
         && route_result.output_contract.locator_hint.trim().is_empty()
-        && (turn_analysis.turn_type == Some(crate::intent_router::TurnType::StatusQuery)
-            || turn_analysis_has_runtime_status_query(turn_analysis))
+        && turn_analysis_has_runtime_status_query(turn_analysis)
         && crate::evidence_policy::final_answer_shape_for_route(route_result)
             .is_some_and(|shape| shape.allows_model_language())
 }
