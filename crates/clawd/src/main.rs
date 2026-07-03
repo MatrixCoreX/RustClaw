@@ -162,11 +162,13 @@ pub(crate) use repo::{
     TaskAdminTarget, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
+#[cfg(test)]
+pub(crate) use runtime::types::FirstLayerDecision;
 pub(crate) use runtime::{
     build_skill_views, llm_model_kind, llm_vendor_name, log_ask_transition, reload_skill_views,
     ActFinalizeStyle, AgentAction, AgentRuntimeConfig, AppState, AskMode, AskReply, AskState,
     AskStateRegistry, AskTransition, ChannelConfig, ClaimedTask, CommandIntentRules,
-    CommandIntentRuntime, CoreServices, FirstLayerDecision, LlmPromptBucket, LlmProviderRuntime,
+    CommandIntentRuntime, CoreServices, LlmPromptBucket, LlmProviderRuntime,
     LocalInteractionContext, MemoryConfigFileWrapper, PolicyConfig, RateLimiter, ReloadContext,
     RouteGateKind, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue,
     SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry, ToolsPolicy, WhatsappDeliveryRoute,

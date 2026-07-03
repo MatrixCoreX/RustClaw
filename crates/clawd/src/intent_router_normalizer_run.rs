@@ -921,10 +921,8 @@ pub(crate) async fn run_intent_normalizer(
             schedule_kind,
             execution_recipe_hint,
         );
-        let route_trace_label = route_label_from_first_layer_decision(
-            derived_route_trace_decision,
-            execution_finalize_style,
-        );
+        let route_trace_label =
+            route_trace_label_from_decision(derived_route_trace_decision, execution_finalize_style);
         if route_trace_label != synced_route_label {
             info!(
                 "{} intent_normalizer task_id={} route_trace_label_override={} -> {} reason=content_evidence_requires_execution locator_kind={:?} shape={:?}",
@@ -1026,18 +1024,32 @@ fn route_trace_decision_from_state(
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
-) -> FirstLayerDecision {
+) -> RouteTraceDecision {
     if needs_clarify {
-        FirstLayerDecision::Clarify
+        RouteTraceDecision::Clarify
     } else if structured_execution_signal_for_effective_route(
         output_contract,
         wants_file_delivery,
         schedule_kind,
         execution_recipe_hint,
     ) {
-        FirstLayerDecision::PlannerExecute
+        RouteTraceDecision::Act
     } else {
-        FirstLayerDecision::DirectAnswer
+        RouteTraceDecision::Respond
+    }
+}
+
+fn route_trace_label_from_decision(
+    decision: RouteTraceDecision,
+    finalize_style: ActFinalizeStyle,
+) -> &'static str {
+    match decision {
+        RouteTraceDecision::Clarify => "AskClarify",
+        RouteTraceDecision::Respond => "Chat",
+        RouteTraceDecision::Act => match finalize_style {
+            ActFinalizeStyle::ChatWrapped => "ChatAct",
+            ActFinalizeStyle::Plain | ActFinalizeStyle::ResumeContinue => "Act",
+        },
     }
 }
 
@@ -1049,7 +1061,7 @@ fn route_trace_label_from_state(
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     execution_finalize_style: ActFinalizeStyle,
 ) -> &'static str {
-    route_label_from_first_layer_decision(
+    route_trace_label_from_decision(
         route_trace_decision_from_state(
             needs_clarify,
             output_contract,

@@ -1,8 +1,8 @@
 use serde_json::Value;
 
 use super::{
-    parse_output_semantic_kind, ActFinalizeStyle, FirstLayerDecision, IntentOutputContract,
-    OutputResponseShape, OutputSemanticKind,
+    parse_output_semantic_kind, ActFinalizeStyle, IntentOutputContract, OutputResponseShape,
+    OutputSemanticKind,
 };
 
 pub(super) fn normalize_schema_token(raw: &str) -> String {
@@ -208,20 +208,6 @@ pub(super) fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static s
         "document_heading" | "document_title" | "markdown_heading" | "markdown_title"
         | "file_heading" | "file_title" => OutputSemanticKind::DocumentHeading.as_str(),
         normalized => parse_output_semantic_kind(normalized).as_str(),
-    }
-}
-
-pub(super) fn route_label_from_first_layer_decision(
-    decision: FirstLayerDecision,
-    finalize_style: ActFinalizeStyle,
-) -> &'static str {
-    match decision {
-        FirstLayerDecision::Clarify => "AskClarify",
-        FirstLayerDecision::DirectAnswer => "Chat",
-        FirstLayerDecision::PlannerExecute => match finalize_style {
-            ActFinalizeStyle::ChatWrapped => "ChatAct",
-            ActFinalizeStyle::Plain | ActFinalizeStyle::ResumeContinue => "Act",
-        },
     }
 }
 
