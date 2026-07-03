@@ -380,7 +380,6 @@ Provided target or content: [{"name":"alpha","score":7},{"name":"beta","score":1
         request,
         &surface,
         &state.skill_rt.workspace_root,
-        "",
         Some(TurnType::TaskRequest),
         Some(TargetTaskPolicy::Standalone),
     );
@@ -415,7 +414,6 @@ fn current_workspace_generic_summary_contract_repair_uses_workspace_project_summ
         request,
         &surface,
         &state.skill_rt.workspace_root,
-        "",
         None,
         None,
     );
@@ -459,7 +457,6 @@ fn current_workspace_extension_inventory_repair_uses_file_paths() {
         request,
         &surface,
         &state.skill_rt.workspace_root,
-        "",
         None,
         None,
     );

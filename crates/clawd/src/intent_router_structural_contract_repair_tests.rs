@@ -28,7 +28,6 @@ fn structural_contract_repair_routes_file_field_scalar_to_evidence() {
         req,
         &surface,
         workspace_root,
-        "",
         None,
         None,
     );
@@ -76,7 +75,6 @@ fn structural_contract_repair_file_paths_missing_file_locator_uses_parent_dir() 
         req,
         &surface,
         workspace_root,
-        "",
         None,
         None,
     );
@@ -116,7 +114,6 @@ fn structural_contract_repair_promotes_mixed_existence_and_content_summary() {
         req,
         &surface,
         workspace_root,
-        "",
         None,
         None,
     );
@@ -158,7 +155,6 @@ fn structural_contract_repair_promotes_strict_mixed_existence_and_content_summar
         req,
         &surface,
         workspace_root,
-        "",
         None,
         None,
     );
@@ -200,7 +196,6 @@ fn structural_contract_repair_keeps_single_existence_path_verdict() {
         req,
         &surface,
         workspace_root,
-        "",
         None,
         None,
     );
@@ -233,7 +228,6 @@ fn structural_contract_repair_preserves_directory_scoped_scalar_path_lookup() {
         req,
         &surface,
         workspace_root,
-        "",
         None,
         None,
     );
@@ -264,7 +258,6 @@ fn structural_contract_repair_keeps_workspace_summary_on_workspace_root_name() {
         req,
         &surface,
         workspace_root,
-        "",
         None,
         None,
     );
@@ -294,7 +287,6 @@ fn structural_contract_repair_preserves_chat_workspace_name_without_evidence() {
         req,
         &surface,
         std::path::Path::new("/tmp/rustclaw"),
-        "RustClaw 是一个面向自然语言自动化的本地 agent 项目。",
         None,
         None,
     );
@@ -329,7 +321,6 @@ fn structural_contract_repair_preserves_file_path_only_delivery() {
         req,
         &surface,
         workspace_root,
-        "",
         None,
         None,
     );
@@ -364,7 +355,6 @@ fn structural_contract_repair_promotes_file_token_delivery_to_generated_artifact
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -402,7 +392,6 @@ fn structural_contract_repair_keeps_filename_delivery_out_of_generated_artifact(
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -444,7 +433,6 @@ fn structural_contract_repair_downgrades_filename_only_generated_delivery_to_exi
         req,
         &surface,
         &workspace,
-        "",
         None,
         None,
     );
@@ -485,7 +473,6 @@ fn structural_contract_repair_keeps_new_filename_generated_delivery() {
         req,
         &surface,
         &workspace,
-        "",
         None,
         None,
     );
@@ -533,7 +520,6 @@ fn structural_contract_repair_converts_existing_generated_delivery_with_counted_
         &req,
         &surface,
         workspace_root,
-        "",
         None,
         None,
     );
@@ -573,7 +559,6 @@ fn semantic_contract_repair_ignores_invented_answer_candidate_for_observation() 
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "没有 (路径未找到)",
         None,
         None,
     );
@@ -607,7 +592,6 @@ fn semantic_contract_repair_promotes_empty_path_locator_for_multi_path_facts() {
         req,
         &surface,
         workspace_root,
-        "",
         None,
         None,
     );
@@ -643,7 +627,6 @@ fn semantic_contract_repair_replaces_combined_path_hint_for_multi_path_facts() {
         req,
         &surface,
         workspace_root,
-        "",
         None,
         None,
     );
@@ -670,7 +653,6 @@ fn scalar_file_contract_repair_ignores_invented_answer_candidate() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "rustclaw",
         None,
         None,
     );
@@ -705,7 +687,6 @@ fn dotted_structured_field_repair_overrides_structured_keys_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -747,7 +728,6 @@ fn dotted_structured_field_repair_overrides_config_validation_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -786,7 +766,6 @@ fn dotted_structured_field_repair_overrides_quantity_comparison_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -825,7 +804,6 @@ fn structured_field_pair_repair_overrides_quantity_comparison_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -870,7 +848,6 @@ fn structured_config_keys_repair_overrides_file_names_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -906,7 +883,6 @@ fn structured_identifier_presence_repair_overrides_file_existence_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -945,7 +921,6 @@ fn structured_identifier_presence_repair_overrides_config_validation_contract() 
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -984,7 +959,6 @@ fn structured_identifier_presence_repair_overrides_content_presence_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -1023,7 +997,6 @@ fn quoted_literal_presence_repair_overrides_path_existence_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -1064,7 +1037,6 @@ fn scalar_structured_keys_contract_repairs_to_field_value_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -1103,7 +1075,6 @@ fn current_workspace_scalar_structured_keys_contract_repairs_to_field_value_cont
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -1137,7 +1108,6 @@ fn planner_locator_contract_repair_requires_evidence_for_sparse_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -1166,7 +1136,6 @@ fn finalizer_language_policy_dry_run_keeps_locatorless_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -1195,7 +1164,6 @@ fn prompt_finalizer_language_policy_dry_run_without_real_locator_keeps_locatorle
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -1224,7 +1192,6 @@ fn prompt_only_finalizer_language_policy_words_do_not_skip_locator_repair() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -1253,7 +1220,6 @@ fn inline_json_payload_context_is_not_repaired_as_path_content() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -1286,7 +1252,6 @@ fn inline_json_transform_repairs_misclassified_content_excerpt_contract() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -1318,7 +1283,6 @@ fn scalar_direct_answer_candidate_is_not_promoted_by_filename_like_text() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "acknowledged",
         None,
         None,
     );
@@ -1347,7 +1311,6 @@ fn scalar_empty_answer_candidate_does_not_promote_filename_like_literal_text() {
             .ancestors()
             .nth(2)
             .expect("workspace root"),
-        "",
         None,
         None,
     );
@@ -1375,7 +1338,6 @@ fn structural_contract_repair_does_not_bind_workspace_child_mentions() {
         req,
         &surface,
         &workspace_root,
-        "",
         None,
         None,
     );
@@ -1403,7 +1365,6 @@ fn structural_contract_repair_does_not_bind_case_mismatched_product_name() {
         req,
         &surface,
         &workspace_root,
-        "",
         None,
         None,
     );

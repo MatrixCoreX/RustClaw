@@ -653,7 +653,6 @@ fn current_turn_contract_repair_does_not_path_bind_package_manager_hint() {
         &surface_req,
         &surface,
         workspace_root,
-        "",
         Some(TurnType::TaskRequest),
         Some(TargetTaskPolicy::Standalone),
     );

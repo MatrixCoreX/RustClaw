@@ -91,20 +91,19 @@ pub(crate) async fn run_intent_normalizer(
     let contract_repair_report = model_success.contract_repair_report;
     let parsed = model_success.parsed;
     if let Some(mut out) = parsed {
-        let (repaired_out, contract_repair_report) =
-            apply_boundary_contract_judge_repair(
-                state,
-                task,
-                req,
-                &req_surface,
-                route_view,
-                session_snapshot,
-                &llm_out,
-                &llm_out_for_parse,
-                contract_repair_report,
-                out,
-            )
-            .await;
+        let (repaired_out, contract_repair_report) = apply_boundary_contract_judge_repair(
+            state,
+            task,
+            req,
+            &req_surface,
+            route_view,
+            session_snapshot,
+            &llm_out,
+            &llm_out_for_parse,
+            contract_repair_report,
+            out,
+        )
+        .await;
         out = repaired_out;
         let resolved = out.resolved_user_intent.trim();
         let mut resume_behavior = parse_resume_behavior(&out.resume_behavior);
@@ -230,7 +229,6 @@ pub(crate) async fn run_intent_normalizer(
             &surface_req,
             &req_surface,
             &state.skill_rt.workspace_root,
-            "",
             parsed_turn_type,
             parsed_target_task_policy,
         );
