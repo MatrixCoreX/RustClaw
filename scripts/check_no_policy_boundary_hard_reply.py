@@ -21,7 +21,6 @@ HARD_REPLY_RE = re.compile(
 PROMPT_OR_TEST_ALLOWLIST = {
     SRC_ROOT / "agent_engine" / "observed_output_route_policy.rs",
     SRC_ROOT / "agent_engine" / "support.rs",
-    SRC_ROOT / "ask_flow_chat_helpers.rs",
     SRC_ROOT / "capability_map.rs",
     SRC_ROOT / "finalize" / "task.rs",
     SRC_ROOT / "finalize" / "task_resume.rs",

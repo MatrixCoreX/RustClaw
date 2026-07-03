@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Guard deprecated agent_decides_* keys from returning to runtime config.
+"""Guard removed route-authority rollback keys from returning to runtime.
 
-The current route authority control is the machine token
-`semantic_route_authority`. The older `agent_decides_semantic_route` and
-`agent_decides_migration_class` names may appear in docs, tests, historical log
-summaries, or comments only.
+Ordinary semantic routing now belongs to the agent loop by default. Runtime
+config must not reintroduce the old route-authority selector or the older
+agent_decides_* compatibility keys.
 """
 
 from __future__ import annotations
@@ -15,7 +14,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LEGACY_KEYS = ("agent_decides_semantic_route", "agent_decides_migration_class")
+FORBIDDEN_KEYS = (
+    "semantic_route_authority",
+    "agent_loop_canary_bucket",
+    "agent_decides_semantic_route",
+    "agent_decides_migration_class",
+)
 RUST_ROOTS = (ROOT / "crates" / "clawd" / "src", ROOT / "crates" / "claw-core" / "src")
 CONFIG_ROOTS = (ROOT / "configs", ROOT / "docker" / "config")
 
@@ -50,33 +54,28 @@ def config_files() -> list[Path]:
     return sorted(files)
 
 
-def line_has_legacy_key(line: str) -> bool:
-    return any(key in line for key in LEGACY_KEYS)
+def line_has_forbidden_key(line: str) -> bool:
+    return any(key in line for key in FORBIDDEN_KEYS)
 
 
 def scan_rust() -> list[str]:
     findings: list[str] = []
     for path in rust_files():
         for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            if line_has_legacy_key(line):
-                findings.append(f"{rel(path)}:{line_no}: legacy_key_in_production_rust")
+            if line_has_forbidden_key(line):
+                findings.append(f"{rel(path)}:{line_no}: route_authority_key_in_production_rust")
     return findings
 
 
 def scan_config() -> list[str]:
     findings: list[str] = []
-    saw_current_authority = False
     for path in config_files():
         for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             stripped = line.strip()
             if stripped.startswith("#"):
                 continue
-            if "semantic_route_authority" in stripped:
-                saw_current_authority = True
-            if line_has_legacy_key(stripped):
-                findings.append(f"{rel(path)}:{line_no}: legacy_key_in_config_body")
-    if not saw_current_authority:
-        findings.append("configs: missing semantic_route_authority config body")
+            if line_has_forbidden_key(stripped):
+                findings.append(f"{rel(path)}:{line_no}: route_authority_key_in_config_body")
     return findings
 
 
@@ -85,9 +84,11 @@ def scan_repo() -> list[str]:
 
 
 def run_self_test() -> int:
-    assert line_has_legacy_key("agent_decides_semantic_route = true")
-    assert line_has_legacy_key('let key = "agent_decides_migration_class";')
-    assert not line_has_legacy_key('semantic_route_authority = "agent_loop_default"')
+    assert line_has_forbidden_key("agent_decides_semantic_route = true")
+    assert line_has_forbidden_key('let key = "agent_decides_migration_class";')
+    assert line_has_forbidden_key('semantic_route_authority = "agent_loop_default"')
+    assert line_has_forbidden_key('agent_loop_canary_bucket = "structured_field_read"')
+    assert not line_has_forbidden_key('registry_idempotency_guard_scope = "all"')
     print("SELF_TEST_OK")
     return 0
 
