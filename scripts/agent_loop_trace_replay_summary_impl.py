@@ -390,7 +390,9 @@ def mismatch_explanation(item: dict[str, Any]) -> str:
     )
     if validation_status in {"shadow_invalid", "invalid"}:
         return f"planner_decision_rejected:{validation_reason}"
-    old_decision = str(item.get("old_first_layer_decision") or "")
+    old_decision = normalize_route_trace_decision(
+        item.get("old_first_layer_decision")
+    )
     agent_decision = str(
         item.get("agent_decision") or decision_envelope.get("decision") or ""
     )
@@ -402,13 +404,23 @@ def mismatch_explanation(item: dict[str, Any]) -> str:
         decision_delta == "different_gate"
         and validation_status == "valid"
         and validation_reason == "agent_loop_decision_shadow_valid"
-        and old_decision == "planner_execute"
+        and old_decision == "act"
         and agent_decision == "respond"
         and capability_delta == "no_capability_ref"
         and capability_ref == "respond"
     ):
-        return "agent_loop_valid_direct_response_vs_legacy_planner"
+        return "agent_loop_valid_respond_vs_legacy_act_trace"
     return "unexplained"
+
+
+def normalize_route_trace_decision(value: Any) -> str:
+    token = str(value or "").strip().lower()
+    return {
+        "planner_execute": "act",
+        "direct_answer": "respond",
+        "chat": "respond",
+        "askclarify": "clarify",
+    }.get(token, token)
 
 
 def dict_value(value: Any) -> dict[str, Any]:
@@ -662,7 +674,11 @@ def summarize_run(
             outcome_counts[str(item.get("outcome") or "unknown")] += 1
             decision_delta = str(item.get("decision_delta") or "unknown")
             decision_delta_counts[decision_delta] += 1
-            old_decision_counts[str(item.get("old_first_layer_decision") or "unknown")] += 1
+            old_decision_counts[
+                normalize_route_trace_decision(
+                    item.get("old_first_layer_decision") or "unknown"
+                )
+            ] += 1
             agent_decision_counts[str(item.get("agent_decision") or "unknown")] += 1
             decision_envelope = dict_value(item.get("decision_envelope"))
             decision_envelope_decision_counts[
