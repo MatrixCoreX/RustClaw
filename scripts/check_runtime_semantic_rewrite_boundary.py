@@ -29,6 +29,7 @@ ASK_PIPELINE_CONTRACT_REPAIR_FILE = SRC_ROOT / "worker/ask_pipeline_contract_rep
 ASK_PIPELINE_BOUNDARY_PREFLIGHT_FILE = (
     SRC_ROOT / "worker/ask_pipeline_boundary_preflight.rs"
 )
+ASK_PIPELINE_FILE_DELIVERY_FILE = SRC_ROOT / "worker/ask_pipeline_file_delivery.rs"
 ASK_PIPELINE_POST_ROUTE_REFINEMENT_FILE = (
     SRC_ROOT / "worker/ask_pipeline_post_route_refinement.rs"
 )
@@ -250,6 +251,34 @@ WORKER_LOOP_BOUNDARY_FORBIDDEN_BLOCK_PATTERNS: tuple[
         re.compile(
             r"log_route_guard_record\s*\([^;]*?"
             rf'"(?:{quoted_token_alternation(WORKER_LOOP_BOUNDARY_REASON_CODES)})"',
+            re.DOTALL,
+        ),
+    ),
+)
+FILE_DELIVERY_BOUNDARY_REASON_CODES: tuple[str, ...] = (
+    "post_route_unresolved_file_delivery_deferred_to_agent_loop",
+    "post_route_file_delivery_current_request_locator_deferred_to_loop",
+)
+FILE_DELIVERY_BOUNDARY_ROUTE_REASONS: tuple[str, ...] = (
+    "unresolved_file_delivery_deferred_to_agent_loop",
+    "file_delivery_current_request_locator_deferred_to_loop",
+)
+FILE_DELIVERY_BOUNDARY_FORBIDDEN_BLOCK_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "file_delivery_boundary_direct_gate_reason",
+        re.compile(
+            r"PostRouteGateRecord::with_owner\s*\([^;]*?"
+            rf'"(?:{quoted_token_alternation(FILE_DELIVERY_BOUNDARY_REASON_CODES)})"',
+            re.DOTALL,
+        ),
+    ),
+    (
+        "file_delivery_boundary_direct_route_reason",
+        re.compile(
+            r"append_route_reason\s*\([^;]*?"
+            rf'"(?:{quoted_token_alternation(FILE_DELIVERY_BOUNDARY_ROUTE_REASONS)})"',
             re.DOTALL,
         ),
     ),
@@ -544,6 +573,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_contract_repair_loop_observation_boundary())
     findings.extend(scan_boundary_preflight_deferral_typing())
     findings.extend(scan_worker_loop_boundary_deferral_typing())
+    findings.extend(scan_file_delivery_boundary_deferral_typing())
     findings.extend(scan_post_route_boundary_candidate_typing())
     findings.extend(scan_prompt_layer_ordinary_semantic_tokens())
     findings.extend(scan_planner_prompt_legacy_semantic_kind_keys())
@@ -1267,6 +1297,34 @@ def scan_worker_loop_boundary_deferral_typing_text(
             )
         )
     for kind, pattern in WORKER_LOOP_BOUNDARY_FORBIDDEN_BLOCK_PATTERNS:
+        for match in pattern.finditer(text):
+            line_no = text[: match.start()].count("\n") + 1
+            findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
+    return findings
+
+
+def scan_file_delivery_boundary_deferral_typing() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_FILE_DELIVERY_FILE)
+    return scan_file_delivery_boundary_deferral_typing_text(
+        rel_path,
+        ASK_PIPELINE_FILE_DELIVERY_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_file_delivery_boundary_deferral_typing_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    if "enum FileDeliveryBoundaryDeferral" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "file_delivery_boundary_deferral_enum_missing",
+                "FileDeliveryBoundaryDeferral enum is required for file-delivery boundary deferrals",
+            )
+        )
+    for kind, pattern in FILE_DELIVERY_BOUNDARY_FORBIDDEN_BLOCK_PATTERNS:
         for match in pattern.finditer(text):
             line_no = text[: match.start()].count("\n") + 1
             findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
@@ -2912,6 +2970,32 @@ def run_self_test() -> int:
         "fn f(item: WorkerLoopBoundaryDeferral) { log_route_guard_record(task, \"worker_locator_guard\", item.guard_reason_code().unwrap_or(\"\"), \"deferred\", before, route); }\n",
     )
     assert not scan_worker_loop_boundary_deferral_typing()
+    blocked_file_delivery_boundary_string = scan_file_delivery_boundary_deferral_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_file_delivery.rs",
+        "enum FileDeliveryBoundaryDeferral {}\n"
+        'PostRouteGateRecord::with_owner("boundary_delivery_gate", "post_route_file_delivery_current_request_locator_deferred_to_loop", outcome);\n'
+        'append_route_reason(route, "unresolved_file_delivery_deferred_to_agent_loop");\n',
+    )
+    assert {
+        "file_delivery_boundary_direct_gate_reason",
+        "file_delivery_boundary_direct_route_reason",
+    }.issubset({item.kind for item in blocked_file_delivery_boundary_string})
+    missing_file_delivery_boundary_enum = scan_file_delivery_boundary_deferral_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_file_delivery.rs",
+        'append_route_reason(route, "x");\n',
+    )
+    assert (
+        missing_file_delivery_boundary_enum
+        and missing_file_delivery_boundary_enum[0].kind
+        == "file_delivery_boundary_deferral_enum_missing"
+    )
+    assert not scan_file_delivery_boundary_deferral_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_file_delivery.rs",
+        "enum FileDeliveryBoundaryDeferral {}\n"
+        "impl FileDeliveryBoundaryDeferral { fn route_reason(self) -> &'static str { \"unresolved_file_delivery_deferred_to_agent_loop\" } }\n"
+        "fn f(item: FileDeliveryBoundaryDeferral) { append_route_reason(route, item.route_reason()); }\n",
+    )
+    assert not scan_file_delivery_boundary_deferral_typing()
     blocked_post_route_candidate_string = scan_post_route_boundary_candidate_typing_text(
         "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
         "enum BoundaryClarifyCandidate {}\n"
