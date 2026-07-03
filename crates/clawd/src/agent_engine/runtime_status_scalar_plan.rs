@@ -65,42 +65,12 @@ pub(super) fn route_reason_has_marker(route: &RouteResult, marker: &str) -> bool
         .any(|part| part.trim() == marker)
 }
 
-#[cfg(test)]
-pub(super) fn first_port_filter_token(text: &str) -> Option<String> {
-    text.split_whitespace()
-        .find_map(port_filter_from_structural_token)
-}
-
 pub(super) fn process_status_contract_filter_token(route: &RouteResult) -> Option<String> {
     let hint = route.output_contract.locator_hint.trim();
     if hint.is_empty() || !safe_process_status_filter_token(hint) {
         return None;
     }
     Some(hint.to_string())
-}
-
-#[cfg(test)]
-pub(super) fn port_filter_from_structural_token(token: &str) -> Option<String> {
-    let trimmed = token.trim_matches(|ch: char| {
-        matches!(
-            ch,
-            ',' | ';' | ')' | '(' | '[' | ']' | '{' | '}' | '"' | '\''
-        )
-    });
-    let numeric = trimmed
-        .parse::<u16>()
-        .ok()
-        .filter(|port| *port >= 1024)
-        .map(|port| port.to_string());
-    if numeric.is_some() {
-        return numeric;
-    }
-    let (_, port_part) = trimmed.rsplit_once(':')?;
-    port_part
-        .parse::<u16>()
-        .ok()
-        .filter(|port| *port > 0)
-        .map(|port| port.to_string())
 }
 
 pub(super) fn safe_process_status_filter_token(token: &str) -> bool {

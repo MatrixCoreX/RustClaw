@@ -82,8 +82,7 @@ use super::{
     scalar_path_auto_locator_deterministic_plan_result, scalar_path_auto_locator_observation_plan,
     scalar_path_current_workspace_deterministic_plan_result,
     scalar_path_directory_locator_search_deterministic_plan_result,
-    scalar_path_directory_locator_search_observation_plan,
-    service_status_deterministic_plan_result, should_force_actionable_plan_repair,
+    scalar_path_directory_locator_search_observation_plan, should_force_actionable_plan_repair,
     strip_directory_read_range_after_inventory_dir, strip_file_lines_count_before_tail_read_range,
     strip_intermediate_synthesize_before_later_execution,
     strip_terminal_discussion_for_direct_skill_passthrough,
@@ -175,6 +174,60 @@ fn expect_planned_call<'a>(action: &'a AgentAction, name: &str, action_name: &st
         Some(action_name)
     );
     args
+}
+
+fn assert_planner_supplied_skill_call_preserved(
+    state: &AppState,
+    route: &RouteResult,
+    loop_state: &LoopState,
+    goal: &str,
+    user_text: Option<&str>,
+    context_text: Option<&str>,
+    skill: &str,
+    action_name: &str,
+    args: Value,
+) -> Value {
+    let action = AgentAction::CallSkill {
+        skill: skill.to_string(),
+        args,
+    };
+    let AgentAction::CallSkill {
+        skill: policy_skill,
+        args: policy_args,
+    } = &action
+    else {
+        unreachable!("test action is a skill call");
+    };
+    assert!(
+        crate::evidence_policy::capability_ref_action_policy_for_route(
+            Some(route),
+            policy_skill,
+            policy_args
+        )
+        .is_some_and(|policy| policy.is_allowed())
+    );
+
+    let normalized = normalize_planned_actions_with_original_and_context(
+        state,
+        Some(route),
+        loop_state,
+        goal,
+        user_text,
+        context_text,
+        None,
+        vec![action],
+    );
+    normalized
+        .iter()
+        .find_map(|action| {
+            planned_call_is(action, skill, action_name)
+                .then(|| expect_planned_call(action, skill, action_name).clone())
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "planner-supplied {skill}.{action_name} action should be preserved: {normalized:?}"
+            )
+        })
 }
 
 struct TempDirGuard {
