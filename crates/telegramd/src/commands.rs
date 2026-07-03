@@ -618,7 +618,7 @@ pub(super) fn default_base_url_for_vendor(vendor: &str) -> &'static str {
         "anthropic" => "https://api.anthropic.com/v1",
         "grok" => "https://api.x.ai/v1",
         "qwen" => "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "minimax" => "https://api.minimax.io/v1",
+        "minimax" => "https://api.minimaxi.com/v1",
         "mimo" => "https://token-plan-sgp.xiaomimimo.com/v1",
         "custom" => "https://api.example.com/v1",
         _ => "https://api.example.com/v1",
