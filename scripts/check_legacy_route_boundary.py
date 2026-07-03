@@ -22,6 +22,7 @@ LEGACY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("legacy_route_label", re.compile(r"\blegacy_route_label\b")),
     ("derived_route_label", re.compile(r"\bderived_route_label\b")),
     ("route_label_call", re.compile(r"\.route_label\s*\(")),
+    ("intent_normalizer_decision_log", re.compile(r"\bintent_normalizer\b.*\bdecision=")),
 )
 
 ALLOWED_FIRST_LAYER_TYPE_FILES = {
@@ -85,6 +86,10 @@ def is_allowed(rel_path: str, kind: str, line_text: str) -> bool:
         # The old route_label() API was removed; route_trace_label_for_log()
         # is the only permitted production helper.
         return False
+    if kind == "intent_normalizer_decision_log":
+        # Normalizer may emit route_trace_decision, but not a generic
+        # decision= log field that looks like current route authority.
+        return False
     if kind == "FirstLayerDecision":
         return rel_path in ALLOWED_FIRST_LAYER_TYPE_FILES or is_intent_router_compat_file(rel_path)
     if kind == "first_layer_decision":
@@ -142,6 +147,14 @@ def run_self_test() -> int:
     assert scan_text(
         "crates/clawd/src/ask_flow.rs",
         "let label = route.route_label();",
+    )
+    assert scan_text(
+        "crates/clawd/src/intent_router_normalizer_run.rs",
+        '"{} intent_normalizer task_id={} decision={:?}"',
+    )
+    assert not scan_text(
+        "crates/clawd/src/intent_router_normalizer_run.rs",
+        '"{} intent_normalizer task_id={} route_trace_decision={:?}"',
     )
     print("SELF_TEST_OK")
     return 0
