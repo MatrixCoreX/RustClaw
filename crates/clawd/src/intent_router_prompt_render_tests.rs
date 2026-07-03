@@ -28,14 +28,15 @@ fn compact_normalizer_prompt_pins_boundary_schema() {
     assert!(prompt.contains("Compact boundary normalizer"));
     assert!(prompt.contains("This stage extracts boundaries only"));
     assert!(prompt.contains("agent loop owns ordinary respond / clarify / act"));
-    assert!(prompt.contains("Always include all top-level compatibility schema keys"));
-    assert!(prompt.contains("decision is a derived compatibility trace only"));
-    assert!(prompt.contains("answer_candidate is legacy compatibility"));
+    assert!(prompt.contains("Always include boundary schema keys"));
+    assert!(!prompt.contains("resolved_user_intent, answer_candidate"));
+    assert!(prompt.contains("Do not emit legacy decision fields"));
+    assert!(prompt.contains("Do not emit answer_candidate"));
     assert!(prompt.contains("Boundary extraction scope"));
     assert!(prompt.contains("Do not classify ordinary capability families"));
     assert!(prompt.contains("let the planner/resolver choose from CAPABILITIES"));
-    assert!(prompt.contains("Set semantic_kind=\"none\" in normalizer output"));
-    assert!(prompt.contains("Never create or select feature semantic_kind values"));
+    assert!(prompt.contains("Set contract_marker=\"none\" in normalizer output"));
+    assert!(prompt.contains("Never create or select feature contract markers"));
     assert!(prompt.contains("Allowed output_contract keys only"));
     assert!(
         prompt.contains("Allowed response_shape: free, one_sentence, strict, scalar, file_token")
@@ -129,9 +130,9 @@ fn compact_normalizer_prompt_keeps_summary_recall_guard_in_head_and_tail() {
     let compact_head = crate::providers::utf8_safe_prefix(&prompt, 1485);
     let compact_tail = crate::providers::utf8_safe_suffix(&prompt, 1485);
 
-    assert!(compact_head.contains("answer_candidate is legacy compatibility"));
-    assert!(prompt.contains("answer_candidate is legacy compatibility"));
-    assert!(prompt.contains("including recall"));
+    assert!(compact_head.contains("Do not emit answer_candidate"));
+    assert!(prompt.contains("Do not emit answer_candidate"));
+    assert!(!prompt.contains("answer_candidate is legacy compatibility"));
     assert!(compact_tail.contains("SUMMARY_RECALL"));
     assert!(compact_tail.contains(request));
 }
