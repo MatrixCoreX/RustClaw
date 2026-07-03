@@ -1,5 +1,49 @@
 use super::*;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BoundaryClarifyCandidate {
+    MissingPathScopedLocator,
+    FuzzyLocatorCandidates,
+    FileDeliveryCurrentRequestLocator,
+    UnresolvedFileDeliveryRequiresLocator,
+}
+
+impl BoundaryClarifyCandidate {
+    fn observation_token(self) -> &'static str {
+        match self {
+            Self::MissingPathScopedLocator => "post_route_missing_path_scoped_locator",
+            Self::FuzzyLocatorCandidates => "post_route_fuzzy_locator_candidates",
+            Self::FileDeliveryCurrentRequestLocator => {
+                "post_route_file_delivery_current_request_locator"
+            }
+            Self::UnresolvedFileDeliveryRequiresLocator => {
+                "post_route_unresolved_file_delivery_requires_locator"
+            }
+        }
+    }
+
+    fn gate_reason_code(self) -> &'static str {
+        match self {
+            Self::MissingPathScopedLocator => {
+                "post_route_missing_path_scoped_locator_deferred_to_agent_loop"
+            }
+            Self::FuzzyLocatorCandidates => {
+                "post_route_fuzzy_locator_candidates_deferred_to_agent_loop"
+            }
+            Self::FileDeliveryCurrentRequestLocator => {
+                "post_route_file_delivery_current_request_locator_deferred_to_agent_loop"
+            }
+            Self::UnresolvedFileDeliveryRequiresLocator => {
+                "post_route_unresolved_file_delivery_deferred_to_agent_loop"
+            }
+        }
+    }
+
+    fn requires_file_delivery_contract(self) -> bool {
+        matches!(self, Self::UnresolvedFileDeliveryRequiresLocator)
+    }
+}
+
 pub(super) fn apply_post_route_refinements(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -155,23 +199,23 @@ fn defer_boundary_clarify_to_agent_loop(
         post_route.gate_record.reason_code,
     ) {
         ("boundary_locator_gate", "post_route_missing_path_scoped_locator") => {
-            "post_route_missing_path_scoped_locator"
+            BoundaryClarifyCandidate::MissingPathScopedLocator
         }
         ("boundary_locator_gate", "post_route_fuzzy_locator_candidates") => {
-            "post_route_fuzzy_locator_candidates"
+            BoundaryClarifyCandidate::FuzzyLocatorCandidates
         }
         (
             "boundary_delivery_gate",
             "post_route_file_delivery_current_request_locator_deferred_to_loop",
-        ) => "post_route_file_delivery_current_request_locator",
+        ) => BoundaryClarifyCandidate::FileDeliveryCurrentRequestLocator,
         (
             "agent_loop_boundary_defer",
             "post_route_unresolved_file_delivery_deferred_to_agent_loop",
-        ) => "post_route_unresolved_file_delivery_requires_locator",
+        ) => BoundaryClarifyCandidate::UnresolvedFileDeliveryRequiresLocator,
         _ if route_has_unresolved_file_delivery_marker
             && !route_has_workspace_root_delivery_reject =>
         {
-            "post_route_unresolved_file_delivery_requires_locator"
+            BoundaryClarifyCandidate::UnresolvedFileDeliveryRequiresLocator
         }
         _ => return,
     };
@@ -181,8 +225,8 @@ fn defer_boundary_clarify_to_agent_loop(
     post_route
         .execution_route_result
         .set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
-    push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, candidate);
-    if candidate == "post_route_unresolved_file_delivery_requires_locator" {
+    push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, candidate.observation_token());
+    if candidate.requires_file_delivery_contract() {
         post_route.execution_route_result.wants_file_delivery = true;
         post_route
             .execution_route_result
@@ -207,21 +251,7 @@ fn defer_boundary_clarify_to_agent_loop(
     }
     post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::with_owner(
         "agent_loop_boundary_defer",
-        match candidate {
-            "post_route_missing_path_scoped_locator" => {
-                "post_route_missing_path_scoped_locator_deferred_to_agent_loop"
-            }
-            "post_route_fuzzy_locator_candidates" => {
-                "post_route_fuzzy_locator_candidates_deferred_to_agent_loop"
-            }
-            "post_route_file_delivery_current_request_locator" => {
-                "post_route_file_delivery_current_request_locator_deferred_to_agent_loop"
-            }
-            "post_route_unresolved_file_delivery_requires_locator" => {
-                "post_route_unresolved_file_delivery_deferred_to_agent_loop"
-            }
-            _ => "post_route_locator_boundary_deferred_to_agent_loop",
-        },
+        candidate.gate_reason_code(),
         crate::post_route_policy::PostRoutePolicyOutcome::RefineContract,
     );
 }
