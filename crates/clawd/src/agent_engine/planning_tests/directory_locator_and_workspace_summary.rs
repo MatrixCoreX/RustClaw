@@ -392,29 +392,35 @@ fn directory_entry_groups_auto_locator_uses_fs_basic_list_dir() {
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
+    route.route_reason = "capability_ref=filesystem.list_dir".to_string();
 
-    let plan = directory_entry_groups_auto_locator_deterministic_plan_result(
+    let args = assert_planner_supplied_tool_call_preserved(
         &test_state(),
-        "group directory entries",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        "按文件和文件夹分组",
+        "group directory entries",
         Some("按文件和文件夹分组"),
-        Some(root_path.as_str()),
-    )
-    .expect("directory entry groups plan should be available");
+        None,
+        "fs_basic",
+        "list_dir",
+        json!({
+            "action": "list_dir",
+            "path": root_path.clone(),
+            "names_only": false,
+            "sort_by": "mtime_desc",
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    assert!(matches!(
-        plan.steps[0].to_agent_action(),
-        Some(AgentAction::CallTool { tool, args })
-            if tool == "fs_basic"
-                && args.get("action").and_then(Value::as_str) == Some("list_dir")
-                && args.get("path").and_then(Value::as_str) == Some(root_path.as_str())
-                && args.get("names_only").and_then(Value::as_bool) == Some(false)
-                && args.get("sort_by").and_then(Value::as_str) == Some("mtime_desc")
-    ));
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(root_path.as_str())
+    );
+    assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(false));
+    assert_eq!(
+        args.get("sort_by").and_then(Value::as_str),
+        Some("mtime_desc")
+    );
 }
 
 #[test]
@@ -442,20 +448,26 @@ fn directory_entry_groups_auto_locator_preserves_bounded_names_shape() {
     };
     route.resolved_intent =
         "legacy first-layer summary selector_limit=9 selector_sort_by=mtime_desc".to_string();
+    route.route_reason = "capability_ref=filesystem.list_dir".to_string();
 
-    let plan = directory_entry_groups_auto_locator_deterministic_plan_result(
+    let args = assert_planner_supplied_tool_call_preserved(
         &test_state(),
-        "list bounded entry names",
-        Some(&route),
+        &route,
         &LoopState::new(1),
         "list bounded entry names",
         Some("list bounded entry names"),
-        Some(root_path.as_str()),
-    )
-    .expect("directory entry groups plan should be available");
+        None,
+        "fs_basic",
+        "list_dir",
+        json!({
+            "action": "list_dir",
+            "path": root_path.clone(),
+            "names_only": true,
+            "max_entries": 4,
+            "sort_by": "name",
+        }),
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
     assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
     assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(4));
     assert_eq!(args.get("sort_by").and_then(Value::as_str), Some("name"));
@@ -484,20 +496,26 @@ fn directory_entry_groups_auto_locator_preserves_name_desc_selector() {
         include_metadata: Some(false),
         include_hidden: None,
     };
+    route.route_reason = "capability_ref=filesystem.list_dir".to_string();
 
-    let plan = directory_entry_groups_auto_locator_deterministic_plan_result(
+    let args = assert_planner_supplied_tool_call_preserved(
         &test_state(),
-        "list bounded entry names",
-        Some(&route),
+        &route,
         &LoopState::new(1),
         "list bounded entry names",
         Some("list bounded entry names"),
-        Some(root_path.as_str()),
-    )
-    .expect("directory entry groups plan should be available");
+        None,
+        "fs_basic",
+        "list_dir",
+        json!({
+            "action": "list_dir",
+            "path": root_path.clone(),
+            "names_only": true,
+            "max_entries": 5,
+            "sort_by": "name_desc",
+        }),
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
     assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
     assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(5));
     assert_eq!(
@@ -592,30 +610,31 @@ fn directory_entry_groups_auto_locator_uses_tree_summary_for_machine_action_toke
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=system.tree_summary".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = directory_entry_groups_auto_locator_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &test_state(),
-        "goal",
-        Some(&route),
+        &route,
         &loop_state,
-        "inspect with tree_summary",
+        "goal",
+        Some("inspect with tree_summary"),
         None,
-        Some(root_path.as_str()),
-    )
-    .expect("plan");
+        "system_basic",
+        "tree_summary",
+        json!({
+            "action": "tree_summary",
+            "path": root_path.clone(),
+        }),
+    );
 
-    assert!(plan.steps.len() >= 1);
-    let step = &plan.steps[0];
-    assert_eq!(step.action_type, "call_skill");
-    assert_eq!(step.skill, "system_basic");
     assert_eq!(
-        step.args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("tree_summary")
     );
     assert_eq!(
-        step.args.get("path").and_then(Value::as_str),
+        args.get("path").and_then(Value::as_str),
         Some(root_path.as_str())
     );
 }
@@ -678,27 +697,31 @@ fn directory_tree_auto_locator_deterministic_plan_uses_system_basic_tree_summary
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
+    route.route_reason = "capability_ref=system.tree_summary".to_string();
 
-    let plan = directory_tree_auto_locator_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &test_state(),
-        "summarize directory structure",
-        Some(&route),
+        &route,
         &LoopState::new(1),
         "summarize directory structure",
         Some("summarize directory structure"),
-        Some(&root_path),
-    )
-    .expect("directory tree plan should be available");
+        None,
+        "system_basic",
+        "tree_summary",
+        json!({
+            "action": "tree_summary",
+            "path": root_path.clone(),
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert!(!plan.steps.is_empty());
-    assert!(matches!(
-        plan.steps[0].to_agent_action(),
-        Some(AgentAction::CallSkill { skill, args })
-            if skill == "system_basic"
-                && args.get("action").and_then(Value::as_str) == Some("tree_summary")
-                && args.get("path").and_then(Value::as_str) == Some(root_path.as_str())
-    ));
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("tree_summary")
+    );
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(root_path.as_str())
+    );
 }
 
 #[test]
