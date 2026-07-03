@@ -26,6 +26,9 @@ MIGRATION_CLASS_FILE = SRC_ROOT / "agent_engine/migration_class.rs"
 ASK_PREPARE_FILE = SRC_ROOT / "worker/ask_prepare.rs"
 ASK_PIPELINE_FILE = SRC_ROOT / "worker/ask_pipeline.rs"
 ASK_PIPELINE_CONTRACT_REPAIR_FILE = SRC_ROOT / "worker/ask_pipeline_contract_repair.rs"
+ASK_PIPELINE_BOUNDARY_PREFLIGHT_FILE = (
+    SRC_ROOT / "worker/ask_pipeline_boundary_preflight.rs"
+)
 ASK_PIPELINE_POST_ROUTE_REFINEMENT_FILE = (
     SRC_ROOT / "worker/ask_pipeline_post_route_refinement.rs"
 )
@@ -165,6 +168,56 @@ POST_ROUTE_BOUNDARY_DEFERRAL_FORBIDDEN_BLOCK_PATTERNS: tuple[
         re.compile(
             r"PostRouteGateRecord::new\s*\(\s*"
             r'"(?:post_route_auto_locator_scalar_file_deferred_to_agent_loop|post_route_directory_file_delivery_deferred_to_agent_loop)"',
+            re.DOTALL,
+        ),
+    ),
+)
+BOUNDARY_PREFLIGHT_DEFERRAL_TOKENS: tuple[str, ...] = (
+    "deictic_memory_only",
+    "unbound_model_context_target",
+    "bare_topic_model_supplied_locator",
+    "implicit_workspace_file_locator",
+    "model_completed_workspace_file_locator",
+    "inferred_missing_workspace_locator",
+    "active_anchor_file_delivery_without_structured_reference",
+    "background_only_locator",
+    "locatorless_observation",
+    "unbound_targeted_evidence",
+)
+BOUNDARY_PREFLIGHT_REASON_CODES: tuple[str, ...] = (
+    "deictic_memory_only_deferred_to_agent_loop",
+    "unbound_model_context_target_deferred_to_agent_loop",
+    "bare_topic_model_supplied_locator_deferred_to_agent_loop",
+    "implicit_workspace_file_locator_deferred_to_agent_loop",
+    "model_completed_workspace_file_locator_deferred_to_agent_loop",
+    "inferred_missing_workspace_locator_deferred_to_agent_loop",
+    "active_anchor_file_delivery_deferred_to_agent_loop",
+    "background_only_locator_deferred_to_agent_loop",
+    "locatorless_observation_deferred_to_agent_loop",
+    "unbound_targeted_evidence_deferred_to_agent_loop",
+)
+
+
+def quoted_token_alternation(tokens: tuple[str, ...]) -> str:
+    return "|".join(re.escape(token) for token in tokens)
+
+
+BOUNDARY_PREFLIGHT_FORBIDDEN_BLOCK_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "boundary_preflight_direct_candidate_push",
+        re.compile(
+            r"push_pre_loop_clarify_candidate\s*\(\s*pre_loop_clarify_candidates\s*,\s*"
+            rf'"(?:{quoted_token_alternation(BOUNDARY_PREFLIGHT_DEFERRAL_TOKENS)})"',
+            re.DOTALL,
+        ),
+    ),
+    (
+        "boundary_preflight_direct_guard_reason",
+        re.compile(
+            r"log_route_guard_record\s*\([^;]*?"
+            rf'"(?:{quoted_token_alternation(BOUNDARY_PREFLIGHT_REASON_CODES)})"',
             re.DOTALL,
         ),
     ),
@@ -457,6 +510,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_static_capability_compat_boundary())
     findings.extend(scan_contract_repair_judge_boundary())
     findings.extend(scan_contract_repair_loop_observation_boundary())
+    findings.extend(scan_boundary_preflight_deferral_typing())
     findings.extend(scan_post_route_boundary_candidate_typing())
     findings.extend(scan_prompt_layer_ordinary_semantic_tokens())
     findings.extend(scan_planner_prompt_legacy_semantic_kind_keys())
@@ -1124,6 +1178,34 @@ def scan_post_route_boundary_candidate_typing_text(
             if pattern.search(line):
                 findings.append(Finding(rel_path, line_no, kind, line.strip()))
     for kind, pattern in POST_ROUTE_BOUNDARY_DEFERRAL_FORBIDDEN_BLOCK_PATTERNS:
+        for match in pattern.finditer(text):
+            line_no = text[: match.start()].count("\n") + 1
+            findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
+    return findings
+
+
+def scan_boundary_preflight_deferral_typing() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_BOUNDARY_PREFLIGHT_FILE)
+    return scan_boundary_preflight_deferral_typing_text(
+        rel_path,
+        ASK_PIPELINE_BOUNDARY_PREFLIGHT_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_boundary_preflight_deferral_typing_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    if "enum BoundaryPreflightDeferral" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "boundary_preflight_deferral_enum_missing",
+                "BoundaryPreflightDeferral enum is required for boundary preflight deferrals",
+            )
+        )
+    for kind, pattern in BOUNDARY_PREFLIGHT_FORBIDDEN_BLOCK_PATTERNS:
         for match in pattern.finditer(text):
             line_no = text[: match.start()].count("\n") + 1
             findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
@@ -2716,6 +2798,32 @@ def run_self_test() -> int:
         'json!({ "source": "contract_repair", "contract_ref": contract_ref })',
     )
     assert not scan_contract_repair_loop_observation_boundary()
+    blocked_boundary_preflight_string = scan_boundary_preflight_deferral_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_boundary_preflight.rs",
+        "enum BoundaryPreflightDeferral {}\n"
+        'push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, "deictic_memory_only");\n'
+        'log_route_guard_record(task, "worker_locator_guard", "locatorless_observation_deferred_to_agent_loop", "deferred", before, route);\n',
+    )
+    assert {
+        "boundary_preflight_direct_candidate_push",
+        "boundary_preflight_direct_guard_reason",
+    }.issubset({item.kind for item in blocked_boundary_preflight_string})
+    missing_boundary_preflight_enum = scan_boundary_preflight_deferral_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_boundary_preflight.rs",
+        'push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, "x");\n',
+    )
+    assert (
+        missing_boundary_preflight_enum
+        and missing_boundary_preflight_enum[0].kind
+        == "boundary_preflight_deferral_enum_missing"
+    )
+    assert not scan_boundary_preflight_deferral_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_boundary_preflight.rs",
+        "enum BoundaryPreflightDeferral {}\n"
+        "impl BoundaryPreflightDeferral { fn observation_token(self) -> &'static str { \"deictic_memory_only\" } }\n"
+        "fn f(item: BoundaryPreflightDeferral) { log_route_guard_record(task, \"worker_locator_guard\", item.reason_code(), \"deferred\", before, route); }\n",
+    )
+    assert not scan_boundary_preflight_deferral_typing()
     blocked_post_route_candidate_string = scan_post_route_boundary_candidate_typing_text(
         "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
         "enum BoundaryClarifyCandidate {}\n"
