@@ -5,8 +5,8 @@ use std::sync::{Arc, RwLock};
 
 use super::{
     admitted_extra_field_exists, build_auto_sudo_retry_args,
-    contains_unresolved_runtime_template_arg, contract_matrix_action_policy_error,
-    contract_matrix_arg_policy_error, handle_skill_step_failure, handle_skill_step_success,
+    contains_unresolved_runtime_template_arg, evidence_policy_action_policy_error,
+    evidence_policy_arg_policy_error, handle_skill_step_failure, handle_skill_step_success,
     merge_isolation_artifact_refs, preflight_failure_metadata, preflight_permission_decision,
     record_subagent_step_execution, skill_extra_requests_user_input,
     structured_extra_evidence_output, structured_observation_path_argument_error,
@@ -254,7 +254,7 @@ fn unresolved_runtime_template_arg_is_detected_structurally() {
 }
 
 #[test]
-fn contract_matrix_preflight_does_not_reject_action_from_semantic_matrix_only() {
+fn evidence_policy_preflight_does_not_reject_action_from_semantic_matrix_only() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
@@ -264,11 +264,11 @@ fn contract_matrix_preflight_does_not_reject_action_from_semantic_matrix_only() 
     });
     let args = serde_json::json!({"command": "ls"});
 
-    assert!(contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none());
+    assert!(evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none());
 }
 
 #[test]
-fn contract_matrix_preflight_allows_runtime_async_job_start_marker() {
+fn evidence_policy_preflight_allows_runtime_async_job_start_marker() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
@@ -286,13 +286,13 @@ fn contract_matrix_preflight_allows_runtime_async_job_start_marker() {
     });
 
     assert!(
-        contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
+        evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
         "runtime async job starts are classified by the machine contract before execution"
     );
 }
 
 #[test]
-fn contract_matrix_preflight_allows_bounded_planner_async_start_without_runtime_marker() {
+fn evidence_policy_preflight_allows_bounded_planner_async_start_without_runtime_marker() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
@@ -309,13 +309,13 @@ fn contract_matrix_preflight_allows_bounded_planner_async_start_without_runtime_
     });
 
     assert!(
-        contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
+        evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
         "complete planner async-start machine fields should keep agent-loop authority even when the normalizer route was generic"
     );
 }
 
 #[test]
-fn contract_matrix_preflight_rejects_unbounded_async_start_without_runtime_marker() {
+fn evidence_policy_preflight_rejects_unbounded_async_start_without_runtime_marker() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
@@ -330,7 +330,7 @@ fn contract_matrix_preflight_rejects_unbounded_async_start_without_runtime_marke
         "poll_after_seconds": 2
     });
 
-    let err = contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args)
+    let err = evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &args)
         .expect("unbounded async starts still need an explicit runtime contract");
     let parsed = crate::skills::parse_structured_skill_error(&err)
         .expect("contract policy error should be structured");
@@ -338,7 +338,7 @@ fn contract_matrix_preflight_rejects_unbounded_async_start_without_runtime_marke
 }
 
 #[test]
-fn contract_matrix_preflight_does_not_reject_config_actions_from_summary_semantic_only() {
+fn evidence_policy_preflight_does_not_reject_config_actions_from_summary_semantic_only() {
     let state = test_state();
     install_test_registry(
         &state,
@@ -378,17 +378,17 @@ planner_capabilities = [
     });
 
     assert!(
-        contract_matrix_action_policy_error(&state, &loop_state, "config_edit", &preview_args)
+        evidence_policy_action_policy_error(&state, &loop_state, "config_edit", &preview_args)
             .is_none()
     );
     assert!(
-        contract_matrix_action_policy_error(&state, &loop_state, "config_edit", &apply_args)
+        evidence_policy_action_policy_error(&state, &loop_state, "config_edit", &apply_args)
             .is_none()
     );
 }
 
 #[test]
-fn contract_matrix_preflight_rejects_generated_media_run_cmd() {
+fn evidence_policy_preflight_rejects_generated_media_run_cmd() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
@@ -401,7 +401,7 @@ fn contract_matrix_preflight_rejects_generated_media_run_cmd() {
     });
     let args = serde_json::json!({"command": "python3 -c 'create image'"});
 
-    let err = contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args)
+    let err = evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &args)
         .expect("media path run_cmd should be rejected");
     let parsed = crate::skills::parse_structured_skill_error(&err)
         .expect("contract policy error should be structured");
@@ -457,7 +457,7 @@ fn contract_matrix_preflight_rejects_generated_media_run_cmd() {
 }
 
 #[test]
-fn contract_matrix_preflight_does_not_block_literal_media_run_cmd() {
+fn evidence_policy_preflight_does_not_block_literal_media_run_cmd() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
@@ -474,7 +474,7 @@ fn contract_matrix_preflight_does_not_block_literal_media_run_cmd() {
     });
 
     assert!(
-        contract_matrix_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
+        evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
         "literal user commands should preserve the explicit command policy boundary"
     );
 }
@@ -626,7 +626,7 @@ planner_capabilities = [
 }
 
 #[test]
-fn contract_matrix_preflight_allows_user_named_output_path_marker() {
+fn evidence_policy_preflight_allows_user_named_output_path_marker() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
@@ -642,7 +642,7 @@ fn contract_matrix_preflight_allows_user_named_output_path_marker() {
     });
 
     assert!(
-        contract_matrix_action_policy_error(&state, &loop_state, "write_file", &args).is_none(),
+        evidence_policy_action_policy_error(&state, &loop_state, "write_file", &args).is_none(),
         "planner-marked user named output writes must survive execution preflight"
     );
 }
@@ -671,13 +671,13 @@ fn active_ops_recipe_preflight_allows_backing_mutation_despite_summary_contract(
     });
 
     assert!(
-        contract_matrix_action_policy_error(&state, &loop_state, "write_file", &args).is_none(),
+        evidence_policy_action_policy_error(&state, &loop_state, "write_file", &args).is_none(),
         "active ops recipe mutations must not be rejected after virtual tool rewrite"
     );
 }
 
 #[test]
-fn contract_matrix_preflight_allows_internal_synthesis_actions() {
+fn evidence_policy_preflight_allows_internal_synthesis_actions() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
@@ -688,19 +688,19 @@ fn contract_matrix_preflight_allows_internal_synthesis_actions() {
     let args = serde_json::json!({"evidence_refs": ["last_output"]});
 
     assert!(
-        contract_matrix_action_policy_error(&state, &loop_state, "synthesize_answer", &args)
+        evidence_policy_action_policy_error(&state, &loop_state, "synthesize_answer", &args)
             .is_none(),
         "internal synthesis must not be rejected by observation allowed_actions"
     );
     assert!(
-        contract_matrix_action_policy_error(&state, &loop_state, "respond", &serde_json::json!({}))
+        evidence_policy_action_policy_error(&state, &loop_state, "respond", &serde_json::json!({}))
             .is_none(),
         "internal respond must not be rejected by observation allowed_actions"
     );
 }
 
 #[test]
-fn contract_matrix_preflight_allows_task_control_lifecycle_dry_run_only() {
+fn evidence_policy_preflight_allows_task_control_lifecycle_dry_run_only() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
@@ -717,7 +717,7 @@ fn contract_matrix_preflight_allows_task_control_lifecycle_dry_run_only() {
     });
 
     assert!(
-        contract_matrix_action_policy_error(&state, &loop_state, "task_control", &dry_run_args)
+        evidence_policy_action_policy_error(&state, &loop_state, "task_control", &dry_run_args)
             .is_none(),
         "task_control resume dry_run should be admitted as a no-mutation preview"
     );
@@ -736,14 +736,14 @@ fn contract_matrix_preflight_allows_task_control_lifecycle_dry_run_only() {
         "dry_run": false
     });
     assert!(
-        contract_matrix_action_policy_error(&state, &loop_state, "task_control", &real_args)
+        evidence_policy_action_policy_error(&state, &loop_state, "task_control", &real_args)
             .is_none(),
         "semantic matrix must not reject real task_control resume before permission policy"
     );
 }
 
 #[test]
-fn contract_matrix_preflight_allows_virtual_find_entries_backing_action() {
+fn evidence_policy_preflight_allows_virtual_find_entries_backing_action() {
     let state = test_state();
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
@@ -759,13 +759,13 @@ fn contract_matrix_preflight_allows_virtual_find_entries_backing_action() {
     });
 
     assert!(
-        contract_matrix_action_policy_error(&state, &loop_state, "fs_search", &args).is_none(),
+        evidence_policy_action_policy_error(&state, &loop_state, "fs_search", &args).is_none(),
         "runtime backing fs_search calls should be admitted through their planner-facing fs_basic.find_entries contract"
     );
 }
 
 #[test]
-fn contract_matrix_preflight_rejects_missing_bound_target_arg() {
+fn evidence_policy_preflight_rejects_missing_bound_target_arg() {
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
@@ -780,7 +780,7 @@ fn contract_matrix_preflight_rejects_missing_bound_target_arg() {
     });
 
     assert!(
-        contract_matrix_arg_policy_error(&loop_state, "fs_basic", &args).is_none(),
+        evidence_policy_arg_policy_error(&loop_state, "fs_basic", &args).is_none(),
         "legacy output-contract marker alone must not reject planner-selected args"
     );
 
@@ -808,7 +808,7 @@ fn contract_matrix_preflight_rejects_missing_bound_target_arg() {
     };
     loop_state.route_policy_context = Some(route);
 
-    let err = contract_matrix_arg_policy_error(&loop_state, "fs_basic", &args)
+    let err = evidence_policy_arg_policy_error(&loop_state, "fs_basic", &args)
         .expect("capability-ref arg policy should reject missing path");
     let parsed = crate::skills::parse_structured_skill_error(&err)
         .expect("contract arg policy error should be structured");
@@ -854,7 +854,7 @@ fn contract_matrix_preflight_rejects_missing_bound_target_arg() {
 }
 
 #[test]
-fn contract_matrix_preflight_defers_template_target_to_runtime_placeholder_check() {
+fn evidence_policy_preflight_defers_template_target_to_runtime_placeholder_check() {
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
@@ -867,7 +867,7 @@ fn contract_matrix_preflight_defers_template_target_to_runtime_placeholder_check
         "path": "{{s1.path}}"
     });
 
-    assert!(contract_matrix_arg_policy_error(&loop_state, "fs_basic", &args).is_none());
+    assert!(evidence_policy_arg_policy_error(&loop_state, "fs_basic", &args).is_none());
     assert!(unresolved_runtime_template_argument_error("fs_basic", &args, &args).is_some());
 }
 
