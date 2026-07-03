@@ -283,6 +283,10 @@ FILE_DELIVERY_BOUNDARY_FORBIDDEN_BLOCK_PATTERNS: tuple[
         ),
     ),
 )
+SUBAGENT_BOUNDARY_TOKENS: tuple[str, ...] = (
+    "post_route_subagent_boundary_clarify_deferred_to_agent_loop",
+    "subagent_boundary_clarify_deferred_to_agent_loop",
+)
 
 ROUTE_RESULT_RAW_SEMANTIC_ACCESS = re.compile(
     r"\b(?:route|route_result|execution_route_result)\.output_contract\.semantic_kind\b"
@@ -573,6 +577,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_contract_repair_loop_observation_boundary())
     findings.extend(scan_boundary_preflight_deferral_typing())
     findings.extend(scan_worker_loop_boundary_deferral_typing())
+    findings.extend(scan_subagent_boundary_deferral_helper())
     findings.extend(scan_file_delivery_boundary_deferral_typing())
     findings.extend(scan_post_route_boundary_candidate_typing())
     findings.extend(scan_prompt_layer_ordinary_semantic_tokens())
@@ -1300,6 +1305,50 @@ def scan_worker_loop_boundary_deferral_typing_text(
         for match in pattern.finditer(text):
             line_no = text[: match.start()].count("\n") + 1
             findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
+    return findings
+
+
+def scan_subagent_boundary_deferral_helper() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_FILE)
+    return scan_subagent_boundary_deferral_helper_text(
+        rel_path,
+        ASK_PIPELINE_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_subagent_boundary_deferral_helper_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    helper = rust_private_or_pub_function_block(
+        text, "defer_subagent_boundary_clarify_to_agent_loop"
+    )
+    if helper is None:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "subagent_boundary_deferral_helper_missing",
+                "defer_subagent_boundary_clarify_to_agent_loop helper is required",
+            )
+        )
+        helper_start = helper_end = -1
+    else:
+        helper_start, helper_text = helper
+        helper_end = helper_start + helper_text.count("\n")
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if helper_start <= line_no <= helper_end:
+            continue
+        for token in SUBAGENT_BOUNDARY_TOKENS:
+            if f'"{token}"' in line:
+                findings.append(
+                    Finding(
+                        rel_path,
+                        line_no,
+                        "subagent_boundary_deferral_token_outside_helper",
+                        line.strip(),
+                    )
+                )
     return findings
 
 
@@ -2970,6 +3019,38 @@ def run_self_test() -> int:
         "fn f(item: WorkerLoopBoundaryDeferral) { log_route_guard_record(task, \"worker_locator_guard\", item.guard_reason_code().unwrap_or(\"\"), \"deferred\", before, route); }\n",
     )
     assert not scan_worker_loop_boundary_deferral_typing()
+    missing_subagent_boundary_helper = scan_subagent_boundary_deferral_helper_text(
+        "crates/clawd/src/worker/ask_pipeline.rs",
+        'fn other() { append_route_reason(route, "subagent_boundary_clarify_deferred_to_agent_loop"); }\n',
+    )
+    assert (
+        missing_subagent_boundary_helper
+        and missing_subagent_boundary_helper[0].kind
+        == "subagent_boundary_deferral_helper_missing"
+    )
+    blocked_subagent_boundary_outside_helper = scan_subagent_boundary_deferral_helper_text(
+        "crates/clawd/src/worker/ask_pipeline.rs",
+        "fn defer_subagent_boundary_clarify_to_agent_loop() {\n"
+        '    append_route_reason(route, "subagent_boundary_clarify_deferred_to_agent_loop");\n'
+        "}\n"
+        "fn build_loop_context_after_boundary_preflight() {\n"
+        '    append_route_reason(route, "subagent_boundary_clarify_deferred_to_agent_loop");\n'
+        "}\n",
+    )
+    assert (
+        blocked_subagent_boundary_outside_helper
+        and blocked_subagent_boundary_outside_helper[0].kind
+        == "subagent_boundary_deferral_token_outside_helper"
+    )
+    assert not scan_subagent_boundary_deferral_helper_text(
+        "crates/clawd/src/worker/ask_pipeline.rs",
+        "fn defer_subagent_boundary_clarify_to_agent_loop() {\n"
+        '    append_route_reason(route, "subagent_boundary_clarify_deferred_to_agent_loop");\n'
+        '    PostRouteGateRecord::new("post_route_subagent_boundary_clarify_deferred_to_agent_loop", outcome);\n'
+        "}\n"
+        "fn build_loop_context_after_boundary_preflight() {}\n",
+    )
+    assert not scan_subagent_boundary_deferral_helper()
     blocked_file_delivery_boundary_string = scan_file_delivery_boundary_deferral_typing_text(
         "crates/clawd/src/worker/ask_pipeline_file_delivery.rs",
         "enum FileDeliveryBoundaryDeferral {}\n"
