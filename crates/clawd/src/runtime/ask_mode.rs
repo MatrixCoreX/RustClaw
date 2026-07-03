@@ -87,8 +87,8 @@ impl AskMode {
         self
     }
 
-    /// Legacy route label for logs/journals. Do not use this for semantics.
-    pub(crate) fn legacy_route_label_for_trace(&self) -> &'static str {
+    /// Human-readable route trace label for logs. Do not use this for semantics.
+    pub(crate) fn route_trace_label_for_log(&self) -> &'static str {
         match self {
             #[cfg(test)]
             AskMode::ClarifyOrChat {

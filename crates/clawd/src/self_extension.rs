@@ -1,10 +1,10 @@
 use std::future::Future;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{
-    runtime::state::reload_skill_views, worker::task_runtime_channel, AppState, AskReply,
-    ClaimedTask, SelfExtensionMode, SelfExtensionTrigger,
+    AppState, AskReply, ClaimedTask, SelfExtensionMode, SelfExtensionTrigger,
+    runtime::state::reload_skill_views, worker::task_runtime_channel,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -896,11 +896,11 @@ pub(crate) async fn maybe_handle_ask_self_extension(
         agent_run_context.and_then(|ctx| ctx.execution_recipe_hint),
     ) {
         tracing::info!(
-            "{} self_extension bypassed for active execution recipe task_id={} ask_mode={} legacy_route_label={}",
+            "{} self_extension bypassed for active execution recipe task_id={} ask_mode={} route_trace_label={}",
             crate::highlight_tag("self_extension"),
             task.task_id,
             route.ask_mode.as_str(),
-            route.legacy_route_label_for_trace()
+            route.route_trace_label_for_log()
         );
         return Ok(None);
     }

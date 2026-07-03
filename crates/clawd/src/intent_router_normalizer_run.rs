@@ -921,21 +921,21 @@ pub(crate) async fn run_intent_normalizer(
             schedule_kind,
             execution_recipe_hint,
         );
-        let legacy_route_label =
+        let route_trace_label =
             route_label_from_first_layer_decision(derived_route_decision, execution_finalize_style);
-        if legacy_route_label != synced_route_label {
+        if route_trace_label != synced_route_label {
             info!(
-                "{} intent_normalizer task_id={} legacy_route_label_override={} -> {} reason=content_evidence_requires_execution locator_kind={:?} shape={:?}",
+                "{} intent_normalizer task_id={} route_trace_label_override={} -> {} reason=content_evidence_requires_execution locator_kind={:?} shape={:?}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 synced_route_label,
-                legacy_route_label,
+                route_trace_label,
                 output_contract.locator_kind,
                 output_contract.response_shape
             );
         }
         info!(
-            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} decision={:?} legacy_route_label={} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} contract_repair_source={} contract_repair_detail={} contract_repair_class={} turn_analysis={}",
+            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} decision={:?} route_trace_label={} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} contract_repair_source={} contract_repair_detail={} contract_repair_class={} turn_analysis={}",
             crate::highlight_tag("routing"),
             task.task_id,
             crate::truncate_for_log(req),
@@ -943,7 +943,7 @@ pub(crate) async fn run_intent_normalizer(
             resume_behavior,
             schedule_kind,
             derived_route_decision,
-            legacy_route_label,
+            route_trace_label,
             wants_file_delivery,
             needs_clarify,
             crate::truncate_for_log(&reason),

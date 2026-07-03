@@ -486,7 +486,7 @@ if model_io_path.exists():
             model_rows.append(row)
 
 route_gate_kind = str(route_result.get('boundary_mode') or route_result.get('route_gate_kind') or '')
-legacy_route_label = str(route_result.get('legacy_route_label') or route_result.get('derived_route_label') or '')
+legacy_route_label = str(route_result.get('route_trace_label') or route_result.get('legacy_route_label') or route_result.get('derived_route_label') or '')
 legacy_first_layer_decision = str(
     route_result.get('route_trace_decision') or route_result.get('legacy_first_layer_decision') or route_result.get('first_layer_decision') or ''
 )
@@ -495,7 +495,7 @@ route_chat = (
     or legacy_route_label == 'Chat'
     or any(
         re.search(r'route_gate_kind=chat\b', line)
-        or re.search(r'(?:legacy_route_label|derived_route_label)=Chat\b', line)
+        or re.search(r'(?:route_trace_label|legacy_route_label|derived_route_label)=Chat\b', line)
         for line in clawd_lines
     )
 )
@@ -504,7 +504,7 @@ route_act = (
     or legacy_route_label == 'Act'
     or any(
         re.search(r'route_gate_kind=execute\b', line)
-        or re.search(r'(?:legacy_route_label|derived_route_label)=Act\b', line)
+        or re.search(r'(?:route_trace_label|legacy_route_label|derived_route_label)=Act\b', line)
         for line in clawd_lines
     )
 )
@@ -512,7 +512,7 @@ route_chat_act = (
     legacy_route_label == 'ChatAct'
     or any(
         re.search(r'ask_mode=act:chat_wrapped\b', line)
-        or re.search(r'(?:legacy_route_label|derived_route_label)=ChatAct\b', line)
+        or re.search(r'(?:route_trace_label|legacy_route_label|derived_route_label)=ChatAct\b', line)
         for line in clawd_lines
     )
 )
@@ -521,7 +521,7 @@ route_clarify = (
     or legacy_first_layer_decision == 'clarify'
     or legacy_route_label == 'AskClarify'
     or any(
-        re.search(r'(?:boundary_mode|route_gate_kind)=clarify\b|(?:route_trace_decision|legacy_first_layer_decision|first_layer_decision)=clarify\b|(?:legacy_route_label|derived_route_label)=AskClarify\b', line)
+        re.search(r'(?:boundary_mode|route_gate_kind)=clarify\b|(?:route_trace_decision|legacy_first_layer_decision|first_layer_decision)=clarify\b|(?:route_trace_label|legacy_route_label|derived_route_label)=AskClarify\b', line)
         for line in clawd_lines
     )
 )

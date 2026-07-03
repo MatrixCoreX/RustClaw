@@ -1,6 +1,6 @@
 use super::{
-    plan_step_from_agent_action, AgentAction, AskMode, IntentOutputContract, PlanStep,
-    ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
+    AgentAction, AskMode, IntentOutputContract, PlanStep, ResumeBehavior, RiskCeiling, RouteResult,
+    ScheduleKind, plan_step_from_agent_action,
 };
 use serde_json::json;
 
@@ -110,18 +110,18 @@ fn route_result_set_execute_gate_updates_legacy_trace_label() {
     route.set_execute_gate();
 
     assert_eq!(route.gate_kind(), crate::RouteGateKind::Execute);
-    assert_eq!(route.legacy_route_label_for_trace(), "Act");
+    assert_eq!(route.route_trace_label_for_log(), "Act");
     assert!(route.is_execute_gate());
 }
 
 #[test]
 fn route_result_exposes_chat_wrapped_planner_mode_as_structured_state() {
-    let route = route_result_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    let route = route_result_with_mode(crate::AskMode::planner_execute_with_chat_finalizer());
 
     assert!(route.is_execute_gate());
-    assert!(route.is_planner_execute_chat_wrapped());
+    assert!(route.uses_chat_finalizer());
     assert!(route.uses_pure_chat_agent_loop_submode());
-    assert_eq!(route.legacy_route_label_for_trace(), "ChatAct");
+    assert_eq!(route.route_trace_label_for_log(), "ChatAct");
 }
 
 #[test]
