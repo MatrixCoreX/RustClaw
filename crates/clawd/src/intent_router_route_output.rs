@@ -327,8 +327,16 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
     let attachment_processing_required = turn_analysis
         .as_ref()
         .is_some_and(|analysis| analysis.attachment_processing_required);
+    let boundary_envelope = crate::intent_router::BoundaryEnvelope::from_request(
+        user_request.trim(),
+        decision.schedule_intent.clone(),
+        attachment_processing_required,
+        &decision.output_contract,
+        turn_analysis.as_ref(),
+        ResumeBehavior::None,
+    );
     IntentNormalizerOutput {
-        raw_user_request: user_request.trim().to_string(),
+        boundary_envelope,
         resolved_user_intent,
         resume_behavior: ResumeBehavior::None,
         schedule_kind: decision.schedule_kind,
@@ -346,7 +354,6 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
         route_trace_decision: legacy_normalizer_decision,
         execution_finalize_style,
         turn_analysis,
-        attachment_processing_required,
         fallback_source,
         route_trace_record: trace_record,
     }

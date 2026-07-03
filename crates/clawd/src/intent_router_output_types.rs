@@ -15,7 +15,7 @@ pub(crate) struct ContextResolution {
 /// Output of the unified intent normalizer (replaces resume_followup_intent + context_resolver + schedule_intent + intent_router in one LLM call).
 #[derive(Debug, Clone)]
 pub(crate) struct IntentNormalizerOutput {
-    pub(crate) raw_user_request: String,
+    pub(crate) boundary_envelope: BoundaryEnvelope,
     pub(crate) resolved_user_intent: String,
     pub(crate) resume_behavior: ResumeBehavior,
     pub(crate) schedule_kind: ScheduleKind,
@@ -39,7 +39,6 @@ pub(crate) struct IntentNormalizerOutput {
     /// Execution finalization style. This is not a semantic gate.
     pub(crate) execution_finalize_style: ActFinalizeStyle,
     pub(crate) turn_analysis: Option<TurnAnalysis>,
-    pub(crate) attachment_processing_required: bool,
     pub(crate) fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     pub(crate) route_trace_record: RouteTraceRecord,
 }
@@ -58,6 +57,29 @@ pub(crate) struct BoundaryEnvelope {
 }
 
 impl BoundaryEnvelope {
+    pub(crate) fn from_request(
+        request: &str,
+        schedule_intent: Option<crate::ScheduleIntentOutput>,
+        attachment_processing_required: bool,
+        output_contract: &IntentOutputContract,
+        turn_analysis: Option<&TurnAnalysis>,
+        resume_behavior: ResumeBehavior,
+    ) -> Self {
+        let language_hint = crate::language_policy::request_language_hint(request);
+        Self {
+            language_hint: (language_hint != "config_default").then(|| language_hint.to_string()),
+            schedule_intent,
+            attachment_refs: attachment_refs_for_boundary(attachment_processing_required),
+            explicit_locators: explicit_locator_refs_for_boundary(output_contract),
+            active_task_reference: turn_analysis
+                .and_then(|analysis| analysis.target_task_policy)
+                .map(|policy| policy.as_str().to_string()),
+            session_binding: resume_behavior_boundary_token(resume_behavior).map(str::to_string),
+            safety_budget_hint: None,
+            raw_chars: request.chars().count(),
+        }
+    }
+
     pub(crate) fn raw_char_count(&self) -> usize {
         self.raw_chars
     }
@@ -96,28 +118,17 @@ impl BoundaryEnvelope {
 
 impl IntentNormalizerOutput {
     pub(crate) fn boundary_envelope(&self) -> BoundaryEnvelope {
-        let language_hint = crate::language_policy::request_language_hint(&self.raw_user_request);
-        BoundaryEnvelope {
-            language_hint: (language_hint != "config_default").then(|| language_hint.to_string()),
-            schedule_intent: self.schedule_intent.clone(),
-            attachment_refs: attachment_refs_for_boundary(self.attachment_processing_required),
-            explicit_locators: explicit_locator_refs_for_boundary(&self.output_contract),
-            active_task_reference: self
-                .turn_analysis
-                .as_ref()
-                .and_then(|analysis| analysis.target_task_policy)
-                .map(|policy| policy.as_str().to_string()),
-            session_binding: resume_behavior_boundary_token(self.resume_behavior)
-                .map(str::to_string),
-            safety_budget_hint: None,
-            raw_chars: self.raw_user_request.chars().count(),
-        }
+        self.boundary_envelope.clone()
     }
 }
 
 fn non_empty_token(value: &str) -> &str {
     let trimmed = value.trim();
-    if trimmed.is_empty() { "none" } else { trimmed }
+    if trimmed.is_empty() {
+        "none"
+    } else {
+        trimmed
+    }
 }
 
 fn explicit_locator_refs_for_boundary(contract: &IntentOutputContract) -> Vec<String> {

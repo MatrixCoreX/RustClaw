@@ -1255,6 +1255,36 @@ def scan_boundary_envelope_rust_type_machine_only() -> list[Finding]:
 
 def scan_boundary_envelope_rust_type_text(rel_path: str, text: str) -> list[Finding]:
     findings: list[Finding] = []
+    normalizer_output_match = re.search(
+        r"struct\s+IntentNormalizerOutput\s*\{(?P<body>.*?)\n\}",
+        text,
+        flags=re.DOTALL,
+    )
+    if normalizer_output_match:
+        normalizer_output_body = normalizer_output_match.group("body")
+        normalizer_output_body_start = normalizer_output_match.start("body")
+        for field, kind, message in (
+            (
+                "raw_user_request",
+                "intent_normalizer_output_raw_user_request_field",
+                "IntentNormalizerOutput must not carry raw_user_request; use BoundaryEnvelope.raw_chars",
+            ),
+            (
+                "attachment_processing_required",
+                "intent_normalizer_output_attachment_required_field",
+                "IntentNormalizerOutput must not keep attachment_processing_required after BoundaryEnvelope projection",
+            ),
+        ):
+            field_offset = normalizer_output_body.find(field)
+            if field_offset >= 0:
+                findings.append(
+                    Finding(
+                        rel_path,
+                        text.count("\n", 0, normalizer_output_body_start + field_offset) + 1,
+                        kind,
+                        message,
+                    )
+                )
     match = re.search(
         r"struct\s+BoundaryEnvelope\s*\{(?P<body>.*?)\n\}",
         text,
@@ -3234,6 +3264,29 @@ def run_self_test() -> int:
         blocked_legacy_prompt_instruction
         and blocked_legacy_prompt_instruction[0].kind
         == "legacy_semantic_prompt_instruction"
+    )
+    blocked_normalizer_output_raw_request = scan_boundary_envelope_rust_type_text(
+        "crates/clawd/src/intent_router_output_types.rs",
+        "struct IntentNormalizerOutput {\n    raw_user_request: String,\n}\n"
+        "struct BoundaryEnvelope {\n    raw_chars: usize,\n}\n",
+    )
+    assert any(
+        item.kind == "intent_normalizer_output_raw_user_request_field"
+        for item in blocked_normalizer_output_raw_request
+    )
+    blocked_normalizer_output_attachment_field = scan_boundary_envelope_rust_type_text(
+        "crates/clawd/src/intent_router_output_types.rs",
+        "struct IntentNormalizerOutput {\n    attachment_processing_required: bool,\n}\n"
+        "struct BoundaryEnvelope {\n    raw_chars: usize,\n}\n",
+    )
+    assert any(
+        item.kind == "intent_normalizer_output_attachment_required_field"
+        for item in blocked_normalizer_output_attachment_field
+    )
+    assert not scan_boundary_envelope_rust_type_text(
+        "crates/clawd/src/intent_router_output_types.rs",
+        "struct IntentNormalizerOutput {\n    boundary_envelope: BoundaryEnvelope,\n}\n"
+        "struct BoundaryEnvelope {\n    raw_chars: usize,\n}\n",
     )
     assert not scan_normalizer_route_result_boundary()
     assert not scan_journal_output_contract_ref_boundary()

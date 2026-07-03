@@ -2,12 +2,30 @@ use super::*;
 
 #[test]
 fn boundary_envelope_projects_only_machine_boundary_fields() {
+    let raw_request = "check config/app.toml later";
     let schedule_intent = crate::ScheduleIntentOutput {
         kind: "create".to_string(),
         ..Default::default()
     };
     let output = IntentNormalizerOutput {
-        raw_user_request: "check config/app.toml later".to_string(),
+        boundary_envelope: BoundaryEnvelope::from_request(
+            raw_request,
+            Some(schedule_intent.clone()),
+            true,
+            &crate::IntentOutputContract {
+                locator_kind: crate::OutputLocatorKind::Path,
+                locator_hint: "config/app.toml".to_string(),
+                ..Default::default()
+            },
+            Some(&TurnAnalysis {
+                turn_type: Some(TurnType::TaskRequest),
+                target_task_policy: Some(TargetTaskPolicy::ReuseActive),
+                should_interrupt_active_run: false,
+                state_patch: None,
+                attachment_processing_required: true,
+            }),
+            crate::ResumeBehavior::ResumeExecute,
+        ),
         resolved_user_intent: "legacy trace text should not matter".to_string(),
         resume_behavior: crate::ResumeBehavior::ResumeExecute,
         schedule_kind: crate::ScheduleKind::Create,
@@ -35,7 +53,6 @@ fn boundary_envelope_projects_only_machine_boundary_fields() {
             state_patch: None,
             attachment_processing_required: true,
         }),
-        attachment_processing_required: true,
         fallback_source: None,
         route_trace_record: route_trace::RouteTraceRecord {
             owner_layer: "normalizer_trace",
