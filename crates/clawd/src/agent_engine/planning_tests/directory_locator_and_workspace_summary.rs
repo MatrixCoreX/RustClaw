@@ -1285,24 +1285,21 @@ fn directory_purpose_reads_representative_found_files_after_extension_inventory(
         finished_at: 0,
     });
 
-    let plan = directory_purpose_representative_reads_after_find_result(
-        "summarize representative toml files",
+    let actions = directory_purpose_representative_read_actions_after_find_result(
         Some(&route),
         &loop_state,
         Some(&root_path),
     )
-    .expect("representative read plan");
+    .expect("representative read actions");
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 5);
+    assert_eq!(actions.len(), 5);
     let expected = [
         cargo_path.canonicalize().unwrap(),
         config_path.canonicalize().unwrap(),
         channel_path.canonicalize().unwrap(),
     ];
     for (idx, expected_path) in expected.iter().enumerate() {
-        let action = plan.steps[idx].to_agent_action().expect("agent action");
-        let args = expect_planned_call(&action, "fs_basic", "read_text_range");
+        let args = expect_planned_call(&actions[idx], "fs_basic", "read_text_range");
         let expected_path = expected_path.display().to_string();
         assert_eq!(
             args.get("path").and_then(Value::as_str),
@@ -1311,16 +1308,16 @@ fn directory_purpose_reads_representative_found_files_after_extension_inventory(
         assert_eq!(args.get("mode").and_then(Value::as_str), Some("head"));
     }
     assert!(matches!(
-        plan.steps.get(3).and_then(|step| step.to_agent_action()),
+        actions.get(3),
         Some(AgentAction::SynthesizeAnswer { evidence_refs })
-            if evidence_refs == vec![
+            if *evidence_refs == vec![
                 "step_1".to_string(),
                 "step_2".to_string(),
                 "step_3".to_string()
             ]
     ));
     assert!(matches!(
-        plan.steps.get(4).and_then(|step| step.to_agent_action()),
+        actions.get(4),
         Some(AgentAction::Respond { content }) if content == "{{last_output}}"
     ));
 }
@@ -1372,32 +1369,32 @@ fn directory_purpose_reads_representative_found_files_from_wrapped_extra() {
         finished_at: 0,
     });
 
-    let plan = directory_purpose_representative_reads_after_find_result(
-        "summarize json schema directory",
+    let actions = directory_purpose_representative_read_actions_after_find_result(
         Some(&route),
         &loop_state,
         Some(&root_path),
     )
-    .expect("representative read plan");
+    .expect("representative read actions");
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 4);
-    let first = plan.steps[0].to_agent_action().expect("first action");
-    let args = expect_planned_call(&first, "fs_basic", "read_text_range");
-    assert!(args
-        .get("path")
-        .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with("intent_normalizer.schema.json")));
-    let second = plan.steps[1].to_agent_action().expect("second action");
-    let args = expect_planned_call(&second, "fs_basic", "read_text_range");
-    assert!(args
-        .get("path")
-        .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with("contract_repair_judge.schema.json")));
+    assert_eq!(actions.len(), 4);
+    let first = actions.get(0).expect("first action");
+    let args = expect_planned_call(first, "fs_basic", "read_text_range");
+    assert!(
+        args.get("path")
+            .and_then(Value::as_str)
+            .is_some_and(|path| path.ends_with("intent_normalizer.schema.json"))
+    );
+    let second = actions.get(1).expect("second action");
+    let args = expect_planned_call(second, "fs_basic", "read_text_range");
+    assert!(
+        args.get("path")
+            .and_then(Value::as_str)
+            .is_some_and(|path| path.ends_with("contract_repair_judge.schema.json"))
+    );
     assert!(matches!(
-        plan.steps.get(2).and_then(|step| step.to_agent_action()),
+        actions.get(2),
         Some(AgentAction::SynthesizeAnswer { evidence_refs })
-            if evidence_refs == vec!["step_1".to_string(), "step_2".to_string()]
+            if *evidence_refs == vec!["step_1".to_string(), "step_2".to_string()]
     ));
 }
 

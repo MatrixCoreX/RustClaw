@@ -167,12 +167,11 @@ pub(super) fn safe_representative_find_result_paths(
 }
 
 #[cfg(test)]
-pub(super) fn directory_purpose_representative_reads_after_find_result(
-    goal: &str,
+pub(super) fn directory_purpose_representative_read_actions_after_find_result(
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
     auto_locator_path: Option<&str>,
-) -> Option<PlanResult> {
+) -> Option<Vec<AgentAction>> {
     let route = route_result?;
     if !loop_state.has_tool_or_skill_output
         || directory_purpose_extension_locator(route).is_none()
@@ -213,12 +212,5 @@ pub(super) fn directory_purpose_representative_reads_after_find_result(
     actions.push(AgentAction::Respond {
         content: "{{last_output}}".to_string(),
     });
-    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
-        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
-    Some(build_plan_result(
-        goal,
-        &raw_plan_text,
-        PlanKind::Single,
-        &actions,
-    ))
+    Some(actions)
 }

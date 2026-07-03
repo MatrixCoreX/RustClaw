@@ -15,7 +15,7 @@ use super::{
     can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
     compact_lightweight_incremental_goal_context, compact_skill_playbook_from_prompt,
     contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
-    directory_purpose_representative_reads_after_find_result, enforce_output_contract_tool_args,
+    directory_purpose_representative_read_actions_after_find_result, enforce_output_contract_tool_args,
     ensure_content_excerpt_summary_has_bounded_content, ensure_required_contract_block_present,
     ensure_workspace_synthesis_has_default_text_evidence, file_facts_auto_locator_observation_plan,
     fill_missing_read_range_path_from_route_locator,
