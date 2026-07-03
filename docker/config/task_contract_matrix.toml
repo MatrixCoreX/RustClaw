@@ -307,6 +307,8 @@ failure_policy = "retry_with_alternatives"
 
 [contracts.photo_organization]
 semantic_kind = "photo_organization"
+migration_status = "transitional_capability_owned_evidence_pending"
+migration_owner = "photo_organize.planner_capabilities"
 operation = "list"
 target_object = "path"
 delivery_shape = "list"
