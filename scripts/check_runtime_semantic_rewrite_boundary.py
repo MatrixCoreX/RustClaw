@@ -149,6 +149,26 @@ POST_ROUTE_BOUNDARY_CANDIDATE_FORBIDDEN_PATTERNS: tuple[
         re.compile(r"\bmatch\s+candidate\s*\{"),
     ),
 )
+POST_ROUTE_BOUNDARY_DEFERRAL_FORBIDDEN_BLOCK_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "post_route_boundary_deferral_direct_candidate_push",
+        re.compile(
+            r"push_pre_loop_clarify_candidate\s*\(\s*pre_loop_clarify_candidates\s*,\s*"
+            r'"(?:auto_locator_scalar_file_without_current_locator|directory_file_delivery_requires_structured_selection)"',
+            re.DOTALL,
+        ),
+    ),
+    (
+        "post_route_boundary_deferral_direct_gate_record",
+        re.compile(
+            r"PostRouteGateRecord::new\s*\(\s*"
+            r'"(?:post_route_auto_locator_scalar_file_deferred_to_agent_loop|post_route_directory_file_delivery_deferred_to_agent_loop)"',
+            re.DOTALL,
+        ),
+    ),
+)
 
 ROUTE_RESULT_RAW_SEMANTIC_ACCESS = re.compile(
     r"\b(?:route|route_result|execution_route_result)\.output_contract\.semantic_kind\b"
@@ -1090,10 +1110,23 @@ def scan_post_route_boundary_candidate_typing_text(
                 "BoundaryClarifyCandidate enum is required for post-route boundary candidates",
             )
         )
+    if "enum BoundaryContractDeferral" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "post_route_boundary_deferral_enum_missing",
+                "BoundaryContractDeferral enum is required for post-route boundary deferrals",
+            )
+        )
     for line_no, line in enumerate(text.splitlines(), start=1):
         for kind, pattern in POST_ROUTE_BOUNDARY_CANDIDATE_FORBIDDEN_PATTERNS:
             if pattern.search(line):
                 findings.append(Finding(rel_path, line_no, kind, line.strip()))
+    for kind, pattern in POST_ROUTE_BOUNDARY_DEFERRAL_FORBIDDEN_BLOCK_PATTERNS:
+        for match in pattern.finditer(text):
+            line_no = text[: match.start()].count("\n") + 1
+            findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
     return findings
 
 
@@ -2686,6 +2719,7 @@ def run_self_test() -> int:
     blocked_post_route_candidate_string = scan_post_route_boundary_candidate_typing_text(
         "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
         "enum BoundaryClarifyCandidate {}\n"
+        "enum BoundaryContractDeferral {}\n"
         'if candidate == "post_route_unresolved_file_delivery_requires_locator" {}\n'
         'match candidate { "x" => "post_route_missing_path_scoped_locator", _ => "" }\n',
     )
@@ -2693,9 +2727,30 @@ def run_self_test() -> int:
         "post_route_boundary_candidate_string_compare",
         "post_route_boundary_candidate_string_match",
     }.issubset({item.kind for item in blocked_post_route_candidate_string})
+    blocked_post_route_deferral_string = scan_post_route_boundary_candidate_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
+        "enum BoundaryClarifyCandidate {}\n"
+        "enum BoundaryContractDeferral {}\n"
+        'push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, "auto_locator_scalar_file_without_current_locator");\n'
+        'PostRouteGateRecord::new("post_route_directory_file_delivery_deferred_to_agent_loop", outcome);\n',
+    )
+    assert {
+        "post_route_boundary_deferral_direct_candidate_push",
+        "post_route_boundary_deferral_direct_gate_record",
+    }.issubset({item.kind for item in blocked_post_route_deferral_string})
+    missing_post_route_deferral_enum = scan_post_route_boundary_candidate_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
+        "enum BoundaryClarifyCandidate {}\n",
+    )
+    assert (
+        missing_post_route_deferral_enum
+        and missing_post_route_deferral_enum[0].kind
+        == "post_route_boundary_deferral_enum_missing"
+    )
     assert not scan_post_route_boundary_candidate_typing_text(
         "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
         "enum BoundaryClarifyCandidate {}\n"
+        "enum BoundaryContractDeferral {}\n"
         "impl BoundaryClarifyCandidate { fn observation_token(self) -> &'static str { \"post_route_missing_path_scoped_locator\" } }\n",
     )
     assert not scan_post_route_boundary_candidate_typing()
