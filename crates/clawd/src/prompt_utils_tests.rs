@@ -1,18 +1,29 @@
 use serde_json::{json, Value};
 
 #[test]
-fn validate_against_schema_rejects_unknown_intent_decision() {
+fn validate_against_schema_drops_legacy_intent_decision_extra() {
     let raw = r#"{
         "resolved_user_intent":"check logs",
         "decision":"oops_status",
         "needs_clarify":false,
         "reason":"r",
-        "confidence":0.9
+        "confidence":0.9,
+        "output_contract":{
+            "response_shape":"free",
+            "requires_content_evidence":false,
+            "delivery_required":false,
+            "locator_kind":"none",
+            "delivery_intent":"none",
+            "contract_marker":"none",
+            "locator_hint":"",
+            "self_extension":{"mode":"none","trigger":"none","execute_now":false}
+        }
     }"#;
-    let err = super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
-        .expect_err("unknown decision should fail schema validation");
-    assert!(err.to_string().contains("$.decision"));
-    assert!(err.to_string().contains("oops_status"));
+    let validated =
+        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
+            .expect("legacy decision field should be dropped during boundary canonicalization");
+    assert!(validated.schema_normalized);
+    assert!(validated.value.get("decision").is_none());
 }
 
 #[test]
@@ -340,6 +351,10 @@ fn validate_against_schema_normalizes_contract_repair_judge_payload_noise() {
             .expect("contract repair judge output should tolerate harmless model noise");
 
     assert!(validated.schema_normalized);
+    assert_eq!(
+        validated.value.get("decision").and_then(Value::as_str),
+        Some("")
+    );
     assert!(validated.value.get("agent_display_name_hint").is_none());
     assert_eq!(
         validated.value.get("repair_target").and_then(Value::as_str),

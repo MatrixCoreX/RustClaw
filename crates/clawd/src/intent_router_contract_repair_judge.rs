@@ -29,7 +29,7 @@ pub(super) struct ContractRepairJudgeOut {
     pub(super) repair_target: String,
     #[serde(default)]
     pub(super) confidence: f64,
-    /// Compatibility field accepted by the prompt schema.
+    /// Empty compatibility field accepted by the prompt schema.
     ///
     /// Repair authority comes from `needs_clarify`, `output_contract`, execution
     /// recipe, and machine markers; this field must not drive runtime routing.
