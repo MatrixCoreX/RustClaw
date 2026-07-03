@@ -25,6 +25,7 @@ PREFERRED_STRUCTURED_ACTION_FILE = SRC_ROOT / "agent_engine/preferred_structured
 MIGRATION_CLASS_FILE = SRC_ROOT / "agent_engine/migration_class.rs"
 ASK_PREPARE_FILE = SRC_ROOT / "worker/ask_prepare.rs"
 ASK_PIPELINE_FILE = SRC_ROOT / "worker/ask_pipeline.rs"
+ASK_PIPELINE_CONTRACT_REPAIR_FILE = SRC_ROOT / "worker/ask_pipeline_contract_repair.rs"
 TASK_JOURNAL_EVIDENCE_COVERAGE_FILE = SRC_ROOT / "task_journal_evidence_coverage.rs"
 TASK_JOURNAL_FILE = SRC_ROOT / "task_journal.rs"
 INTENT_ROUTER_OBSERVATION_REPAIR_FILE = SRC_ROOT / "intent_router_observation_repair.rs"
@@ -96,6 +97,40 @@ FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "post_route_semantic_clarify_deferred",
         re.compile(r"\bpost_route_semantic_clarify_deferred_to_agent_loop\b"),
+    ),
+)
+
+CONTRACT_REPAIR_LOOP_OBSERVATION_FORBIDDEN_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "contract_repair_mutable_route_result_param",
+        re.compile(r"\broute_result\s*:\s*&mut\s+(?:crate::)?RouteResult\b"),
+    ),
+    (
+        "contract_repair_mutable_route_result_binding",
+        re.compile(r"\bmut\s+route_result\b"),
+    ),
+    (
+        "contract_repair_route_result_field_assignment",
+        re.compile(
+            r"\broute_result\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?\s*="
+        ),
+    ),
+    (
+        "contract_repair_route_result_field_mutation_call",
+        re.compile(
+            r"\broute_result\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?"
+            r"\.(?:push|push_str|clear|truncate|extend|insert|remove)\s*\("
+        ),
+    ),
+    (
+        "contract_repair_route_gate_mutation",
+        re.compile(r"\b(?:route_result\.)?set_(?:clarify|chat|execute)_gate\s*\("),
+    ),
+    (
+        "contract_repair_route_reason_mutation_helper",
+        re.compile(r"\b(?:append|push|set)_route_reason(?:_marker)?\s*\("),
     ),
 )
 
@@ -385,6 +420,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_journal_output_contract_ref_boundary())
     findings.extend(scan_static_capability_compat_boundary())
     findings.extend(scan_contract_repair_judge_boundary())
+    findings.extend(scan_contract_repair_loop_observation_boundary())
     findings.extend(scan_prompt_layer_ordinary_semantic_tokens())
     findings.extend(scan_planner_prompt_legacy_semantic_kind_keys())
     findings.extend(scan_intent_normalizer_prompt_contract_marker())
@@ -994,6 +1030,25 @@ def scan_schema_text(rel_path: str, text: str) -> list[Finding]:
                     line.strip(),
                 )
             )
+    return findings
+
+
+def scan_contract_repair_loop_observation_boundary() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_CONTRACT_REPAIR_FILE)
+    return scan_contract_repair_loop_observation_boundary_text(
+        rel_path,
+        ASK_PIPELINE_CONTRACT_REPAIR_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_contract_repair_loop_observation_boundary_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for kind, pattern in CONTRACT_REPAIR_LOOP_OBSERVATION_FORBIDDEN_PATTERNS:
+            if pattern.search(line):
+                findings.append(Finding(rel_path, line_no, kind, line.strip()))
     return findings
 
 
@@ -2565,6 +2620,24 @@ def run_self_test() -> int:
         and blocked_runtime_repair_switch[0].kind
         == "contract_repair_judge_boundary_missing"
     )
+    contract_repair_route_mutation = scan_contract_repair_loop_observation_boundary_text(
+        "crates/clawd/src/worker/ask_pipeline_contract_repair.rs",
+        "fn f(route_result: &mut crate::RouteResult) {}\n"
+        "route_result.output_contract.semantic_kind = OutputSemanticKind::None;\n"
+        "route_result.route_reason.push_str(\";contract_repair\");\n"
+        "route_result.set_clarify_gate();\n",
+    )
+    assert {
+        "contract_repair_mutable_route_result_param",
+        "contract_repair_route_result_field_assignment",
+        "contract_repair_route_result_field_mutation_call",
+        "contract_repair_route_gate_mutation",
+    }.issubset({item.kind for item in contract_repair_route_mutation})
+    assert not scan_contract_repair_loop_observation_boundary_text(
+        "crates/clawd/src/worker/ask_pipeline_contract_repair.rs",
+        'json!({ "source": "contract_repair", "contract_ref": contract_ref })',
+    )
+    assert not scan_contract_repair_loop_observation_boundary()
     blocked_prompt = scan_prompt_layer_text(
         "prompts/layers/overlays/intent_normalizer_prompt.md",
         "`weather_query`\n",
