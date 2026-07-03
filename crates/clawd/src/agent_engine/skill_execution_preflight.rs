@@ -1008,7 +1008,7 @@ fn contract_policy_retry_instruction(
     parts.push(format!("policy_decision={policy_decision}"));
     let preferred = structured_error_extra_string_list(structured, "preferred_actions");
     if !preferred.is_empty() {
-        parts.push(format!("preferred_actions={}", preferred.join("|")));
+        parts.push(format!("preferred_action_refs={}", preferred.join("|")));
     }
     let expected_targets = structured_error_extra_string_list(structured, "expected_target_args");
     if !expected_targets.is_empty() {
