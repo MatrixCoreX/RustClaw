@@ -32,7 +32,7 @@ fn prepared_flow_with_context() -> PreparedAskFlow {
         execution_recipe_plan_hint: None,
         turn_analysis: None,
         boundary_envelope: Some(crate::intent_router::BoundaryEnvelope {
-            raw_user_request: "raw user request".to_string(),
+            raw_chars: "raw user request".chars().count(),
             explicit_locators: vec!["README.md".to_string()],
             ..Default::default()
         }),

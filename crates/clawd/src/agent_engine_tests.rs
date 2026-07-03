@@ -616,7 +616,7 @@ fn turn_analysis_prompt_block_includes_contract_matrix_for_structured_route() {
     };
 
     let boundary_envelope = crate::intent_router::BoundaryEnvelope {
-        raw_user_request: "list private project notes".to_string(),
+        raw_chars: "list private project notes".chars().count(),
         explicit_locators: vec!["notes.md".to_string()],
         session_binding: Some("resume_execute".to_string()),
         ..Default::default()
