@@ -8,6 +8,75 @@ pub(super) fn generated_file_delivery_uses_runtime_target(
         )
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FileDeliveryBoundaryDeferral {
+    UnresolvedMissingLocator,
+    CurrentRequestLocator,
+}
+
+impl FileDeliveryBoundaryDeferral {
+    fn owner_layer(self) -> &'static str {
+        match self {
+            Self::UnresolvedMissingLocator => "agent_loop_boundary_defer",
+            Self::CurrentRequestLocator => "boundary_delivery_gate",
+        }
+    }
+
+    fn gate_reason_code(self) -> &'static str {
+        match self {
+            Self::UnresolvedMissingLocator => {
+                "post_route_unresolved_file_delivery_deferred_to_agent_loop"
+            }
+            Self::CurrentRequestLocator => {
+                "post_route_file_delivery_current_request_locator_deferred_to_loop"
+            }
+        }
+    }
+
+    fn route_reason(self) -> &'static str {
+        match self {
+            Self::UnresolvedMissingLocator => "unresolved_file_delivery_deferred_to_agent_loop",
+            Self::CurrentRequestLocator => "file_delivery_current_request_locator_deferred_to_loop",
+        }
+    }
+
+    fn apply(self, post_route: &mut crate::post_route_policy::PostRoutePolicyResult) {
+        post_route.execution_route_result.needs_clarify = false;
+        post_route.execution_route_result.clarify_question.clear();
+        post_route
+            .execution_route_result
+            .set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+        post_route.execution_route_result.wants_file_delivery = true;
+        post_route
+            .execution_route_result
+            .output_contract
+            .delivery_required = true;
+        post_route
+            .execution_route_result
+            .output_contract
+            .delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        post_route
+            .execution_route_result
+            .output_contract
+            .response_shape = crate::OutputResponseShape::FileToken;
+        post_route
+            .execution_route_result
+            .output_contract
+            .requires_content_evidence = true;
+        post_route.missing_locator_for_path_scoped_content = true;
+        if matches!(self, Self::CurrentRequestLocator) {
+            post_route.clarify_reason_kind =
+                crate::post_route_policy::ClarifyReasonKind::RouteReasonText;
+        }
+        post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::with_owner(
+            self.owner_layer(),
+            self.gate_reason_code(),
+            crate::post_route_policy::PostRoutePolicyOutcome::RefineContract,
+        );
+        super::append_route_reason(&mut post_route.execution_route_result, self.route_reason());
+    }
+}
+
 pub(super) fn reject_direct_file_delivery_workspace_root_locator(
     state: &crate::AppState,
     recent_execution_context: &str,
@@ -76,74 +145,11 @@ pub(super) fn refine_unresolved_file_delivery_boundary_contract(
             crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
         )
     }) else {
-        post_route.execution_route_result.needs_clarify = false;
-        post_route.execution_route_result.clarify_question.clear();
-        post_route
-            .execution_route_result
-            .set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
-        post_route.execution_route_result.wants_file_delivery = true;
-        post_route
-            .execution_route_result
-            .output_contract
-            .delivery_required = true;
-        post_route
-            .execution_route_result
-            .output_contract
-            .delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-        post_route
-            .execution_route_result
-            .output_contract
-            .response_shape = crate::OutputResponseShape::FileToken;
-        post_route
-            .execution_route_result
-            .output_contract
-            .requires_content_evidence = true;
-        post_route.missing_locator_for_path_scoped_content = true;
-        post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::with_owner(
-            "agent_loop_boundary_defer",
-            "post_route_unresolved_file_delivery_deferred_to_agent_loop",
-            crate::post_route_policy::PostRoutePolicyOutcome::RefineContract,
-        );
-        super::append_route_reason(
-            &mut post_route.execution_route_result,
-            "unresolved_file_delivery_deferred_to_agent_loop",
-        );
+        FileDeliveryBoundaryDeferral::UnresolvedMissingLocator.apply(post_route);
         return true;
     };
 
-    post_route.execution_route_result.needs_clarify = false;
-    post_route.execution_route_result.clarify_question.clear();
-    post_route
-        .execution_route_result
-        .set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
-    post_route.execution_route_result.wants_file_delivery = true;
-    post_route
-        .execution_route_result
-        .output_contract
-        .delivery_required = true;
-    post_route
-        .execution_route_result
-        .output_contract
-        .delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    post_route
-        .execution_route_result
-        .output_contract
-        .response_shape = crate::OutputResponseShape::FileToken;
-    post_route
-        .execution_route_result
-        .output_contract
-        .requires_content_evidence = true;
-    post_route.missing_locator_for_path_scoped_content = true;
-    post_route.clarify_reason_kind = crate::post_route_policy::ClarifyReasonKind::RouteReasonText;
-    post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::with_owner(
-        "boundary_delivery_gate",
-        "post_route_file_delivery_current_request_locator_deferred_to_loop",
-        crate::post_route_policy::PostRoutePolicyOutcome::RefineContract,
-    );
-    super::append_route_reason(
-        &mut post_route.execution_route_result,
-        "file_delivery_current_request_locator_deferred_to_loop",
-    );
+    FileDeliveryBoundaryDeferral::CurrentRequestLocator.apply(post_route);
     true
 }
 
