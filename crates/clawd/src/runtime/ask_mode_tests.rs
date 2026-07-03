@@ -215,21 +215,21 @@ fn gate_kind_maps_to_three_gates() {
 }
 
 #[test]
-fn route_trace_decision_for_legacy_journal_maps_to_three_decisions() {
+fn route_trace_decision_for_journal_maps_to_three_decisions() {
     assert_eq!(
-        AskMode::direct_answer().route_trace_decision_for_legacy_journal(),
+        AskMode::direct_answer().route_trace_decision_for_journal(),
         FirstLayerDecision::DirectAnswer
     );
     assert_eq!(
-        AskMode::clarify().route_trace_decision_for_legacy_journal(),
+        AskMode::clarify().route_trace_decision_for_journal(),
         FirstLayerDecision::Clarify
     );
     assert_eq!(
-        AskMode::planner_execute_plain().route_trace_decision_for_legacy_journal(),
+        AskMode::planner_execute_plain().route_trace_decision_for_journal(),
         FirstLayerDecision::PlannerExecute
     );
     assert_eq!(
-        AskMode::planner_execute_with_chat_finalizer().route_trace_decision_for_legacy_journal(),
+        AskMode::planner_execute_with_chat_finalizer().route_trace_decision_for_journal(),
         FirstLayerDecision::PlannerExecute
     );
 }

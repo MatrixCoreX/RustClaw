@@ -113,7 +113,7 @@ impl AskMode {
         }
     }
 
-    pub(crate) fn route_trace_decision_for_legacy_journal(&self) -> FirstLayerDecision {
+    pub(crate) fn route_trace_decision_for_journal(&self) -> FirstLayerDecision {
         match self {
             #[cfg(test)]
             AskMode::ClarifyOrChat {

@@ -505,8 +505,8 @@ impl RouteResult {
         self.set_ask_mode(AskMode::Act { finalize });
     }
 
-    pub(crate) fn route_trace_decision_for_legacy_journal(&self) -> FirstLayerDecision {
-        self.ask_mode.route_trace_decision_for_legacy_journal()
+    pub(crate) fn route_trace_decision_for_journal(&self) -> FirstLayerDecision {
+        self.ask_mode.route_trace_decision_for_journal()
     }
 
     pub(crate) fn gate_kind(&self) -> crate::RouteGateKind {
