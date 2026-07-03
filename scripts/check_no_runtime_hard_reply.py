@@ -80,7 +80,7 @@ def looks_machine_literal(value: str) -> bool:
         return True
     if "/" in value or "\\" in value:
         return True
-    if value.startswith(("__RC_", "clawd.", "agent.", "semantic:", "schema:")):
+    if value.startswith(("__RC_", "clawd.", "agent.", "contract_marker:", "schema:")):
         return True
     if re.fullmatch(r"### [A-Z0-9_]+", value):
         return True
