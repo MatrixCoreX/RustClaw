@@ -325,6 +325,44 @@ pub(super) fn normalize_path_batch_facts_args(obj: &mut serde_json::Map<String, 
     }
 }
 
+fn normalize_compare_paths_args(obj: &mut serde_json::Map<String, Value>) {
+    if !obj.contains_key("left_path") {
+        if let Some(value) = obj
+            .remove("path1")
+            .or_else(|| obj.remove("path_a"))
+            .or_else(|| obj.remove("left"))
+            .or_else(|| obj.remove("source_path"))
+            .or_else(|| obj.remove("first_path"))
+        {
+            obj.insert("left_path".to_string(), value);
+        }
+    }
+    if !obj.contains_key("right_path") {
+        if let Some(value) = obj
+            .remove("path2")
+            .or_else(|| obj.remove("path_b"))
+            .or_else(|| obj.remove("right"))
+            .or_else(|| obj.remove("target_path"))
+            .or_else(|| obj.remove("second_path"))
+        {
+            obj.insert("right_path".to_string(), value);
+        }
+    }
+    if obj.contains_key("left_path") && obj.contains_key("right_path") {
+        return;
+    }
+    let paths = string_list_from_value(obj.get("paths"))
+        .into_iter()
+        .chain(string_list_from_value(obj.get("targets")))
+        .collect::<Vec<_>>();
+    if paths.len() >= 2 {
+        obj.entry("left_path".to_string())
+            .or_insert_with(|| Value::String(paths[0].clone()));
+        obj.entry("right_path".to_string())
+            .or_insert_with(|| Value::String(paths[1].clone()));
+    }
+}
+
 pub(super) fn normalize_system_basic_args(mut args: Value) -> Value {
     let Some(obj) = args.as_object_mut() else {
         return args;
@@ -424,42 +462,7 @@ pub(super) fn normalize_system_basic_args(mut args: Value) -> Value {
             }
         }
         "compare_paths" => {
-            if obj.contains_key("left_path") && obj.contains_key("right_path") {
-                return args;
-            }
-            if !obj.contains_key("left_path") {
-                if let Some(value) = obj
-                    .remove("path1")
-                    .or_else(|| obj.remove("left"))
-                    .or_else(|| obj.remove("source_path"))
-                    .or_else(|| obj.remove("first_path"))
-                {
-                    obj.insert("left_path".to_string(), value);
-                }
-            }
-            if !obj.contains_key("right_path") {
-                if let Some(value) = obj
-                    .remove("path2")
-                    .or_else(|| obj.remove("right"))
-                    .or_else(|| obj.remove("target_path"))
-                    .or_else(|| obj.remove("second_path"))
-                {
-                    obj.insert("right_path".to_string(), value);
-                }
-            }
-            if obj.contains_key("left_path") && obj.contains_key("right_path") {
-                return args;
-            }
-            let paths = string_list_from_value(obj.get("paths"))
-                .into_iter()
-                .chain(string_list_from_value(obj.get("targets")))
-                .collect::<Vec<_>>();
-            if paths.len() >= 2 {
-                obj.entry("left_path".to_string())
-                    .or_insert_with(|| Value::String(paths[0].clone()));
-                obj.entry("right_path".to_string())
-                    .or_insert_with(|| Value::String(paths[1].clone()));
-            }
+            normalize_compare_paths_args(obj);
         }
         _ => {}
     }
@@ -501,6 +504,9 @@ pub(super) fn normalize_fs_basic_args_for_planner(mut args: Value) -> Value {
                     .or_insert(Value::Bool(true));
             }
             normalize_arg_alias(obj, "max_results", &["max_matches", "limit"]);
+        }
+        "compare_paths" => {
+            normalize_compare_paths_args(obj);
         }
         _ => {}
     }
@@ -649,8 +655,7 @@ pub(super) fn recent_scalar_current_workspace_deterministic_plan_result(
         || route.needs_clarify
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind
-            != crate::OutputSemanticKind::RecentScalarEqualityCheck
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
         || route.output_contract.locator_kind != crate::OutputLocatorKind::CurrentWorkspace
         || !git_basic_available_for_plan(state)
     {
@@ -703,8 +708,7 @@ pub(super) fn recent_scalar_file_pair_deterministic_plan_result(
         || route.needs_clarify
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind
-            != crate::OutputSemanticKind::RecentScalarEqualityCheck
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
     {
         return None;
     }
@@ -830,140 +834,6 @@ pub(super) fn recent_scalar_file_pair_deterministic_plan_result(
         PlanKind::Single,
         &actions,
     ))
-}
-
-#[cfg(test)]
-pub(super) fn structured_scalar_field_auto_locator_deterministic_plan_result(
-    state: &AppState,
-    goal: &str,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-    user_text: &str,
-    original_user_text: Option<&str>,
-    auto_locator_path: Option<&str>,
-) -> Option<PlanResult> {
-    let route = route_result?;
-    if loop_state.round_no > 1
-        || loop_state.has_tool_or_skill_output
-        || route.needs_clarify
-        || !route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ContentExcerptSummary
-    {
-        return None;
-    }
-
-    let action = structured_scalar_field_auto_locator_action(
-        state,
-        route,
-        user_text,
-        original_user_text,
-        auto_locator_path,
-    )?;
-    let Some((skill, args)) = planned_call_subject_and_args(&action) else {
-        return None;
-    };
-    if !crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), skill, args)
-        .is_some_and(|policy| policy.is_allowed())
-    {
-        return None;
-    }
-
-    let mut actions = vec![action];
-    if !matches!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
-    ) {
-        actions.push(AgentAction::SynthesizeAnswer {
-            evidence_refs: vec!["last_output".to_string()],
-        });
-        actions.push(AgentAction::Respond {
-            content: "{{last_output}}".to_string(),
-        });
-    }
-    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
-        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
-    Some(build_plan_result(
-        goal,
-        &raw_plan_text,
-        PlanKind::Single,
-        &actions,
-    ))
-}
-
-#[cfg(test)]
-fn structured_scalar_field_auto_locator_action(
-    state: &AppState,
-    route: &RouteResult,
-    user_text: &str,
-    original_user_text: Option<&str>,
-    auto_locator_path: Option<&str>,
-) -> Option<AgentAction> {
-    let paths = structured_scalar_field_auto_locator_target_paths(state, route, auto_locator_path);
-    for path in paths {
-        for source in [Some(user_text), original_user_text].into_iter().flatten() {
-            if let Some(action) =
-                structured_scalar_read_action_for_target(state, route, source, path.as_str())
-            {
-                return Some(action);
-            }
-        }
-    }
-    None
-}
-
-#[cfg(test)]
-fn structured_scalar_field_auto_locator_target_paths(
-    state: &AppState,
-    route: &RouteResult,
-    auto_locator_path: Option<&str>,
-) -> Vec<String> {
-    let mut candidates = Vec::new();
-    push_structured_scalar_path_candidate(&mut candidates, auto_locator_path);
-    let route_locator_path = route_locator_structured_config_path(route);
-    push_structured_scalar_path_candidate(&mut candidates, route_locator_path.as_deref());
-    push_structured_scalar_path_candidate(
-        &mut candidates,
-        Some(route.output_contract.locator_hint.as_str()),
-    );
-    for target in route_locator_targets(route) {
-        push_structured_scalar_path_candidate(&mut candidates, Some(target.as_str()));
-    }
-
-    let mut resolved = Vec::new();
-    for candidate in candidates {
-        let Some(path) =
-            resolve_existing_metadata_locator_path(&state.skill_rt.workspace_root, &candidate)
-        else {
-            continue;
-        };
-        if !path_has_structured_document_extension(&path) || !Path::new(&path).is_file() {
-            continue;
-        }
-        if !resolved
-            .iter()
-            .any(|existing: &String| existing.eq_ignore_ascii_case(&path))
-        {
-            resolved.push(path);
-        }
-    }
-    resolved
-}
-
-#[cfg(test)]
-fn push_structured_scalar_path_candidate(out: &mut Vec<String>, candidate: Option<&str>) {
-    let Some(candidate) = candidate.map(str::trim).filter(|value| !value.is_empty()) else {
-        return;
-    };
-    if !path_has_structured_document_extension(candidate) {
-        return;
-    }
-    if !out
-        .iter()
-        .any(|existing: &String| existing.eq_ignore_ascii_case(candidate))
-    {
-        out.push(candidate.to_string());
-    }
 }
 
 pub(super) fn structured_scalar_read_action_for_target(
