@@ -808,40 +808,6 @@ fn route_requests_config_validation(route: &RouteResult) -> bool {
 }
 
 #[cfg(test)]
-pub(super) fn scalar_content_auto_locator_deterministic_plan_result(
-    state: &AppState,
-    goal: &str,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-    user_text: &str,
-    original_user_text: Option<&str>,
-    auto_locator_path: Option<&str>,
-) -> Option<PlanResult> {
-    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
-        return None;
-    }
-    let actions = scalar_content_auto_locator_observation_plan(route_result, auto_locator_path)?;
-    let actions = normalize_planned_actions_with_original_and_context(
-        state,
-        route_result,
-        loop_state,
-        user_text,
-        original_user_text,
-        Some(goal),
-        auto_locator_path,
-        actions,
-    );
-    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
-        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
-    Some(build_plan_result(
-        goal,
-        &raw_plan_text,
-        PlanKind::Single,
-        &actions,
-    ))
-}
-
-#[cfg(test)]
 pub(super) fn file_facts_auto_locator_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,

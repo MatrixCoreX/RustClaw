@@ -423,7 +423,7 @@ pub(super) fn ensure_content_excerpt_summary_has_bounded_content(
     auto_locator_path: Option<&str>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
-    if loop_state.has_tool_or_skill_output {
+    if actions.is_empty() || loop_state.has_tool_or_skill_output {
         return actions;
     }
     let Some(path) = content_excerpt_summary_target_path(route_result, auto_locator_path) else {
