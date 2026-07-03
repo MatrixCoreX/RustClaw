@@ -170,6 +170,43 @@ fn task_language_source_prefers_original_payload_text_over_runtime_scaffold() {
 }
 
 #[test]
+fn task_language_source_keeps_user_text_that_mentions_runtime_scaffold_marker() {
+    let task = crate::ClaimedTask {
+        task_id: "task-language-scaffold-mention".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"placeholder"}).to_string(),
+    };
+    let current = "请解释字符串 Current task: 在日志里通常代表什么";
+    assert_eq!(task_language_source_text(&task, current).as_ref(), current);
+}
+
+#[test]
+fn task_language_source_treats_task_merge_frame_as_runtime_scaffold() {
+    let task = crate::ClaimedTask {
+        task_id: "task-language-task-merge-frame".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"继续完善这份计划"}).to_string(),
+    };
+    let scaffolded = "Current task: continue plan\nStructured task updates: add rollout notes";
+    assert_eq!(
+        task_language_source_text(&task, scaffolded).as_ref(),
+        "继续完善这份计划"
+    );
+}
+
+#[test]
 fn task_language_source_prefers_explicit_current_text_over_placeholder_payload() {
     let task = crate::ClaimedTask {
         task_id: "task-language-current-text".to_string(),
