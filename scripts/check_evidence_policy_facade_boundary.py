@@ -35,6 +35,13 @@ FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "direct_task_contract_use",
         re.compile(r"\buse\s+(?:crate::|super::)*task_contract(?:\s*::|\s*;)"),
     ),
+    (
+        "contract_matrix_execution_helper_name",
+        re.compile(
+            r"\b(?:synthesize|build|append|select|resolve)"
+            r"_[a-z0-9_]*contract_matrix[a-z0-9_]*\b"
+        ),
+    ),
 )
 
 BACKING_FILES = {
@@ -100,6 +107,12 @@ def run_self_test() -> int:
     assert FORBIDDEN_PATTERNS[1][1].search("use crate::contract_matrix::FinalAnswerShape;")
     assert FORBIDDEN_PATTERNS[2][1].search("crate::task_contract::target_locators_for_route")
     assert FORBIDDEN_PATTERNS[3][1].search("use crate::task_contract;")
+    assert FORBIDDEN_PATTERNS[4][1].search(
+        "synthesize_contract_matrix_direct_observed_fallback_answer"
+    )
+    assert not FORBIDDEN_PATTERNS[4][1].search(
+        "synthesize_evidence_policy_direct_observed_fallback_answer"
+    )
     assert not FORBIDDEN_PATTERNS[0][1].search("crate::evidence_policy::final_answer_shape_for_route")
     assert not FORBIDDEN_PATTERNS[2][1].search("crate::evidence_policy::target_locators_for_route")
     print("SELF_TEST_OK")
