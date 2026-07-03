@@ -811,34 +811,31 @@ fn existence_with_path_filename_deterministic_plan_uses_name_search() {
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "start-all-bin.sh".to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = existence_with_path_locator_deterministic_plan_result(
-        "find the file in the current repository",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
+        "find the file in the current repository",
+        Some("find start-all-bin.sh in the current repository"),
         None,
-        "find start-all-bin.sh in the current repository",
-    )
-    .expect("existence-with-path filename route should use a bounded search");
+        "fs_basic",
+        "find_entries",
+        json!({
+            "action": "find_entries",
+            "pattern": "start-all-bin.sh",
+            "target_kind": "any",
+            "max_results": 50,
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("find_entries")
-            );
-            assert_eq!(
-                args.get("pattern").and_then(Value::as_str),
-                Some("start-all-bin.sh")
-            );
-        }
-        other => panic!("expected fs_basic find_entries action, got {other:?}"),
-    }
+    assert_eq!(
+        args.get("pattern").and_then(Value::as_str),
+        Some("start-all-bin.sh")
+    );
 }
 
 #[test]
@@ -849,6 +846,7 @@ fn existence_with_path_directory_locator_uses_child_selector_search() {
     fs::write(locator.join("abcd_report.md"), "").expect("write report");
     fs::write(locator.join("my_abcd.txt"), "").expect("write text");
     fs::write(locator.join("x_abcd_log.txt"), "").expect("write log");
+    let locator_path = locator.display().to_string();
 
     let mut route = route_result(
         crate::AskMode::planner_execute_plain(),
@@ -859,34 +857,31 @@ fn existence_with_path_directory_locator_uses_child_selector_search() {
         "在目录 locator_smart/fuzzy_top3 中查找名称为 abcd 的文件或目录".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = locator.display().to_string();
+    route.output_contract.locator_hint = locator_path.clone();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = existence_with_path_locator_deterministic_plan_result(
-        "find a child selector under an existing directory",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
-        Some(&locator.display().to_string()),
-        "去 locator_smart/fuzzy_top3 找 abcd",
-    )
-    .expect("existing directory route should search for the structural child selector");
+        "find a child selector under an existing directory",
+        Some(&locator_path),
+        Some(&locator_path),
+        "fs_basic",
+        "find_entries",
+        json!({
+            "action": "find_entries",
+            "root": locator_path.clone(),
+            "pattern": "abcd",
+            "target_kind": "any",
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("find_entries")
-            );
-            assert_eq!(args.get("pattern").and_then(Value::as_str), Some("abcd"));
-            assert_eq!(args.get("target_kind").and_then(Value::as_str), Some("any"));
-        }
-        other => panic!("expected fs_basic find_entries action, got {other:?}"),
-    }
+    assert_eq!(args.get("pattern").and_then(Value::as_str), Some("abcd"));
+    assert_eq!(args.get("target_kind").and_then(Value::as_str), Some("any"));
 }
 
 #[test]
@@ -903,34 +898,29 @@ fn existence_with_path_multi_file_targets_deterministic_plan_uses_path_batch_fac
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "/home/guagua/rustclaw".to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.stat_paths".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = existence_with_path_locator_deterministic_plan_result(
-        "check several explicit files",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
+        "check several explicit files",
+        Some("check several explicit files"),
         Some("/home/guagua/rustclaw"),
-        "检查 README.md、AGENTS.md、Cargo.toml 是否都存在，只用一行回答每个文件的存在状态",
-    )
-    .expect("multi-file existence route should use path facts");
+        "fs_basic",
+        "stat_paths",
+        json!({
+            "action": "stat_paths",
+            "paths": ["README.md", "AGENTS.md", "Cargo.toml"],
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("stat_paths")
-            );
-            assert_eq!(
-                args.get("paths"),
-                Some(&json!(["README.md", "AGENTS.md", "Cargo.toml"]))
-            );
-        }
-        other => panic!("expected fs_basic stat_paths action, got {other:?}"),
-    }
+    assert_eq!(
+        args.get("paths"),
+        Some(&json!(["README.md", "AGENTS.md", "Cargo.toml"]))
+    );
 }
 
 #[test]
@@ -945,38 +935,36 @@ fn existence_with_path_multi_file_targets_preserve_relative_path_segments() {
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "/home/guagua/rustclaw".to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.stat_paths".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
     let user_text = "Inspecte ces chemins: scripts/nl_tests/fixtures/device_local/package.json et scripts/nl_tests/fixtures/device_local/nope.json; indique existence et type.";
 
-    let plan = existence_with_path_locator_deterministic_plan_result(
-        "check several explicit relative fixture paths",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
+        "check several explicit relative fixture paths",
+        Some(user_text),
         Some("/home/guagua/rustclaw"),
-        user_text,
-    )
-    .expect("multi-path existence route should preserve explicit relative paths");
+        "fs_basic",
+        "stat_paths",
+        json!({
+            "action": "stat_paths",
+            "paths": [
+                "scripts/nl_tests/fixtures/device_local/package.json",
+                "scripts/nl_tests/fixtures/device_local/nope.json"
+            ],
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("stat_paths")
-            );
-            assert_eq!(
-                args.get("paths"),
-                Some(&json!([
-                    "scripts/nl_tests/fixtures/device_local/package.json",
-                    "scripts/nl_tests/fixtures/device_local/nope.json"
-                ]))
-            );
-        }
-        other => panic!("expected fs_basic stat_paths action, got {other:?}"),
-    }
+    assert_eq!(
+        args.get("paths"),
+        Some(&json!([
+            "scripts/nl_tests/fixtures/device_local/package.json",
+            "scripts/nl_tests/fixtures/device_local/nope.json"
+        ]))
+    );
 }
 
 #[test]
@@ -992,31 +980,26 @@ fn existence_with_path_current_workspace_single_file_target_uses_path_batch_fact
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "/home/guagua/rustclaw".to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.stat_paths".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = existence_with_path_locator_deterministic_plan_result(
-        "check one explicit file in current workspace",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
+        "check one explicit file in current workspace",
+        Some("Check if README.md exists in the current directory and answer with the path"),
         Some("/home/guagua/rustclaw"),
-        "Check if README.md exists in the current directory and answer with the path",
-    )
-    .expect("single-file current-workspace existence route should use path facts");
+        "fs_basic",
+        "stat_paths",
+        json!({
+            "action": "stat_paths",
+            "paths": ["README.md"],
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("stat_paths")
-            );
-            assert_eq!(args.get("paths"), Some(&json!(["README.md"])));
-        }
-        other => panic!("expected fs_basic stat_paths action, got {other:?}"),
-    }
+    assert_eq!(args.get("paths"), Some(&json!(["README.md"])));
 }
 
 #[test]
@@ -1033,35 +1016,31 @@ fn missing_existing_file_delivery_uses_find_name_probe() {
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.wants_file_delivery = true;
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = existence_with_path_locator_deterministic_plan_result(
-        "deliver an existing file if present",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
+        "deliver an existing file if present",
+        Some("把 definitely_missing_named_file_route_cleanup_001.txt 发给我"),
         None,
-        "把 definitely_missing_named_file_route_cleanup_001.txt 发给我",
-    )
-    .expect("file delivery existence route should probe the named target");
+        "fs_basic",
+        "find_entries",
+        json!({
+            "action": "find_entries",
+            "root": ".",
+            "pattern": "definitely_missing_named_file_route_cleanup_001.txt",
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("find_entries")
-            );
-            assert_eq!(
-                args.get("pattern").and_then(Value::as_str),
-                Some("definitely_missing_named_file_route_cleanup_001.txt")
-            );
-            assert_eq!(args.get("root").and_then(Value::as_str), Some("."));
-        }
-        other => panic!("expected fs_basic find_entries action, got {other:?}"),
-    }
+    assert_eq!(
+        args.get("pattern").and_then(Value::as_str),
+        Some("definitely_missing_named_file_route_cleanup_001.txt")
+    );
+    assert_eq!(args.get("root").and_then(Value::as_str), Some("."));
 }
 
 #[test]
@@ -1078,42 +1057,29 @@ fn generated_file_delivery_without_state_patch_uses_existing_file_probe() {
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.wants_file_delivery = true;
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
-    let analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
-        should_interrupt_active_run: false,
-        state_patch: None,
-        attachment_processing_required: false,
-    };
 
-    let plan = existing_file_delivery_probe_deterministic_plan_result(
-        "deliver an existing file if present",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
-        Some(&analysis),
+        "deliver an existing file if present",
+        Some("把 definitely_missing_named_file_route_cleanup_001.txt 发给我"),
         None,
-        "把 definitely_missing_named_file_route_cleanup_001.txt 发给我",
-    )
-    .expect("filename generated-delivery without content patch should probe existing file");
+        "fs_basic",
+        "find_entries",
+        json!({
+            "action": "find_entries",
+            "pattern": "definitely_missing_named_file_route_cleanup_001.txt",
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("find_entries")
-            );
-            assert_eq!(
-                args.get("pattern").and_then(Value::as_str),
-                Some("definitely_missing_named_file_route_cleanup_001.txt")
-            );
-        }
-        other => panic!("expected fs_basic find_entries action, got {other:?}"),
-    }
+    assert_eq!(
+        args.get("pattern").and_then(Value::as_str),
+        Some("definitely_missing_named_file_route_cleanup_001.txt")
+    );
 }
 
 #[test]
@@ -1130,31 +1096,26 @@ fn existence_with_path_current_workspace_service_file_target_uses_path_batch_fac
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "/home/guagua/rustclaw".to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.stat_paths".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = existence_with_path_locator_deterministic_plan_result(
-        "check one service file in current workspace",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
+        "check one service file in current workspace",
+        Some("检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"),
         Some("/home/guagua/rustclaw"),
-        "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径",
-    )
-    .expect("single service-file current-workspace existence route should use path facts");
+        "fs_basic",
+        "stat_paths",
+        json!({
+            "action": "stat_paths",
+            "paths": ["rustclaw.service"],
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("stat_paths")
-            );
-            assert_eq!(args.get("paths"), Some(&json!(["rustclaw.service"])));
-        }
-        other => panic!("expected fs_basic stat_paths action, got {other:?}"),
-    }
+    assert_eq!(args.get("paths"), Some(&json!(["rustclaw.service"])));
 }
 
 #[test]
@@ -1168,31 +1129,26 @@ fn existence_with_path_path_deterministic_plan_uses_path_facts() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "Cargo.lock".to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.stat_paths".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = existence_with_path_locator_deterministic_plan_result(
-        "check exact path existence",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
+        "check exact path existence",
+        Some("check exact path Cargo.lock existence"),
         Some("/tmp/Cargo.lock"),
-        "check exact path Cargo.lock existence",
-    )
-    .expect("existence-with-path path route should use path facts");
+        "fs_basic",
+        "stat_paths",
+        json!({
+            "action": "stat_paths",
+            "paths": ["/tmp/Cargo.lock"],
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("stat_paths")
-            );
-            assert_eq!(args.get("paths"), Some(&json!(["/tmp/Cargo.lock"])));
-        }
-        other => panic!("expected fs_basic stat_paths action, got {other:?}"),
-    }
+    assert_eq!(args.get("paths"), Some(&json!(["/tmp/Cargo.lock"])));
 }
 
 #[test]
@@ -1259,39 +1215,34 @@ fn archive_entry_existence_uses_archive_list_instead_of_archive_stat() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = archive.to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=archive.list".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let stat_plan = existence_with_path_locator_deterministic_plan_result(
-        "check archive member existence",
-        Some(&route),
+    assert_empty_planner_actions_stay_empty(
+        &state,
+        &route,
         &loop_state,
-        Some(archive),
+        "check archive member existence",
         "nested/config.ini in scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
     );
-    assert!(
-        stat_plan.is_none(),
-        "archive member checks must not be answered by statting only the archive file"
+
+    let args = assert_planner_supplied_skill_call_preserved(
+        &state,
+        &route,
+        &loop_state,
+        "check archive member existence",
+        Some(archive),
+        Some(archive),
+        "archive_basic",
+        "list",
+        json!({
+            "action": "list",
+            "archive": archive,
+        }),
     );
 
-    let plan = archive_list_auto_locator_deterministic_plan_result(
-        "check archive member existence",
-        &state,
-        Some(&route),
-        &loop_state,
-        Some(archive),
-    )
-    .expect("archive member existence should inspect archive entries");
-
-    assert_eq!(plan.steps.len(), 3);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallSkill { skill, args }) => {
-            assert_eq!(skill, "archive_basic");
-            assert_eq!(args.get("action").and_then(Value::as_str), Some("list"));
-            assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
-        }
-        other => panic!("expected archive_basic list action, got {other:?}"),
-    }
+    assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
 }
 
 #[test]
@@ -1309,38 +1260,34 @@ fn archive_entry_existence_scalar_shape_uses_archive_list() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = archive.to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=archive.list".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let stat_plan = existence_with_path_locator_deterministic_plan_result(
-            "check archive member scalar existence",
-            Some(&route),
-            &loop_state,
-            Some(archive),
-            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 에 notes.txt 가 있는지만 말해. 압축 풀지 마.",
-        );
-    assert!(
-        stat_plan.is_none(),
-        "archive member scalar checks must not stat only the archive file"
+    assert_empty_planner_actions_stay_empty(
+        &state,
+        &route,
+        &loop_state,
+        "check archive member scalar existence",
+        "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 에 notes.txt 가 있는지만 말해. 압축 풀지 마.",
     );
 
-    let plan = archive_list_auto_locator_deterministic_plan_result(
-        "check archive member scalar existence",
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        Some(&route),
+        &route,
         &loop_state,
+        "check archive member scalar existence",
         Some(archive),
-    )
-    .expect("archive member scalar existence should inspect archive entries");
+        Some(archive),
+        "archive_basic",
+        "list",
+        json!({
+            "action": "list",
+            "archive": archive,
+        }),
+    );
 
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallSkill { skill, args }) => {
-            assert_eq!(skill, "archive_basic");
-            assert_eq!(args.get("action").and_then(Value::as_str), Some("list"));
-            assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
-        }
-        other => panic!("expected archive_basic list action, got {other:?}"),
-    }
+    assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
 }
 
 #[test]
@@ -1356,30 +1303,26 @@ fn archive_file_existence_without_member_target_still_stats_archive() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = archive.to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.stat_paths".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = existence_with_path_locator_deterministic_plan_result(
-        "check archive file existence",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
+        "check archive file existence",
+        Some("Check whether scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip exists."),
         Some(archive),
-        "Check whether scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip exists.",
-    )
-    .expect("plain archive file existence should use path facts");
+        "fs_basic",
+        "stat_paths",
+        json!({
+            "action": "stat_paths",
+            "paths": [archive],
+        }),
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("stat_paths")
-            );
-            assert_eq!(args.get("paths"), Some(&json!([archive])));
-        }
-        other => panic!("expected fs_basic stat_paths action, got {other:?}"),
-    }
+    assert_eq!(args.get("paths"), Some(&json!([archive])));
 }
 
 #[test]
@@ -1400,42 +1343,39 @@ fn existence_with_path_directory_locator_with_file_target_uses_find_path() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = directory_path.clone();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = existence_with_path_locator_deterministic_plan_result(
-        "find a file inside a resolved directory",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
+        "find a file inside a resolved directory",
+        Some("Locate report.md within the specified directory and output only its full path."),
         Some(&directory_path),
-        "Locate report.md within the specified directory and output only its full path.",
-    )
-    .expect("directory locator with file target should use find_path");
+        "fs_basic",
+        "find_entries",
+        json!({
+            "action": "find_entries",
+            "root": directory_path.clone(),
+            "pattern": "report.md",
+            "target_kind": "file",
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("find_entries")
-            );
-            assert_eq!(
-                args.get("root").and_then(Value::as_str),
-                Some(directory_path.as_str())
-            );
-            assert_eq!(
-                args.get("pattern").and_then(Value::as_str),
-                Some("report.md")
-            );
-            assert_eq!(
-                args.get("target_kind").and_then(Value::as_str),
-                Some("file")
-            );
-        }
-        other => panic!("expected fs_basic find_entries action, got {other:?}"),
-    }
+    assert_eq!(
+        args.get("root").and_then(Value::as_str),
+        Some(directory_path.as_str())
+    );
+    assert_eq!(
+        args.get("pattern").and_then(Value::as_str),
+        Some("report.md")
+    );
+    assert_eq!(
+        args.get("target_kind").and_then(Value::as_str),
+        Some("file")
+    );
 }
 
 #[test]
@@ -1453,21 +1393,17 @@ fn existence_with_path_directory_auto_locator_does_not_parse_history_entries_as_
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = directory_path.clone();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.stat_paths".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = existence_with_path_locator_deterministic_plan_result(
-        "follow up on the active ordered list",
-        Some(&route),
+    assert_empty_planner_actions_stay_empty(
+        &test_state(),
+        &route,
         &loop_state,
-        Some(&directory_path),
+        "follow up on the active ordered list",
         "看最后一个的基本信息，只回答路径和类型",
     );
-
-    assert!(
-            plan.is_none(),
-            "directory auto-locator followups without current-turn locator surface should stay with planner/anchor resolution"
-        );
 }
 
 #[test]
@@ -1485,37 +1421,34 @@ fn file_paths_current_workspace_deterministic_plan_uses_name_search() {
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "start-all-bin.sh".to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = file_paths_locator_deterministic_plan_result(
-        "find a matching file and return its relative path",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
+        "find a matching file and return its relative path",
+        Some("find a matching file and return its relative path"),
         Some(&script_path),
-    )
-    .expect("file-path route should use a bounded name search");
+        "fs_basic",
+        "find_entries",
+        json!({
+            "action": "find_entries",
+            "pattern": "start-all-bin.sh",
+            "target_kind": "file",
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("find_entries")
-            );
-            assert_eq!(
-                args.get("pattern").and_then(Value::as_str),
-                Some("start-all-bin.sh")
-            );
-            assert_eq!(
-                args.get("target_kind").and_then(Value::as_str),
-                Some("file")
-            );
-        }
-        other => panic!("expected fs_basic find_entries action, got {other:?}"),
-    }
+    assert_eq!(
+        args.get("pattern").and_then(Value::as_str),
+        Some("start-all-bin.sh")
+    );
+    assert_eq!(
+        args.get("target_kind").and_then(Value::as_str),
+        Some("file")
+    );
 }
 
 #[test]
@@ -1529,36 +1462,34 @@ fn file_paths_path_like_locator_hint_uses_parent_search_scope() {
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "case_only/report.md".to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = file_paths_locator_deterministic_plan_result(
-        "find path-like locator under its parent scope",
-        Some(&route),
+    let args = assert_planner_supplied_tool_call_preserved(
+        &test_state(),
+        &route,
         &loop_state,
+        "find path-like locator under its parent scope",
+        Some("find path-like locator under its parent scope"),
         None,
-    )
-    .expect("path-like file locator should preserve parent scope");
+        "fs_basic",
+        "find_entries",
+        json!({
+            "action": "find_entries",
+            "root": "case_only",
+            "pattern": "report.md",
+            "target_kind": "file",
+        }),
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("find_entries")
-            );
-            assert_eq!(args.get("root").and_then(Value::as_str), Some("case_only"));
-            assert_eq!(
-                args.get("pattern").and_then(Value::as_str),
-                Some("report.md")
-            );
-            assert_eq!(
-                args.get("target_kind").and_then(Value::as_str),
-                Some("file")
-            );
-        }
-        other => panic!("expected fs_basic find_entries action, got {other:?}"),
-    }
+    assert_eq!(args.get("root").and_then(Value::as_str), Some("case_only"));
+    assert_eq!(
+        args.get("pattern").and_then(Value::as_str),
+        Some("report.md")
+    );
+    assert_eq!(
+        args.get("target_kind").and_then(Value::as_str),
+        Some("file")
+    );
 }
