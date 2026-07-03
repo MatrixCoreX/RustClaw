@@ -300,6 +300,23 @@ fn push_target_basename(out: &mut Vec<String>, target: Option<&str>) {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StructuredAnchorEvidenceMarker {
+    RequiresEvidence,
+}
+
+impl StructuredAnchorEvidenceMarker {
+    fn route_reason(self) -> &'static str {
+        match self {
+            Self::RequiresEvidence => "structured_anchor_requires_evidence",
+        }
+    }
+
+    fn record(self, route_result: &mut crate::RouteResult) {
+        append_route_reason(route_result, self.route_reason());
+    }
+}
+
 pub(super) fn apply_structured_anchor_evidence_repair(route_result: &mut crate::RouteResult) {
     route_result.needs_clarify = false;
     route_result.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
@@ -318,7 +335,7 @@ pub(super) fn apply_structured_anchor_evidence_repair(route_result: &mut crate::
     ) {
         route_result.output_contract.response_shape = crate::OutputResponseShape::Strict;
     }
-    append_route_reason(route_result, "structured_anchor_requires_evidence");
+    StructuredAnchorEvidenceMarker::RequiresEvidence.record(route_result);
 }
 
 pub(super) fn session_has_authoritative_deictic_anchor(

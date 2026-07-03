@@ -28,6 +28,9 @@ ASK_PIPELINE_FILE = SRC_ROOT / "worker/ask_pipeline.rs"
 ASK_PIPELINE_AUTO_LOCATOR_BINDING_FILE = (
     SRC_ROOT / "worker/ask_pipeline_auto_locator_binding.rs"
 )
+ASK_PIPELINE_BACKGROUND_LOCATOR_GUARD_FILE = (
+    SRC_ROOT / "worker/ask_pipeline_background_locator_guard.rs"
+)
 ASK_PIPELINE_CONTRACT_REPAIR_FILE = SRC_ROOT / "worker/ask_pipeline_contract_repair.rs"
 ASK_PIPELINE_BOUNDARY_PREFLIGHT_FILE = (
     SRC_ROOT / "worker/ask_pipeline_boundary_preflight.rs"
@@ -37,6 +40,9 @@ ASK_PIPELINE_FILE_DELIVERY_FILE = SRC_ROOT / "worker/ask_pipeline_file_delivery.
 ASK_PIPELINE_DEFAULT_CONFIG_FILE = SRC_ROOT / "worker/ask_pipeline_default_config.rs"
 ASK_PIPELINE_POST_ROUTE_REFINEMENT_FILE = (
     SRC_ROOT / "worker/ask_pipeline_post_route_refinement.rs"
+)
+ASK_PIPELINE_STRUCTURED_ANCHOR_GUARD_FILE = (
+    SRC_ROOT / "worker/ask_pipeline_structured_anchor_guard.rs"
 )
 TASK_JOURNAL_EVIDENCE_COVERAGE_FILE = SRC_ROOT / "task_journal_evidence_coverage.rs"
 TASK_JOURNAL_FILE = SRC_ROOT / "task_journal.rs"
@@ -300,6 +306,37 @@ WORKER_ROUTE_MARKER_FORBIDDEN_BLOCK_PATTERNS: tuple[
         re.compile(
             r"append_route_reason\s*\([^;]*?"
             rf'"(?:{quoted_token_alternation(WORKER_ROUTE_MARKER_REASON_CODES)})"',
+            re.DOTALL,
+        ),
+    ),
+)
+BACKGROUND_LOCATOR_LOOP_RECOVERY_ROUTE_REASONS: tuple[str, ...] = (
+    "active_observed_output_loop_recovery",
+    "recent_observed_results_background_locator_loop_recovery",
+)
+BACKGROUND_LOCATOR_LOOP_RECOVERY_FORBIDDEN_BLOCK_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "background_locator_recovery_direct_route_reason",
+        re.compile(
+            r"append_route_reason\s*\([^;]*?"
+            rf'"(?:{quoted_token_alternation(BACKGROUND_LOCATOR_LOOP_RECOVERY_ROUTE_REASONS)})"',
+            re.DOTALL,
+        ),
+    ),
+)
+STRUCTURED_ANCHOR_EVIDENCE_ROUTE_REASONS: tuple[str, ...] = (
+    "structured_anchor_requires_evidence",
+)
+STRUCTURED_ANCHOR_EVIDENCE_FORBIDDEN_BLOCK_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "structured_anchor_evidence_direct_route_reason",
+        re.compile(
+            r"append_route_reason\s*\([^;]*?"
+            rf'"(?:{quoted_token_alternation(STRUCTURED_ANCHOR_EVIDENCE_ROUTE_REASONS)})"',
             re.DOTALL,
         ),
     ),
@@ -673,6 +710,8 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_boundary_preflight_deferral_typing())
     findings.extend(scan_worker_loop_boundary_deferral_typing())
     findings.extend(scan_worker_route_marker_typing())
+    findings.extend(scan_background_locator_loop_recovery_marker_typing())
+    findings.extend(scan_structured_anchor_evidence_marker_typing())
     findings.extend(scan_subagent_boundary_deferral_helper())
     findings.extend(scan_file_delivery_boundary_deferral_typing())
     findings.extend(scan_default_config_contract_deferral_typing())
@@ -1440,6 +1479,62 @@ def scan_worker_route_marker_typing_text(rel_path: str, text: str) -> list[Findi
             )
         )
     for kind, pattern in WORKER_ROUTE_MARKER_FORBIDDEN_BLOCK_PATTERNS:
+        for match in pattern.finditer(text):
+            line_no = text[: match.start()].count("\n") + 1
+            findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
+    return findings
+
+
+def scan_background_locator_loop_recovery_marker_typing() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_BACKGROUND_LOCATOR_GUARD_FILE)
+    return scan_background_locator_loop_recovery_marker_typing_text(
+        rel_path,
+        ASK_PIPELINE_BACKGROUND_LOCATOR_GUARD_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_background_locator_loop_recovery_marker_typing_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    if "enum BackgroundLocatorLoopRecoveryMarker" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "background_locator_recovery_marker_enum_missing",
+                "BackgroundLocatorLoopRecoveryMarker enum is required for background locator recovery markers",
+            )
+        )
+    for kind, pattern in BACKGROUND_LOCATOR_LOOP_RECOVERY_FORBIDDEN_BLOCK_PATTERNS:
+        for match in pattern.finditer(text):
+            line_no = text[: match.start()].count("\n") + 1
+            findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
+    return findings
+
+
+def scan_structured_anchor_evidence_marker_typing() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_STRUCTURED_ANCHOR_GUARD_FILE)
+    return scan_structured_anchor_evidence_marker_typing_text(
+        rel_path,
+        ASK_PIPELINE_STRUCTURED_ANCHOR_GUARD_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_structured_anchor_evidence_marker_typing_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    if "enum StructuredAnchorEvidenceMarker" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "structured_anchor_evidence_marker_enum_missing",
+                "StructuredAnchorEvidenceMarker enum is required for structured anchor evidence markers",
+            )
+        )
+    for kind, pattern in STRUCTURED_ANCHOR_EVIDENCE_FORBIDDEN_BLOCK_PATTERNS:
         for match in pattern.finditer(text):
             line_no = text[: match.start()].count("\n") + 1
             findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
@@ -3268,6 +3363,66 @@ def run_self_test() -> int:
         "fn f(item: WorkerRouteMarker) { append_route_reason(route, item.route_reason()); }\n",
     )
     assert not scan_worker_route_marker_typing()
+    blocked_background_locator_recovery_string = (
+        scan_background_locator_loop_recovery_marker_typing_text(
+            "crates/clawd/src/worker/ask_pipeline_background_locator_guard.rs",
+            "enum BackgroundLocatorLoopRecoveryMarker {}\n"
+            'append_route_reason(route, "active_observed_output_loop_recovery");\n'
+            'append_route_reason(route, "recent_observed_results_background_locator_loop_recovery");\n',
+        )
+    )
+    assert blocked_background_locator_recovery_string and all(
+        item.kind == "background_locator_recovery_direct_route_reason"
+        for item in blocked_background_locator_recovery_string
+    )
+    missing_background_locator_recovery_enum = (
+        scan_background_locator_loop_recovery_marker_typing_text(
+            "crates/clawd/src/worker/ask_pipeline_background_locator_guard.rs",
+            'append_route_reason(route, "x");\n',
+        )
+    )
+    assert (
+        missing_background_locator_recovery_enum
+        and missing_background_locator_recovery_enum[0].kind
+        == "background_locator_recovery_marker_enum_missing"
+    )
+    assert not scan_background_locator_loop_recovery_marker_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_background_locator_guard.rs",
+        "enum BackgroundLocatorLoopRecoveryMarker {}\n"
+        "impl BackgroundLocatorLoopRecoveryMarker { fn route_reason(self) -> &'static str { \"active_observed_output_loop_recovery\" } }\n"
+        "fn f(item: BackgroundLocatorLoopRecoveryMarker) { append_route_reason(route, item.route_reason()); }\n",
+    )
+    assert not scan_background_locator_loop_recovery_marker_typing()
+    blocked_structured_anchor_evidence_string = (
+        scan_structured_anchor_evidence_marker_typing_text(
+            "crates/clawd/src/worker/ask_pipeline_structured_anchor_guard.rs",
+            "enum StructuredAnchorEvidenceMarker {}\n"
+            'append_route_reason(route, "structured_anchor_requires_evidence");\n',
+        )
+    )
+    assert (
+        blocked_structured_anchor_evidence_string
+        and blocked_structured_anchor_evidence_string[0].kind
+        == "structured_anchor_evidence_direct_route_reason"
+    )
+    missing_structured_anchor_evidence_enum = (
+        scan_structured_anchor_evidence_marker_typing_text(
+            "crates/clawd/src/worker/ask_pipeline_structured_anchor_guard.rs",
+            'append_route_reason(route, "x");\n',
+        )
+    )
+    assert (
+        missing_structured_anchor_evidence_enum
+        and missing_structured_anchor_evidence_enum[0].kind
+        == "structured_anchor_evidence_marker_enum_missing"
+    )
+    assert not scan_structured_anchor_evidence_marker_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_structured_anchor_guard.rs",
+        "enum StructuredAnchorEvidenceMarker {}\n"
+        "impl StructuredAnchorEvidenceMarker { fn route_reason(self) -> &'static str { \"structured_anchor_requires_evidence\" } }\n"
+        "fn f(item: StructuredAnchorEvidenceMarker) { append_route_reason(route, item.route_reason()); }\n",
+    )
+    assert not scan_structured_anchor_evidence_marker_typing()
     missing_subagent_boundary_helper = scan_subagent_boundary_deferral_helper_text(
         "crates/clawd/src/worker/ask_pipeline.rs",
         'fn other() { append_route_reason(route, "subagent_boundary_clarify_deferred_to_agent_loop"); }\n',
