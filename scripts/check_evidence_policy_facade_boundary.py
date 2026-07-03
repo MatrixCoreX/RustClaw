@@ -84,7 +84,7 @@ def rust_production_files() -> list[Path]:
     )
 
 
-def scan_file(path: Path) -> list[str]:
+def scan_file(path: Path, *, strict: bool) -> list[str]:
     findings: list[str] = []
     rel_path = rel(path)
     text = path.read_text(encoding="utf-8")
@@ -94,16 +94,20 @@ def scan_file(path: Path) -> list[str]:
             continue
         for code, pattern in FORBIDDEN_PATTERNS:
             if pattern.search(line):
-                if code.startswith("direct_task_contract") and rel_path in BASELINE_TASK_CONTRACT_FILES:
+                if (
+                    not strict
+                    and code.startswith("direct_task_contract")
+                    and rel_path in BASELINE_TASK_CONTRACT_FILES
+                ):
                     continue
                 findings.append(f"{rel_path}:{line_no}: {code}")
     return findings
 
 
-def scan_repo() -> list[str]:
+def scan_repo(*, strict: bool) -> list[str]:
     findings: list[str] = []
     for path in rust_production_files():
-        findings.extend(scan_file(path))
+        findings.extend(scan_file(path, strict=strict))
     return findings
 
 
@@ -123,12 +127,20 @@ def run_self_test() -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="report historical task_contract baseline debt instead of allowing it",
+    )
     args = parser.parse_args(argv)
     if args.self_test:
         return run_self_test()
 
-    findings = scan_repo()
-    print(f"EVIDENCE_POLICY_FACADE_BOUNDARY_CHECK findings={len(findings)}")
+    findings = scan_repo(strict=args.strict)
+    print(
+        "EVIDENCE_POLICY_FACADE_BOUNDARY_CHECK "
+        f"strict={str(args.strict).lower()} findings={len(findings)}"
+    )
     for finding in findings:
         print(f"  - {finding}")
     return 1 if findings else 0
