@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[path = "task_journal_decision_envelope.rs"]
 mod decision_envelope;
@@ -23,8 +23,8 @@ use task_journal_event_stream::task_event_stream_json;
 use task_journal_evidence_collect::*;
 use task_journal_evidence_coverage::*;
 pub(crate) use task_journal_evidence_coverage::{
-    evidence_coverage_for_route, failure_attribution_for_error_text, step_reads_text_content,
-    TaskJournalEvidenceCoverage,
+    TaskJournalEvidenceCoverage, evidence_coverage_for_route, failure_attribution_for_error_text,
+    step_reads_text_content,
 };
 use task_journal_evidence_registry::*;
 pub(crate) use task_journal_evidence_registry::{
@@ -989,7 +989,7 @@ fn step_trace_json(
             .map(|value| value.capability.as_str()),
         "resolution_source": requested
             .map(|value| capability_resolution_source(&value.action_type))
-            .unwrap_or("step_trace_compat"),
+            .unwrap_or("step_trace_fallback"),
         "status": step.status.as_str(),
         "error_kind": structured_error.as_ref().map(|value| value.error_kind.as_str()),
         "failure_attribution": failure_attribution.as_deref(),

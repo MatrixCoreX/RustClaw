@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{
-    capability_resolution_source, next_requested_capability, requested_capability_sequence,
-    step_action_kind, TaskJournal, TaskJournalFinalStatus,
+    TaskJournal, TaskJournalFinalStatus, capability_resolution_source, next_requested_capability,
+    requested_capability_sequence, step_action_kind,
 };
 
 fn task_event_json(seq: &mut u64, event_type: &'static str, payload: Value) -> Value {
@@ -107,7 +107,7 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
                 "resolution_source": requested
                     .as_ref()
                     .map(|value| capability_resolution_source(&value.action_type))
-                    .unwrap_or("step_trace_compat"),
+                    .unwrap_or("step_trace_fallback"),
                 "status": step.status.as_str(),
                 "error_kind": step_trace.get("error_kind"),
                 "failure_attribution": step_trace.get("failure_attribution"),
@@ -246,7 +246,7 @@ fn tool_lifecycle_event_payload(
             .map(|value| value.capability.as_str()),
         "resolution_source": requested
             .map(|value| capability_resolution_source(&value.action_type))
-            .unwrap_or("step_trace_compat"),
+            .unwrap_or("step_trace_fallback"),
         "status": step.status.as_str(),
         "error_kind": step_trace.get("error_kind"),
         "failure_attribution": step_trace.get("failure_attribution"),
@@ -321,11 +321,7 @@ impl CodingEvidenceSignals {
         } else {
             Value::Null
         };
-        let final_diff_summary = self
-            .diff_summaries
-            .last()
-            .cloned()
-            .unwrap_or(Value::Null);
+        let final_diff_summary = self.diff_summaries.last().cloned().unwrap_or(Value::Null);
         json!({
             "schema_version": 1,
             "contract_ref": "coding_task_contract:summary",
