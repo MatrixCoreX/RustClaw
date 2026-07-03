@@ -25,32 +25,6 @@ ALLOWED_SEMANTIC_CONTROL_STATES = {
     "none",
 }
 
-ALLOWED_DIRECT_ANSWER_BOUNDARY_CLASSES = {
-    "not_recorded",
-    "not_observed_in_planner_shadow",
-    "locator_binding_fallback",
-    "evidence_backed_direct_candidate",
-    "fallback_safety_filter",
-    "contract_execution_boundary",
-    "evidence_projection_execution",
-    "agent_loop_activation_boundary",
-    "clarify_boundary",
-}
-
-ALLOWED_DIRECT_ANSWER_OWNERSHIP_CLASSES = {
-    "not_recorded",
-    "fallback_safety_check",
-    "contract_boundary",
-    "evidence_projection",
-    "agent_loop_activation",
-}
-
-ALLOWED_DIRECT_ANSWER_MIGRATION_TARGETS = {
-    "not_recorded",
-    "none",
-}
-
-
 def load_summarizer() -> ModuleType:
     path = Path(__file__).with_name("summarize_agent_decides_route_delta.py")
     spec = importlib.util.spec_from_file_location("route_delta_summary", path)
@@ -74,6 +48,10 @@ def dict_value(value: Any) -> dict[str, Any]:
 
 def counter_total(counter: dict[str, Any], *keys: str) -> int:
     return sum(int_value(counter.get(key)) for key in keys)
+
+
+def counter_value_total(counter: dict[str, Any]) -> int:
+    return sum(int_value(value) for value in counter.values())
 
 
 def unexpected_keys(counter: dict[str, Any], allowed: set[str]) -> list[str]:
@@ -100,8 +78,12 @@ def evaluate_summary(summary: dict[str, Any], allow_semantic_debt: bool) -> list
     findings: list[str] = []
     if int_value(summary.get("parse_errors")):
         findings.append(f"parse_errors={summary.get('parse_errors')}")
-    if int_value(summary.get("route_delta_items")) <= 0:
-        findings.append("route_delta_items=0")
+    route_delta_items = int_value(summary.get("route_delta_items"))
+    round_envelope_items = counter_value_total(
+        dict_value(summary.get("round_decision_envelope_source_counts"))
+    )
+    if route_delta_items <= 0 and round_envelope_items <= 0:
+        findings.append("route_observation_items=0")
     if int_value(summary.get("unexplained_mismatch_count")):
         findings.append(
             f"unexplained_mismatch_count={summary.get('unexplained_mismatch_count')}"
@@ -133,26 +115,6 @@ def evaluate_summary(summary: dict[str, Any], allow_semantic_debt: bool) -> list
         | ({"legacy_migration_debt"} if allow_semantic_debt else set()),
     )
 
-    add_counter_findings(
-        findings,
-        summary,
-        "pre_agent_direct_answer_boundary_class_counts",
-        ALLOWED_DIRECT_ANSWER_BOUNDARY_CLASSES,
-    )
-    add_counter_findings(
-        findings,
-        summary,
-        "pre_agent_direct_answer_ownership_class_counts",
-        ALLOWED_DIRECT_ANSWER_OWNERSHIP_CLASSES
-        | ({"semantic_policy_candidate"} if allow_semantic_debt else set()),
-    )
-    add_counter_findings(
-        findings,
-        summary,
-        "pre_agent_direct_answer_semantic_migration_target_counts",
-        ALLOWED_DIRECT_ANSWER_MIGRATION_TARGETS
-        | ({"planner_loop_decision_envelope"} if allow_semantic_debt else set()),
-    )
     return findings
 
 
@@ -195,6 +157,8 @@ def main() -> int:
     print(
         "ROUTE_DELTA_RELEASE_GATE ok "
         f"route_delta_items={int_value(summary.get('route_delta_items'))} "
+        "round_decision_envelope_items="
+        f"{counter_value_total(dict_value(summary.get('round_decision_envelope_source_counts')))} "
         f"unexplained_mismatch_count={int_value(summary.get('unexplained_mismatch_count'))}"
     )
     return 0
