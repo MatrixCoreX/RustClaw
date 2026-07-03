@@ -1132,7 +1132,7 @@ fn is_route_reason_marker_char(ch: Option<char>) -> bool {
 fn append_route_reason(route_result: &mut crate::RouteResult, reason: &'static str) {
     if route_result.route_reason.trim().is_empty() {
         route_result.route_reason = reason.to_string();
-    } else if !route_result.route_reason.contains(reason) {
+    } else if !route_reason_has_marker(route_result, reason) {
         route_result.route_reason.push_str("; ");
         route_result.route_reason.push_str(reason);
     }
@@ -1270,6 +1270,9 @@ pub(super) async fn execute_ask_dispatch(
 #[cfg(test)]
 #[path = "ask_pipeline_agent_context_tests.rs"]
 mod agent_context_tests;
+#[cfg(test)]
+#[path = "ask_pipeline_route_reason_tests.rs"]
+mod route_reason_tests;
 #[cfg(test)]
 #[path = "ask_pipeline_scalar_count_tests.rs"]
 mod scalar_count_tests;
