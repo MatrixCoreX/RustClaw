@@ -574,6 +574,8 @@ mod kb_chain;
 mod log_analyze_with_summary_policy;
 #[path = "planning_tests/log_excerpt_quantity_and_skill_policy.rs"]
 mod log_excerpt_quantity_and_skill_policy;
+#[path = "planning_tests/observed_finalize_followup.rs"]
+mod observed_finalize_followup;
 #[path = "planning_tests/missing_paths_and_multi_target_metadata.rs"]
 mod missing_paths_and_multi_target_metadata;
 #[path = "planning_tests/nl_failure_regressions.rs"]
