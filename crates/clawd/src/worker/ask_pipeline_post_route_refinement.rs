@@ -121,6 +121,42 @@ impl BoundaryContractDeferral {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PostRouteBoundaryReady {
+    LocatorGuardPromptTargets,
+    StructuralFileDeliveryBoundTarget,
+}
+
+impl PostRouteBoundaryReady {
+    fn gate_reason_code(self) -> &'static str {
+        match self {
+            Self::LocatorGuardPromptTargets => {
+                "post_route_locator_guard_deferred_to_prompt_targets"
+            }
+            Self::StructuralFileDeliveryBoundTarget => {
+                "post_route_structural_file_delivery_bound_target"
+            }
+        }
+    }
+
+    fn route_reason(self) -> Option<&'static str> {
+        match self {
+            Self::LocatorGuardPromptTargets => Some("locator_guard_deferred_to_prompt_targets"),
+            Self::StructuralFileDeliveryBoundTarget => None,
+        }
+    }
+
+    fn record(self, post_route: &mut crate::post_route_policy::PostRoutePolicyResult) {
+        post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
+            self.gate_reason_code(),
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
+        );
+        if let Some(route_reason) = self.route_reason() {
+            append_route_reason(&mut post_route.execution_route_result, route_reason);
+        }
+    }
+}
+
 pub(super) fn apply_post_route_refinements(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -167,14 +203,7 @@ pub(super) fn apply_post_route_refinements(
         post_route
             .execution_route_result
             .set_planner_execute_finalize(finalize);
-        post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
-            "post_route_locator_guard_deferred_to_prompt_targets",
-            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
-        );
-        append_route_reason(
-            &mut post_route.execution_route_result,
-            "locator_guard_deferred_to_prompt_targets",
-        );
+        PostRouteBoundaryReady::LocatorGuardPromptTargets.record(post_route);
     }
     if defer_config_contract_default_main_config_after_locator_policy(state, prompt, post_route) {
         tracing::info!(
@@ -198,10 +227,7 @@ pub(super) fn apply_post_route_refinements(
         if !target.is_empty() {
             post_route.auto_locator_path = Some(target);
             post_route.auto_locator_resolved_direct = true;
-            post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
-                "post_route_structural_file_delivery_bound_target",
-                crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
-            );
+            PostRouteBoundaryReady::StructuralFileDeliveryBoundTarget.record(post_route);
         }
     }
     auto_locator_binding::bind_structured_field_read_to_auto_locator(post_route);
