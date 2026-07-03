@@ -243,7 +243,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     req: &str,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     workspace_root: &Path,
-    answer_candidate: &str,
+    _answer_candidate: &str,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
 ) -> Option<&'static str> {
@@ -623,11 +623,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
 
     if matches!(output_contract.response_shape, OutputResponseShape::Scalar)
         && !output_contract.delivery_required
-        && scalar_locator_surface_should_require_evidence(
-            output_contract,
-            req_surface,
-            answer_candidate,
-        )
+        && scalar_locator_surface_should_require_evidence(output_contract, req_surface)
         && (req_surface.has_explicit_path_or_url() || req_surface.has_filename_candidates())
     {
         output_contract.requires_content_evidence = true;
@@ -646,7 +642,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
             req_surface,
             workspace_root,
         )
-        && planner_locator_surface_should_require_evidence(req_surface, answer_candidate)
+        && planner_locator_surface_should_require_evidence(req_surface)
         && (req_surface.has_explicit_path_or_url() || req_surface.has_filename_candidates())
         && !req_surface.is_structural_locator_only_reply()
     {
@@ -827,21 +823,17 @@ fn media_generation_machine_context_has_path_report(
 fn scalar_locator_surface_should_require_evidence(
     output_contract: &IntentOutputContract,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    answer_candidate: &str,
 ) -> bool {
     output_contract.requires_content_evidence
         || req_surface.has_structured_target_refinement()
         || surface_has_structured_document_locator_candidate(req_surface)
-        || answer_candidate.trim().is_empty()
 }
 
 fn planner_locator_surface_should_require_evidence(
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    answer_candidate: &str,
 ) -> bool {
     req_surface.has_structured_target_refinement()
         || surface_has_structured_document_locator_candidate(req_surface)
-        || answer_candidate.trim().is_empty()
 }
 
 fn surface_has_structured_document_locator_candidate(
