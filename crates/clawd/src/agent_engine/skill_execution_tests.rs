@@ -453,7 +453,10 @@ fn evidence_policy_preflight_rejects_generated_media_run_cmd() {
     let metadata = preflight_failure_metadata(&err);
     assert_eq!(metadata.reason, "contract_action_rejected");
     assert!(metadata.retry_instruction.contains("policy_decision=deny"));
-    assert!(metadata.retry_instruction.contains("image_edit"));
+    assert!(metadata
+        .retry_instruction
+        .contains("preferred_action_refs=image_edit"));
+    assert!(!metadata.retry_instruction.contains("preferred_actions="));
 }
 
 #[test]
