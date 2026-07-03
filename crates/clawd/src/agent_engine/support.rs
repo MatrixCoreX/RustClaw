@@ -256,10 +256,10 @@ impl AgentLoopGuardPolicy {
         let Some(route) = route_result else {
             return LoopBudgetProfile::General;
         };
-        let operation = crate::task_contract::operation_for_route(route);
-        let target_object = crate::task_contract::target_object_for_route(route);
+        let operation = crate::evidence_policy::operation_for_route(route);
+        let target_object = crate::evidence_policy::target_object_for_route(route);
         let required_evidence_fields =
-            crate::task_contract::required_evidence_fields_for_route(route);
+            crate::evidence_policy::required_evidence_fields_for_route(route);
         let evidence_required = route.output_contract.requires_content_evidence
             || route.output_contract.delivery_required
             || !required_evidence_fields.is_empty();
@@ -267,16 +267,16 @@ impl AgentLoopGuardPolicy {
             || route.wants_file_delivery
             || matches!(
                 operation,
-                crate::task_contract::TaskOperation::Write
-                    | crate::task_contract::TaskOperation::Modify
+                crate::evidence_policy::EvidenceOperation::Write
+                    | crate::evidence_policy::EvidenceOperation::Modify
             )
         {
             return LoopBudgetProfile::MultiStepWorkspace;
         }
         if matches!(
             target_object,
-            crate::task_contract::TaskTargetObject::Directory
-        ) && matches!(operation, crate::task_contract::TaskOperation::Summarize)
+            crate::evidence_policy::EvidenceTargetObject::Directory
+        ) && matches!(operation, crate::evidence_policy::EvidenceOperation::Summarize)
         {
             return LoopBudgetProfile::MultiStepWorkspace;
         }
@@ -284,10 +284,10 @@ impl AgentLoopGuardPolicy {
             || (evidence_required
                 && matches!(
                     operation,
-                    crate::task_contract::TaskOperation::Summarize
-                        | crate::task_contract::TaskOperation::Validate
-                        | crate::task_contract::TaskOperation::Run
-                        | crate::task_contract::TaskOperation::List
+                    crate::evidence_policy::EvidenceOperation::Summarize
+                        | crate::evidence_policy::EvidenceOperation::Validate
+                        | crate::evidence_policy::EvidenceOperation::Run
+                        | crate::evidence_policy::EvidenceOperation::List
                 ))
         {
             return LoopBudgetProfile::GroundedSummary;
