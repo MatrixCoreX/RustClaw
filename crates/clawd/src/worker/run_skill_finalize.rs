@@ -241,7 +241,7 @@ fn record_run_skill_task_observation(
     journal: &mut crate::task_journal::TaskJournal,
     skill_name: &str,
     status: &str,
-    task_contract: &Value,
+    capability_contract: &Value,
     machine_payload: &Value,
     text: Option<&str>,
     error_text: Option<&str>,
@@ -262,7 +262,7 @@ fn record_run_skill_task_observation(
             .and_then(Value::as_str)
             .unwrap_or(status),
         "message_key": machine_payload.get("message_key").and_then(Value::as_str),
-        "task_contract": task_contract,
+        "task_contract": capability_contract,
     });
     if let Some(obj) = payload.as_object_mut() {
         if let Some(error_code) = machine_payload.get("error_code") {
@@ -312,8 +312,8 @@ fn record_run_skill_task_observation(
             "error_code": machine_payload.get("error_code").cloned(),
             "failure_attribution": machine_payload.get("failure_attribution").cloned(),
             "retryable": machine_payload.get("retryable").cloned(),
-            "task_contract": task_contract,
-            "capability_ref": task_contract.get("capability_ref").cloned(),
+            "task_contract": capability_contract,
+            "capability_ref": capability_contract.get("capability_ref").cloned(),
             "external_skill_admission": external_skill_admission,
             "observed_evidence": observed_evidence,
         }));
@@ -515,14 +515,14 @@ async fn finalize_run_skill_success(
         Some(clean_text.clone()),
         None,
     ));
-    let task_contract = run_skill_capability_contract(state, payload, skill_name);
+    let capability_contract = run_skill_capability_contract(state, payload, skill_name);
     let machine_payload = run_skill_success_machine_payload();
     let external_skill_admission = external_skill_admission_trace(state, skill_name);
     record_run_skill_task_observation(
         &mut journal,
         skill_name,
         "ok",
-        &task_contract,
+        &capability_contract,
         &machine_payload,
         Some(&clean_text),
         None,
@@ -682,14 +682,14 @@ async fn finalize_run_skill_failure(
         None,
         Some(err_text.to_string()),
     ));
-    let task_contract = run_skill_capability_contract(state, payload, skill_name);
+    let capability_contract = run_skill_capability_contract(state, payload, skill_name);
     let machine_payload = run_skill_failure_machine_payload(err_text);
     let external_skill_admission = external_skill_admission_trace(state, skill_name);
     record_run_skill_task_observation(
         &mut journal,
         skill_name,
         "error",
-        &task_contract,
+        &capability_contract,
         &machine_payload,
         None,
         Some(err_text),
