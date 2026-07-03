@@ -201,6 +201,29 @@ fn log_route_guard_record(
     );
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkerRouteMarker {
+    AgentLoopDefaultEntry,
+    BareTopicContextualClarifySanitized,
+    AutoLocatorSuppressedMultipleExplicitPaths,
+}
+
+impl WorkerRouteMarker {
+    fn route_reason(self) -> &'static str {
+        match self {
+            Self::AgentLoopDefaultEntry => "agent_loop_default_entry",
+            Self::BareTopicContextualClarifySanitized => "bare_topic_contextual_clarify_sanitized",
+            Self::AutoLocatorSuppressedMultipleExplicitPaths => {
+                "auto_locator_suppressed_multiple_explicit_paths"
+            }
+        }
+    }
+
+    fn record(self, route_result: &mut crate::RouteResult) {
+        append_route_reason(route_result, self.route_reason());
+    }
+}
+
 fn agent_loop_default_context(
     mut agent_run_context: Option<crate::agent_engine::AgentRunContext>,
 ) -> Option<crate::agent_engine::AgentRunContext> {
@@ -211,7 +234,7 @@ fn agent_loop_default_context(
         route.needs_clarify = false;
         route.clarify_question.clear();
         route.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
-        append_route_reason(route, "agent_loop_default_entry");
+        WorkerRouteMarker::AgentLoopDefaultEntry.record(route);
     }
     agent_run_context
 }
@@ -905,7 +928,7 @@ fn build_loop_context_after_boundary_preflight(
     }
     if bare_topic_clarify_question_should_drop_context_target(prompt, &route_result) {
         route_result.clarify_question.clear();
-        append_route_reason(&mut route_result, "bare_topic_contextual_clarify_sanitized");
+        WorkerRouteMarker::BareTopicContextualClarifySanitized.record(&mut route_result);
     }
     if unbound_existing_file_delivery_route_should_defer_to_agent_loop(
         state,
@@ -973,10 +996,7 @@ fn build_loop_context_after_boundary_preflight(
         Some(recent_execution_context),
     );
     if multiple_explicit_local_paths {
-        append_route_reason(
-            &mut route_result,
-            "auto_locator_suppressed_multiple_explicit_paths",
-        );
+        WorkerRouteMarker::AutoLocatorSuppressedMultipleExplicitPaths.record(&mut route_result);
     }
     let locator_resolution =
         if should_attempt_auto_locator(&route_result) && !multiple_explicit_local_paths {
