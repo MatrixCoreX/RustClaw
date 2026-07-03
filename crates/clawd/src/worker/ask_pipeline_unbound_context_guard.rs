@@ -233,13 +233,19 @@ pub(super) fn runtime_status_query_route_can_plan_without_locator(
     let Some(turn_analysis) = turn_analysis else {
         return false;
     };
+    let status_query_with_raw_command_contract = matches!(
+        turn_analysis.turn_type,
+        Some(crate::intent_router::TurnType::StatusQuery)
+    ) && route_result
+        .output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput);
     route_result.is_execute_gate()
         && route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && !route_result.wants_file_delivery
         && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
         && route_result.output_contract.locator_hint.trim().is_empty()
-        && turn_analysis_has_runtime_status_query(turn_analysis)
+        && (turn_analysis_has_runtime_status_query(turn_analysis)
+            || status_query_with_raw_command_contract)
         && crate::evidence_policy::final_answer_shape_for_route(route_result)
             .is_some_and(|shape| shape.allows_model_language())
 }
