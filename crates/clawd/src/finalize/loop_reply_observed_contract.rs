@@ -344,7 +344,7 @@ fn loop_contract_observed_answer_satisfies_required_evidence(
         return false;
     };
     let required_fields =
-        crate::task_contract::required_evidence_fields_for_output_contract(output_contract);
+        crate::evidence_policy::required_evidence_fields_for_output_contract(output_contract);
     if required_fields.is_empty() {
         return true;
     }
