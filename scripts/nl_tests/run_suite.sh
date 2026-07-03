@@ -188,7 +188,7 @@ run_mode_contract_matrix_offline() {
 run_mode_evidence_policy_offline() {
   run_wrapped_suite \
     "evidence_policy_offline" \
-    bash "${SCRIPT_DIR}/run_contract_matrix_offline_suite.sh" \
+    bash "${SCRIPT_DIR}/run_evidence_policy_offline_suite.sh" \
     "$@"
 }
 
