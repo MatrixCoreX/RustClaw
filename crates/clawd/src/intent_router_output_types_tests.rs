@@ -44,7 +44,6 @@ fn boundary_envelope_projects_only_machine_boundary_fields() {
         },
         execution_recipe_hint: None,
         execution_recipe_plan_hint: None,
-        route_trace_decision: crate::FirstLayerDecision::DirectAnswer,
         execution_finalize_style: crate::ActFinalizeStyle::ChatWrapped,
         turn_analysis: Some(TurnAnalysis {
             turn_type: Some(TurnType::TaskRequest),
