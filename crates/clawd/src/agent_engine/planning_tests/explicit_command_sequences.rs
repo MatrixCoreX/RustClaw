@@ -298,7 +298,9 @@ fn multi_explicit_run_cmd_plan_marks_literal_commands_without_continue_on_error(
         Some(&route),
         &loop_state,
         "Execute command sequence",
-        Some("先执行 echo BEFORE_CHANGE，再执行 definitely_missing_command_rustclaw_change_24682，再执行 echo AFTER_CHANGE_OLD；如果稍后继续则替换最后一步。"),
+        Some(
+            "先执行 echo BEFORE_CHANGE，再执行 definitely_missing_command_rustclaw_change_24682，再执行 echo AFTER_CHANGE_OLD；如果稍后继续则替换最后一步。",
+        ),
         Some("/home/guagua/rustclaw"),
         actions,
     );

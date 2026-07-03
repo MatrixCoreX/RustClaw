@@ -14,6 +14,7 @@ fn contract_rejected_log_analyze_rewrites_to_preferred_excerpt_read() {
     route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = log_path.clone();
+    route.resolved_intent = "capability_ref=filesystem.read_text_range".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "log_analyze".to_string(),
         args: json!({
@@ -328,6 +329,7 @@ fn command_output_summary_replaces_non_recipe_mutation_with_preferred_observatio
     );
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.resolved_intent = "capability_ref=process.ps".to_string();
     let loop_state = LoopState::new(1);
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
@@ -424,24 +426,36 @@ fn command_output_summary_keeps_scratch_filesystem_lifecycle_mutation_plan() {
         actions,
     );
 
-    assert!(normalized
-        .iter()
-        .any(|action| planned_call_is(action, "fs_basic", "make_dir")));
-    assert!(normalized
-        .iter()
-        .any(|action| planned_call_is(action, "fs_basic", "write_text")));
-    assert!(normalized
-        .iter()
-        .any(|action| planned_call_is(action, "fs_basic", "append_text")));
-    assert!(normalized
-        .iter()
-        .any(|action| planned_call_is(action, "fs_basic", "read_text_range")));
-    assert!(normalized
-        .iter()
-        .any(|action| planned_call_is(action, "fs_basic", "remove_path")));
-    assert!(!normalized
-        .iter()
-        .any(|action| planned_call_is(action, "process_basic", "ps")));
+    assert!(
+        normalized
+            .iter()
+            .any(|action| planned_call_is(action, "fs_basic", "make_dir"))
+    );
+    assert!(
+        normalized
+            .iter()
+            .any(|action| planned_call_is(action, "fs_basic", "write_text"))
+    );
+    assert!(
+        normalized
+            .iter()
+            .any(|action| planned_call_is(action, "fs_basic", "append_text"))
+    );
+    assert!(
+        normalized
+            .iter()
+            .any(|action| planned_call_is(action, "fs_basic", "read_text_range"))
+    );
+    assert!(
+        normalized
+            .iter()
+            .any(|action| planned_call_is(action, "fs_basic", "remove_path"))
+    );
+    assert!(
+        !normalized
+            .iter()
+            .any(|action| planned_call_is(action, "process_basic", "ps"))
+    );
 }
 
 #[test]
@@ -567,12 +581,16 @@ fn command_output_summary_keeps_scratch_cleanup_recovery_after_prior_write() {
         actions,
     );
 
-    assert!(normalized
-        .iter()
-        .any(|action| planned_call_is(action, "fs_basic", "remove_path")));
-    assert!(!normalized
-        .iter()
-        .any(|action| planned_call_is(action, "git_basic", "status")));
+    assert!(
+        normalized
+            .iter()
+            .any(|action| planned_call_is(action, "fs_basic", "remove_path"))
+    );
+    assert!(
+        !normalized
+            .iter()
+            .any(|action| planned_call_is(action, "git_basic", "status"))
+    );
     let steps = vec![crate::PlanStep {
         step_id: "step_3".to_string(),
         action_type: "call_tool".to_string(),
@@ -666,9 +684,11 @@ fn command_output_summary_keeps_archive_pack_cleanup_recovery() {
         actions,
     );
 
-    assert!(normalized
-        .iter()
-        .any(|action| planned_call_is(action, "fs_basic", "remove_path")));
+    assert!(
+        normalized
+            .iter()
+            .any(|action| planned_call_is(action, "fs_basic", "remove_path"))
+    );
     let steps = vec![crate::PlanStep {
         step_id: "step_2".to_string(),
         action_type: "call_tool".to_string(),
@@ -1177,16 +1197,16 @@ fn explicit_literal_scalar_route_marks_failure_repairable() {
     }];
 
     let normalized = normalize_planned_actions_with_original(
-            &state,
-            Some(&route),
-            &loop_state,
+        &state,
+        Some(&route),
+        &loop_state,
+        "执行 missing_probe --version；如果该命令不存在，则执行 which bash，并只返回 bash 的路径。",
+        Some(
             "执行 missing_probe --version；如果该命令不存在，则执行 which bash，并只返回 bash 的路径。",
-            Some(
-                "执行 missing_probe --version；如果该命令不存在，则执行 which bash，并只返回 bash 的路径。",
-            ),
-            None,
-            actions,
-        );
+        ),
+        None,
+        actions,
+    );
 
     match &normalized[0] {
         AgentAction::CallSkill { skill, args } => {

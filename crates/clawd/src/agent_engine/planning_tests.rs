@@ -8,17 +8,18 @@ use claw_core::config::{AgentConfig, ToolsConfig};
 use claw_core::skill_registry::SkillsRegistry;
 
 use super::{
-    action_supports_structured_direct_observed_finalize, action_targets_config_edit,
-    actions_use_ad_hoc_command_without_route_preferred_skill, apply_scalar_count_filter_hint,
-    broaden_default_read_range_for_structured_text, build_lightweight_skill_playbooks_text,
-    build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
-    can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
-    compact_lightweight_incremental_goal_context, compact_skill_playbook_from_prompt,
-    contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
-    directory_purpose_representative_read_actions_after_find_result, enforce_output_contract_tool_args,
-    ensure_content_excerpt_summary_has_bounded_content, ensure_required_contract_block_present,
-    ensure_workspace_synthesis_has_default_text_evidence, file_facts_auto_locator_observation_plan,
-    fill_missing_read_range_path_from_route_locator,
+    LoopState, PlanningPromptClass, action_supports_structured_direct_observed_finalize,
+    action_targets_config_edit, actions_use_ad_hoc_command_without_route_preferred_skill,
+    apply_scalar_count_filter_hint, broaden_default_read_range_for_structured_text,
+    build_lightweight_skill_playbooks_text, build_lightweight_skill_quick_index_text,
+    build_lightweight_tool_spec, can_fallback_to_initial_plan_after_repair_failure,
+    classify_planning_prompt_class, compact_lightweight_incremental_goal_context,
+    compact_skill_playbook_from_prompt, contract_scoped_lightweight_planner_skill_scope,
+    contract_scoped_planner_skill_scope,
+    directory_purpose_representative_read_actions_after_find_result,
+    enforce_output_contract_tool_args, ensure_content_excerpt_summary_has_bounded_content,
+    ensure_required_contract_block_present, ensure_workspace_synthesis_has_default_text_evidence,
+    file_facts_auto_locator_observation_plan, fill_missing_read_range_path_from_route_locator,
     generic_directory_auto_locator_observation_plan, generic_path_content_log_analyze_target_path,
     has_pre_observation_structured_output_shape, incremental_prompt_spec_for_class,
     inject_structural_extension_filter_for_directory_inventory,
@@ -42,7 +43,6 @@ use super::{
     rewrite_config_mutation_plan_only_to_config_edit_plan,
     rewrite_config_mutation_to_config_edit_closed_loop,
     rewrite_config_validation_read_plan_to_validate,
-    rewrite_directory_entry_groups_tree_summary_to_list_dir,
     rewrite_docker_readonly_run_cmd_to_docker_basic, rewrite_extract_field_alias_args,
     rewrite_observed_terminal_synthesis_concrete_respond,
     rewrite_pre_observation_concrete_respond_to_placeholder,
@@ -67,19 +67,18 @@ use super::{
     strip_terminal_discussion_for_observed_finalize,
     strip_terminal_discussion_for_scalar_path_observation,
     strip_terminal_placeholder_respond_for_exact_listing_contract,
-    strip_unresolved_template_reads_after_inventory_dir, structured_field_selectors, LoopState,
-    PlanningPromptClass,
+    strip_unresolved_template_reads_after_inventory_dir, structured_field_selectors,
 };
 use crate::agent_engine::{
     CLAWD_CONTINUE_ON_ERROR_ARG, CLAWD_LITERAL_COMMAND_ARG, CLAWD_RUNTIME_ASYNC_JOB_START_ARG,
 };
 use crate::{
-    AgentAction, AgentRuntimeConfig, AppState, AskMode, ClaimedTask, IntentOutputContract,
-    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, PlanKind,
-    ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind, SkillViewsSnapshot, ToolsPolicy,
-    DEFAULT_AGENT_ID,
+    AgentAction, AgentRuntimeConfig, AppState, AskMode, ClaimedTask, DEFAULT_AGENT_ID,
+    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
+    OutputSemanticKind, PlanKind, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
+    SkillViewsSnapshot, ToolsPolicy,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[test]
 fn planner_notes_record_repair_reason_codes() {
@@ -574,12 +573,12 @@ mod kb_chain;
 mod log_analyze_with_summary_policy;
 #[path = "planning_tests/log_excerpt_quantity_and_skill_policy.rs"]
 mod log_excerpt_quantity_and_skill_policy;
-#[path = "planning_tests/observed_finalize_followup.rs"]
-mod observed_finalize_followup;
 #[path = "planning_tests/missing_paths_and_multi_target_metadata.rs"]
 mod missing_paths_and_multi_target_metadata;
 #[path = "planning_tests/nl_failure_regressions.rs"]
 mod nl_failure_regressions;
+#[path = "planning_tests/observed_finalize_followup.rs"]
+mod observed_finalize_followup;
 #[path = "planning_tests/runtime_surface_plans.rs"]
 mod runtime_surface_plans;
 #[path = "planning_tests/scalar_count_and_hidden_entries.rs"]

@@ -1,15 +1,14 @@
 #[cfg(test)]
 use super::MatchedContract;
 use super::{
-    ActionPolicyDecision, ActionRef, ArgPolicyDecision, ContractMatrix, EvidenceExpression,
-    FinalAnswerShape, FinalAnswerShapeClass, IntentOutputContract, ObservationExtractor,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
-    BUNDLED_CONTRACT_MATRIX,
+    ActionPolicyDecision, ActionRef, ArgPolicyDecision, BUNDLED_CONTRACT_MATRIX, ContractMatrix,
+    EvidenceExpression, FinalAnswerShape, FinalAnswerShapeClass, IntentOutputContract,
+    ObservationExtractor, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
 };
 #[cfg(test)]
 use claw_core::skill_registry::SkillKind;
 use claw_core::skill_registry::SkillsRegistry;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
@@ -150,7 +149,11 @@ fn compact_prompt_line_for_route_capability_ref(route: &RouteResult) -> Option<S
 
     Some(format!(
         "- capability_policy source=registry match=capability_ref capability_refs={} evidence_profile=capability_ref required_evidence={} final_answer_shape={} available_action_refs={} preferred_action_refs={}",
-        capability_refs, required_evidence, final_answer_shape, available_action_refs, preferred_action_refs,
+        capability_refs,
+        required_evidence,
+        final_answer_shape,
+        available_action_refs,
+        preferred_action_refs,
     ))
 }
 
@@ -860,14 +863,26 @@ fn route_capability_ref_action_policy(
     normalized_skill: &str,
     args: &Value,
 ) -> Option<ContractActionPolicy> {
-    if !route_capability_ref_allows_action(route, normalized_skill, args) {
-        return None;
-    }
     let action = route_capability_policy_action_ref(normalized_skill, args)?;
+    let decision = if route_capability_ref_allows_action(route, normalized_skill, args) {
+        ActionPolicyDecision::Allowed
+    } else {
+        ActionPolicyDecision::RejectedNotAllowed
+    };
+    let mut preferred_actions = route_capability_ref_action_refs(route, true)
+        .into_iter()
+        .map(|action_ref| action_ref.as_key())
+        .collect::<Vec<_>>();
+    if preferred_actions.is_empty() {
+        preferred_actions = route_capability_ref_action_refs(route, false)
+            .into_iter()
+            .map(|action_ref| action_ref.as_key())
+            .collect();
+    }
     let final_answer_shape_kind =
         final_answer_shape_for_route_capability_ref(route).unwrap_or(FinalAnswerShape::Free);
     Some(ContractActionPolicy {
-        decision: ActionPolicyDecision::Allowed,
+        decision,
         action_key: action.effective.as_key(),
         original_action_ref: action.original.as_key(),
         replacement_action_ref: action.replacement_action_ref(),
@@ -875,7 +890,7 @@ fn route_capability_ref_action_policy(
         preferred_replacement_reason_code: action.replacement_reason_code.map(str::to_string),
         contract_match: "capability_ref".to_string(),
         required_evidence: crate::task_contract::required_evidence_fields_for_route(route),
-        preferred_actions: vec![action.effective.as_key()],
+        preferred_actions,
         final_answer_shape_kind,
         final_answer_shape: final_answer_shape_kind.as_str().to_string(),
         evidence_expression: EvidenceExpression::default(),
@@ -1316,10 +1331,12 @@ pub(super) fn observation_extractors_for_sources(
 }
 
 fn observation_extractors_trace_json(extractors: &[ObservationExtractor]) -> Value {
-    json!(extractors
-        .iter()
-        .map(ObservationExtractor::to_trace_json)
-        .collect::<Vec<_>>())
+    json!(
+        extractors
+            .iter()
+            .map(ObservationExtractor::to_trace_json)
+            .collect::<Vec<_>>()
+    )
 }
 
 pub(super) fn observation_extractors_stable_key(extractors: &[ObservationExtractor]) -> String {

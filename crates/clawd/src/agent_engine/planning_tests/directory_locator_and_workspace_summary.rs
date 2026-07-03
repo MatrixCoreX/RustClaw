@@ -300,12 +300,14 @@ fn scalar_path_directory_locator_search_requires_scalar_path_contract() {
     route.output_contract.locator_hint = root_path.clone();
     route.output_contract.delivery_required = false;
 
-    assert!(scalar_path_directory_locator_search_observation_plan(
-        Some(&route),
-        Some(&root_path),
-        &format!("Inside {root_path}, find abcd and return only the path"),
-    )
-    .is_none());
+    assert!(
+        scalar_path_directory_locator_search_observation_plan(
+            Some(&route),
+            Some(&root_path),
+            &format!("Inside {root_path}, find abcd and return only the path"),
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -560,40 +562,6 @@ fn generic_directory_auto_locator_uses_mtime_for_directory_entry_groups() {
         }
         other => panic!("expected fs_basic list_dir action, got {other:?}"),
     }
-}
-
-#[test]
-fn directory_entry_groups_preserves_tree_summary_action() {
-    let root = TempDirGuard::new("directory_entry_groups_rewrite");
-    fs::create_dir_all(root.path.join("docs")).expect("create docs");
-    let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
-    route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = root_path.clone();
-    let actions = vec![AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
-        args: json!({
-            "action": "tree_summary",
-            "path": root_path,
-            "max_depth": 2
-        }),
-    }];
-
-    let rewritten =
-        rewrite_directory_entry_groups_tree_summary_to_list_dir(Some(&route), None, actions);
-
-    assert_eq!(rewritten.len(), 1);
-    assert!(matches!(
-        &rewritten[0],
-        AgentAction::CallSkill { skill, args }
-            if skill == "system_basic"
-                && args.get("action").and_then(Value::as_str) == Some("tree_summary")
-    ));
 }
 
 #[test]
@@ -888,10 +856,12 @@ fn directory_purpose_auto_locator_lists_directory_and_reads_text_candidates() {
     );
 
     let read_args = expect_planned_call(&normalized[1], "fs_basic", "read_text_range");
-    assert!(read_args
-        .get("path")
-        .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with("README.txt")));
+    assert!(
+        read_args
+            .get("path")
+            .and_then(Value::as_str)
+            .is_some_and(|path| path.ends_with("README.txt"))
+    );
     assert!(matches!(
         normalized.get(1),
         Some(AgentAction::CallTool { .. })
@@ -1086,10 +1056,12 @@ fn directory_purpose_extension_locator_uses_recursive_find_entries_not_tree_summ
         Some("size_desc")
     );
     let read_args = expect_planned_call(&normalized[1], "fs_basic", "read_text_range");
-    assert!(read_args
-        .get("path")
-        .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with("Cargo.toml")));
+    assert!(
+        read_args
+            .get("path")
+            .and_then(Value::as_str)
+            .is_some_and(|path| path.ends_with("Cargo.toml"))
+    );
     assert!(matches!(
         normalized.get(3),
         Some(AgentAction::SynthesizeAnswer { evidence_refs })
@@ -1206,12 +1178,16 @@ fn directory_purpose_extension_from_resolved_intent_uses_recursive_find_entries(
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert!(read_paths
-        .iter()
-        .any(|path| path.ends_with("intent_normalizer.schema.json")));
-    assert!(read_paths
-        .iter()
-        .any(|path| path.ends_with("nested/contract_repair.schema.json")));
+    assert!(
+        read_paths
+            .iter()
+            .any(|path| path.ends_with("intent_normalizer.schema.json"))
+    );
+    assert!(
+        read_paths
+            .iter()
+            .any(|path| path.ends_with("nested/contract_repair.schema.json"))
+    );
 }
 
 #[test]

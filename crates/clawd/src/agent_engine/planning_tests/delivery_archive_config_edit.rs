@@ -1087,14 +1087,14 @@ fn unrequested_config_edit_is_stripped_from_text_rewrite_followup() {
     ];
 
     let normalized = normalize_planned_actions_with_original(
-            &state,
-            Some(&route),
-            &loop_state,
-            "active_task_id=summary\nprevious_output=configs/config.toml build-all.sh 1\ncurrent_instruction=rewrite_style_only",
-            Some("rewrite_style_only"),
-            None,
-            actions,
-        );
+        &state,
+        Some(&route),
+        &loop_state,
+        "active_task_id=summary\nprevious_output=configs/config.toml build-all.sh 1\ncurrent_instruction=rewrite_style_only",
+        Some("rewrite_style_only"),
+        None,
+        actions,
+    );
 
     assert!(
         !normalized.iter().any(action_targets_config_edit),
@@ -1561,13 +1561,13 @@ fn config_validation_contract_normalizes_legacy_system_validate_structured_to_va
     ];
 
     let normalized = normalize_planned_actions(
-            &state,
-            Some(&route),
-            &LoopState::new(1),
-            "验证 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 是否是可读配置，并简短说明结果。",
-            None,
-            actions,
-        );
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "验证 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 是否是可读配置，并简短说明结果。",
+        None,
+        actions,
+    );
 
     let args = expect_planned_call(&normalized[0], "config_basic", "validate");
     assert_eq!(
@@ -1762,13 +1762,13 @@ fn rustclaw_config_section_header_field_reads_rewrite_to_guard_config() {
     ];
 
     let normalized = normalize_planned_actions(
-            &state,
-            Some(&route),
-            &LoopState::new(1),
-            "Inspect RustClaw configuration file configs/config.toml for security or risk-related settings and present only the important findings.",
-            Some("/home/guagua/rustclaw/configs/config.toml"),
-            actions,
-        );
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "Inspect RustClaw configuration file configs/config.toml for security or risk-related settings and present only the important findings.",
+        Some("/home/guagua/rustclaw/configs/config.toml"),
+        actions,
+    );
 
     let args = expect_planned_call(&normalized[0], "config_basic", "guard_rustclaw_config");
     assert_eq!(
