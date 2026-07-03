@@ -90,6 +90,29 @@ fn route_has_quantity_comparison_machine_signal(route_result: &crate::RouteResul
 }
 
 #[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BackgroundLocatorLoopRecoveryMarker {
+    ActiveObservedOutput,
+    RecentObservedResults,
+}
+
+#[cfg(test)]
+impl BackgroundLocatorLoopRecoveryMarker {
+    fn route_reason(self) -> &'static str {
+        match self {
+            Self::ActiveObservedOutput => "active_observed_output_loop_recovery",
+            Self::RecentObservedResults => {
+                "recent_observed_results_background_locator_loop_recovery"
+            }
+        }
+    }
+
+    fn record(self, route_result: &mut crate::RouteResult) {
+        append_route_reason(route_result, self.route_reason());
+    }
+}
+
+#[cfg(test)]
 pub(super) fn recover_background_locator_clarify_to_agent_loop(
     route_result: &mut crate::RouteResult,
     recent_execution_context: &str,
@@ -115,11 +138,8 @@ pub(super) fn recover_background_locator_clarify_to_agent_loop(
         response_shape,
         ..Default::default()
     };
-    append_route_reason(route_result, "active_observed_output_loop_recovery");
-    append_route_reason(
-        route_result,
-        "recent_observed_results_background_locator_loop_recovery",
-    );
+    BackgroundLocatorLoopRecoveryMarker::ActiveObservedOutput.record(route_result);
+    BackgroundLocatorLoopRecoveryMarker::RecentObservedResults.record(route_result);
     true
 }
 
