@@ -97,6 +97,7 @@ fn route_trace_repair_code_class(code: &str) -> &'static str {
         | "execution_recipe_structured_read_observation"
         | "file_delivery_contract_repaired"
         | "output_contract_delivery_intent_normalized"
+        | "output_contract_marker_normalized"
         | "output_contract_response_shape_normalized"
         | "output_contract_semantic_kind_normalized"
         | "raw_output_explicit_locator_contract_repaired"
@@ -168,6 +169,7 @@ mod tests {
             &contract,
             vec![
                 "output_contract_response_shape_normalized".to_string(),
+                "output_contract_marker_normalized".to_string(),
                 "output_contract_locator_kind_normalized".to_string(),
                 "execution_recipe_untrusted_text_ignored".to_string(),
             ],
