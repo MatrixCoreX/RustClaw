@@ -415,7 +415,7 @@ pub(super) fn append_active_delivery_content_target_token(
 fn record_unresolved_file_delivery_loop_candidate(route_result: &mut crate::RouteResult) {
     route_result.needs_clarify = false;
     route_result.clarify_question.clear();
-    route_result.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+    route_result.set_act_finalize(crate::ActFinalizeStyle::ChatWrapped);
     route_result.wants_file_delivery = true;
     route_result.output_contract.delivery_required = true;
     route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;

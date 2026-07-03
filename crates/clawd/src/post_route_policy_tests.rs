@@ -902,7 +902,7 @@ fn directory_like_content_request_does_not_default_to_content_excerpt_summary() 
 fn directory_like_chat_wrapped_execution_requires_content_evidence_without_forcing_semantic_kind() {
     let mut route = route_result();
     route.resolved_intent = "列出 docs 目录最近修改的两个文件，再判断这些是干什么的".to_string();
-    route.set_planner_execute_finalize(ActFinalizeStyle::ChatWrapped);
+    route.set_act_finalize(ActFinalizeStyle::ChatWrapped);
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -934,7 +934,7 @@ fn directory_like_chat_wrapped_execution_requires_content_evidence_without_forci
 fn generic_directory_chat_wrapped_execution_no_longer_defaults_to_directory_purpose_summary() {
     let mut route = route_result();
     route.resolved_intent = "看看 docs 目录".to_string();
-    route.set_planner_execute_finalize(ActFinalizeStyle::ChatWrapped);
+    route.set_act_finalize(ActFinalizeStyle::ChatWrapped);
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = OutputLocatorKind::Path;

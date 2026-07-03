@@ -179,7 +179,7 @@ pub(crate) fn apply_post_route_policy(
             && !missing_locator_for_path_scoped_content;
     if existing_file_delivery_can_try_locator_hint {
         execution_route_result.needs_clarify = false;
-        execution_route_result.set_planner_execute_finalize(ActFinalizeStyle::Plain);
+        execution_route_result.set_act_finalize(ActFinalizeStyle::Plain);
     }
 
     let ignored_scalar_count_marker =
@@ -216,7 +216,7 @@ pub(crate) fn apply_post_route_policy(
         } else {
             ActFinalizeStyle::ChatWrapped
         };
-        execution_route_result.set_planner_execute_finalize(finalize);
+        execution_route_result.set_act_finalize(finalize);
     }
 
     let fuzzy_locator_has_boundary_choices = !fuzzy_locator_suggestions.is_empty()
@@ -258,7 +258,7 @@ pub(crate) fn apply_post_route_policy(
         if !execution_route_result.is_execute_gate()
             || execution_route_result.is_resume_discussion_mode()
         {
-            execution_route_result.set_planner_execute_finalize(ActFinalizeStyle::ChatWrapped);
+            execution_route_result.set_act_finalize(ActFinalizeStyle::ChatWrapped);
         }
     }
     if apply_boundary_clarify {
