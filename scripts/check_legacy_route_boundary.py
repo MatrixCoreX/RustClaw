@@ -74,10 +74,10 @@ def is_intent_router_compat_file(rel_path: str) -> bool:
 
 def is_allowed(rel_path: str, kind: str, line_text: str) -> bool:
     if kind == "derived_route_label":
-        # Production code should use route_gate_kind or legacy_route_label_*.
+        # Production code should use boundary_mode, route_trace_decision, or route_trace_label.
         return False
     if kind == "route_label_call":
-        # The old route_label() API was removed; legacy_route_label_for_trace()
+        # The old route_label() API was removed; route_trace_label_for_log()
         # is the only permitted production helper.
         return False
     if kind == "FirstLayerDecision":

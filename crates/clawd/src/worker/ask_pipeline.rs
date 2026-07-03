@@ -995,15 +995,15 @@ fn build_loop_context_after_boundary_preflight(
         );
     } else if post_route.execution_route_result.ask_mode != route_result.ask_mode {
         info!(
-            "{} worker_once: ask boundary_dispatch_hint_refined_by_auto_locator task_id={} ask_mode={} -> {} legacy_route_label={} -> {}",
+            "{} worker_once: ask boundary_dispatch_hint_refined_by_auto_locator task_id={} ask_mode={} -> {} route_trace_label={} -> {}",
             crate::highlight_tag("routing"),
             task.task_id,
             route_result.ask_mode.as_str(),
             post_route.execution_route_result.ask_mode.as_str(),
-            route_result.legacy_route_label_for_trace(),
+            route_result.route_trace_label_for_log(),
             post_route
                 .execution_route_result
-                .legacy_route_label_for_trace()
+                .route_trace_label_for_log()
         );
     }
     sanitize_untrusted_normalizer_answer_candidate_for_execution(

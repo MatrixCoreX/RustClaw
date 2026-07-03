@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::runtime::ask_mode::{ActFinalizeStyle, AskMode};
 use crate::runtime::types::{AgentAction, FirstLayerDecision, ScheduleIntentOutput};
@@ -484,8 +484,8 @@ impl RouteResult {
         self.ask_mode = ask_mode;
     }
 
-    pub(crate) fn legacy_route_label_for_trace(&self) -> &'static str {
-        self.ask_mode.legacy_route_label_for_trace()
+    pub(crate) fn route_trace_label_for_log(&self) -> &'static str {
+        self.ask_mode.route_trace_label_for_log()
     }
 
     #[cfg(test)]
