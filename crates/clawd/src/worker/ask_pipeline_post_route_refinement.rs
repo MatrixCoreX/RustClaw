@@ -39,8 +39,22 @@ impl BoundaryClarifyCandidate {
         }
     }
 
-    fn requires_file_delivery_contract(self) -> bool {
-        matches!(self, Self::UnresolvedFileDeliveryRequiresLocator)
+    fn apply_route_boundary(self, route_result: &mut crate::RouteResult) {
+        route_result.needs_clarify = false;
+        route_result.clarify_question.clear();
+        route_result.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+        if !matches!(self, Self::UnresolvedFileDeliveryRequiresLocator) {
+            return;
+        }
+        route_result.wants_file_delivery = true;
+        route_result.output_contract.delivery_required = true;
+        route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route_result.output_contract.requires_content_evidence = true;
+        append_route_reason(
+            route_result,
+            "unresolved_file_delivery_deferred_to_agent_loop",
+        );
     }
 }
 
@@ -220,35 +234,8 @@ fn defer_boundary_clarify_to_agent_loop(
         _ => return,
     };
 
-    post_route.execution_route_result.needs_clarify = false;
-    post_route.execution_route_result.clarify_question.clear();
-    post_route
-        .execution_route_result
-        .set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+    candidate.apply_route_boundary(&mut post_route.execution_route_result);
     push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, candidate.observation_token());
-    if candidate.requires_file_delivery_contract() {
-        post_route.execution_route_result.wants_file_delivery = true;
-        post_route
-            .execution_route_result
-            .output_contract
-            .delivery_required = true;
-        post_route
-            .execution_route_result
-            .output_contract
-            .delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-        post_route
-            .execution_route_result
-            .output_contract
-            .response_shape = crate::OutputResponseShape::FileToken;
-        post_route
-            .execution_route_result
-            .output_contract
-            .requires_content_evidence = true;
-        append_route_reason(
-            &mut post_route.execution_route_result,
-            "unresolved_file_delivery_deferred_to_agent_loop",
-        );
-    }
     post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::with_owner(
         "agent_loop_boundary_defer",
         candidate.gate_reason_code(),
