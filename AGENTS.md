@@ -51,8 +51,8 @@ This file is for all agents working in this repository. The goal is to standardi
    `ask` tasks are handled in `worker_once()` in `crates/clawd/src/main.rs`:
    - 先做上下文解析与路由（`intent_router`）。
      First resolve context and route mode (`intent_router`).
-   - `AskMode::Act` / `route_gate_kind=execute` 时进入 `agent_engine::run_agent_with_tools()`；旧 `FirstLayerDecision::PlannerExecute` 只作为 normalizer 兼容输入和日志/journal trace 字段。
-     For `AskMode::Act` / `route_gate_kind=execute`, execution enters `agent_engine::run_agent_with_tools()`; legacy `FirstLayerDecision::PlannerExecute` is only a normalizer compatibility input and log/journal trace field.
+   - `AskMode::Act` / `route_gate_kind=execute` 时进入 `agent_engine::run_agent_with_tools()`；历史 first-layer trace 只能作为隔离兼容日志读取，不得作为新路由或执行决策依据。
+     For `AskMode::Act` / `route_gate_kind=execute`, execution enters `agent_engine::run_agent_with_tools()`; historical first-layer trace may only be read in isolated compatibility logs and must not drive new routing or execution decisions.
 3. `agent_engine` 输出动作 JSON（`call_capability/call_tool/call_skill/synthesize_answer/respond`）；推荐新规划优先输出 `call_capability`，由 runtime resolver 映射到具体 tool/skill。
    `agent_engine` emits action JSON (`call_capability/call_tool/call_skill/synthesize_answer/respond`); new planner-facing flows should prefer `call_capability`, which the runtime resolver maps to concrete tools/skills.
 4. 执行前由 `CapabilityResolver` / `PlanVerifier` 做能力解析、可见性、必填参数、风险/效果与确认/验证检查；不要为了单个自然语言 case 在 `clawd` 主流程加按技能名或固定短语的选择分支。
