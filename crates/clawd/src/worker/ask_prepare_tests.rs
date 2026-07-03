@@ -16,6 +16,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[path = "ask_prepare_tests/followup_delivery.rs"]
 mod followup_delivery;
+#[path = "ask_prepare_tests/ordered_entry_marker.rs"]
+mod ordered_entry_marker;
 
 fn make_temp_root(label: &str) -> std::path::PathBuf {
     let nonce = SystemTime::now()

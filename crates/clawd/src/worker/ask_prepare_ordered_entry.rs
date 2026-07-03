@@ -1,5 +1,70 @@
 use serde_json::Value;
 
+const ORDERED_ENTRY_BOUND_MARKER: &str = "ordered_entry_reference_bound_from_active_frame";
+const ORDERED_ENTRY_ROUTE_PATH_REPAIRED_MARKER: &str =
+    "ordered_entry_reference_index_repaired_from_route_path";
+const ORDERED_ENTRY_CURRENT_PROMPT_INFERRED_MARKER: &str =
+    "ordered_entry_reference_inferred_from_current_prompt_token";
+const ORDERED_ENTRY_TARGET_KEY: &str = "ordered_entry_target";
+
+fn route_reason_has_structural_marker(route_result: &crate::RouteResult, marker: &str) -> bool {
+    route_result
+        .route_reason
+        .split(';')
+        .map(str::trim)
+        .any(|part| {
+            part == marker
+                || part
+                    .rsplit_once(':')
+                    .is_some_and(|(_, suffix)| suffix.trim() == marker)
+        })
+}
+
+fn append_route_reason_structural_marker(route_result: &mut crate::RouteResult, marker: &str) {
+    if route_result.route_reason.trim().is_empty() {
+        route_result.route_reason = marker.to_string();
+    } else if !route_reason_has_structural_marker(route_result, marker) {
+        route_result.route_reason.push_str("; ");
+        route_result.route_reason.push_str(marker);
+    }
+}
+
+fn resolved_intent_has_structural_value(resolved_intent: &str, key: &str, value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty() {
+        return false;
+    }
+    let prefix = format!("{key}:");
+    resolved_intent.lines().map(str::trim).any(|line| {
+        line.strip_prefix(prefix.as_str())
+            .is_some_and(|suffix| suffix.trim() == value)
+    })
+}
+
+fn ordered_entry_target_line(target: &str) -> String {
+    let mut line =
+        String::with_capacity(ORDERED_ENTRY_TARGET_KEY.len() + ": ".len() + target.len());
+    line.push_str(ORDERED_ENTRY_TARGET_KEY);
+    line.push_str(": ");
+    line.push_str(target);
+    line
+}
+
+fn append_ordered_entry_target(route_result: &mut crate::RouteResult, target: &str) {
+    if route_result.resolved_intent.trim().is_empty() {
+        route_result.resolved_intent = ordered_entry_target_line(target);
+    } else if !resolved_intent_has_structural_value(
+        &route_result.resolved_intent,
+        ORDERED_ENTRY_TARGET_KEY,
+        target,
+    ) {
+        route_result.resolved_intent.push('\n');
+        route_result
+            .resolved_intent
+            .push_str(&ordered_entry_target_line(target));
+    }
+}
+
 fn json_usize(value: &Value) -> Option<usize> {
     value
         .as_u64()
@@ -66,23 +131,8 @@ fn ordered_entry_reference_from_active_frame_index(
     }
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route_result.output_contract.locator_hint = target.clone();
-    if route_result.route_reason.trim().is_empty() {
-        route_result.route_reason = "ordered_entry_reference_bound_from_active_frame".to_string();
-    } else if !route_result
-        .route_reason
-        .contains("ordered_entry_reference_bound_from_active_frame")
-    {
-        route_result
-            .route_reason
-            .push_str("; ordered_entry_reference_bound_from_active_frame");
-    }
-    if route_result.resolved_intent.trim().is_empty() {
-        route_result.resolved_intent = format!("Use ordered entry {}: {target}", index + 1);
-    } else if !route_result.resolved_intent.contains(&target) {
-        route_result
-            .resolved_intent
-            .push_str(&format!("\nordered_entry_target: {target}"));
-    }
+    append_route_reason_structural_marker(route_result, ORDERED_ENTRY_BOUND_MARKER);
+    append_ordered_entry_target(route_result, &target);
     true
 }
 
@@ -276,8 +326,7 @@ pub(super) fn bind_ordered_entry_reference_from_active_frame(
     let supported_ordered_entry_contract = route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || (route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar
-            && route_result.output_contract.semantic_kind
-                == crate::OutputSemanticKind::ScalarPathOnly);
+            && super::route_reason_has_structural_marker(route_result, "scalar_path_only"));
     if route_result.needs_clarify || !supported_ordered_entry_contract {
         return false;
     }
@@ -295,23 +344,17 @@ pub(super) fn bind_ordered_entry_reference_from_active_frame(
         return false;
     };
     if let Some(state_patch_index) = state_patch_index {
-        if route_path_index.is_some_and(|route_path_index| route_path_index != state_patch_index)
-            && !route_result
-                .route_reason
-                .contains("ordered_entry_reference_index_repaired_from_route_path")
-        {
-            route_result
-                .route_reason
-                .push_str("; ordered_entry_reference_index_repaired_from_route_path");
+        if route_path_index.is_some_and(|route_path_index| route_path_index != state_patch_index) {
+            append_route_reason_structural_marker(
+                route_result,
+                ORDERED_ENTRY_ROUTE_PATH_REPAIRED_MARKER,
+            );
         }
-    } else if current_prompt_index.is_some()
-        && !route_result
-            .route_reason
-            .contains("ordered_entry_reference_inferred_from_current_prompt_token")
-    {
-        route_result
-            .route_reason
-            .push_str("; ordered_entry_reference_inferred_from_current_prompt_token");
+    } else if current_prompt_index.is_some() {
+        append_route_reason_structural_marker(
+            route_result,
+            ORDERED_ENTRY_CURRENT_PROMPT_INFERRED_MARKER,
+        );
     }
     ordered_entry_reference_from_active_frame_index(route_result, session_snapshot, index)
 }
