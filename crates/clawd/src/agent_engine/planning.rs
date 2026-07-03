@@ -25,8 +25,6 @@ use super::planning_prompt::{
     round1_prompt_spec_for_class, runtime_os_label, runtime_shell_label, PlanningPromptClass,
 };
 #[cfg(test)]
-use super::planning_recent_artifacts::recent_artifacts_judgment_deterministic_plan_result;
-#[cfg(test)]
 use super::planning_registry_preference::registry_preferred_skill_matches_route;
 #[cfg(test)]
 use super::planning_registry_preference::registry_preferred_skill_names_for_route;

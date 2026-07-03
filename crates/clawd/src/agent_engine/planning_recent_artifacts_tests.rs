@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::super::planning_recent_artifacts::normalize_recent_artifacts_listing_selectors;
 use super::*;
 use crate::{
     executor::{StepExecutionResult, StepExecutionStatus},
@@ -514,8 +515,8 @@ fn recent_artifacts_judgment_rewrites_capability_field_extract_to_selected_file_
 }
 
 #[test]
-fn recent_artifacts_judgment_uses_deterministic_listing_plan_before_open_planner() {
-    let temp = TempDirGuard::new("deterministic_plan");
+fn recent_artifacts_judgment_listing_policy_and_selectors_are_loop_owned() {
+    let temp = TempDirGuard::new("loop_owned_listing");
     std::fs::write(temp.path.join("clawd.run.log"), b"runtime log").expect("write log");
     std::fs::write(temp.path.join("nl_suite.log"), b"test log").expect("write log");
     let temp_path = temp.path.display().to_string();
@@ -533,18 +534,32 @@ fn recent_artifacts_judgment_uses_deterministic_listing_plan_before_open_planner
     contract.self_extension.list_selector.target_kind_specified = true;
     let route = route_with_contract(contract);
 
-    let plan = recent_artifacts_judgment_deterministic_plan_result(
-        "list recent artifacts and judge their kind",
-        Some(&route),
-        &LoopState::new(1),
-        Some(temp_path.as_str()),
+    let effective_contract = route.effective_output_contract();
+    let policy = crate::evidence_policy::action_policy_for_output_contract(
+        Some(&effective_contract),
+        "fs_basic",
+        &json!({
+            "action": "list_dir",
+            "path": temp_path.as_str(),
+        }),
     )
-    .expect("recent artifacts should use deterministic listing");
+    .expect("recent artifacts should allow listing evidence");
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert!(policy.action_matches_preferred(), "{policy:?}");
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = planned_call(&action, "fs_basic", "list_dir").expect("list_dir action");
+    let normalized = normalize_recent_artifacts_listing_selectors(
+        Some(&route),
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": temp_path.as_str(),
+            }),
+        }],
+    );
+
+    assert_eq!(normalized.len(), 1, "{normalized:?}");
+    let args = planned_call(&normalized[0], "fs_basic", "list_dir").expect("list_dir action");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some(temp_path.as_str())
