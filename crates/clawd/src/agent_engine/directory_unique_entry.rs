@@ -654,50 +654,6 @@ fn unique_log_file_matching_name_filter(directory: &Path, filter: &str) -> Optio
 }
 
 #[cfg(test)]
-pub(super) fn generic_path_content_log_analyze_deterministic_plan_result(
-    goal: &str,
-    state: &AppState,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-    auto_locator_path: Option<&str>,
-) -> Option<PlanResult> {
-    if loop_state.round_no > 1
-        || loop_state.has_tool_or_skill_output
-        || !log_analyze_is_enabled(state)
-    {
-        return None;
-    }
-    let route = route_result?;
-    let path = generic_path_content_log_analyze_target_path(route_result, auto_locator_path)?;
-    if !contract_allows_log_analyze_for_path(route, &path) {
-        return None;
-    }
-    let actions = vec![
-        AgentAction::CallSkill {
-            skill: "log_analyze".to_string(),
-            args: serde_json::json!({
-                "path": path,
-                "max_matches": 50
-            }),
-        },
-        AgentAction::SynthesizeAnswer {
-            evidence_refs: vec!["last_output".to_string()],
-        },
-        AgentAction::Respond {
-            content: "{{last_output}}".to_string(),
-        },
-    ];
-    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
-        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
-    Some(build_plan_result(
-        goal,
-        &raw_plan_text,
-        PlanKind::Single,
-        &actions,
-    ))
-}
-
-#[cfg(test)]
 pub(super) fn route_allows_single_file_content_understanding(route: &RouteResult) -> bool {
     [
         crate::OutputSemanticKind::ContentExcerptSummary,

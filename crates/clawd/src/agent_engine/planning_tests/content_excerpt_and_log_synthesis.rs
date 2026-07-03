@@ -721,31 +721,29 @@ fn generic_log_directory_auto_locator_uses_log_analyze_plan() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = logs_path.clone();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=logs.analyze".to_string();
 
-    let plan = generic_path_content_log_analyze_deterministic_plan_result(
-        "inspect the current target",
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        Some(&route),
+        &route,
         &LoopState::new(1),
+        "inspect the current target",
         Some(&logs_path),
-    )
-    .expect("log analyze plan");
+        Some(&route.route_reason),
+        "log_analyze",
+        "analyze",
+        json!({
+            "action": "analyze",
+            "path": logs_path.clone(),
+            "max_matches": 50,
+        }),
+    );
 
-    assert_eq!(plan.steps.len(), 3);
-    assert_eq!(plan.steps[0].action_type, "call_skill");
-    assert_eq!(plan.steps[0].skill, "log_analyze");
     assert_eq!(
-        plan.steps[0].args.get("path").and_then(Value::as_str),
+        args.get("path").and_then(Value::as_str),
         Some(logs_path.as_str())
     );
-    assert_eq!(
-        plan.steps[0]
-            .args
-            .get("max_matches")
-            .and_then(Value::as_u64),
-        Some(50)
-    );
-    assert_eq!(plan.steps[1].action_type, "synthesize_answer");
+    assert_eq!(args.get("max_matches").and_then(Value::as_u64), Some(50));
 }
 
 #[test]
@@ -770,21 +768,26 @@ fn content_excerpt_summary_log_directory_auto_locator_uses_log_analyze_plan() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = logs_path.clone();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=logs.analyze".to_string();
 
-    let plan = generic_path_content_log_analyze_deterministic_plan_result(
-        "inspect the current target",
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        Some(&route),
+        &route,
         &LoopState::new(1),
+        "inspect the current target",
         Some(&logs_path),
-    )
-    .expect("log analyze plan");
+        Some(&route.route_reason),
+        "log_analyze",
+        "analyze",
+        json!({
+            "action": "analyze",
+            "path": logs_path.clone(),
+            "max_matches": 50,
+        }),
+    );
 
-    assert_eq!(plan.steps.len(), 3);
-    assert_eq!(plan.steps[0].action_type, "call_skill");
-    assert_eq!(plan.steps[0].skill, "log_analyze");
     assert_eq!(
-        plan.steps[0].args.get("path").and_then(Value::as_str),
+        args.get("path").and_then(Value::as_str),
         Some(logs_path.as_str())
     );
 }
@@ -808,34 +811,26 @@ fn content_excerpt_summary_single_log_file_without_slice_defers_to_log_analyze_p
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = log_path.clone();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=logs.analyze".to_string();
 
-    assert!(
-        content_excerpt_explicit_file_targets_deterministic_plan_result(
-            &state,
-            "inspect the log target",
-            Some(&route),
-            &LoopState::new(1),
-            "",
-            None,
-            Some(&log_path),
-        )
-        .is_none()
+    let args = assert_planner_supplied_skill_call_preserved(
+        &state,
+        &route,
+        &LoopState::new(1),
+        "inspect the log target",
+        Some(&log_path),
+        Some(&route.route_reason),
+        "log_analyze",
+        "analyze",
+        json!({
+            "action": "analyze",
+            "path": log_path.clone(),
+            "max_matches": 50,
+        }),
     );
 
-    let plan = generic_path_content_log_analyze_deterministic_plan_result(
-        "inspect the log target",
-        &state,
-        Some(&route),
-        &LoopState::new(1),
-        Some(&log_path),
-    )
-    .expect("single log summary should use log_analyze");
-
-    assert_eq!(plan.steps.len(), 3);
-    assert_eq!(plan.steps[0].action_type, "call_skill");
-    assert_eq!(plan.steps[0].skill, "log_analyze");
     assert_eq!(
-        plan.steps[0].args.get("path").and_then(Value::as_str),
+        args.get("path").and_then(Value::as_str),
         Some(log_path.as_str())
     );
 }
@@ -859,26 +854,28 @@ fn content_excerpt_single_doc_file_with_doc_parse_capability_uses_doc_parse_plan
     route.output_contract.delivery_required = false;
     route.route_reason = "capability_ref=document.parse".to_string();
 
-    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "summarize the resolved document",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        "",
-        None,
+        "summarize the resolved document",
+        Some("summarize the resolved document"),
         Some(&readme_path),
-    )
-    .expect("single document summary should use doc_parse");
-
-    assert_eq!(plan.steps.len(), 3);
-    assert_eq!(plan.steps[0].action_type, "call_skill");
-    assert_eq!(plan.steps[0].skill, "doc_parse");
+        "doc_parse",
+        "parse_doc",
+        json!({
+            "action": "parse_doc",
+            "path": readme_path.clone(),
+            "max_chars": 12000,
+            "include_metadata": true,
+        }),
+    );
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("parse_doc")
     );
     assert_eq!(
-        plan.steps[0].args.get("path").and_then(Value::as_str),
+        args.get("path").and_then(Value::as_str),
         Some(readme_path.as_str())
     );
 }
