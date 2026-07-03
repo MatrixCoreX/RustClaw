@@ -914,15 +914,17 @@ pub(crate) async fn run_intent_normalizer(
                 )
             })
             .unwrap_or_else(|| "none".to_string());
-        let derived_route_decision = route_trace_decision_from_state(
+        let derived_route_trace_decision = route_trace_decision_from_state(
             needs_clarify,
             &output_contract,
             wants_file_delivery,
             schedule_kind,
             execution_recipe_hint,
         );
-        let route_trace_label =
-            route_label_from_first_layer_decision(derived_route_decision, execution_finalize_style);
+        let route_trace_label = route_label_from_first_layer_decision(
+            derived_route_trace_decision,
+            execution_finalize_style,
+        );
         if route_trace_label != synced_route_label {
             info!(
                 "{} intent_normalizer task_id={} route_trace_label_override={} -> {} reason=content_evidence_requires_execution locator_kind={:?} shape={:?}",
@@ -942,7 +944,7 @@ pub(crate) async fn run_intent_normalizer(
             crate::truncate_for_log(&resolved_user_intent),
             resume_behavior,
             schedule_kind,
-            derived_route_decision,
+            derived_route_trace_decision,
             route_trace_label,
             wants_file_delivery,
             needs_clarify,
@@ -1015,6 +1017,9 @@ pub(crate) async fn run_intent_normalizer(
     normalizer_parse_failed_fallback_output(state, task, req, &surface_req, &req_surface, &llm_out)
 }
 
+/// Derives a legacy-compatible route trace token from machine boundary fields.
+/// This is journal/log compatibility only; ordinary respond/clarify/act
+/// decisions are owned by the agent loop.
 fn route_trace_decision_from_state(
     needs_clarify: bool,
     output_contract: &IntentOutputContract,
