@@ -93,23 +93,23 @@ impl AskMode {
             #[cfg(test)]
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::DirectAnswerTrace,
-            } => "Chat",
+            } => "respond",
             #[cfg(test)]
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::ClarifyTrace,
-            } => "AskClarify",
+            } => "clarify",
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::ResumeFollowupDiscussion,
-            } => "Chat",
+            } => "respond_resume_discussion",
             AskMode::Act {
                 finalize: ActFinalizeStyle::Plain,
-            } => "Act",
+            } => "act_plain_finalizer",
             AskMode::Act {
                 finalize: ActFinalizeStyle::ChatWrapped,
-            } => "ChatAct",
+            } => "act_chat_finalizer",
             AskMode::Act {
                 finalize: ActFinalizeStyle::ResumeContinue,
-            } => "Act",
+            } => "act_resume_continue",
         }
     }
 
