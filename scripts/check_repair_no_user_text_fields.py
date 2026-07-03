@@ -26,6 +26,7 @@ PRESENCE_CHECK_ONLY_FILES = [
     "crates/clawd/src/repo/task_resume_execution.rs",
     "crates/clawd/src/worker/async_poll_executor.rs",
     "crates/clawd/src/worker/resume_replay_executor.rs",
+    "crates/clawd/src/worker/runtime_support/stale_recovery.rs",
 ]
 
 MONITORED_FILES = CORE_RECOVERY_FILES + PRESENCE_CHECK_ONLY_FILES
