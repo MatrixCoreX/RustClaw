@@ -19,9 +19,12 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "crates/clawd/src"
+MAIN_FILE = SRC_ROOT / "main.rs"
 AGENT_ENGINE_FILE = SRC_ROOT / "agent_engine.rs"
 PIPELINE_TYPES_FILE = SRC_ROOT / "pipeline_types.rs"
 RUNTIME_ASK_MODE_FILE = SRC_ROOT / "runtime/ask_mode.rs"
+RUNTIME_TYPES_FILE = SRC_ROOT / "runtime/types.rs"
+INTENT_ROUTER_FILE = SRC_ROOT / "intent_router.rs"
 PREFERRED_RUN_CMD_FILE = SRC_ROOT / "agent_engine/scalar_count_deterministic_plan.rs"
 PREFERRED_STRUCTURED_ACTION_FILE = SRC_ROOT / "agent_engine/preferred_structured_action.rs"
 MIGRATION_CLASS_FILE = SRC_ROOT / "agent_engine/migration_class.rs"
@@ -734,6 +737,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_route_trace_record_decision_type())
     findings.extend(scan_normalizer_run_route_trace_decision_type())
     findings.extend(scan_runtime_journal_route_trace_decision_type())
+    findings.extend(scan_first_layer_decision_test_only_boundary())
     findings.extend(scan_contract_repair_schema_ordinary_semantic_tokens())
     findings.extend(scan_skill_registry_metadata_ordinary_semantic_tokens())
     findings.extend(scan_preferred_run_cmd_registry_bridge_fallback())
@@ -1480,6 +1484,60 @@ def scan_runtime_journal_route_trace_decision_type_text(
                     text.count("\n", 0, body_start + first_layer_variant) + 1,
                     "runtime_journal_route_trace_first_layer_variant",
                     "route_trace_decision_for_journal must not construct FirstLayerDecision variants",
+                )
+            )
+    return findings
+
+
+def scan_first_layer_decision_test_only_boundary() -> list[Finding]:
+    findings: list[Finding] = []
+    for path in (RUNTIME_TYPES_FILE, MAIN_FILE, INTENT_ROUTER_FILE):
+        findings.extend(
+            scan_first_layer_decision_test_only_boundary_text(
+                rel(path),
+                path.read_text(encoding="utf-8"),
+            )
+        )
+    return findings
+
+
+def preceding_lines_have_cfg_test(text: str, offset: int, line_window: int = 3) -> bool:
+    prefix = text[:offset].splitlines()
+    recent = prefix[-line_window:]
+    return any("#[cfg(test)]" in line for line in recent)
+
+
+def scan_first_layer_decision_test_only_boundary_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    checks: tuple[tuple[str, str, str], ...] = (
+        (
+            r"\benum\s+FirstLayerDecision\b",
+            "first_layer_decision_enum_not_test_only",
+            "FirstLayerDecision enum must remain test-only",
+        ),
+        (
+            r"\bpub\(crate\)\s+use\s+runtime::types::FirstLayerDecision\b",
+            "first_layer_decision_crate_reexport_not_test_only",
+            "crate-root FirstLayerDecision re-export must remain test-only",
+        ),
+        (
+            r"\buse\s+crate::FirstLayerDecision\b",
+            "first_layer_decision_import_not_test_only",
+            "intent-router FirstLayerDecision import must remain test-only",
+        ),
+    )
+    for pattern, kind, message in checks:
+        for match in re.finditer(pattern, text):
+            if preceding_lines_have_cfg_test(text, match.start()):
+                continue
+            findings.append(
+                Finding(
+                    rel_path,
+                    text.count("\n", 0, match.start()) + 1,
+                    kind,
+                    message,
                 )
             )
     return findings
@@ -3557,6 +3615,42 @@ def run_self_test() -> int:
         "pub(crate) fn route_trace_decision_for_journal(&self) -> AskRouteTraceDecision {\n"
         "    AskRouteTraceDecision::Respond\n"
         "}\n",
+    )
+    blocked_first_layer_enum = scan_first_layer_decision_test_only_boundary_text(
+        "crates/clawd/src/runtime/types.rs",
+        "#[derive(Debug)]\nenum FirstLayerDecision { DirectAnswer }\n",
+    )
+    assert any(
+        item.kind == "first_layer_decision_enum_not_test_only"
+        for item in blocked_first_layer_enum
+    )
+    blocked_first_layer_reexport = scan_first_layer_decision_test_only_boundary_text(
+        "crates/clawd/src/main.rs",
+        "pub(crate) use runtime::types::FirstLayerDecision;\n",
+    )
+    assert any(
+        item.kind == "first_layer_decision_crate_reexport_not_test_only"
+        for item in blocked_first_layer_reexport
+    )
+    blocked_first_layer_import = scan_first_layer_decision_test_only_boundary_text(
+        "crates/clawd/src/intent_router.rs",
+        "use crate::FirstLayerDecision;\n",
+    )
+    assert any(
+        item.kind == "first_layer_decision_import_not_test_only"
+        for item in blocked_first_layer_import
+    )
+    assert not scan_first_layer_decision_test_only_boundary_text(
+        "crates/clawd/src/runtime/types.rs",
+        "#[cfg(test)]\n#[derive(Debug)]\nenum FirstLayerDecision { DirectAnswer }\n",
+    )
+    assert not scan_first_layer_decision_test_only_boundary_text(
+        "crates/clawd/src/main.rs",
+        "#[cfg(test)]\npub(crate) use runtime::types::FirstLayerDecision;\n",
+    )
+    assert not scan_first_layer_decision_test_only_boundary_text(
+        "crates/clawd/src/intent_router.rs",
+        "#[cfg(test)]\nuse crate::FirstLayerDecision;\n",
     )
     assert not scan_normalizer_route_result_boundary()
     assert not scan_journal_output_contract_ref_boundary()
