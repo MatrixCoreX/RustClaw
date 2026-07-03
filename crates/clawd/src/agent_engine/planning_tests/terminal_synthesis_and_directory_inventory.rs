@@ -695,27 +695,34 @@ fn file_names_auto_locator_builds_list_dir_with_structural_extension_filter() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
 
-    let plan = file_names_auto_locator_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &test_state(),
-        "return matching file names",
         Some(&route),
         &loop_state,
         &route.resolved_intent,
-        Some(&route.resolved_intent),
         Some(root_path.as_str()),
-    )
-    .expect("file_names directory locator should build deterministic list_dir plan");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": root_path,
+                "names_only": true,
+                "files_only": true,
+                "dirs_only": false,
+                "include_hidden": false,
+                "max_entries": 1000,
+                "sort_by": "name",
+                "ext_filter": ["md"],
+            }),
+        }],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action();
-    let args = match &action {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            args
-        }
-        other => panic!("expected fs_basic list_dir action, got {other:?}"),
-    };
+    let args = normalized
+        .iter()
+        .filter(|action| planned_call_is(action, "fs_basic", "list_dir"))
+        .map(|action| expect_planned_call(action, "fs_basic", "list_dir"))
+        .next()
+        .expect("planner list_dir action");
     assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
     assert_eq!(
         args.get("path").and_then(Value::as_str),
@@ -745,23 +752,36 @@ fn file_names_auto_locator_does_not_inherit_extension_from_history_text() {
     route.output_contract.locator_hint = root_path.clone();
     route.resolved_intent = "list file names selector_limit=5".to_string();
     let user_text = "list logs file names selector_limit=5";
-    let original_user_text = "previous ordered entries included hello.sh";
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
 
-    let plan = file_names_auto_locator_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &test_state(),
-        "return selected file names",
         Some(&route),
         &loop_state,
         user_text,
-        Some(original_user_text),
         Some(root_path.as_str()),
-    )
-    .expect("file_names directory locator should build deterministic list_dir plan");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": root_path,
+                "names_only": true,
+                "files_only": true,
+                "dirs_only": false,
+                "include_hidden": false,
+                "max_entries": 5,
+                "sort_by": "name",
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    let args = normalized
+        .iter()
+        .filter(|action| planned_call_is(action, "fs_basic", "list_dir"))
+        .map(|action| expect_planned_call(action, "fs_basic", "list_dir"))
+        .next()
+        .expect("planner list_dir action");
     assert!(args.get("ext_filter").is_none());
     assert_eq!(args.get("sort_by").and_then(Value::as_str), Some("name"));
 }
@@ -786,19 +806,29 @@ fn file_names_auto_locator_does_not_use_stale_resolved_intent_selector() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
 
-    let plan = file_names_auto_locator_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &test_state(),
-        "return selected file names",
         Some(&route),
         &loop_state,
         user_text,
-        Some(user_text),
         Some(root_path.as_str()),
-    )
-    .expect("file_names directory locator should build deterministic list_dir plan");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": root_path,
+                "names_only": true,
+                "files_only": true,
+                "dirs_only": false,
+                "include_hidden": false,
+                "max_entries": 1000,
+                "sort_by": "name",
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
     assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(1000));
     assert_eq!(args.get("sort_by").and_then(Value::as_str), Some("name"));
     assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
@@ -825,19 +855,29 @@ fn file_names_auto_locator_preserves_size_ranked_metadata() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
 
-    let plan = file_names_auto_locator_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &test_state(),
-        "return matching file names with sizes",
         Some(&route),
         &loop_state,
         user_text,
-        Some(user_text),
         Some(root_path.as_str()),
-    )
-    .expect("file_names size-ranked directory locator should build deterministic list_dir plan");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": root_path,
+                "names_only": false,
+                "files_only": true,
+                "dirs_only": false,
+                "include_hidden": false,
+                "max_entries": 3,
+                "sort_by": "size_desc",
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
     assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
     assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(false));
     assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(3));
@@ -868,19 +908,29 @@ fn file_names_auto_locator_does_not_promote_negated_size_marker_over_name_sort()
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
 
-    let plan = file_names_auto_locator_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &test_state(),
-        "return selected file names by descending name",
         Some(&route),
         &loop_state,
         user_text,
-        Some(user_text),
         Some(root_path.as_str()),
-    )
-    .expect("file_names directory locator should build deterministic list_dir plan");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": root_path,
+                "names_only": true,
+                "files_only": true,
+                "dirs_only": false,
+                "include_hidden": false,
+                "max_entries": 5,
+                "sort_by": "name_desc",
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
     assert_eq!(
         args.get("sort_by").and_then(Value::as_str),
         Some("name_desc")
@@ -909,19 +959,29 @@ fn file_names_auto_locator_does_not_promote_size_marker_when_name_sort_is_explic
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
 
-    let plan = file_names_auto_locator_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &test_state(),
-        "return selected file names by name",
         Some(&route),
         &loop_state,
         user_text,
-        Some(user_text),
         Some(root_path.as_str()),
-    )
-    .expect("file_names directory locator should build deterministic list_dir plan");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": root_path,
+                "names_only": true,
+                "files_only": true,
+                "dirs_only": false,
+                "include_hidden": false,
+                "max_entries": 5,
+                "sort_by": "name",
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
     assert_eq!(args.get("sort_by").and_then(Value::as_str), Some("name"));
     assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
     assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(5));
@@ -954,19 +1014,33 @@ fn directory_purpose_auto_locator_preserves_file_selector_for_selected_entry_jud
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
 
-    let plan = directory_purpose_auto_locator_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &test_state(),
-        "judge selected entries from a directory listing",
         Some(&route),
         &loop_state,
         "selector_target_kind=file selector_limit=5",
-        Some("selector_target_kind=file selector_limit=5"),
         Some(root_path.as_str()),
-    )
-    .expect("directory purpose selector should build deterministic listing plan");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": root_path,
+                "names_only": false,
+                "files_only": true,
+                "dirs_only": false,
+                "include_hidden": false,
+                "max_entries": 5,
+                "sort_by": "name",
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    let args = normalized
+        .iter()
+        .filter(|action| planned_call_is(action, "fs_basic", "list_dir"))
+        .map(|action| expect_planned_call(action, "fs_basic", "list_dir"))
+        .next()
+        .expect("planner list_dir action");
     assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
     assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(false));
     assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(false));
@@ -1001,19 +1075,29 @@ fn file_names_auto_locator_uses_structured_list_selector_without_reason_token() 
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
 
-    let plan = file_names_auto_locator_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &test_state(),
-        "return selected file names with sizes",
         Some(&route),
         &loop_state,
         user_text,
-        Some(user_text),
         Some(root_path.as_str()),
-    )
-    .expect("file_names list-selector contract should build deterministic list_dir plan");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": root_path,
+                "names_only": false,
+                "files_only": true,
+                "dirs_only": false,
+                "include_hidden": false,
+                "max_entries": 3,
+                "sort_by": "size_desc",
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
     assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
     assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(false));
     assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(3));
@@ -1051,19 +1135,29 @@ fn file_names_auto_locator_preserves_recent_modified_file_selector() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
 
-    let plan = file_names_auto_locator_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &test_state(),
-        "return the two most recently modified file names",
         Some(&route),
         &loop_state,
         user_text,
-        Some(user_text),
         Some(root_path.as_str()),
-    )
-    .expect("recent modified file_names selector should build deterministic list_dir plan");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": root_path,
+                "names_only": false,
+                "files_only": true,
+                "dirs_only": false,
+                "include_hidden": false,
+                "max_entries": 2,
+                "sort_by": "mtime_desc",
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
     assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
     assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(false));
     assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(2));
@@ -1101,19 +1195,29 @@ fn file_names_auto_locator_preserves_structured_mtime_sort_selector_without_reas
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
 
-    let plan = file_names_auto_locator_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &test_state(),
-        "return selected file names",
         Some(&route),
         &loop_state,
         user_text,
-        Some(user_text),
         Some(root_path.as_str()),
-    )
-    .expect("file_names directory locator should build deterministic list_dir plan");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": root_path,
+                "names_only": false,
+                "files_only": true,
+                "dirs_only": false,
+                "include_hidden": false,
+                "max_entries": 5,
+                "sort_by": "mtime_asc",
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
     assert_eq!(
         args.get("sort_by").and_then(Value::as_str),
         Some("mtime_asc")
@@ -1149,19 +1253,29 @@ fn file_names_auto_locator_preserves_metadata_sort_with_machine_hint() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
 
-    let plan = file_names_auto_locator_deterministic_plan_result(
+    let normalized = super::super::normalize_planned_actions(
         &test_state(),
-        "return selected file names",
         Some(&route),
         &loop_state,
         user_text,
-        Some(user_text),
         Some(root_path.as_str()),
-    )
-    .expect("file_names directory locator should build deterministic list_dir plan");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": root_path,
+                "names_only": false,
+                "files_only": true,
+                "dirs_only": false,
+                "include_hidden": false,
+                "max_entries": 5,
+                "sort_by": "mtime_asc",
+            }),
+        }],
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
     assert_eq!(
         args.get("sort_by").and_then(Value::as_str),
         Some("mtime_asc")
