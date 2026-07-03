@@ -856,7 +856,7 @@ fn intent_normalizer_schema_accepts_missing_legacy_decision() {
     )
     .expect("normalizer schema should allow omitted legacy decision")
     .value;
-    assert!(validated.decision.is_empty());
+    assert_eq!(validated.resolved_user_intent, "boundary-only request");
 }
 
 #[test]

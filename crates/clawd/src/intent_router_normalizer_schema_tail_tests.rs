@@ -288,6 +288,7 @@ fn normalizer_schema_normalization_does_not_recover_files_listing_from_string_co
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
     assert!(value.get("answer_candidate").is_none());
+    assert!(value.get("decision").is_none());
     let validated = crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
         crate::prompt_utils::PromptSchemaId::IntentNormalizer,
@@ -297,7 +298,6 @@ fn normalizer_schema_normalization_does_not_recover_files_listing_from_string_co
     let contract = super::parse_output_contract(validated.output_contract, false);
     assert_eq!(contract.semantic_kind, crate::OutputSemanticKind::None);
     assert!(!contract.requires_content_evidence);
-    assert!(validated.decision.is_empty());
 }
 
 #[test]

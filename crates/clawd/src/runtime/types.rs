@@ -145,17 +145,6 @@ impl AskRouteTraceDecision {
     }
 }
 
-#[cfg(test)]
-impl FirstLayerDecision {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Clarify => "clarify",
-            Self::DirectAnswer => "direct_answer",
-            Self::PlannerExecute => "planner_execute",
-        }
-    }
-}
-
 impl RouteGateKind {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
