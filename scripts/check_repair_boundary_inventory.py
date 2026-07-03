@@ -11,6 +11,8 @@ SOURCE = REPO_ROOT / "crates/clawd/src/repair_boundary_inventory.rs"
 
 ITEM_RE = re.compile(r"RepairBoundaryInventoryItem\s*\{(?P<body>.*?)\n\s*\}", re.S)
 STRING_FIELD_RE = re.compile(r'(?P<key>\w+):\s*"(?P<value>[^"]*)"')
+ARRAY_FIELD_RE = re.compile(r'(?P<key>\w+):\s*&\[(?P<body>.*?)\]', re.S)
+STRING_LITERAL_RE = re.compile(r'"(?P<value>[^"]*)"')
 CLASS_RE = re.compile(r"repair_class:\s*RepairBoundaryClass::(?P<value>\w+)")
 
 KNOWN_DELETION_GATES = {
@@ -38,6 +40,12 @@ def parse_items() -> list[dict[str, str]]:
     for match in ITEM_RE.finditer(inventory_text):
         body = match.group("body")
         fields = {m.group("key"): m.group("value") for m in STRING_FIELD_RE.finditer(body)}
+        for array_match in ARRAY_FIELD_RE.finditer(body):
+            values = [
+                value_match.group("value")
+                for value_match in STRING_LITERAL_RE.finditer(array_match.group("body"))
+            ]
+            fields[f"{array_match.group('key')}[]"] = ",".join(values)
         class_match = CLASS_RE.search(body)
         if class_match:
             fields["repair_class"] = class_match.group("value")
@@ -59,9 +67,29 @@ def validate(items: list[dict[str, str]]) -> list[str]:
         if not reason:
             errors.append(f"{prefix}: missing reason_code")
             continue
+        for key in (
+            "reason_code",
+            "owner_layer",
+            "runtime_scope",
+            "migration_target",
+            "next_recovery_kind",
+        ):
+            value = item.get(key, "")
+            if not value:
+                errors.append(f"{prefix}: missing {key}")
+            elif not machine_token(value):
+                errors.append(f"{prefix}: {key} is not a machine token: {value}")
         if reason in seen:
             errors.append(f"{prefix}: duplicate reason_code")
         seen.add(reason)
+
+        allowed_inputs = set(filter(None, item.get("allowed_input_fields[]", "").split(",")))
+        forbidden_inputs = set(filter(None, item.get("forbidden_input_fields[]", "").split(",")))
+        for required_forbidden in ("text", "error_text"):
+            if required_forbidden not in forbidden_inputs:
+                errors.append(f"{prefix}: forbidden_input_fields missing {required_forbidden}")
+            if required_forbidden in allowed_inputs:
+                errors.append(f"{prefix}: allowed_input_fields includes {required_forbidden}")
 
         gate = item.get("deletion_gate", "")
         if gate not in KNOWN_DELETION_GATES:
