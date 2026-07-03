@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CASE_DIR="${SCRIPT_DIR}/cases"
 
 ALL_SUITES=(
+  evidence_policy_offline
   contract_matrix_offline
   client_like_continuous
   runtime_capability_boundary
@@ -38,6 +39,7 @@ Usage:
   bash scripts/nl_tests/run_suite.sh --list
 
 Suites:
+  evidence_policy_offline
   contract_matrix_offline
   client_like_continuous
   runtime_capability_boundary
@@ -66,11 +68,11 @@ Categories:
   single_turn   -> manual, compound_single, multistep_mixed, text_match, full
   multi_turn    -> task_updates, task_updates4, clarify, clarify_hard, context_chain
   multi_instruction -> compound_single, task_updates, task_updates4
-  regression    -> contract_matrix_offline, trace, resume, runtime_capability_boundary
+  regression    -> evidence_policy_offline, trace, resume, runtime_capability_boundary
   guard         -> dynamic_guard, sensitive_flows
   ops           -> ops_closed_loop, long_tail_flows
-  core          -> contract_matrix_offline, client_like_continuous, manual, text_match, trace, resume, clarify, context_chain
-  all           -> contract_matrix_offline, client_like_continuous, manual, text_match, full, trace, resume, clarify, clarify_hard, context_chain, dynamic_guard
+  core          -> evidence_policy_offline, client_like_continuous, manual, text_match, trace, resume, clarify, context_chain
+  all           -> evidence_policy_offline, client_like_continuous, manual, text_match, full, trace, resume, clarify, clarify_hard, context_chain, dynamic_guard
 
 Examples:
   bash scripts/nl_tests/run_suite.sh manual
@@ -96,6 +98,7 @@ EOF
 print_available() {
   cat <<'EOF'
 Available suites:
+  - evidence_policy_offline
   - contract_matrix_offline
   - client_like_continuous
   - runtime_capability_boundary
@@ -178,6 +181,13 @@ run_mode_client_like_continuous() {
 run_mode_contract_matrix_offline() {
   run_wrapped_suite \
     "contract_matrix_offline" \
+    bash "${SCRIPT_DIR}/run_contract_matrix_offline_suite.sh" \
+    "$@"
+}
+
+run_mode_evidence_policy_offline() {
+  run_wrapped_suite \
+    "evidence_policy_offline" \
     bash "${SCRIPT_DIR}/run_contract_matrix_offline_suite.sh" \
     "$@"
 }
@@ -440,6 +450,9 @@ run_one_suite() {
   shift
   filter_pass_through_for_suite "$suite" "$@"
   case "$suite" in
+    evidence_policy_offline)
+      run_mode_evidence_policy_offline "${FILTERED_SUITE_ARGS[@]}"
+      ;;
     contract_matrix_offline)
       run_mode_contract_matrix_offline "${FILTERED_SUITE_ARGS[@]}"
       ;;
@@ -528,7 +541,7 @@ add_suite() {
 expand_selector() {
   local selector="$1"
   case "$selector" in
-    contract_matrix_offline|client_like_continuous|runtime_capability_boundary|manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_closed_loop|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+    evidence_policy_offline|contract_matrix_offline|client_like_continuous|runtime_capability_boundary|manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_closed_loop|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
       add_suite "$selector"
       ;;
     smoke)
@@ -556,7 +569,7 @@ expand_selector() {
       add_suite task_updates4
       ;;
     regression)
-      add_suite contract_matrix_offline
+      add_suite evidence_policy_offline
       add_suite trace
       add_suite resume
       add_suite runtime_capability_boundary
@@ -570,7 +583,7 @@ expand_selector() {
       add_suite long_tail_flows
       ;;
     core)
-      add_suite contract_matrix_offline
+      add_suite evidence_policy_offline
       add_suite client_like_continuous
       add_suite manual
       add_suite compound_single
@@ -584,7 +597,7 @@ expand_selector() {
       ;;
     all)
       local suite
-      for suite in contract_matrix_offline client_like_continuous manual compound_single task_updates task_updates4 multistep_mixed text_match full trace resume clarify clarify_hard context_chain dynamic_guard; do
+      for suite in evidence_policy_offline client_like_continuous manual compound_single task_updates task_updates4 multistep_mixed text_match full trace resume clarify clarify_hard context_chain dynamic_guard; do
         add_suite "$suite"
       done
       ;;
