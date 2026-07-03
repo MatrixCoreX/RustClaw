@@ -25,7 +25,6 @@ fn route_is_default_main_config_contract(route: &crate::RouteResult) -> bool {
         && !route.output_contract.delivery_required
         && route.schedule_kind == crate::ScheduleKind::None
         && route.output_contract.delivery_intent == crate::OutputDeliveryIntent::None
-        && route.output_contract.requires_content_evidence
         && route_has_default_main_config_contract_marker(route)
 }
 
@@ -60,50 +59,6 @@ fn locator_hint_is_default_main_config(
     workspace_root.join(hint_path) == main_config
 }
 
-fn locator_hint_is_workspace_identity(
-    workspace_root: &std::path::Path,
-    locator_hint: &str,
-) -> bool {
-    let Some(workspace_name) = workspace_root.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    let Some(hint_name) = std::path::Path::new(locator_hint.trim())
-        .file_name()
-        .and_then(|name| name.to_str())
-    else {
-        return false;
-    };
-    hint_name.eq_ignore_ascii_case(workspace_name)
-        || hint_name
-            .strip_suffix(".toml")
-            .is_some_and(|stem| stem.eq_ignore_ascii_case(workspace_name))
-}
-
-fn locator_hint_matches_current_request_workspace_child(
-    state: &AppState,
-    prompt: &str,
-    locator_hint: &str,
-) -> bool {
-    let Some(current_request_path) =
-        super::current_request_resolves_workspace_child_locator(state, prompt)
-    else {
-        return false;
-    };
-    let hint = locator_hint.trim();
-    if hint.is_empty() {
-        return false;
-    }
-    let hint_path = std::path::Path::new(hint);
-    let hint_path = if hint_path.is_absolute() {
-        hint_path.to_path_buf()
-    } else {
-        state.skill_rt.workspace_root.join(hint_path)
-    };
-    let hint_path = hint_path.canonicalize().unwrap_or(hint_path);
-    let current_request_path = std::path::PathBuf::from(current_request_path);
-    hint_path == current_request_path
-}
-
 fn route_locator_hint_allows_default_main_config_binding(
     state: &AppState,
     prompt: &str,
@@ -118,8 +73,7 @@ fn route_locator_hint_allows_default_main_config_binding(
     if !prompt_allows_default_main_config_binding(prompt) {
         return false;
     }
-    locator_hint_is_workspace_identity(&state.skill_rt.workspace_root, locator_hint)
-        || locator_hint_matches_current_request_workspace_child(state, prompt, locator_hint)
+    true
 }
 
 pub(super) fn default_main_config_contract_observation(

@@ -200,7 +200,8 @@ fn config_risk_default_main_config_replaces_workspace_identity_locator_hint() {
         String::new(),
     );
 
-    assert!(applied.execution_route_result.needs_clarify);
+    assert!(!applied.execution_route_result.needs_clarify);
+    assert!(applied.execution_route_result.is_execute_gate());
     assert_eq!(
         applied.execution_route_result.output_contract.locator_hint,
         ""
