@@ -719,7 +719,19 @@ fn machine_kv_pair_has_observed_value(pair: &(String, String), observed_texts: &
 }
 
 fn machine_marker_is_observed(marker: &str, observed_texts: &[String]) -> bool {
-    observed_texts.iter().any(|text| text.contains(marker))
+    observed_machine_marker_projection(marker, observed_texts).is_some()
+        || observed_texts
+            .iter()
+            .any(|text| text_has_exact_machine_marker(text, marker))
+}
+
+fn text_has_exact_machine_marker(text: &str, marker: &str) -> bool {
+    let marker = marker.trim();
+    !marker.is_empty()
+        && text
+            .split(char::is_whitespace)
+            .map(|token| token.trim_matches(|ch| matches!(ch, ',' | ';')))
+            .any(|token| token == marker)
 }
 
 fn observed_machine_marker_projection(marker: &str, observed_texts: &[String]) -> Option<String> {

@@ -91,6 +91,21 @@ fn machine_summary_preserves_dotted_markers_and_embedded_pairs() {
 }
 
 #[test]
+fn machine_summary_does_not_accept_marker_substring() {
+    let observed = vec![
+        "task_control.resume.dry_run_extra checkpoint_id=ckpt-1 task_id=00000000-0000-4000-8000-000000000010"
+            .to_string(),
+    ];
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Final must contain task_control.resume.dry_run and checkpoint_id=ckpt-1.",
+        &observed,
+    );
+
+    assert!(summary.is_none());
+}
+
+#[test]
 fn machine_summary_preserves_requested_underscore_field_markers_from_json_keys() {
     let mut observed = Vec::new();
     collect_machine_text_fragments_from_output(
