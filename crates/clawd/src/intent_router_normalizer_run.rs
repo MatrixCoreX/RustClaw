@@ -1,7 +1,7 @@
 use super::*;
 
-/// Unified intent normalizer: one LLM call for resume decision, intent completion,
-/// schedule classification, clarify state, and the first-layer decision.
+/// Unified intent normalizer: one LLM call for boundary hints such as resume,
+/// schedule, clarify state, and route-trace compatibility fields.
 pub(crate) async fn run_intent_normalizer(
     state: &AppState,
     task: &ClaimedTask,
@@ -935,7 +935,7 @@ pub(crate) async fn run_intent_normalizer(
             );
         }
         info!(
-            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} decision={:?} route_trace_label={} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} contract_repair_source={} contract_repair_detail={} contract_repair_class={} turn_analysis={}",
+            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} route_trace_decision={:?} route_trace_label={} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} contract_repair_source={} contract_repair_detail={} contract_repair_class={} turn_analysis={}",
             crate::highlight_tag("routing"),
             task.task_id,
             crate::truncate_for_log(req),
