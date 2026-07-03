@@ -46,19 +46,8 @@ COUNTER_FIELDS = (
     "execution_surface_owner_counts",
     "repair_signal_status_counts",
     "validation_status_counts",
-    "configured_migration_class_counts",
-    "eligible_migration_class_counts",
-    "selected_migration_class_counts",
     "agent_loop_eligibility_bucket_counts",
     "agent_loop_eligibility_blocked_reason_counts",
-    "agent_loop_authority_enabled_counts",
-    "semantic_routing_activation_state_counts",
-    "semantic_routing_authority_counts",
-    "semantic_routing_chosen_authority_counts",
-    "semantic_routing_runtime_default_authority_counts",
-    "semantic_routing_normalizer_role_counts",
-    "semantic_routing_post_route_role_counts",
-    "semantic_routing_direct_answer_gate_role_counts",
 )
 CLARIFICATION_FINAL_STATUS_KEYS = {"clarify", "clarification_requested"}
 VERIFIER_BLOCK_KEYS = {"False", "false"}
@@ -729,19 +718,8 @@ def summarize_run(
     by_prompt_totals: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"count": 0, "elapsed_ms": 0, "prompt_truncation_count": 0}
     )
-    configured_migration_class_counts: Counter[str] = Counter()
-    eligible_migration_class_counts: Counter[str] = Counter()
-    selected_migration_class_counts: Counter[str] = Counter()
     agent_loop_eligibility_bucket_counts: Counter[str] = Counter()
     agent_loop_eligibility_blocked_reason_counts: Counter[str] = Counter()
-    agent_loop_authority_enabled_counts: Counter[str] = Counter()
-    semantic_routing_activation_state_counts: Counter[str] = Counter()
-    semantic_routing_authority_counts: Counter[str] = Counter()
-    semantic_routing_chosen_authority_counts: Counter[str] = Counter()
-    semantic_routing_runtime_default_authority_counts: Counter[str] = Counter()
-    semantic_routing_normalizer_role_counts: Counter[str] = Counter()
-    semantic_routing_post_route_role_counts: Counter[str] = Counter()
-    semantic_routing_direct_answer_gate_role_counts: Counter[str] = Counter()
     parse_errors = 0
     total_llm_calls = 0
     total_llm_elapsed_ms = 0
@@ -848,16 +826,6 @@ def summarize_run(
                     guard_signal_counts[signal] += 1
             boundary_context = dict_value(item.get("boundary_context"))
             boundary_budget = dict_value(boundary_context.get("budget"))
-            semantic_routing = dict_value(boundary_context.get("semantic_routing"))
-            configured_migration_class_counts[
-                str(boundary_budget.get("agent_decides_migration_class") or "unknown")
-            ] += 1
-            eligible_migration_class_counts[
-                str(boundary_budget.get("eligible_migration_class") or "unknown")
-            ] += 1
-            selected_migration_class_counts[
-                str(boundary_budget.get("selected_migration_class") or "unknown")
-            ] += 1
             agent_loop_eligibility_bucket_counts[
                 str(boundary_budget.get("agent_loop_eligibility_bucket") or "unknown")
             ] += 1
@@ -866,30 +834,6 @@ def summarize_run(
                     boundary_budget.get("agent_loop_eligibility_blocked_reason")
                     or "unknown"
                 )
-            ] += 1
-            agent_loop_authority_enabled_counts[
-                bool_token(semantic_routing.get("agent_loop_authority_enabled"))
-            ] += 1
-            semantic_routing_activation_state_counts[
-                str(semantic_routing.get("activation_state") or "not_recorded")
-            ] += 1
-            semantic_routing_authority_counts[
-                str(semantic_routing.get("ordinary_semantic_authority") or "not_recorded")
-            ] += 1
-            semantic_routing_chosen_authority_counts[
-                str(semantic_routing.get("chosen_authority") or "not_recorded")
-            ] += 1
-            semantic_routing_runtime_default_authority_counts[
-                str(semantic_routing.get("runtime_default_authority") or "not_recorded")
-            ] += 1
-            semantic_routing_normalizer_role_counts[
-                str(semantic_routing.get("normalizer_role") or "not_recorded")
-            ] += 1
-            semantic_routing_post_route_role_counts[
-                str(semantic_routing.get("post_route_role") or "not_recorded")
-            ] += 1
-            semantic_routing_direct_answer_gate_role_counts[
-                str(semantic_routing.get("direct_answer_gate_role") or "not_recorded")
             ] += 1
 
         steps = step_results(trace)
@@ -963,44 +907,11 @@ def summarize_run(
         ),
         "repair_signal_status_counts": dict(sorted(repair_signal_status_counts.items())),
         "validation_status_counts": dict(sorted(validation_status_counts.items())),
-        "configured_migration_class_counts": dict(
-            sorted(configured_migration_class_counts.items())
-        ),
-        "eligible_migration_class_counts": dict(
-            sorted(eligible_migration_class_counts.items())
-        ),
-        "selected_migration_class_counts": dict(
-            sorted(selected_migration_class_counts.items())
-        ),
         "agent_loop_eligibility_bucket_counts": dict(
             sorted(agent_loop_eligibility_bucket_counts.items())
         ),
         "agent_loop_eligibility_blocked_reason_counts": dict(
             sorted(agent_loop_eligibility_blocked_reason_counts.items())
-        ),
-        "agent_loop_authority_enabled_counts": dict(
-            sorted(agent_loop_authority_enabled_counts.items())
-        ),
-        "semantic_routing_activation_state_counts": dict(
-            sorted(semantic_routing_activation_state_counts.items())
-        ),
-        "semantic_routing_authority_counts": dict(
-            sorted(semantic_routing_authority_counts.items())
-        ),
-        "semantic_routing_chosen_authority_counts": dict(
-            sorted(semantic_routing_chosen_authority_counts.items())
-        ),
-        "semantic_routing_runtime_default_authority_counts": dict(
-            sorted(semantic_routing_runtime_default_authority_counts.items())
-        ),
-        "semantic_routing_normalizer_role_counts": dict(
-            sorted(semantic_routing_normalizer_role_counts.items())
-        ),
-        "semantic_routing_post_route_role_counts": dict(
-            sorted(semantic_routing_post_route_role_counts.items())
-        ),
-        "semantic_routing_direct_answer_gate_role_counts": dict(
-            sorted(semantic_routing_direct_answer_gate_role_counts.items())
         ),
         "llm": {
             "total_calls": total_llm_calls,

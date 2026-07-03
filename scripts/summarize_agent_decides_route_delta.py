@@ -9,15 +9,13 @@ from pathlib import Path
 from typing import Any
 
 
-PRIMARY_SWITCH_NAME = "semantic_route_authority"
-LEGACY_SWITCH_NAME = "agent_decides_semantic_route"
-ROUTE_DELTA_SWITCH_NAMES = {PRIMARY_SWITCH_NAME, LEGACY_SWITCH_NAME}
+PRIMARY_SWITCH_NAME = "agent_loop_round_context"
+ROUTE_DELTA_SWITCH_NAMES = {PRIMARY_SWITCH_NAME}
 CASE_FILE_RE = re.compile(r"^turn_(?P<turn>\d+)_case_(?P<case>\d+)\.json$")
 FINAL_CASE_DIR_RE = re.compile(r"^case_(?P<case>\d+)_")
 PRE_PLANNER_PROMPTS = {
     "normalizer",
     "contract_repair",
-    "direct_answer_gate",
     "router_legacy",
     "delivery_classifier",
     "direct_classifier",
@@ -71,15 +69,8 @@ COUNTER_FIELDS = (
     "output_contract_delta_counts",
     "evidence_delta_counts",
     "budget_profile_counts",
-    "configured_migration_class_counts",
     "eligible_migration_class_counts",
     "selected_migration_class_counts",
-    "semantic_routing_activation_state_counts",
-    "semantic_routing_authority_counts",
-    "semantic_routing_runtime_default_authority_counts",
-    "semantic_routing_normalizer_role_counts",
-    "semantic_routing_post_route_role_counts",
-    "semantic_routing_direct_answer_gate_role_counts",
     "pre_agent_intent_authority_counts",
     "pre_agent_intent_ownership_class_counts",
     "pre_agent_intent_boundary_allowed_counts",
@@ -88,11 +79,6 @@ COUNTER_FIELDS = (
     "pre_agent_post_route_ownership_class_counts",
     "pre_agent_post_route_boundary_allowed_counts",
     "pre_agent_post_route_semantic_migration_target_counts",
-    "pre_agent_direct_answer_observation_class_counts",
-    "pre_agent_direct_answer_boundary_class_counts",
-    "pre_agent_direct_answer_ownership_class_counts",
-    "pre_agent_direct_answer_boundary_allowed_counts",
-    "pre_agent_direct_answer_semantic_migration_target_counts",
     "runtime_decision_source_counts",
     "runtime_semantic_control_state_counts",
     "runtime_rewrite_reason_counts",
@@ -120,6 +106,10 @@ def dict_path(obj: dict[str, Any], *keys: str) -> Any:
 
 def counter_json(counter: Counter[str]) -> dict[str, int]:
     return {key: counter[key] for key in sorted(counter)}
+
+
+def counter_value_total(counter: dict[str, Any]) -> int:
+    return sum(safe_int(value) for value in counter.values())
 
 
 def merge_counter_dicts(summaries: list[dict[str, Any]], key: str) -> dict[str, int]:
@@ -455,11 +445,9 @@ def compact_item(path: Path, turn_obj: dict[str, Any], item: dict[str, Any]) -> 
     decision_envelope = dict_value(item.get("decision_envelope"))
     boundary_context = dict_value(item.get("boundary_context"))
     boundary_budget = dict_value(boundary_context.get("budget"))
-    routing = semantic_routing(boundary_context)
     gates = pre_agent_gates(boundary_context)
     intent_normalizer = dict_value(gates.get("intent_normalizer"))
     post_route_policy = dict_value(gates.get("post_route_policy"))
-    direct_answer_gate = dict_value(gates.get("direct_answer_gate"))
     return {
         "file": path.name,
         "task_id": task_id(turn_obj),
@@ -487,15 +475,8 @@ def compact_item(path: Path, turn_obj: dict[str, Any], item: dict[str, Any]) -> 
         "agent_required_evidence": sorted_str_list(item.get("agent_required_evidence")),
         "missing_slots": sorted_str_list(item.get("missing_slots")),
         "budget_profile": item.get("budget_profile"),
-        "configured_migration_class": boundary_budget.get("agent_decides_migration_class"),
         "eligible_migration_class": boundary_budget.get("eligible_migration_class"),
         "selected_migration_class": boundary_budget.get("selected_migration_class"),
-        "semantic_routing_activation_state": routing.get("activation_state"),
-        "semantic_routing_authority": routing.get("ordinary_semantic_authority"),
-        "semantic_routing_runtime_default_authority": routing.get("runtime_default_authority"),
-        "semantic_routing_normalizer_role": routing.get("normalizer_role"),
-        "semantic_routing_post_route_role": routing.get("post_route_role"),
-        "semantic_routing_direct_answer_gate_role": routing.get("direct_answer_gate_role"),
         "pre_agent_intent_authority": intent_normalizer.get("authority_target"),
         "pre_agent_intent_ownership_class": intent_normalizer.get("ownership_class"),
         "pre_agent_intent_boundary_allowed": intent_normalizer.get("boundary_allowed"),
@@ -506,15 +487,6 @@ def compact_item(path: Path, turn_obj: dict[str, Any], item: dict[str, Any]) -> 
         "pre_agent_post_route_ownership_class": post_route_policy.get("ownership_class"),
         "pre_agent_post_route_boundary_allowed": post_route_policy.get("boundary_allowed"),
         "pre_agent_post_route_semantic_migration_target": post_route_policy.get(
-            "semantic_migration_target"
-        ),
-        "pre_agent_direct_answer_observation_class": direct_answer_gate.get(
-            "observation_class"
-        ),
-        "pre_agent_direct_answer_boundary_class": direct_answer_gate.get("boundary_class"),
-        "pre_agent_direct_answer_ownership_class": direct_answer_gate.get("ownership_class"),
-        "pre_agent_direct_answer_boundary_allowed": direct_answer_gate.get("boundary_allowed"),
-        "pre_agent_direct_answer_semantic_migration_target": direct_answer_gate.get(
             "semantic_migration_target"
         ),
     }
@@ -560,15 +532,8 @@ def summarize_run(
     output_contract_delta_counts: Counter[str] = Counter()
     evidence_delta_counts: Counter[str] = Counter()
     budget_profile_counts: Counter[str] = Counter()
-    configured_migration_class_counts: Counter[str] = Counter()
     eligible_migration_class_counts: Counter[str] = Counter()
     selected_migration_class_counts: Counter[str] = Counter()
-    semantic_routing_activation_state_counts: Counter[str] = Counter()
-    semantic_routing_authority_counts: Counter[str] = Counter()
-    semantic_routing_runtime_default_authority_counts: Counter[str] = Counter()
-    semantic_routing_normalizer_role_counts: Counter[str] = Counter()
-    semantic_routing_post_route_role_counts: Counter[str] = Counter()
-    semantic_routing_direct_answer_gate_role_counts: Counter[str] = Counter()
     pre_agent_intent_authority_counts: Counter[str] = Counter()
     pre_agent_intent_ownership_class_counts: Counter[str] = Counter()
     pre_agent_intent_boundary_allowed_counts: Counter[str] = Counter()
@@ -577,11 +542,6 @@ def summarize_run(
     pre_agent_post_route_ownership_class_counts: Counter[str] = Counter()
     pre_agent_post_route_boundary_allowed_counts: Counter[str] = Counter()
     pre_agent_post_route_semantic_migration_target_counts: Counter[str] = Counter()
-    pre_agent_direct_answer_observation_class_counts: Counter[str] = Counter()
-    pre_agent_direct_answer_boundary_class_counts: Counter[str] = Counter()
-    pre_agent_direct_answer_ownership_class_counts: Counter[str] = Counter()
-    pre_agent_direct_answer_boundary_allowed_counts: Counter[str] = Counter()
-    pre_agent_direct_answer_semantic_migration_target_counts: Counter[str] = Counter()
     runtime_decision_source_counts: Counter[str] = Counter()
     runtime_semantic_control_state_counts: Counter[str] = Counter()
     runtime_rewrite_reason_counts: Counter[str] = Counter()
@@ -715,38 +675,15 @@ def summarize_run(
             budget_profile_counts[str(item.get("budget_profile") or "unknown")] += 1
             boundary_context = dict_value(item.get("boundary_context"))
             boundary_budget = dict_value(boundary_context.get("budget"))
-            configured_migration_class_counts[
-                str(boundary_budget.get("agent_decides_migration_class") or "unknown")
-            ] += 1
             eligible_migration_class_counts[
                 str(boundary_budget.get("eligible_migration_class") or "unknown")
             ] += 1
             selected_migration_class_counts[
                 str(boundary_budget.get("selected_migration_class") or "unknown")
             ] += 1
-            routing = semantic_routing(boundary_context)
-            semantic_routing_activation_state_counts[
-                str(routing.get("activation_state") or "not_recorded")
-            ] += 1
-            semantic_routing_authority_counts[
-                str(routing.get("ordinary_semantic_authority") or "not_recorded")
-            ] += 1
-            semantic_routing_runtime_default_authority_counts[
-                str(routing.get("runtime_default_authority") or "not_recorded")
-            ] += 1
-            semantic_routing_normalizer_role_counts[
-                str(routing.get("normalizer_role") or "not_recorded")
-            ] += 1
-            semantic_routing_post_route_role_counts[
-                str(routing.get("post_route_role") or "not_recorded")
-            ] += 1
-            semantic_routing_direct_answer_gate_role_counts[
-                str(routing.get("direct_answer_gate_role") or "not_recorded")
-            ] += 1
             gates = pre_agent_gates(boundary_context)
             intent_normalizer = dict_value(gates.get("intent_normalizer"))
             post_route_policy = dict_value(gates.get("post_route_policy"))
-            direct_answer_gate = dict_value(gates.get("direct_answer_gate"))
             pre_agent_intent_authority_counts[
                 str(intent_normalizer.get("authority_target") or "not_recorded")
             ] += 1
@@ -770,21 +707,6 @@ def summarize_run(
             ] += 1
             pre_agent_post_route_semantic_migration_target_counts[
                 str(post_route_policy.get("semantic_migration_target") or "not_recorded")
-            ] += 1
-            pre_agent_direct_answer_observation_class_counts[
-                str(direct_answer_gate.get("observation_class") or "not_recorded")
-            ] += 1
-            pre_agent_direct_answer_boundary_class_counts[
-                str(direct_answer_gate.get("boundary_class") or "not_recorded")
-            ] += 1
-            pre_agent_direct_answer_ownership_class_counts[
-                str(direct_answer_gate.get("ownership_class") or "not_recorded")
-            ] += 1
-            pre_agent_direct_answer_boundary_allowed_counts[
-                bool_token(direct_answer_gate.get("boundary_allowed"))
-            ] += 1
-            pre_agent_direct_answer_semantic_migration_target_counts[
-                str(direct_answer_gate.get("semantic_migration_target") or "not_recorded")
             ] += 1
             reason_code_counts[str(item.get("reason_code") or "unknown")] += 1
             if (
@@ -885,25 +807,8 @@ def summarize_run(
         "output_contract_delta_counts": counter_json(output_contract_delta_counts),
         "evidence_delta_counts": counter_json(evidence_delta_counts),
         "budget_profile_counts": counter_json(budget_profile_counts),
-        "configured_migration_class_counts": counter_json(configured_migration_class_counts),
         "eligible_migration_class_counts": counter_json(eligible_migration_class_counts),
         "selected_migration_class_counts": counter_json(selected_migration_class_counts),
-        "semantic_routing_activation_state_counts": counter_json(
-            semantic_routing_activation_state_counts
-        ),
-        "semantic_routing_authority_counts": counter_json(semantic_routing_authority_counts),
-        "semantic_routing_runtime_default_authority_counts": counter_json(
-            semantic_routing_runtime_default_authority_counts
-        ),
-        "semantic_routing_normalizer_role_counts": counter_json(
-            semantic_routing_normalizer_role_counts
-        ),
-        "semantic_routing_post_route_role_counts": counter_json(
-            semantic_routing_post_route_role_counts
-        ),
-        "semantic_routing_direct_answer_gate_role_counts": counter_json(
-            semantic_routing_direct_answer_gate_role_counts
-        ),
         "pre_agent_intent_authority_counts": counter_json(pre_agent_intent_authority_counts),
         "pre_agent_intent_ownership_class_counts": counter_json(
             pre_agent_intent_ownership_class_counts
@@ -925,21 +830,6 @@ def summarize_run(
         ),
         "pre_agent_post_route_semantic_migration_target_counts": counter_json(
             pre_agent_post_route_semantic_migration_target_counts
-        ),
-        "pre_agent_direct_answer_observation_class_counts": counter_json(
-            pre_agent_direct_answer_observation_class_counts
-        ),
-        "pre_agent_direct_answer_boundary_class_counts": counter_json(
-            pre_agent_direct_answer_boundary_class_counts
-        ),
-        "pre_agent_direct_answer_ownership_class_counts": counter_json(
-            pre_agent_direct_answer_ownership_class_counts
-        ),
-        "pre_agent_direct_answer_boundary_allowed_counts": counter_json(
-            pre_agent_direct_answer_boundary_allowed_counts
-        ),
-        "pre_agent_direct_answer_semantic_migration_target_counts": counter_json(
-            pre_agent_direct_answer_semantic_migration_target_counts
         ),
         "runtime_decision_source_counts": counter_json(runtime_decision_source_counts),
         "runtime_semantic_control_state_counts": counter_json(
@@ -1139,7 +1029,14 @@ def main() -> int:
         dedupe_latest_case=args.dedupe_latest_case,
     )
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2))
-    if args.require_items and summary["route_delta_items"] <= 0:
+    round_envelope_items = counter_value_total(
+        dict_value(summary.get("round_decision_envelope_source_counts"))
+    )
+    if (
+        args.require_items
+        and summary["route_delta_items"] <= 0
+        and round_envelope_items <= 0
+    ):
         return 2
     if args.expect_case_count:
         case_count = safe_int(dict_path(summary, "case_dedupe", "case_count"))
