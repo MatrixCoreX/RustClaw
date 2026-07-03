@@ -138,6 +138,15 @@ BOUNDARY_PROMPT_SCHEMA_NO_LEGACY_SEMANTIC_KIND_FILES: tuple[Path, ...] = (
     INTENT_ROUTER_PROMPT_RENDER_FILE,
     PROMPT_LAYERS_ROOT / "vendor_patches/minimax/routing/common.md",
 )
+CHINA_MODEL_ROUTING_PATCH_FILES: tuple[Path, ...] = (
+    PROMPT_LAYERS_ROOT / "vendor_patches/minimax/routing/common.md",
+    PROMPT_LAYERS_ROOT / "vendor_patches/mimo/routing/common.md",
+)
+CHINA_MODEL_ROUTING_PATCH_REQUIRED_TOKENS: tuple[str, ...] = (
+    "Do not emit legacy `decision`",
+    "Do not emit `answer_candidate`",
+    "planner loop and finalizer",
+)
 SKILL_REGISTRY_METADATA_FILES: tuple[Path, ...] = (
     ROOT / "configs/skills_registry.toml",
     ROOT / "docker/config/skills_registry.toml",
@@ -360,6 +369,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_prompt_layer_ordinary_semantic_tokens())
     findings.extend(scan_planner_prompt_legacy_semantic_kind_keys())
     findings.extend(scan_intent_normalizer_prompt_contract_marker())
+    findings.extend(scan_china_model_routing_patch_boundaries())
     findings.extend(scan_boundary_prompt_schema_legacy_semantic_kind_fields())
     findings.extend(scan_intent_normalizer_schema_ordinary_semantic_tokens())
     findings.extend(scan_intent_normalizer_schema_route_authority_fields())
@@ -678,6 +688,35 @@ def scan_intent_normalizer_prompt_contract_marker() -> list[Finding]:
                 1,
                 "intent_normalizer_semantic_kind_output_target",
                 f"forbidden normalizer prompt output target: {token}",
+            )
+        )
+    return findings
+
+
+def scan_china_model_routing_patch_boundaries() -> list[Finding]:
+    findings: list[Finding] = []
+    for path in CHINA_MODEL_ROUTING_PATCH_FILES:
+        findings.extend(
+            scan_china_model_routing_patch_boundaries_text(
+                rel(path), path.read_text(encoding="utf-8")
+            )
+        )
+    return findings
+
+
+def scan_china_model_routing_patch_boundaries_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    for token in CHINA_MODEL_ROUTING_PATCH_REQUIRED_TOKENS:
+        if token in text:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "china_model_routing_boundary_token_missing",
+                f"missing required routing boundary token: {token}",
             )
         )
     return findings
@@ -2410,6 +2449,15 @@ def run_self_test() -> int:
     assert (
         blocked_prompt
         and blocked_prompt[0].kind == "prompt_layer_ordinary_semantic_token"
+    )
+    missing_china_model_boundary = scan_china_model_routing_patch_boundaries_text(
+        "prompts/layers/vendor_patches/mimo/routing/common.md",
+        "Do not emit legacy `decision`.\n",
+    )
+    assert (
+        missing_china_model_boundary
+        and missing_china_model_boundary[0].kind
+        == "china_model_routing_boundary_token_missing"
     )
     blocked_planner_legacy_key = scan_planner_prompt_legacy_semantic_kind_keys_text(
         "prompts/layers/overlays/single_plan_execution_prompt.md",
