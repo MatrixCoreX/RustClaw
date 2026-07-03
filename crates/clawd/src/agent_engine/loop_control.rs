@@ -1,13 +1,13 @@
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::{info, warn};
 
 use super::support::publish_agent_loop_checkpoint_progress;
 use super::{
-    append_progress_hint, attempt_ledger, encode_progress_i18n, ensure_task_running,
-    execute_actions_once, load_agent_loop_guard_policy, prepare_round_actions, push_round_trace,
-    AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome,
+    AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome, append_progress_hint,
+    attempt_ledger, encode_progress_i18n, ensure_task_running, execute_actions_once,
+    load_agent_loop_guard_policy, prepare_round_actions, push_round_trace,
 };
 use crate::{AgentAction, AppState, AskReply, ClaimedTask, RouteResult};
 
@@ -580,12 +580,17 @@ fn observed_answer_contains_required_success_marker(
     marker: &str,
 ) -> bool {
     super::observed_output::extract_direct_answer_from_generic_output(loop_state, agent_run_context)
-        .is_some_and(|answer| answer.contains(marker))
+        .is_some_and(|answer| text_has_exact_marker_line(&answer, marker))
         || super::observed_output::extract_direct_scalar_from_generic_output(
             loop_state,
             agent_run_context,
         )
-        .is_some_and(|answer| answer.contains(marker))
+        .is_some_and(|answer| text_has_exact_marker_line(&answer, marker))
+}
+
+fn text_has_exact_marker_line(text: &str, marker: &str) -> bool {
+    let marker = marker.trim();
+    !marker.is_empty() && text.lines().map(str::trim).any(|line| line == marker)
 }
 
 fn should_stop_for_observed_finalize(

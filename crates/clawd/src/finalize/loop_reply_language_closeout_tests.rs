@@ -1,4 +1,5 @@
 use super::*;
+use super::super::language_closeout::delivery_text_has_exact_marker_line;
 
 #[test]
 fn execution_recipe_closeout_note_mentions_external_workspace_for_english_code_change() {
@@ -330,6 +331,18 @@ fn ensure_requested_success_marker_visible_does_not_scan_user_text() {
     assert_eq!(delivery.len(), 1);
     assert!(delivery[0].contains("system scope"));
     assert!(!delivery[0].contains("VALIDATION_PASSED"));
+}
+
+#[test]
+fn delivery_success_marker_matching_requires_exact_line() {
+    assert!(!delivery_text_has_exact_marker_line(
+        "status=ok\nVALIDATION_PASSED_EXTRA",
+        "VALIDATION_PASSED",
+    ));
+    assert!(delivery_text_has_exact_marker_line(
+        "status=ok\nVALIDATION_PASSED\nnext=done",
+        "VALIDATION_PASSED",
+    ));
 }
 
 #[test]
