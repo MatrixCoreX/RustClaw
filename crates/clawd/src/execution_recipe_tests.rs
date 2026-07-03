@@ -483,6 +483,36 @@ fn structured_validation_success_marker_accepts_matching_output() {
 }
 
 #[test]
+fn structured_validation_success_marker_contains_requires_marker_boundary() {
+    let state = test_state();
+    let args = json!({
+        "command": "bash /tmp/rustclaw-validation-case/check.sh",
+        "_clawd_validation": {
+            "profile": "code_change",
+            "validator_type": "custom",
+            "validated_target": "/tmp/rustclaw-validation-case",
+            "success_marker": {
+                "marker": "OK",
+                "match_mode": "contains",
+                "case_sensitive": true
+            }
+        }
+    });
+
+    let observation = assess_validation_output(&state, "run_cmd", &args, "script says OKAY\n");
+    assert_eq!(
+        observation,
+        ValidationObservation::Failed("validation output missing required marker=OK".to_string())
+    );
+
+    let observation = assess_validation_output(&state, "run_cmd", &args, "BROKEN_OK\n");
+    assert_eq!(
+        observation,
+        ValidationObservation::Failed("validation output missing required marker=OK".to_string())
+    );
+}
+
+#[test]
 fn structured_validation_success_marker_rejects_missing_output_marker() {
     let state = test_state();
     let args = json!({
@@ -673,7 +703,19 @@ fn run_cmd_nginx_test_ok_output_is_validation_pass() {
             "run_cmd",
             &json!({"command":"nginx -t"}),
             "nginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful",
-        );
+    );
+    assert_eq!(observation, ValidationObservation::Passed);
+}
+
+#[test]
+fn run_cmd_nginx_test_exit_zero_sentinel_is_validation_pass() {
+    let state = test_state();
+    let observation = assess_validation_output(
+        &state,
+        "run_cmd",
+        &json!({"command":"nginx -t"}),
+        "exit=0 command=nginx -t",
+    );
     assert_eq!(observation, ValidationObservation::Passed);
 }
 

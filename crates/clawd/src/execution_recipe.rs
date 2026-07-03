@@ -173,9 +173,25 @@ fn structured_success_marker_matches(output: &str, spec: &StructuredSuccessMarke
         (output.to_lowercase(), spec.marker.to_lowercase())
     };
     match spec.match_mode {
-        SuccessMarkerMatchMode::Contains => candidate.contains(&marker),
+        SuccessMarkerMatchMode::Contains => text_contains_success_marker(&candidate, &marker),
         SuccessMarkerMatchMode::Equals => candidate.trim() == marker.trim(),
     }
+}
+
+fn success_marker_boundary(ch: Option<char>) -> bool {
+    ch.is_none_or(|ch| !ch.is_ascii_alphanumeric() && !matches!(ch, '_' | '-' | '.'))
+}
+
+fn text_contains_success_marker(candidate: &str, marker: &str) -> bool {
+    let marker = marker.trim();
+    if marker.is_empty() {
+        return false;
+    }
+    candidate.match_indices(marker).any(|(start, _)| {
+        let before = candidate[..start].chars().next_back();
+        let after = candidate[start + marker.len()..].chars().next();
+        success_marker_boundary(before) && success_marker_boundary(after)
+    })
 }
 
 fn structured_success_marker_observation(args: &Value, output: &str) -> ValidationObservation {
@@ -1098,6 +1114,9 @@ fn assess_service_status_validation(output: &str) -> ValidationObservation {
 
 fn assess_nginx_test_validation(output: &str) -> ValidationObservation {
     let lower = output.trim().to_ascii_lowercase();
+    if output_is_exit_zero_sentinel(output) {
+        return ValidationObservation::Passed;
+    }
     if lower.contains("syntax is ok") && lower.contains("test is successful") {
         return ValidationObservation::Passed;
     }
