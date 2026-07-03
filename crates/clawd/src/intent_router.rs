@@ -12,7 +12,9 @@ use serde_json::Value;
 use std::path::Path;
 use tracing::{info, warn};
 
-use crate::{ActFinalizeStyle, AppState, ClaimedTask, FirstLayerDecision};
+#[cfg(test)]
+use crate::FirstLayerDecision;
+use crate::{ActFinalizeStyle, AppState, ClaimedTask};
 
 #[path = "intent_router_scalar_count_filter.rs"]
 mod scalar_count_filter;
@@ -94,7 +96,7 @@ use schema_tokens::{
     looks_like_current_workspace_path_alias, machine_context_has_capability_ref,
     normalize_output_delivery_intent_for_schema, normalize_output_locator_kind_for_schema,
     normalize_output_response_shape_for_schema, normalize_output_semantic_kind_for_schema,
-    normalize_schema_token, route_label_from_first_layer_decision,
+    normalize_schema_token,
 };
 
 #[path = "intent_router_schema_report.rs"]

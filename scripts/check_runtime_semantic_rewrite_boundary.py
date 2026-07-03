@@ -55,6 +55,7 @@ INTENT_ROUTER_RUNTIME_STATUS_RECIPE_FILE = (
 INTENT_ROUTER_PROMPT_RENDER_FILE = SRC_ROOT / "intent_router_prompt_render.rs"
 INTENT_ROUTER_OUTPUT_TYPES_FILE = SRC_ROOT / "intent_router_output_types.rs"
 INTENT_ROUTER_ROUTE_TRACE_FILE = SRC_ROOT / "intent_router_route_trace.rs"
+INTENT_ROUTER_NORMALIZER_RUN_FILE = SRC_ROOT / "intent_router_normalizer_run.rs"
 INTENT_ROUTER_BINDING_REPAIR_FILES: tuple[Path, ...] = (
     SRC_ROOT / "intent_router_answer_candidate_binding.rs",
     SRC_ROOT / "intent_router_active_task_repair.rs",
@@ -729,6 +730,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_boundary_envelope_schema_machine_only())
     findings.extend(scan_boundary_envelope_rust_type_machine_only())
     findings.extend(scan_route_trace_record_decision_type())
+    findings.extend(scan_normalizer_run_route_trace_decision_type())
     findings.extend(scan_contract_repair_schema_ordinary_semantic_tokens())
     findings.extend(scan_skill_registry_metadata_ordinary_semantic_tokens())
     findings.extend(scan_preferred_run_cmd_registry_bridge_fallback())
@@ -1367,6 +1369,67 @@ def scan_route_trace_record_decision_type_text(rel_path: str, text: str) -> list
                 text.count("\n", 0, body_start + field_offset) + 1,
                 "route_trace_record_first_layer_decision_field",
                 "RouteTraceRecord must use RouteTraceDecision, not FirstLayerDecision",
+            )
+        )
+    return findings
+
+
+def scan_normalizer_run_route_trace_decision_type() -> list[Finding]:
+    rel_path = rel(INTENT_ROUTER_NORMALIZER_RUN_FILE)
+    return scan_normalizer_run_route_trace_decision_type_text(
+        rel_path,
+        INTENT_ROUTER_NORMALIZER_RUN_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_normalizer_run_route_trace_decision_type_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    match = re.search(
+        r"fn\s+route_trace_decision_from_state\b(?P<body>.*?)(?=\nfn\s+route_trace_label_|\Z)",
+        text,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "normalizer_route_trace_decision_helper_missing",
+                "route_trace_decision_from_state helper not found",
+            )
+        ]
+    body = match.group("body")
+    body_start = match.start("body")
+    signature = body.split("{", 1)[0]
+    if "-> FirstLayerDecision" in signature:
+        findings.append(
+            Finding(
+                rel_path,
+                text.count("\n", 0, body_start + signature.find("FirstLayerDecision")) + 1,
+                "normalizer_route_trace_first_layer_return_type",
+                "route_trace_decision_from_state must return RouteTraceDecision",
+            )
+        )
+    first_layer_offset = body.find("FirstLayerDecision::")
+    if first_layer_offset >= 0:
+        findings.append(
+            Finding(
+                rel_path,
+                text.count("\n", 0, body_start + first_layer_offset) + 1,
+                "normalizer_route_trace_first_layer_variant",
+                "normalizer route-trace derivation must not construct FirstLayerDecision variants",
+            )
+        )
+    old_label_offset = text.find("route_label_from_first_layer_decision")
+    if old_label_offset >= 0:
+        findings.append(
+            Finding(
+                rel_path,
+                text.count("\n", 0, old_label_offset) + 1,
+                "normalizer_route_trace_first_layer_label_helper",
+                "normalizer route-trace labels must be derived from RouteTraceDecision",
             )
         )
     return findings
@@ -3366,6 +3429,54 @@ def run_self_test() -> int:
         "crates/clawd/src/intent_router_route_trace.rs",
         "enum RouteTraceDecision {}\n"
         "struct RouteTraceRecord {\n    route_trace_decision: RouteTraceDecision,\n}\n",
+    )
+    blocked_normalizer_route_trace_return_type = (
+        scan_normalizer_run_route_trace_decision_type_text(
+            "crates/clawd/src/intent_router_normalizer_run.rs",
+            "fn route_trace_decision_from_state() -> FirstLayerDecision {\n"
+            "    RouteTraceDecision::Respond\n"
+            "}\n",
+        )
+    )
+    assert any(
+        item.kind == "normalizer_route_trace_first_layer_return_type"
+        for item in blocked_normalizer_route_trace_return_type
+    )
+    blocked_normalizer_route_trace_variant = (
+        scan_normalizer_run_route_trace_decision_type_text(
+            "crates/clawd/src/intent_router_normalizer_run.rs",
+            "fn route_trace_decision_from_state() -> RouteTraceDecision {\n"
+            "    FirstLayerDecision::DirectAnswer\n"
+            "}\n",
+        )
+    )
+    assert any(
+        item.kind == "normalizer_route_trace_first_layer_variant"
+        for item in blocked_normalizer_route_trace_variant
+    )
+    blocked_normalizer_route_trace_label_helper = (
+        scan_normalizer_run_route_trace_decision_type_text(
+            "crates/clawd/src/intent_router_normalizer_run.rs",
+            "fn route_trace_decision_from_state() -> RouteTraceDecision {\n"
+            "    RouteTraceDecision::Respond\n"
+            "}\n"
+            "fn route_trace_label_from_state() {\n"
+            "    route_label_from_first_layer_decision(decision, finalize_style);\n"
+            "}\n",
+        )
+    )
+    assert any(
+        item.kind == "normalizer_route_trace_first_layer_label_helper"
+        for item in blocked_normalizer_route_trace_label_helper
+    )
+    assert not scan_normalizer_run_route_trace_decision_type_text(
+        "crates/clawd/src/intent_router_normalizer_run.rs",
+        "fn route_trace_decision_from_state() -> RouteTraceDecision {\n"
+        "    RouteTraceDecision::Respond\n"
+        "}\n"
+        "fn route_trace_label_from_decision() {\n"
+        "    RouteTraceDecision::Act.as_str();\n"
+        "}\n",
     )
     assert not scan_normalizer_route_result_boundary()
     assert not scan_journal_output_contract_ref_boundary()
