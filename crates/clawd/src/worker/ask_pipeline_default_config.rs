@@ -3,6 +3,23 @@ use serde_json::{json, Value};
 
 const RUSTCLAW_MAIN_CONFIG_LOGICAL_PATH: &str = "configs/config.toml";
 
+#[derive(Clone, Copy)]
+enum DefaultConfigContractDeferral {
+    MainConfig,
+}
+
+impl DefaultConfigContractDeferral {
+    fn route_reason(self) -> &'static str {
+        match self {
+            Self::MainConfig => "config_contract_default_main_config_deferred_to_loop",
+        }
+    }
+
+    fn apply_to_post_route(self, post_route: &mut crate::post_route_policy::PostRoutePolicyResult) {
+        super::append_route_reason(&mut post_route.execution_route_result, self.route_reason());
+    }
+}
+
 fn route_is_default_main_config_contract(route: &crate::RouteResult) -> bool {
     !route.wants_file_delivery
         && !route.output_contract.delivery_required
@@ -167,10 +184,7 @@ pub(super) fn defer_config_contract_default_main_config_after_locator_policy(
             .output_contract
             .locator_kind = crate::OutputLocatorKind::None;
     }
-    super::append_route_reason(
-        &mut post_route.execution_route_result,
-        "config_contract_default_main_config_deferred_to_loop",
-    );
+    DefaultConfigContractDeferral::MainConfig.apply_to_post_route(post_route);
     true
 }
 
