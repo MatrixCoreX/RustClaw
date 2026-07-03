@@ -126,6 +126,7 @@ ALLOWED_PRODUCTION_FILES: set[str] = set()
 PROMPT_LAYERS_ROOT = ROOT / "prompts/layers"
 INTENT_NORMALIZER_PROMPT = PROMPT_LAYERS_ROOT / "overlays/intent_normalizer_prompt.md"
 INTENT_NORMALIZER_SCHEMA = ROOT / "prompts/schemas/intent_normalizer.schema.json"
+BOUNDARY_ENVELOPE_SCHEMA = ROOT / "prompts/schemas/boundary_envelope.schema.json"
 CONTRACT_REPAIR_JUDGE_SCHEMA = ROOT / "prompts/schemas/contract_repair_judge.schema.json"
 PLANNER_EXECUTION_PROMPT_FILES: tuple[Path, ...] = (
     PROMPT_LAYERS_ROOT / "overlays/loop_incremental_plan_prompt.md",
@@ -257,6 +258,23 @@ FORBIDDEN_NORMALIZER_SCHEMA_ROUTE_AUTHORITY_OUTPUT_CONTRACT_FIELDS: frozenset[st
         "route_kind",
     }
 )
+FORBIDDEN_BOUNDARY_ENVELOPE_SCHEMA_FIELDS: frozenset[str] = frozenset(
+    {
+        "raw_user_request",
+        "user_prompt",
+        "resolved_user_intent",
+        "reason",
+        "decision",
+        "answer_candidate",
+        "direct_answer",
+        "planner_execute",
+        "route_authority",
+        "semantic_route_authority",
+        "semantic_kind",
+        "output_contract",
+        "capability_ref",
+    }
+)
 FORBIDDEN_PREFERRED_RUN_CMD_SEMANTIC_ENUMS: tuple[str, ...] = (
     "OutputSemanticKind::PackageManagerDetection",
     "OutputSemanticKind::DockerPs",
@@ -373,6 +391,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_boundary_prompt_schema_legacy_semantic_kind_fields())
     findings.extend(scan_intent_normalizer_schema_ordinary_semantic_tokens())
     findings.extend(scan_intent_normalizer_schema_route_authority_fields())
+    findings.extend(scan_boundary_envelope_schema_machine_only())
     findings.extend(scan_contract_repair_schema_ordinary_semantic_tokens())
     findings.extend(scan_skill_registry_metadata_ordinary_semantic_tokens())
     findings.extend(scan_preferred_run_cmd_registry_bridge_fallback())
@@ -832,6 +851,59 @@ def scan_intent_normalizer_schema_route_authority_json(
                 rel_path,
                 1,
                 "normalizer_schema_route_authority_output_contract_required",
+                field,
+            )
+        )
+    return findings
+
+
+def scan_boundary_envelope_schema_machine_only() -> list[Finding]:
+    rel_path = rel(BOUNDARY_ENVELOPE_SCHEMA)
+    schema = json.loads(BOUNDARY_ENVELOPE_SCHEMA.read_text(encoding="utf-8"))
+    if not isinstance(schema, dict):
+        return [
+            Finding(
+                rel_path,
+                1,
+                "boundary_envelope_schema_not_object",
+                "BoundaryEnvelope schema must be a JSON object",
+            )
+        ]
+    return scan_boundary_envelope_schema_json(rel_path, schema)
+
+
+def scan_boundary_envelope_schema_json(
+    rel_path: str, schema: dict[str, Any]
+) -> list[Finding]:
+    findings: list[Finding] = []
+    properties = json_object_keys(schema.get("properties"))
+    required = json_list_values(schema.get("required"))
+    forbidden = (properties | required) & FORBIDDEN_BOUNDARY_ENVELOPE_SCHEMA_FIELDS
+
+    if schema.get("additionalProperties") is not False:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "boundary_envelope_schema_not_closed",
+                "BoundaryEnvelope schema must set additionalProperties=false",
+            )
+        )
+    if "raw_chars" not in properties:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "boundary_envelope_raw_chars_missing",
+                "BoundaryEnvelope schema must expose raw_chars count",
+            )
+        )
+    for field in sorted(forbidden):
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "boundary_envelope_forbidden_field",
                 field,
             )
         )
@@ -2536,8 +2608,39 @@ def run_self_test() -> int:
         and blocked_schema_route_authority_output_contract[0].kind
         == "normalizer_schema_route_authority_output_contract_field"
     )
+    blocked_boundary_envelope_raw_text = scan_boundary_envelope_schema_json(
+        "prompts/schemas/boundary_envelope.schema.json",
+        {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["raw_chars"],
+            "properties": {
+                "raw_chars": {"type": "integer"},
+                "raw_user_request": {"type": "string"},
+            },
+        },
+    )
+    assert (
+        blocked_boundary_envelope_raw_text
+        and blocked_boundary_envelope_raw_text[0].kind
+        == "boundary_envelope_forbidden_field"
+    )
+    blocked_boundary_envelope_open_schema = scan_boundary_envelope_schema_json(
+        "prompts/schemas/boundary_envelope.schema.json",
+        {
+            "type": "object",
+            "additionalProperties": True,
+            "required": ["raw_chars"],
+            "properties": {"raw_chars": {"type": "integer"}},
+        },
+    )
+    assert any(
+        item.kind == "boundary_envelope_schema_not_closed"
+        for item in blocked_boundary_envelope_open_schema
+    )
     assert not scan_intent_normalizer_schema_ordinary_semantic_tokens()
     assert not scan_intent_normalizer_schema_route_authority_fields()
+    assert not scan_boundary_envelope_schema_machine_only()
     blocked_contract_repair_schema = scan_schema_text(
         "prompts/schemas/contract_repair_judge.schema.json",
         '"docker_logs"\n',
