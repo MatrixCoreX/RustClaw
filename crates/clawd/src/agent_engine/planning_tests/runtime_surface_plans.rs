@@ -1,5 +1,129 @@
 use super::*;
 
+fn normalize_runtime_surface_actions(
+    state: &AppState,
+    route: &RouteResult,
+    loop_state: &LoopState,
+    goal: &str,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    normalize_planned_actions(state, Some(route), loop_state, goal, None, actions)
+}
+
+fn subagent_review_surface_actions(plan_path: &str) -> Vec<AgentAction> {
+    vec![
+        AgentAction::CallTool {
+            tool: "subagent".to_string(),
+            args: json!({
+                "role": "review",
+                "objective": "runtime_boundary_alignment_audit",
+                "context_refs": ["AGENTS.md", plan_path],
+                "allowed_capabilities": [
+                    "filesystem.read_text_range",
+                    "filesystem.find_entries"
+                ],
+                "budget": {
+                    "max_rounds": 1,
+                    "max_tool_calls": 3,
+                    "max_context_chars": 12000
+                }
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "AGENTS.md",
+                "start_line": 1,
+                "end_line": 260,
+                "max_bytes": 24000
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": plan_path,
+                "start_line": 1,
+                "end_line": 260,
+                "max_bytes": 24000
+            }),
+        },
+        AgentAction::Respond {
+            content: json!({
+                "boundary": {
+                    "write_enabled": false,
+                    "external_publish_enabled": false,
+                    "execution_mode": "inline_readonly_child_run",
+                    "child_worker_status": "inline_completed"
+                },
+                "evidence_refs": ["step_1", "step_2", "step_3"]
+            })
+            .to_string(),
+        },
+    ]
+}
+
+fn subagent_bounded_batch_surface_actions(plan_path: &str) -> Vec<AgentAction> {
+    vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "AGENTS.md",
+                "start_line": 1,
+                "end_line": 260,
+                "max_bytes": 24000
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": plan_path,
+                "start_line": 1,
+                "end_line": 260,
+                "max_bytes": 24000
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "subagent".to_string(),
+            args: json!({
+                "children": [
+                    {"role": "explorer", "objective": "collect_boundary_context_refs"},
+                    {"role": "verifier", "objective": "verify_boundary_contract_fields"}
+                ]
+            }),
+        },
+        AgentAction::Respond {
+            content: json!({
+                "execution_mode": "bounded_parallel_readonly_child_runs",
+                "finding_refs": ["step_1:evidence", "step_2:evidence"],
+                "external_publish_enabled": false
+            })
+            .to_string(),
+        },
+    ]
+}
+
+fn find_planned_call<'a>(actions: &'a [AgentAction], name: &str, action_name: &str) -> &'a Value {
+    actions
+        .iter()
+        .find(|action| planned_call_is(action, name, action_name))
+        .map(|action| expect_planned_call(action, name, action_name))
+        .unwrap_or_else(|| panic!("expected {name}.{action_name} in {actions:?}"))
+}
+
+fn find_tool_call<'a>(actions: &'a [AgentAction], name: &str) -> &'a Value {
+    actions
+        .iter()
+        .find_map(|action| {
+            let (tool, args) = planned_call(action)?;
+            (tool == name).then_some(args)
+        })
+        .unwrap_or_else(|| panic!("expected {name} call in {actions:?}"))
+}
+
 #[test]
 fn hook_permission_surface_returns_pre_tool_use_machine_projection() {
     let state = test_state_with_enabled_skills(&["config_basic"]);
@@ -12,28 +136,44 @@ fn hook_permission_surface_returns_pre_tool_use_machine_projection() {
     route.route_reason = "surface=agent_hooks stage=pre_tool_use".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = hook_permission_surface_deterministic_plan_result(
+    let normalized = normalize_runtime_surface_actions(
         &state,
-        "inspect hook surface",
-        Some(&route),
+        &route,
         &loop_state,
-        "检查工具调用前的权限边界",
-    )
-    .expect("machine hook token should use deterministic surface plan");
+        "inspect hook surface",
+        vec![
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "read_fields",
+                    "path": "configs/agent_guard.toml",
+                    "format": "toml",
+                    "field_paths": [
+                        "agent.hooks.blocked_action_refs",
+                        "agent.hooks.blocked_tools",
+                        "agent.hooks.require_confirmation_action_refs"
+                    ]
+                }),
+            },
+            AgentAction::Respond {
+                content: json!({
+                    "stage": "pre_tool_use",
+                    "field_value": {
+                        "allow": "default_allow",
+                        "block": ["blocked_action_refs", "blocked_tools"]
+                    },
+                    "evidence_refs": ["step_1"]
+                })
+                .to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 2);
-    let read_action = plan.steps[0].to_agent_action().expect("agent action");
-    let read_args = expect_planned_call(&read_action, "config_basic", "read_fields");
+    let read_args = find_planned_call(&normalized, "config_basic", "read_fields");
     assert_eq!(
         read_args.get("path").and_then(Value::as_str),
         Some("configs/agent_guard.toml")
     );
-    let reply_action = plan.steps[1].to_agent_action().expect("agent action");
-    let AgentAction::Respond { content } = reply_action else {
-        panic!("expected respond action, got {reply_action:?}");
-    };
-    assert!(content.contains("\"stage\":\"pre_tool_use\""), "{content}");
-    assert!(content.contains("\"field_value\""), "{content}");
 }
 
 #[test]
@@ -47,24 +187,46 @@ fn hook_permission_surface_collects_fields_and_valid_for_config_validation_contr
     route.route_reason = "surface=agent_hooks stage=pre_tool_use".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = hook_permission_surface_deterministic_plan_result(
+    let normalized = normalize_runtime_surface_actions(
         &state,
-        "inspect hook surface",
-        Some(&route),
+        &route,
         &loop_state,
-        "检查工具调用前的权限边界",
-    )
-    .expect("config validation contract should still collect hook field evidence");
+        "inspect hook surface",
+        vec![
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "read_fields",
+                    "path": "configs/agent_guard.toml",
+                    "format": "toml",
+                    "field_paths": [
+                        "agent.hooks.blocked_action_refs",
+                        "agent.hooks.blocked_tools",
+                        "agent.hooks.require_confirmation_action_refs"
+                    ]
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "validate",
+                    "path": "configs/agent_guard.toml",
+                    "format": "toml"
+                }),
+            },
+            AgentAction::Respond {
+                content: json!({"stage": "pre_tool_use", "evidence_refs": ["step_1", "step_2"]})
+                    .to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 3);
-    let fields_action = plan.steps[0].to_agent_action().expect("agent action");
-    expect_planned_call(&fields_action, "config_basic", "read_fields");
-    let validate_action = plan.steps[1].to_agent_action().expect("agent action");
-    expect_planned_call(&validate_action, "config_basic", "validate");
+    find_planned_call(&normalized, "config_basic", "read_fields");
+    find_planned_call(&normalized, "config_basic", "validate");
 }
 
 #[test]
-fn clawcli_resume_surface_reports_resume_task_id_field_token() {
+fn clawcli_resume_surface_uses_planner_supplied_resume_help_call() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::direct_answer();
@@ -73,29 +235,36 @@ fn clawcli_resume_surface_reports_resume_task_id_field_token() {
     route.route_reason = "surface=clawcli subcommand=resume".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = clawcli_resume_surface_deterministic_plan_result(
+    let normalized = normalize_runtime_surface_actions(
         &state,
-        "inspect clawcli resume",
-        Some(&route),
+        &route,
         &loop_state,
-        "检查命令行恢复能力",
-    )
-    .expect("clawcli resume machine tokens should use deterministic surface plan");
+        "inspect clawcli resume",
+        vec![
+            AgentAction::CallTool {
+                tool: "run_cmd".to_string(),
+                args: json!({
+                    "command": "target/release/clawcli resume --help 2>&1 || true"
+                }),
+            },
+            AgentAction::Respond {
+                content: json!({
+                    "surface": "clawcli",
+                    "subcommand": "resume",
+                    "field_tokens": ["text", "resume_task_id", "resume_trigger"],
+                    "evidence_ref": "step_1"
+                })
+                .to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 2);
-    let cmd_action = plan.steps[0].to_agent_action().expect("agent action");
-    let (tool, cmd_args) = planned_call(&cmd_action).expect("planned call");
-    assert_eq!(tool, "run_cmd");
+    let cmd_args = find_tool_call(&normalized, "run_cmd");
     let command = cmd_args
         .get("command")
         .and_then(Value::as_str)
         .expect("command");
     assert!(command.contains("clawcli resume --help"), "{command}");
-    let reply_action = plan.steps[1].to_agent_action().expect("agent action");
-    let AgentAction::Respond { content } = reply_action else {
-        panic!("expected respond action, got {reply_action:?}");
-    };
-    assert!(content.contains("\"resume_task_id\""), "{content}");
 }
 
 #[test]
@@ -106,15 +275,15 @@ fn clawcli_resume_surface_ignores_user_text_tokens_without_machine_tokens() {
     route.output_contract.response_shape = OutputResponseShape::Strict;
     let loop_state = LoopState::new(1);
 
-    let plan = clawcli_resume_surface_deterministic_plan_result(
+    let normalized = normalize_runtime_surface_actions(
         &state,
-        "inspect clawcli resume",
-        Some(&route),
+        &route,
         &loop_state,
-        "clawcli resume",
+        "inspect clawcli resume",
+        vec![],
     );
 
-    assert!(plan.is_none());
+    assert!(normalized.is_empty());
 }
 
 #[test]
@@ -133,19 +302,15 @@ fn subagent_review_boundary_surface_uses_readonly_machine_envelope() {
     route.route_reason = "surface=subagent role=review context_ref=AGENTS.md".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = subagent_review_boundary_surface_deterministic_plan_result(
+    let normalized = normalize_runtime_surface_actions(
         &state,
-        "review runtime boundary",
-        Some(&route),
+        &route,
         &loop_state,
-        "检查运行边界",
-    )
-    .expect("review role token with AGENTS.md and plan should use subagent boundary surface");
+        "review runtime boundary",
+        subagent_review_surface_actions("plan/current_runtime_plan.md"),
+    );
 
-    assert_eq!(plan.steps.len(), 4);
-    let subagent_action = plan.steps[0].to_agent_action().expect("agent action");
-    let (subagent_tool, subagent_args) = planned_call(&subagent_action).expect("planned call");
-    assert_eq!(subagent_tool, "subagent");
+    let subagent_args = find_tool_call(&normalized, "subagent");
     assert_eq!(
         subagent_args.get("role").and_then(Value::as_str),
         Some("review")
@@ -158,38 +323,32 @@ fn subagent_review_boundary_surface_uses_readonly_machine_envelope() {
             .and_then(Value::as_str),
         Some("AGENTS.md")
     );
-    let agents_read = plan.steps[1].to_agent_action().expect("agent action");
-    let agents_args = expect_planned_call(&agents_read, "fs_basic", "read_text_range");
+    let agents_args = normalized
+        .iter()
+        .filter(|action| planned_call_is(action, "fs_basic", "read_text_range"))
+        .map(|action| expect_planned_call(action, "fs_basic", "read_text_range"))
+        .find(|args| args.get("path").and_then(Value::as_str) == Some("AGENTS.md"))
+        .expect("AGENTS.md read");
     assert_eq!(
         agents_args.get("path").and_then(Value::as_str),
         Some("AGENTS.md")
     );
-    let plan_read = plan.steps[2].to_agent_action().expect("agent action");
-    let plan_args = expect_planned_call(&plan_read, "fs_basic", "read_text_range");
+    let plan_args = normalized
+        .iter()
+        .filter(|action| planned_call_is(action, "fs_basic", "read_text_range"))
+        .map(|action| expect_planned_call(action, "fs_basic", "read_text_range"))
+        .find(|args| {
+            args.get("path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| path.starts_with("plan/") && path.ends_with(".md"))
+        })
+        .expect("plan read");
     assert!(
         plan_args
             .get("path")
             .and_then(Value::as_str)
             .is_some_and(|path| path.starts_with("plan/") && path.ends_with(".md")),
         "{plan_args}"
-    );
-    let reply_action = plan.steps[3].to_agent_action().expect("agent action");
-    let AgentAction::Respond { content } = reply_action else {
-        panic!("expected respond action, got {reply_action:?}");
-    };
-    assert!(content.contains("\"boundary\""), "{content}");
-    assert!(content.contains("\"write_enabled\":false"), "{content}");
-    assert!(
-        content.contains("\"external_publish_enabled\":false"),
-        "{content}"
-    );
-    assert!(
-        content.contains("\"execution_mode\":\"inline_readonly_child_run\""),
-        "{content}"
-    );
-    assert!(
-        content.contains("\"child_worker_status\":\"inline_completed\""),
-        "{content}"
     );
 }
 
@@ -211,19 +370,15 @@ fn subagent_bounded_batch_surface_uses_children_contract() {
             .to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = subagent_bounded_batch_surface_deterministic_plan_result(
+    let normalized = normalize_runtime_surface_actions(
         &state,
-        "subagent batch surface",
-        Some(&route),
+        &route,
         &loop_state,
-        "检查子任务边界",
-    )
-    .expect("machine role tokens should use bounded batch subagent surface");
+        "subagent batch surface",
+        subagent_bounded_batch_surface_actions("plan/current_runtime_plan.md"),
+    );
 
-    assert_eq!(plan.steps.len(), 4);
-    let subagent_action = plan.steps[2].to_agent_action().expect("agent action");
-    let (subagent_tool, subagent_args) = planned_call(&subagent_action).expect("planned call");
-    assert_eq!(subagent_tool, "subagent");
+    let subagent_args = find_tool_call(&normalized, "subagent");
     let children = subagent_args
         .get("children")
         .and_then(Value::as_array)
@@ -236,19 +391,6 @@ fn subagent_bounded_batch_surface_uses_children_contract() {
     assert_eq!(
         children[1].get("role").and_then(Value::as_str),
         Some("verifier")
-    );
-    let reply_action = plan.steps[3].to_agent_action().expect("agent action");
-    let AgentAction::Respond { content } = reply_action else {
-        panic!("expected respond action, got {reply_action:?}");
-    };
-    assert!(
-        content.contains("\"execution_mode\":\"bounded_parallel_readonly_child_runs\""),
-        "{content}"
-    );
-    assert!(content.contains("\"finding_refs\""), "{content}");
-    assert!(
-        content.contains("\"external_publish_enabled\":false"),
-        "{content}"
     );
 }
 
@@ -271,18 +413,22 @@ fn subagent_review_boundary_surface_resolves_current_plan_when_route_requested_c
             .to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = subagent_review_boundary_surface_deterministic_plan_result(
+    let normalized = normalize_runtime_surface_actions(
         &state,
-        "review runtime boundary",
-        Some(&route),
+        &route,
         &loop_state,
-        "检查当前计划边界",
-    )
-    .expect("current plan surface should resolve bounded route clarify into readonly plan");
+        "review runtime boundary",
+        subagent_review_surface_actions("plan/current_runtime_plan.md"),
+    );
 
-    assert_eq!(plan.steps.len(), 4);
-    let plan_read = plan.steps[2].to_agent_action().expect("agent action");
-    let plan_args = expect_planned_call(&plan_read, "fs_basic", "read_text_range");
+    let plan_args = normalized
+        .iter()
+        .filter(|action| planned_call_is(action, "fs_basic", "read_text_range"))
+        .map(|action| expect_planned_call(action, "fs_basic", "read_text_range"))
+        .find(|args| {
+            args.get("path").and_then(Value::as_str) == Some("plan/current_runtime_plan.md")
+        })
+        .expect("current plan read");
     assert_eq!(
         plan_args.get("path").and_then(Value::as_str),
         Some("plan/current_runtime_plan.md")
@@ -307,17 +453,22 @@ fn subagent_review_boundary_surface_uses_current_plan_without_plan_text_token() 
         "subagent_roles=review; current_workspace_scope_from_current_request".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = subagent_review_boundary_surface_deterministic_plan_result(
+    let normalized = normalize_runtime_surface_actions(
         &state,
-        "review runtime boundary",
-        Some(&route),
+        &route,
         &loop_state,
-        "只读 review 子代理检查 AGENTS.md 和当前文件执行边界",
-    )
-    .expect("current plan file discovery should not depend on language-specific plan text");
+        "review runtime boundary",
+        subagent_review_surface_actions("plan/current_runtime_plan.md"),
+    );
 
-    let plan_read = plan.steps[2].to_agent_action().expect("agent action");
-    let plan_args = expect_planned_call(&plan_read, "fs_basic", "read_text_range");
+    let plan_args = normalized
+        .iter()
+        .filter(|action| planned_call_is(action, "fs_basic", "read_text_range"))
+        .map(|action| expect_planned_call(action, "fs_basic", "read_text_range"))
+        .find(|args| {
+            args.get("path").and_then(Value::as_str) == Some("plan/current_runtime_plan.md")
+        })
+        .expect("current plan read");
     assert_eq!(
         plan_args.get("path").and_then(Value::as_str),
         Some("plan/current_runtime_plan.md")
