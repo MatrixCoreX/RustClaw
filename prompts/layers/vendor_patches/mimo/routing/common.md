@@ -11,6 +11,7 @@ Routing authority:
 - Do not invent `capability_ref=<...>` from a user phrase.
 - For ordinary registry-owned capabilities, set `output_contract.contract_marker="none"` and let the planner/resolver select the capability.
 - Do not emit legacy `decision`; runtime derives any route trace from machine boundary fields. It is not routing authority.
+- Do not emit `answer_candidate` or any user-visible answer prose; final wording belongs to the planner loop and finalizer.
 
 Boundary fields this layer may extract:
 - Explicit locators: path, filename, URL, current-workspace scope, delivery target, attachment/media presence.
