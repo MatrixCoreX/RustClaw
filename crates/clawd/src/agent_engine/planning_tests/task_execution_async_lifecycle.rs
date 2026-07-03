@@ -51,7 +51,7 @@ fn structured_async_start_keeps_planner_action_when_route_contract_is_generic_co
 }
 
 #[test]
-fn execution_recipe_async_plan_hint_starts_run_cmd_without_route_async_marker() {
+fn execution_recipe_async_plan_hint_preserves_planner_run_cmd_without_route_async_marker() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = base_route_result();
     route.output_contract.response_shape = OutputResponseShape::Strict;
@@ -76,19 +76,30 @@ fn execution_recipe_async_plan_hint_starts_run_cmd_without_route_async_marker() 
         "route_execution_recipe_plan_async_adapter_kind".to_string(),
         "local_process_poll".to_string(),
     );
+    let actions = vec![AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: json!({
+            "command": "sleep 2 && echo RUSTCLAW_ASYNC_LIFECYCLE",
+            "async_start": true,
+            "poll_after_seconds": 2,
+            "expires_in_seconds": 600,
+            super::super::super::CLAWD_RUNTIME_ASYNC_JOB_START_ARG: "async_job_protocol"
+        }),
+    }];
 
-    let plan = async_job_start_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "start async lifecycle",
         Some(&route),
         &loop_state,
         "start async lifecycle",
-    )
-    .expect("structured async recipe should bypass generic content locator drift");
+        Some("start async lifecycle"),
+        Some("start async lifecycle"),
+        Some("rustclaw"),
+        actions,
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let AgentAction::CallSkill { skill, args } = action else {
-        panic!("expected run_cmd action, got {action:?}");
+    let Some(AgentAction::CallSkill { skill, args }) = normalized.first() else {
+        panic!("expected run_cmd action, got {normalized:?}");
     };
     assert_eq!(skill, "run_cmd");
     assert_eq!(
