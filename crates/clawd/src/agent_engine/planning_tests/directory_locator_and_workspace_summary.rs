@@ -1415,16 +1415,13 @@ fn directory_tree_auto_locator_does_not_override_exact_file_names_contract() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
 
-    assert!(directory_tree_auto_locator_deterministic_plan_result(
-        &test_state(),
-        "list file names",
-        Some(&route),
+    assert_empty_planner_actions_stay_empty(
+        &route,
         &LoopState::new(1),
         "list file names",
         Some("list file names"),
         Some(&root_path),
-    )
-    .is_none());
+    );
 }
 
 #[test]
@@ -1441,16 +1438,13 @@ fn directory_tree_auto_locator_does_not_override_raw_command_output_contract() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
 
-    assert!(directory_tree_auto_locator_deterministic_plan_result(
-        &test_state(),
-        "show current process output",
-        Some(&route),
+    assert_empty_planner_actions_stay_empty(
+        &route,
         &LoopState::new(1),
         "show current process output",
         Some("show current process output"),
         Some(&root_path),
-    )
-    .is_none());
+    );
 }
 
 #[test]
@@ -1469,16 +1463,13 @@ fn directory_tree_auto_locator_does_not_override_multi_directory_contract() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = format!("{left_path} | {right_path}");
 
-    assert!(directory_tree_auto_locator_deterministic_plan_result(
-        &test_state(),
-        "compare two directories",
-        Some(&route),
+    assert_empty_planner_actions_stay_empty(
+        &route,
         &LoopState::new(1),
         "compare two directories",
         Some("compare two directories"),
         Some(&left_path),
-    )
-    .is_none());
+    );
 }
 
 #[test]
@@ -1698,44 +1689,36 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_doc_parse_for_lo
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=document.parse".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.join("workspace_root");
 
-    let plan = content_excerpt_summary_auto_locator_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "summarize a resolved fallback document",
-        Some(&route),
+        &route,
         &loop_state,
+        "summarize a resolved fallback document",
+        Some("summarize a resolved fallback document"),
         Some(&readme_path),
-    )
-    .expect("content excerpt summary should parse the resolved document directly");
-
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 3);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallSkill { skill, args }) => {
-            assert_eq!(skill, "doc_parse");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("parse_doc")
-            );
-            assert_eq!(
-                args.get("path").and_then(Value::as_str),
-                Some(readme_path.as_str())
-            );
-        }
-        other => panic!("expected doc_parse parse_doc action, got {other:?}"),
-    }
-    assert!(matches!(
-        plan.steps[1].to_agent_action(),
-        Some(AgentAction::SynthesizeAnswer { evidence_refs }) if evidence_refs == vec!["last_output".to_string()]
-    ));
-    assert!(matches!(
-        plan.steps[2].to_agent_action(),
-        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
-    ));
+        "doc_parse",
+        "parse_doc",
+        json!({
+            "action": "parse_doc",
+            "path": readme_path.clone(),
+            "max_chars": 12000,
+            "include_metadata": true,
+        }),
+    );
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("parse_doc")
+    );
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(readme_path.as_str())
+    );
 }
 
 #[test]
@@ -1759,43 +1742,34 @@ fn content_excerpt_summary_auto_locator_reads_nested_file_without_workspace_inve
     route.output_contract.delivery_required = false;
     route.output_contract.requires_content_evidence = true;
     route.resolved_intent = "Summarize package metadata. slice_mode=head slice_n=120".to_string();
+    route.route_reason = "capability_ref=filesystem.read_text_range".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = content_excerpt_summary_auto_locator_deterministic_plan_result(
+    let args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "use workspace context and a resolved package file",
-        Some(&route),
+        &route,
         &loop_state,
+        "use workspace context and a resolved package file",
+        Some("use workspace context and a resolved package file"),
         Some(&package_path),
-    )
-    .expect("workspace file summary should include root context and file evidence");
-
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 3);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("read_text_range")
-            );
-            assert_eq!(
-                args.get("path").and_then(Value::as_str),
-                Some(package_path.as_str())
-            );
-            assert_eq!(args.get("mode").and_then(Value::as_str), Some("head"));
-            assert_eq!(args.get("n").and_then(Value::as_u64), Some(120));
-        }
-        other => panic!("expected fs_basic read_text_range action, got {other:?}"),
-    }
-    assert!(matches!(
-        plan.steps[1].to_agent_action(),
-        Some(AgentAction::SynthesizeAnswer { evidence_refs })
-            if evidence_refs == vec!["last_output".to_string()]
-    ));
-    assert!(matches!(
-        plan.steps[2].to_agent_action(),
-        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
-    ));
+        "fs_basic",
+        "read_text_range",
+        json!({
+            "action": "read_text_range",
+            "path": package_path.clone(),
+            "mode": "head",
+            "n": 120,
+        }),
+    );
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("read_text_range")
+    );
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(package_path.as_str())
+    );
+    assert_eq!(args.get("mode").and_then(Value::as_str), Some("head"));
+    assert_eq!(args.get("n").and_then(Value::as_u64), Some(120));
 }
