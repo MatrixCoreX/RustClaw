@@ -10,7 +10,7 @@ use claw_core::skill_registry::SkillsRegistry;
 use super::{
     action_supports_structured_direct_observed_finalize, action_targets_config_edit,
     actions_use_ad_hoc_command_without_route_preferred_skill, apply_scalar_count_filter_hint,
-    archive_list_auto_locator_deterministic_plan_result, archive_read_deterministic_plan_result,
+    archive_list_auto_locator_deterministic_plan_result,
     broaden_default_read_range_for_structured_text, build_lightweight_skill_playbooks_text,
     build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
     can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
