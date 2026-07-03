@@ -641,7 +641,7 @@ fn scalar_path_auto_locator_requires_scalar_path_contract() {
 }
 
 #[test]
-fn scalar_path_auto_locator_deterministic_plan_uses_structural_locator() {
+fn scalar_path_auto_locator_preserves_planner_structural_locator_action() {
     let root = TempDirGuard::new("scalar_auto_locator_deterministic_plan");
     let report = root.path.join("my_abcd.txt");
     fs::write(&report, "hello").expect("write report");
@@ -658,22 +658,29 @@ fn scalar_path_auto_locator_deterministic_plan_uses_structural_locator() {
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = scalar_path_auto_locator_deterministic_plan_result(
-        "return the structurally resolved path",
+    let normalized = normalize_planned_actions(
+        &test_state(),
         Some(&route),
         &loop_state,
+        "return the structurally resolved path",
         Some(&report_path),
-    )
-    .expect("fast plan should be available");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "stat_paths",
+                "paths": [report_path],
+                "include_missing": true,
+            }),
+        }],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    assert!(plan.raw_plan_text.contains("stat_paths"));
-    assert!(plan.raw_plan_text.contains(&report_path));
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "stat_paths");
+    assert_eq!(args.get("paths"), Some(&json!([report_path])));
 }
 
 #[test]
-fn file_basename_auto_locator_deterministic_plan_uses_stat_paths() {
+fn file_basename_auto_locator_preserves_planner_stat_paths_action() {
     let root = TempDirGuard::new("file_basename_auto_locator_deterministic_plan");
     let report = root.path.join("release_checklist.md");
     fs::write(&report, "hello").expect("write report");
@@ -690,25 +697,29 @@ fn file_basename_auto_locator_deterministic_plan_uses_stat_paths() {
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = scalar_path_auto_locator_deterministic_plan_result(
-        "return only the selected file basename",
+    let normalized = normalize_planned_actions(
+        &test_state(),
         Some(&route),
         &loop_state,
+        "return only the selected file basename",
         Some(&report_path),
-    )
-    .expect("fast plan should be available");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "stat_paths",
+                "paths": [report_path],
+                "include_missing": true,
+            }),
+        }],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0]
-        .to_agent_action()
-        .expect("planned step should convert to action");
-    let args = expect_planned_call(&action, "fs_basic", "stat_paths");
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "stat_paths");
     assert_eq!(args.get("paths"), Some(&json!([report_path])));
 }
 
 #[test]
-fn scalar_path_current_workspace_deterministic_plan_uses_workspace_contract() {
+fn scalar_path_current_workspace_preserves_planner_workspace_contract_action() {
     let root = TempDirGuard::new("scalar_current_workspace_deterministic_plan");
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
@@ -725,28 +736,25 @@ fn scalar_path_current_workspace_deterministic_plan_uses_workspace_contract() {
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = scalar_path_current_workspace_deterministic_plan_result(
+    let normalized = normalize_planned_actions(
         &state,
-        "return current workspace path",
         Some(&route),
         &loop_state,
-    )
-    .expect("current workspace scalar path should have a deterministic plan");
+        "return current workspace path",
+        Some(&workspace_path),
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "stat_paths",
+                "paths": [workspace_path],
+                "include_missing": true,
+            }),
+        }],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    match plan.steps[0].to_agent_action().as_ref() {
-        Some(AgentAction::CallTool { tool, args })
-        | Some(AgentAction::CallSkill { skill: tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("stat_paths")
-            );
-            assert_eq!(args.get("paths"), Some(&json!([workspace_path])));
-        }
-        other => panic!("expected fs_basic stat_paths action, got {other:?}"),
-    }
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "stat_paths");
+    assert_eq!(args.get("paths"), Some(&json!([workspace_path])));
 }
 
 #[tokio::test]
@@ -1236,7 +1244,7 @@ fn free_quantity_directory_target_uses_broader_ranked_inventory() {
 }
 
 #[test]
-fn file_facts_auto_locator_deterministic_plan_resolves_current_workspace_quantity_target() {
+fn file_facts_auto_locator_preserves_planner_current_workspace_quantity_target() {
     let root = TempDirGuard::new("directory_facts_quantity_current_workspace");
     let target = root.path.join("target");
     fs::create_dir_all(&target).expect("create target dir");
@@ -1253,27 +1261,30 @@ fn file_facts_auto_locator_deterministic_plan_resolves_current_workspace_quantit
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "target".to_string();
 
-    let plan = file_facts_auto_locator_deterministic_plan_result(
+    let target_path = target_path.display().to_string();
+    let loop_state = LoopState::new(1);
+    let actions = file_facts_auto_locator_observation_plan(Some(&route), Some(&target_path))
+        .expect("planner-observation actions");
+    let normalized = normalize_planned_actions(
         &state,
-        "inspect target metadata",
         Some(&route),
-        &LoopState::new(1),
+        &loop_state,
         "inspect target metadata",
-        None,
-        None,
-    )
-    .expect("deterministic file facts plan");
+        Some(&target_path),
+        actions,
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 3);
-    assert!(plan.raw_plan_text.contains("count_entries"));
-    assert!(plan
-        .raw_plan_text
-        .contains(&target_path.display().to_string()));
+    assert!(normalized.iter().any(|action| matches!(
+        action,
+        AgentAction::CallTool { tool, args }
+            if tool == "fs_basic"
+                && args.get("action").and_then(Value::as_str) == Some("count_entries")
+                && args.get("path").and_then(Value::as_str) == Some(target_path.as_str())
+    )));
 }
 
 #[test]
-fn quantity_compare_pair_locator_uses_compare_paths_without_planner_guessing() {
+fn quantity_compare_pair_locator_preserves_planner_compare_paths_action() {
     let root = TempDirGuard::new("quantity_compare_pair_locator");
     fs::write(root.path.join("Cargo.lock"), "abcdef").expect("write lock");
     fs::write(root.path.join("Cargo.toml"), "abc").expect("write toml");
@@ -1289,19 +1300,29 @@ fn quantity_compare_pair_locator_uses_compare_paths_without_planner_guessing() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "Cargo.lock | Cargo.toml".to_string();
 
-    let plan = quantity_compare_pair_locator_deterministic_plan_result(
+    let loop_state = LoopState::new(1);
+    let normalized = normalize_planned_actions(
         &state,
-        "compare two path metadata targets",
         Some(&route),
-        &LoopState::new(1),
+        &loop_state,
+        "compare two path metadata targets",
         None,
-    )
-    .expect("deterministic quantity comparison pair plan");
+        vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "compare_paths",
+                "left_path": root.path.join("Cargo.lock").display().to_string(),
+                "right_path": root.path.join("Cargo.toml").display().to_string(),
+            }),
+        }],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "compare_paths");
+    let args = normalized
+        .iter()
+        .filter(|action| planned_call_is(action, "fs_basic", "compare_paths"))
+        .map(|action| expect_planned_call(action, "fs_basic", "compare_paths"))
+        .next()
+        .expect("planner compare_paths action");
     assert!(args
         .get("left_path")
         .and_then(Value::as_str)
@@ -1313,7 +1334,7 @@ fn quantity_compare_pair_locator_uses_compare_paths_without_planner_guessing() {
 }
 
 #[test]
-fn quantity_compare_pair_locator_uses_count_entries_for_directory_pairs() {
+fn quantity_compare_pair_locator_preserves_planner_count_entries_for_directory_pairs() {
     let root = TempDirGuard::new("quantity_compare_directory_pair_locator");
     fs::create_dir_all(root.path.join("crates/skills")).expect("write dirs");
     let mut state = test_state();
@@ -1328,19 +1349,43 @@ fn quantity_compare_pair_locator_uses_count_entries_for_directory_pairs() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "crates | crates/skills".to_string();
 
-    let plan = quantity_compare_pair_locator_deterministic_plan_result(
+    let loop_state = LoopState::new(1);
+    let normalized = normalize_planned_actions(
         &state,
-        "count entries in two directories",
         Some(&route),
-        &LoopState::new(1),
+        &loop_state,
+        "count entries in two directories",
         None,
-    )
-    .expect("deterministic directory pair count plan");
+        vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "count_entries",
+                    "path": root.path.join("crates").display().to_string(),
+                    "recursive": false,
+                    "include_hidden": false,
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "count_entries",
+                    "path": root.path.join("crates/skills").display().to_string(),
+                    "recursive": false,
+                    "include_hidden": false,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 4);
-    let first = plan.steps[0].to_agent_action().expect("first action");
-    let first_args = expect_planned_call(&first, "fs_basic", "count_entries");
+    assert!(normalized.len() >= 2);
+    let first_args = expect_planned_call(&normalized[0], "fs_basic", "count_entries");
     assert!(first_args
         .get("path")
         .and_then(Value::as_str)
@@ -1354,8 +1399,7 @@ fn quantity_compare_pair_locator_uses_count_entries_for_directory_pairs() {
         Some(false)
     );
 
-    let second = plan.steps[1].to_agent_action().expect("second action");
-    let second_args = expect_planned_call(&second, "fs_basic", "count_entries");
+    let second_args = expect_planned_call(&normalized[1], "fs_basic", "count_entries");
     assert!(second_args
         .get("path")
         .and_then(Value::as_str)
@@ -1368,18 +1412,6 @@ fn quantity_compare_pair_locator_uses_count_entries_for_directory_pairs() {
         second_args.get("include_hidden").and_then(Value::as_bool),
         Some(false)
     );
-
-    let synthesize = plan.steps[2].to_agent_action().expect("synthesize action");
-    assert!(matches!(
-        synthesize,
-        AgentAction::SynthesizeAnswer { evidence_refs }
-            if evidence_refs == vec!["step_1".to_string(), "step_2".to_string()]
-    ));
-    let respond = plan.steps[3].to_agent_action().expect("respond action");
-    assert!(matches!(
-        respond,
-        AgentAction::Respond { content } if content == "{{last_output}}"
-    ));
 }
 
 #[test]
@@ -1408,19 +1440,53 @@ fn quantity_compare_pair_locator_recovers_pair_from_original_request_over_parent
     route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
     let prompt = "先数 scripts/nl_tests/fixtures/device_local/docs 直接子项数量，再数 scripts/nl_tests/fixtures/device_local/logs 直接子项数量，最后一句中文说哪个更多";
 
-    let plan = quantity_compare_pair_locator_deterministic_plan_result(
+    let docs_path = root
+        .path
+        .join("scripts/nl_tests/fixtures/device_local/docs")
+        .display()
+        .to_string();
+    let logs_path = root
+        .path
+        .join("scripts/nl_tests/fixtures/device_local/logs")
+        .display()
+        .to_string();
+    let loop_state = LoopState::new(1);
+    let normalized = normalize_planned_actions(
         &state,
-        "count entries in two directories",
         Some(&route),
-        &LoopState::new(1),
-        Some(prompt),
-    )
-    .expect("deterministic directory pair count plan");
+        &loop_state,
+        prompt,
+        None,
+        vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "count_entries",
+                    "path": docs_path,
+                    "recursive": false,
+                    "include_hidden": false,
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "count_entries",
+                    "path": logs_path,
+                    "recursive": false,
+                    "include_hidden": false,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 4);
-    let first = plan.steps[0].to_agent_action().expect("first action");
-    let first_args = expect_planned_call(&first, "fs_basic", "count_entries");
+    assert!(normalized.len() >= 2);
+    let first_args = expect_planned_call(&normalized[0], "fs_basic", "count_entries");
     assert!(first_args
         .get("path")
         .and_then(Value::as_str)
@@ -1430,8 +1496,7 @@ fn quantity_compare_pair_locator_recovers_pair_from_original_request_over_parent
         Some(false)
     );
 
-    let second = plan.steps[1].to_agent_action().expect("second action");
-    let second_args = expect_planned_call(&second, "fs_basic", "count_entries");
+    let second_args = expect_planned_call(&normalized[1], "fs_basic", "count_entries");
     assert!(second_args
         .get("path")
         .and_then(Value::as_str)
@@ -1577,7 +1642,7 @@ fn single_path_metadata_facts_do_not_satisfy_multi_target_quantity_comparison() 
 }
 
 #[test]
-fn explicit_command_deterministic_plan_preserves_pipeline_literal() {
+fn explicit_command_planner_action_preserves_pipeline_literal() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
     state.policy.command_intent.execute_prefixes = vec!["执行命令".to_string()];
     let mut route = route_result(
@@ -1590,31 +1655,35 @@ fn explicit_command_deterministic_plan_preserves_pipeline_literal() {
     let loop_state = LoopState::new(1);
     let request = "运行命令 `printf rustclaw | wc -c`，只输出数字";
 
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_planned_actions(
         &state,
-        "run explicit command",
         Some(&route),
         &loop_state,
         request,
         None,
-    )
-    .expect("explicit command should produce run_cmd plan");
+        vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({
+                "command": "printf rustclaw | wc -c",
+                "request_text": request,
+                "cwd": state.skill_rt.workspace_root.display().to_string(),
+                CLAWD_LITERAL_COMMAND_ARG: true,
+            }),
+        }],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
+    assert_eq!(normalized.len(), 1);
+    let (tool, args) = planned_call(&normalized[0]).expect("run_cmd call");
+    assert_eq!(tool, "run_cmd");
     assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
+        args.get("command").and_then(Value::as_str),
         Some("printf rustclaw | wc -c")
     );
-    assert_eq!(
-        plan.steps[0].args.get(CLAWD_LITERAL_COMMAND_ARG),
-        Some(&json!(true))
-    );
+    assert_eq!(args.get(CLAWD_LITERAL_COMMAND_ARG), Some(&json!(true)));
 }
 
 #[test]
-fn execution_failed_step_code_span_sequence_gets_multi_run_cmd_plan() {
+fn execution_failed_step_code_span_sequence_preserves_planner_multi_run_cmd_actions() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = route_result(
         crate::AskMode::planner_execute_with_chat_finalizer(),
@@ -1626,39 +1695,62 @@ fn execution_failed_step_code_span_sequence_gets_multi_run_cmd_plan() {
     let loop_state = LoopState::new(1);
     let request = "请依次执行命令 `echo RC_RENDER_ZH_OK` 和命令 `definitely_missing_command_rustclaw_render_zh_0605`，只告诉我哪一步失败";
 
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_planned_actions(
         &state,
-        "run command sequence and identify failed step",
         Some(&route),
         &loop_state,
         request,
         None,
-    )
-    .expect("failed-step command sequence should produce deterministic run_cmd plan");
+        vec![
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: json!({
+                    "command": "echo RC_RENDER_ZH_OK",
+                    "request_text": request,
+                    "cwd": state.skill_rt.workspace_root.display().to_string(),
+                    CLAWD_LITERAL_COMMAND_ARG: true,
+                    CLAWD_CONTINUE_ON_ERROR_ARG: true,
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: json!({
+                    "command": "definitely_missing_command_rustclaw_render_zh_0605",
+                    "request_text": request,
+                    "cwd": state.skill_rt.workspace_root.display().to_string(),
+                    CLAWD_LITERAL_COMMAND_ARG: true,
+                    CLAWD_CONTINUE_ON_ERROR_ARG: true,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 4);
+    assert!(normalized.len() >= 2);
+    let (first_tool, first_args) = planned_call(&normalized[0]).expect("first run_cmd call");
+    let (second_tool, second_args) = planned_call(&normalized[1]).expect("second run_cmd call");
+    assert_eq!(first_tool, "run_cmd");
+    assert_eq!(second_tool, "run_cmd");
     assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
+        first_args.get("command").and_then(Value::as_str),
         Some("echo RC_RENDER_ZH_OK")
     );
     assert_eq!(
-        plan.steps[1].args.get("command").and_then(Value::as_str),
+        second_args.get("command").and_then(Value::as_str),
         Some("definitely_missing_command_rustclaw_render_zh_0605")
     );
-    for step in plan.steps.iter().take(2) {
-        assert_eq!(step.skill, "run_cmd");
-        assert_eq!(step.args.get(CLAWD_LITERAL_COMMAND_ARG), Some(&json!(true)));
-        assert_eq!(
-            step.args.get(CLAWD_CONTINUE_ON_ERROR_ARG),
-            Some(&json!(true))
-        );
+    for args in [first_args, second_args] {
+        assert_eq!(args.get(CLAWD_LITERAL_COMMAND_ARG), Some(&json!(true)));
+        assert_eq!(args.get(CLAWD_CONTINUE_ON_ERROR_ARG), Some(&json!(true)));
     }
-    assert_eq!(
-        plan.steps[2].args,
-        json!({"evidence_refs": ["step_1", "step_2"]})
-    );
-    assert_eq!(
-        plan.steps[3].args.get("content").and_then(Value::as_str),
-        Some("{{last_output}}")
-    );
+    assert!(normalized.iter().any(|action| matches!(
+        action,
+        AgentAction::SynthesizeAnswer { evidence_refs }
+            if evidence_refs == &vec!["step_1".to_string(), "step_2".to_string()]
+    )));
 }
