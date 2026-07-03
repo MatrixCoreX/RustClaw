@@ -69,7 +69,7 @@ fn boundary_envelope_projects_only_machine_boundary_fields() {
             .map(|intent| intent.kind.as_str()),
         Some(schedule_intent.kind.as_str())
     );
-    assert!(envelope.language_hint.is_none());
+    assert_eq!(envelope.language_hint.as_deref(), Some("en"));
     assert!(envelope.safety_budget_hint.is_none());
     let prompt_line = envelope.compact_prompt_line();
     assert!(prompt_line.contains("raw_chars=27"));
@@ -78,6 +78,7 @@ fn boundary_envelope_projects_only_machine_boundary_fields() {
     assert!(prompt_line.contains("explicit_locators=1"));
     assert!(prompt_line.contains("active_task_reference=reuse_active"));
     assert!(prompt_line.contains("session_binding=resume_execute"));
+    assert!(prompt_line.contains("language_hint=en"));
     assert!(!prompt_line.contains("check config/app.toml later"));
     assert!(!prompt_line.contains("config/app.toml"));
 }
