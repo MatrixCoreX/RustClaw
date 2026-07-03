@@ -8,7 +8,7 @@ use super::{
     filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
     package_docker_probe_structured_answer, strip_internal_execution_args,
     strip_unsupported_planner_metadata_args, synthesize_answer_allows_direct_fallback,
-    synthesize_contract_matrix_direct_observed_fallback_answer,
+    synthesize_evidence_policy_direct_observed_fallback_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer, synthesize_failure_observed_facts,
     synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
@@ -1174,7 +1174,7 @@ fn contract_matrix_synthesis_prefers_observed_answer_over_step_status() {
     };
 
     let answer =
-        synthesize_contract_matrix_direct_observed_fallback_answer(&state, &loop_state, Some(&ctx))
+        synthesize_evidence_policy_direct_observed_fallback_answer(&state, &loop_state, Some(&ctx))
             .expect("contract matrix observed fallback");
 
     assert!(answer.contains("/tmp/rustclaw-workspace/tmp/contract_matrix_unpacked"));
@@ -1229,7 +1229,7 @@ fn contract_matrix_synthesis_defers_multi_count_quantity_comparison_to_model() {
         ..AgentRunContext::default()
     };
 
-    assert!(synthesize_contract_matrix_direct_observed_fallback_answer(
+    assert!(synthesize_evidence_policy_direct_observed_fallback_answer(
         &state,
         &loop_state,
         Some(&ctx)
@@ -1334,7 +1334,7 @@ fn synthesize_direct_fallback_defers_multi_observation_grounded_summary_to_model
         ..AgentRunContext::default()
     };
 
-    assert!(synthesize_contract_matrix_direct_observed_fallback_answer(
+    assert!(synthesize_evidence_policy_direct_observed_fallback_answer(
         &state,
         &loop_state,
         Some(&ctx)
@@ -1390,7 +1390,7 @@ fn contract_matrix_synthesis_defers_multiline_content_excerpt_summary_to_model()
         synthesize_direct_fallback_would_passthrough_multiline_read_range(&loop_state, Some(&ctx))
     );
     assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
-    assert!(synthesize_contract_matrix_direct_observed_fallback_answer(
+    assert!(synthesize_evidence_policy_direct_observed_fallback_answer(
         &state,
         &loop_state,
         Some(&ctx)
@@ -1441,7 +1441,7 @@ fn command_output_summary_contract_defers_direct_fallback_to_synthesis() {
         Some(&ctx)
     ));
     assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
-    assert!(synthesize_contract_matrix_direct_observed_fallback_answer(
+    assert!(synthesize_evidence_policy_direct_observed_fallback_answer(
         &state,
         &loop_state,
         Some(&ctx)

@@ -672,7 +672,7 @@ fn strict_raw_tail_read_answer_from_flat_value(value: &Value) -> Option<String> 
     )
 }
 
-pub(super) fn synthesize_contract_matrix_direct_observed_fallback_answer(
+pub(super) fn synthesize_evidence_policy_direct_observed_fallback_answer(
     state: &AppState,
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
