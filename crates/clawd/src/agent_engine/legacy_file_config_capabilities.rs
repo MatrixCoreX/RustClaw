@@ -130,11 +130,6 @@ pub(super) fn normalize_legacy_compatibility_actions(
         auto_locator_path,
         actions,
     );
-    let actions = rewrite_directory_entry_groups_tree_summary_to_list_dir(
-        route_result,
-        auto_locator_path,
-        actions,
-    );
     let actions = rewrite_archive_basic_short_archive_to_active_bound_target(plan_context, actions);
     let actions = rewrite_invalid_rustclaw_config_section_field_reads_to_guard(
         route_result,
@@ -175,22 +170,28 @@ pub(super) fn normalize_legacy_compatibility_actions(
         original_user_text,
         actions,
     );
+    let preserve_registry_preferred_repair = route_result.is_some_and(|route| {
+        actions_use_ad_hoc_command_without_route_preferred_skill(state, route, &actions)
+    });
     let preserve_unqualified_docker_command = route_result.is_some_and(|route| {
         !crate::machine_capability_ref::route_has_capability_namespace(route, &["docker"])
     });
     let actions = rewrite_docker_readonly_run_cmd_to_docker_basic(
         state,
-        skip_legacy_semantic_rewrites || preserve_unqualified_docker_command,
+        skip_legacy_semantic_rewrites
+            || preserve_registry_preferred_repair
+            || preserve_unqualified_docker_command,
         actions,
     );
     let actions = rewrite_archive_unpack_run_cmd_to_archive_basic(
         route_result,
-        skip_legacy_semantic_rewrites,
+        skip_legacy_semantic_rewrites || preserve_registry_preferred_repair,
         actions,
     );
     let actions = rewrite_archive_pack_plan_to_archive_basic(
         route_result,
-        skip_legacy_semantic_rewrites,
+        loop_state,
+        skip_legacy_semantic_rewrites || preserve_registry_preferred_repair,
         actions,
     );
     let actions = rewrite_single_target_structured_field_read_to_auto_locator(
@@ -200,65 +201,18 @@ pub(super) fn normalize_legacy_compatibility_actions(
     );
     let actions =
         rewrite_single_target_file_read_to_auto_locator(route_result, auto_locator_path, actions);
-    let actions =
-        rewrite_session_alias_delivery_observations_to_route_locator(route_result, actions);
+    let actions = rewrite_active_bound_target_observations_to_matching_locator_hint(
+        route_result,
+        loop_state,
+        actions,
+    );
+    let actions = rewrite_session_alias_delivery_observations_to_route_locator(
+        route_result,
+        loop_state,
+        actions,
+    );
     let actions = collapse_route_target_file_content_plan(route_result, auto_locator_path, actions);
     actions
-}
-
-pub(super) fn rewrite_directory_entry_groups_tree_summary_to_list_dir(
-    route_result: Option<&RouteResult>,
-    auto_locator_path: Option<&str>,
-    actions: Vec<AgentAction>,
-) -> Vec<AgentAction> {
-    if route_result.is_none_or(|route| {
-        route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryEntryGroups
-    }) {
-        return actions;
-    }
-    actions
-        .into_iter()
-        .map(|action| match action {
-            AgentAction::CallSkill { skill, args }
-            | AgentAction::CallTool { tool: skill, args }
-                if skill.eq_ignore_ascii_case("system_basic")
-                    && args
-                        .get("action")
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .is_some_and(|action| action.eq_ignore_ascii_case("tree_summary")) =>
-            {
-                let path = args
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|path| !path.is_empty())
-                    .or_else(|| {
-                        auto_locator_path
-                            .map(str::trim)
-                            .filter(|path| !path.is_empty())
-                    })
-                    .or_else(|| {
-                        route_result
-                            .map(|route| route.output_contract.locator_hint.trim())
-                            .filter(|path| !path.is_empty())
-                    });
-                let mut mapped = serde_json::Map::new();
-                mapped.insert("action".to_string(), Value::String("list_dir".to_string()));
-                if let Some(path) = path {
-                    mapped.insert("path".to_string(), Value::String(path.to_string()));
-                }
-                mapped.insert("names_only".to_string(), Value::Bool(false));
-                mapped.insert("max_entries".to_string(), Value::Number(1000.into()));
-                mapped.insert("sort_by".to_string(), Value::String("name".to_string()));
-                AgentAction::CallTool {
-                    tool: "fs_basic".to_string(),
-                    args: Value::Object(mapped),
-                }
-            }
-            other => other,
-        })
-        .collect()
 }
 
 pub(super) fn normalize_action_schema_aliases(
@@ -272,7 +226,8 @@ pub(super) fn normalize_action_schema_aliases(
     let actions = normalize_transform_schema_aliases(actions);
     let actions = normalize_fs_basic_schema_aliases(actions);
     let actions = normalize_system_basic_schema_aliases(actions);
-    let actions = rewrite_readonly_runtime_status_run_cmd_to_system_basic(state, actions);
+    let actions =
+        rewrite_readonly_runtime_status_run_cmd_to_system_basic(state, route_result, actions);
     let actions = normalize_git_basic_schema_aliases(route_result, actions);
     let actions = fill_missing_read_range_path_from_route_locator(route_result, actions);
     let actions = rewrite_filtered_list_dir_to_inventory_dir(state, route_result, actions);
@@ -314,9 +269,16 @@ pub(super) fn normalize_action_schema_aliases(
 
 pub(super) fn rewrite_readonly_runtime_status_run_cmd_to_system_basic(
     state: &AppState,
+    route_result: Option<&RouteResult>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
     if !system_basic_available_for_plan(state) {
+        return actions;
+    }
+    if matches!(
+        route_result.map(|route| route.effective_output_contract_semantic_kind()),
+        Some(crate::OutputSemanticKind::RawCommandOutput)
+    ) {
         return actions;
     }
     actions

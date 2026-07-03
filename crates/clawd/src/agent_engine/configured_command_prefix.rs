@@ -793,8 +793,7 @@ pub(super) fn route_allows_explicit_command_preservation(
     route_result.is_some_and(|route| {
         route.is_execute_gate()
             && (route.output_contract.requires_content_evidence
-                || route.output_contract.semantic_kind
-                    == crate::OutputSemanticKind::RawCommandOutput)
+                || route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput))
     })
 }
 
@@ -827,11 +826,8 @@ pub(super) fn action_is_run_cmd(state: &AppState, action: &AgentAction) -> bool 
 pub(super) fn literal_command_failure_can_replan(route_result: Option<&RouteResult>) -> bool {
     route_result.is_some_and(|route| {
         route.is_execute_gate()
-            && !matches!(
-                route.output_contract.semantic_kind,
-                crate::OutputSemanticKind::RawCommandOutput
-                    | crate::OutputSemanticKind::ExecutionFailedStep
-            )
+            && !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+            && !route.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep)
     })
 }
 
@@ -839,26 +835,31 @@ pub(super) fn route_contract_defers_literal_command_to_planner(
     route_result: Option<&RouteResult>,
 ) -> bool {
     route_result.is_some_and(|route| {
-        let semantic_kind = route.output_contract.semantic_kind;
         route.is_execute_gate()
             && route.output_contract.requires_content_evidence
             && !route.output_contract.delivery_required
-            && (matches!(
-                semantic_kind,
-                crate::OutputSemanticKind::StructuredKeys
-                    | crate::OutputSemanticKind::DirectoryPurposeSummary
-                    | crate::OutputSemanticKind::DirectoryEntryGroups
-                    | crate::OutputSemanticKind::FileNames
-                    | crate::OutputSemanticKind::DirectoryNames
-                    | crate::OutputSemanticKind::FilePaths
-                    | crate::OutputSemanticKind::ContentExcerptSummary
-                    | crate::OutputSemanticKind::ContentExcerptWithSummary
-                    | crate::OutputSemanticKind::ExistenceWithPath
-                    | crate::OutputSemanticKind::ExistenceWithPathSummary
-                    | crate::OutputSemanticKind::RecentScalarEqualityCheck
-                    | crate::OutputSemanticKind::RecentArtifactsJudgment
-            ) || (semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
-                && scalar_path_contract_has_structural_locator(route)))
+            && ([
+                crate::OutputSemanticKind::StructuredKeys,
+                crate::OutputSemanticKind::DirectoryPurposeSummary,
+                crate::OutputSemanticKind::DirectoryEntryGroups,
+                crate::OutputSemanticKind::FileNames,
+                crate::OutputSemanticKind::DirectoryNames,
+                crate::OutputSemanticKind::FilePaths,
+                crate::OutputSemanticKind::ContentExcerptSummary,
+                crate::OutputSemanticKind::ContentExcerptWithSummary,
+                crate::OutputSemanticKind::ExistenceWithPath,
+                crate::OutputSemanticKind::ExistenceWithPathSummary,
+                crate::OutputSemanticKind::RecentScalarEqualityCheck,
+                crate::OutputSemanticKind::RecentArtifactsJudgment,
+                crate::OutputSemanticKind::SqliteTableListing,
+                crate::OutputSemanticKind::SqliteTableNamesOnly,
+                crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+                crate::OutputSemanticKind::SqliteSchemaVersion,
+            ]
+            .iter()
+            .any(|kind| route.output_contract_marker_is(*kind))
+                || (route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
+                    && scalar_path_contract_has_structural_locator(route)))
     })
 }
 
@@ -876,16 +877,17 @@ pub(super) fn missing_target_failure_can_replan(route_result: Option<&RouteResul
     route_result.is_some_and(|route| {
         route.is_execute_gate()
             && route.output_contract.requires_content_evidence
-            && matches!(
-                route.output_contract.semantic_kind,
-                crate::OutputSemanticKind::FilePaths
-                    | crate::OutputSemanticKind::FileNames
-                    | crate::OutputSemanticKind::DirectoryNames
-                    | crate::OutputSemanticKind::DirectoryPurposeSummary
-                    | crate::OutputSemanticKind::ContentExcerptSummary
-                    | crate::OutputSemanticKind::ContentExcerptWithSummary
-                    | crate::OutputSemanticKind::ExistenceWithPathSummary
-            )
+            && [
+                crate::OutputSemanticKind::FilePaths,
+                crate::OutputSemanticKind::FileNames,
+                crate::OutputSemanticKind::DirectoryNames,
+                crate::OutputSemanticKind::DirectoryPurposeSummary,
+                crate::OutputSemanticKind::ContentExcerptSummary,
+                crate::OutputSemanticKind::ContentExcerptWithSummary,
+                crate::OutputSemanticKind::ExistenceWithPathSummary,
+            ]
+            .iter()
+            .any(|kind| route.output_contract_marker_is(*kind))
     })
 }
 
@@ -1065,7 +1067,6 @@ pub(super) fn replace_explicit_command_substitute_plan_with_run_cmd(
 ) -> Vec<AgentAction> {
     if loop_state.has_tool_or_skill_output
         || !route_allows_explicit_command_preservation(route_result)
-        || route_contract_defers_literal_command_to_planner(route_result)
         || !run_cmd_available_for_plan(state)
     {
         return actions;
@@ -1102,6 +1103,9 @@ pub(super) fn replace_explicit_command_substitute_plan_with_run_cmd(
             actions,
             literal_command_failure_can_replan(route_result),
         );
+    }
+    if route_contract_defers_literal_command_to_planner(route_result) {
+        return actions;
     }
     let Some(first_observation_idx) = actions.iter().position(|action| {
         matches!(
@@ -1337,8 +1341,16 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
         auto_locator_path,
         actions,
     );
-    let actions =
-        rewrite_session_alias_delivery_observations_to_route_locator(route_result, actions);
+    let actions = rewrite_active_bound_target_observations_to_matching_locator_hint(
+        route_result,
+        loop_state,
+        actions,
+    );
+    let actions = rewrite_session_alias_delivery_observations_to_route_locator(
+        route_result,
+        loop_state,
+        actions,
+    );
     let actions =
         expand_compound_listing_and_content_synthesis_refs(route_result, loop_state, actions);
     let actions =
@@ -1502,12 +1514,7 @@ fn rewrite_backend_identity_metadata_respond_to_runtime_identity(
 }
 
 fn route_reason_has_backend_identity_metadata_marker(route: &RouteResult) -> bool {
-    [
-        "agent_display_name_hint_backend_metadata_removed",
-        "normalizer_answer_candidate_backend_metadata_removed",
-    ]
-    .iter()
-    .any(|marker| route_reason_has_structural_marker(route, marker))
+    route_reason_has_structural_marker(route, "agent_display_name_hint_backend_metadata_removed")
 }
 
 fn respond_content_mentions_backend_identity_metadata(state: &AppState, content: &str) -> bool {
