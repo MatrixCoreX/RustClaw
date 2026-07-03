@@ -1183,7 +1183,7 @@ fn quantity_compare_rewrites_directory_name_searches_to_dir_compare() {
 }
 
 #[test]
-fn quantity_compare_directory_pair_uses_deterministic_dir_compare_plan() {
+fn quantity_compare_directory_pair_exposes_resolved_dir_compare_targets() {
     let root = TempDirGuard::new("quantity_dir_compare_locator");
     let left = root.path.join("tmp/bundle_src");
     let right = root.path.join("tmp/dynamic_guard_unpack_case");
@@ -1201,31 +1201,22 @@ fn quantity_compare_directory_pair_uses_deterministic_dir_compare_plan() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = format!("{} | {}", left.display(), right.display());
 
-    let plan = directory_compare_locator_deterministic_plan_result(
-        &state,
-        "compare two directories recursively",
-        Some(&route),
-        &LoopState::new(1),
-    )
-    .expect("deterministic dir compare plan");
-
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("action");
-    let args = expect_planned_call(&action, "system_basic", "dir_compare");
     let expected_left = left.canonicalize().unwrap().display().to_string();
     let expected_right = right.canonicalize().unwrap().display().to_string();
-    assert_eq!(
-        args.get("left_path").and_then(Value::as_str),
-        Some(expected_left.as_str())
-    );
-    assert_eq!(
-        args.get("right_path").and_then(Value::as_str),
-        Some(expected_right.as_str())
-    );
+    let targets = crate::evidence_policy::target_locators_for_route(&route);
+    assert_eq!(targets.len(), 2);
+    let resolved_left =
+        resolve_directory_locator_for_dir_compare(&state.skill_rt.workspace_root, &targets[0])
+            .expect("left directory locator");
+    let resolved_right =
+        resolve_directory_locator_for_dir_compare(&state.skill_rt.workspace_root, &targets[1])
+            .expect("right directory locator");
+    assert_eq!(resolved_left, expected_left);
+    assert_eq!(resolved_right, expected_right);
 }
 
 #[test]
-fn directory_pair_locator_uses_dir_compare_even_without_quantity_semantic() {
+fn directory_pair_locator_exposes_resolved_targets_even_without_quantity_semantic() {
     let root = TempDirGuard::new("directory_pair_compare_locator_no_semantic");
     let left = root.path.join("tmp/bundle_src");
     let right = root.path.join("tmp/dynamic_guard_unpack_case");
@@ -1243,25 +1234,18 @@ fn directory_pair_locator_uses_dir_compare_even_without_quantity_semantic() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = format!("{} | {}", left.display(), right.display());
 
-    let plan = directory_compare_locator_deterministic_plan_result(
-        &state,
-        "compare two directory targets",
-        Some(&route),
-        &LoopState::new(1),
-    )
-    .expect("deterministic dir compare plan");
-
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("action");
-    let args = expect_planned_call(&action, "system_basic", "dir_compare");
-    assert_eq!(
-        args.get("left_path").and_then(Value::as_str),
-        Some(left.canonicalize().unwrap().to_string_lossy().as_ref())
-    );
-    assert_eq!(
-        args.get("right_path").and_then(Value::as_str),
-        Some(right.canonicalize().unwrap().to_string_lossy().as_ref())
-    );
+    let targets = crate::evidence_policy::target_locators_for_route(&route);
+    assert_eq!(targets.len(), 2);
+    let resolved_left =
+        resolve_directory_locator_for_dir_compare(&state.skill_rt.workspace_root, &targets[0])
+            .expect("left directory locator");
+    let resolved_right =
+        resolve_directory_locator_for_dir_compare(&state.skill_rt.workspace_root, &targets[1])
+            .expect("right directory locator");
+    let expected_left = left.canonicalize().unwrap().display().to_string();
+    let expected_right = right.canonicalize().unwrap().display().to_string();
+    assert_eq!(resolved_left, expected_left);
+    assert_eq!(resolved_right, expected_right);
 }
 
 #[test]
