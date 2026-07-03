@@ -26,6 +26,9 @@ MIGRATION_CLASS_FILE = SRC_ROOT / "agent_engine/migration_class.rs"
 ASK_PREPARE_FILE = SRC_ROOT / "worker/ask_prepare.rs"
 ASK_PIPELINE_FILE = SRC_ROOT / "worker/ask_pipeline.rs"
 ASK_PIPELINE_CONTRACT_REPAIR_FILE = SRC_ROOT / "worker/ask_pipeline_contract_repair.rs"
+ASK_PIPELINE_POST_ROUTE_REFINEMENT_FILE = (
+    SRC_ROOT / "worker/ask_pipeline_post_route_refinement.rs"
+)
 TASK_JOURNAL_EVIDENCE_COVERAGE_FILE = SRC_ROOT / "task_journal_evidence_coverage.rs"
 TASK_JOURNAL_FILE = SRC_ROOT / "task_journal.rs"
 INTENT_ROUTER_OBSERVATION_REPAIR_FILE = SRC_ROOT / "intent_router_observation_repair.rs"
@@ -131,6 +134,19 @@ CONTRACT_REPAIR_LOOP_OBSERVATION_FORBIDDEN_PATTERNS: tuple[
     (
         "contract_repair_route_reason_mutation_helper",
         re.compile(r"\b(?:append|push|set)_route_reason(?:_marker)?\s*\("),
+    ),
+)
+
+POST_ROUTE_BOUNDARY_CANDIDATE_FORBIDDEN_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "post_route_boundary_candidate_string_compare",
+        re.compile(r"\bcandidate\s*==\s*\"post_route_"),
+    ),
+    (
+        "post_route_boundary_candidate_string_match",
+        re.compile(r"\bmatch\s+candidate\s*\{"),
     ),
 )
 
@@ -421,6 +437,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_static_capability_compat_boundary())
     findings.extend(scan_contract_repair_judge_boundary())
     findings.extend(scan_contract_repair_loop_observation_boundary())
+    findings.extend(scan_post_route_boundary_candidate_typing())
     findings.extend(scan_prompt_layer_ordinary_semantic_tokens())
     findings.extend(scan_planner_prompt_legacy_semantic_kind_keys())
     findings.extend(scan_intent_normalizer_prompt_contract_marker())
@@ -1047,6 +1064,34 @@ def scan_contract_repair_loop_observation_boundary_text(
     findings: list[Finding] = []
     for line_no, line in enumerate(text.splitlines(), start=1):
         for kind, pattern in CONTRACT_REPAIR_LOOP_OBSERVATION_FORBIDDEN_PATTERNS:
+            if pattern.search(line):
+                findings.append(Finding(rel_path, line_no, kind, line.strip()))
+    return findings
+
+
+def scan_post_route_boundary_candidate_typing() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_POST_ROUTE_REFINEMENT_FILE)
+    return scan_post_route_boundary_candidate_typing_text(
+        rel_path,
+        ASK_PIPELINE_POST_ROUTE_REFINEMENT_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_post_route_boundary_candidate_typing_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    if "enum BoundaryClarifyCandidate" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "post_route_boundary_candidate_enum_missing",
+                "BoundaryClarifyCandidate enum is required for post-route boundary candidates",
+            )
+        )
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for kind, pattern in POST_ROUTE_BOUNDARY_CANDIDATE_FORBIDDEN_PATTERNS:
             if pattern.search(line):
                 findings.append(Finding(rel_path, line_no, kind, line.strip()))
     return findings
@@ -2638,6 +2683,22 @@ def run_self_test() -> int:
         'json!({ "source": "contract_repair", "contract_ref": contract_ref })',
     )
     assert not scan_contract_repair_loop_observation_boundary()
+    blocked_post_route_candidate_string = scan_post_route_boundary_candidate_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
+        "enum BoundaryClarifyCandidate {}\n"
+        'if candidate == "post_route_unresolved_file_delivery_requires_locator" {}\n'
+        'match candidate { "x" => "post_route_missing_path_scoped_locator", _ => "" }\n',
+    )
+    assert {
+        "post_route_boundary_candidate_string_compare",
+        "post_route_boundary_candidate_string_match",
+    }.issubset({item.kind for item in blocked_post_route_candidate_string})
+    assert not scan_post_route_boundary_candidate_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
+        "enum BoundaryClarifyCandidate {}\n"
+        "impl BoundaryClarifyCandidate { fn observation_token(self) -> &'static str { \"post_route_missing_path_scoped_locator\" } }\n",
+    )
+    assert not scan_post_route_boundary_candidate_typing()
     blocked_prompt = scan_prompt_layer_text(
         "prompts/layers/overlays/intent_normalizer_prompt.md",
         "`weather_query`\n",
