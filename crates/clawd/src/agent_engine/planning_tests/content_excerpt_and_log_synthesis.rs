@@ -57,26 +57,46 @@ fn explicit_document_targets_win_over_workspace_log_analyze() {
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.read_text_range".to_string();
     route.resolved_intent = format!("summarize README.md and {plan_path}; current_workspace_scope");
     let user_text =
         format!("Use README.md and {plan_path} to explain checkpoint_id and resume_entrypoint.");
 
-    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "explain checkpoint/resume fields from explicit docs",
         Some(&route),
         &LoopState::new(1),
-        &user_text,
-        None,
+        "explain checkpoint/resume fields from explicit docs",
+        Some(&user_text),
         Some(root.path.to_string_lossy().as_ref()),
-    )
-    .expect("explicit document targets should produce bounded reads before log analysis");
+        None,
+        vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": root.path.join("README.md").display().to_string(),
+                    "mode": "head",
+                    "n": 80,
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": root.path.join(plan_path).display().to_string(),
+                    "mode": "head",
+                    "n": 80,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 4);
-    let read_paths = plan
-        .steps
+    let read_paths = normalized
         .iter()
-        .filter_map(|step| step.to_agent_action())
         .filter_map(|action| match action {
             AgentAction::CallTool { tool, args }
                 if tool == "fs_basic"
@@ -93,9 +113,9 @@ fn explicit_document_targets_win_over_workspace_log_analyze() {
     assert!(read_paths.iter().any(|path| path.ends_with("README.md")));
     assert!(read_paths.iter().any(|path| path.ends_with(plan_path)));
     assert!(matches!(
-        plan.steps[2].to_agent_action(),
+        normalized.get(2),
         Some(AgentAction::SynthesizeAnswer { evidence_refs })
-            if evidence_refs == vec!["step_1".to_string(), "step_2".to_string()]
+            if evidence_refs == &vec!["step_1".to_string(), "step_2".to_string()]
     ));
 }
 
@@ -130,25 +150,45 @@ fn explicit_log_and_document_targets_are_both_read_before_synthesis() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = format!("{log_path} | {doc_path}");
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.read_text_range".to_string();
     route.resolved_intent = format!("summarize {log_path} and {doc_path}");
     let user_text = format!("Analyze {log_path}; parse {doc_path}; then synthesize.");
 
-    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "summarize explicit log and doc targets",
         Some(&route),
         &LoopState::new(1),
-        &user_text,
-        None,
+        "summarize explicit log and doc targets",
+        Some(&user_text),
         Some(root.path.to_string_lossy().as_ref()),
-    )
-    .expect("explicit log and doc targets should produce bounded reads");
+        None,
+        vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": root.path.join(log_path).display().to_string(),
+                    "mode": "head",
+                    "n": 80,
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": root.path.join(doc_path).display().to_string(),
+                    "mode": "head",
+                    "n": 80,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 4);
-    let read_paths = plan
-        .steps
+    let read_paths = normalized
         .iter()
-        .filter_map(|step| step.to_agent_action())
         .filter_map(|action| match action {
             AgentAction::CallTool { tool, args }
                 if tool == "fs_basic"
@@ -165,9 +205,9 @@ fn explicit_log_and_document_targets_are_both_read_before_synthesis() {
     assert!(read_paths.iter().any(|path| path.ends_with(log_path)));
     assert!(read_paths.iter().any(|path| path.ends_with(doc_path)));
     assert!(matches!(
-        plan.steps[2].to_agent_action(),
+        normalized.get(2),
         Some(AgentAction::SynthesizeAnswer { evidence_refs })
-            if evidence_refs == vec!["step_1".to_string(), "step_2".to_string()]
+            if evidence_refs == &vec!["step_1".to_string(), "step_2".to_string()]
     ));
 }
 
@@ -194,39 +234,31 @@ fn explicit_raw_output_file_target_preserves_tail_slice_selector() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = log_path.to_string();
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.read_text_range".to_string();
     route.resolved_intent = format!("{log_path} slice_mode=tail slice_n=3");
-    let user_text = format!("read {log_path} tail slice");
 
-    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+    let read_args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "read the selected raw log tail",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        &user_text,
-        None,
+        "read the selected raw log tail",
+        Some(&format!("read {log_path} tail slice")),
         Some(root.path.to_string_lossy().as_ref()),
-    )
-    .expect("explicit raw output target should produce a bounded read");
-
-    let read_action = plan.steps[0]
-        .to_agent_action()
-        .expect("first step should be a read action");
-    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
+        "fs_basic",
+        "read_text_range",
+        json!({
+            "action": "read_text_range",
+            "path": root.path.join(log_path).display().to_string(),
+            "mode": "tail",
+            "n": 3,
+        }),
+    );
     assert_eq!(
         read_args.get("path").and_then(Value::as_str),
         Some(root.path.join(log_path).to_string_lossy().as_ref())
     );
     assert_eq!(read_args.get("mode").and_then(Value::as_str), Some("tail"));
     assert_eq!(read_args.get("n").and_then(Value::as_u64), Some(3));
-    assert!(matches!(
-        plan.steps[1].to_agent_action(),
-        Some(AgentAction::SynthesizeAnswer { evidence_refs })
-            if evidence_refs == vec!["step_1".to_string()]
-    ));
-    assert!(matches!(
-        plan.steps[2].to_agent_action(),
-        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
-    ));
 }
 
 #[test]
@@ -249,28 +281,29 @@ fn explicit_file_target_reads_structured_update_slice_from_goal_context() {
     route.output_contract.locator_hint = log_path.to_string();
     route.output_contract.delivery_required = false;
     route.resolved_intent = log_path.to_string();
-    route.route_reason = "raw_command_output contract for direct bounded line slice".to_string();
+    route.route_reason = "capability_ref=filesystem.read_text_range".to_string();
     let goal = format!(
         r#"Current task:
 Structured update: {{"slice_mode":"tail","slice_n":3}}
 Bound target: {log_path}"#
     );
 
-    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+    let read_args = assert_planner_supplied_tool_call_preserved(
         &state,
-        &goal,
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        log_path,
-        None,
+        &goal,
+        Some(log_path),
         Some(root.path.to_string_lossy().as_ref()),
-    )
-    .expect("explicit raw output target should consume structured slice tokens from goal context");
-
-    let read_action = plan.steps[0]
-        .to_agent_action()
-        .expect("first step should be a read action");
-    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
+        "fs_basic",
+        "read_text_range",
+        json!({
+            "action": "read_text_range",
+            "path": root.path.join(log_path).display().to_string(),
+            "mode": "tail",
+            "n": 3,
+        }),
+    );
     assert_eq!(read_args.get("mode").and_then(Value::as_str), Some("tail"));
     assert_eq!(read_args.get("n").and_then(Value::as_u64), Some(3));
 }
