@@ -67,7 +67,7 @@ impl PolicyDecision {
         }
     }
 
-    pub(crate) fn from_contract_action_policy(
+    pub(crate) fn from_evidence_action_policy(
         decision: crate::evidence_policy::ActionPolicyDecision,
     ) -> Self {
         match decision {
@@ -78,7 +78,7 @@ impl PolicyDecision {
         }
     }
 
-    pub(crate) fn from_contract_arg_policy(
+    pub(crate) fn from_evidence_arg_policy(
         decision: crate::evidence_policy::ArgPolicyDecision,
     ) -> Self {
         match decision {
@@ -148,39 +148,39 @@ mod tests {
     }
 
     #[test]
-    fn contract_matrix_policies_map_to_closed_policy_decisions() {
+    fn evidence_policies_map_to_closed_policy_decisions() {
         assert_eq!(
-            PolicyDecision::from_contract_action_policy(
+            PolicyDecision::from_evidence_action_policy(
                 crate::evidence_policy::ActionPolicyDecision::Allowed
             ),
             PolicyDecision::Allow
         );
         assert_eq!(
-            PolicyDecision::from_contract_action_policy(
+            PolicyDecision::from_evidence_action_policy(
                 crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed
             ),
             PolicyDecision::Deny
         );
         assert_eq!(
-            PolicyDecision::from_contract_action_policy(
+            PolicyDecision::from_evidence_action_policy(
                 crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
             ),
             PolicyDecision::Deny
         );
         assert_eq!(
-            PolicyDecision::from_contract_arg_policy(
+            PolicyDecision::from_evidence_arg_policy(
                 crate::evidence_policy::ArgPolicyDecision::Allowed
             ),
             PolicyDecision::Allow
         );
         assert_eq!(
-            PolicyDecision::from_contract_arg_policy(
+            PolicyDecision::from_evidence_arg_policy(
                 crate::evidence_policy::ArgPolicyDecision::MissingTargetBinding
             ),
             PolicyDecision::Deny
         );
         assert_eq!(
-            PolicyDecision::from_contract_arg_policy(
+            PolicyDecision::from_evidence_arg_policy(
                 crate::evidence_policy::ArgPolicyDecision::DeferredTemplateArg
             ),
             PolicyDecision::Deny
