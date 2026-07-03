@@ -607,6 +607,10 @@ FORBIDDEN_BOUNDARY_ENVELOPE_SCHEMA_FIELDS: frozenset[str] = frozenset(
         "capability_ref",
     }
 )
+FORBIDDEN_LEGACY_ROUTE_TRACE_REASON_TOKENS: tuple[str, ...] = (
+    "direct_answer_trace_inferred",
+    "planner_execute_trace_inferred",
+)
 FORBIDDEN_PREFERRED_RUN_CMD_SEMANTIC_ENUMS: tuple[str, ...] = (
     "OutputSemanticKind::PackageManagerDetection",
     "OutputSemanticKind::DockerPs",
@@ -742,6 +746,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_runtime_journal_route_trace_decision_type())
     findings.extend(scan_first_layer_decision_test_only_boundary())
     findings.extend(scan_intent_normalizer_legacy_decision_field_deleted())
+    findings.extend(scan_legacy_route_trace_reason_tokens())
     findings.extend(scan_contract_repair_schema_ordinary_semantic_tokens())
     findings.extend(scan_skill_registry_metadata_ordinary_semantic_tokens())
     findings.extend(scan_preferred_run_cmd_registry_bridge_fallback())
@@ -1623,6 +1628,37 @@ def scan_intent_normalizer_legacy_decision_field_deleted_text(
                 "repair code must not write legacy normalizer decision",
             )
         )
+    return findings
+
+
+def scan_legacy_route_trace_reason_tokens() -> list[Finding]:
+    findings: list[Finding] = []
+    for path in (INTENT_ROUTER_ROUTE_TRACE_FILE, ASK_PIPELINE_FILE):
+        findings.extend(
+            scan_legacy_route_trace_reason_tokens_text(
+                rel(path),
+                path.read_text(encoding="utf-8"),
+            )
+        )
+    return findings
+
+
+def scan_legacy_route_trace_reason_tokens_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        for token in FORBIDDEN_LEGACY_ROUTE_TRACE_REASON_TOKENS:
+            if token not in line:
+                continue
+            findings.append(
+                Finding(
+                    rel_path,
+                    line_no,
+                    "legacy_route_trace_reason_token",
+                    line.strip(),
+                )
+            )
     return findings
 
 
@@ -3761,6 +3797,20 @@ def run_self_test() -> int:
     assert not scan_intent_normalizer_legacy_decision_field_deleted_text(
         "crates/clawd/src/intent_router.rs",
         "struct IntentNormalizerOut {\n    needs_clarify: bool,\n}\n",
+    )
+    blocked_legacy_route_trace_reason = scan_legacy_route_trace_reason_tokens_text(
+        "crates/clawd/src/intent_router_route_trace.rs",
+        'RouteTraceDecision::Act => "planner_execute_trace_inferred",\n',
+    )
+    assert (
+        blocked_legacy_route_trace_reason
+        and blocked_legacy_route_trace_reason[0].kind
+        == "legacy_route_trace_reason_token"
+    )
+    assert not scan_legacy_route_trace_reason_tokens_text(
+        "crates/clawd/src/intent_router_route_trace.rs",
+        'RouteTraceDecision::Act => "act_trace_inferred",\n'
+        'RouteTraceDecision::Respond => "respond_trace_inferred",\n',
     )
     assert not scan_normalizer_route_result_boundary()
     assert not scan_journal_output_contract_ref_boundary()
