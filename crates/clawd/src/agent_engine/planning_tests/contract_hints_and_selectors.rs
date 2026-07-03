@@ -616,14 +616,21 @@ fn async_job_protocol_without_loop_command_does_not_parse_text_command() {
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
 
-    assert!(async_job_start_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "start async job",
         Some(&route),
         &LoopState::new(1),
-        &route.resolved_intent,
-    )
-    .is_none());
+        "start async job",
+        Some("start async job"),
+        Some(&route.resolved_intent),
+        None,
+        Vec::new(),
+    );
+
+    assert!(
+        normalized.is_empty(),
+        "route/user text must not synthesize async run_cmd: {normalized:?}"
+    );
 }
 
 #[test]
