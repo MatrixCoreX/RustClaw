@@ -55,7 +55,7 @@ fn final_error_text_records_failure_attribution() {
             "provider_error",
         ),
         (
-            "direct_answer_gate schema_validation_failed task_id=t1 err=missing field",
+            "agent_loop_decision_envelope schema_validation_failed task_id=t1 err=missing field",
             "schema_error",
         ),
         (

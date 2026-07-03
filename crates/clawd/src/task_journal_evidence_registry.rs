@@ -386,6 +386,17 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         ],
     ),
     step_json_extractor(
+        "http_basic.get",
+        "http_basic.get.structured_json_v1",
+        &[
+            "content_excerpt",
+            "field_value",
+            "status",
+            "status_code",
+            "url",
+        ],
+    ),
+    step_json_extractor(
         "log_analyze",
         "log_analyze.structured_json_v1",
         &["field_value", "content_excerpt"],
@@ -429,9 +440,29 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         &["field_value", "content_excerpt"],
     ),
     step_json_extractor(
+        "transform.transform_data",
+        "transform.transform_data.structured_json_v1",
+        &["field_value", "content_excerpt"],
+    ),
+    step_json_extractor(
         "audio_synthesize",
         "audio_synthesize.structured_json_v1",
         &["field_value", "path"],
+    ),
+    step_json_extractor(
+        "audio_synthesize.synthesize",
+        "audio_synthesize.synthesize.structured_json_v1",
+        &["field_value", "path"],
+    ),
+    step_json_extractor(
+        "audio_synthesize.poll",
+        "audio_synthesize.poll.structured_json_v1",
+        &["field_value", "path", "status"],
+    ),
+    step_json_extractor(
+        "audio_synthesize.cancel",
+        "audio_synthesize.cancel.structured_json_v1",
+        &["field_value", "status"],
     ),
     step_json_extractor(
         "rss_fetch",
@@ -445,8 +476,38 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         &["field_value", "path"],
     ),
     step_json_extractor(
+        "image_generate.generate",
+        "image_generate.generate.structured_json_v1",
+        &["field_value", "path"],
+    ),
+    step_json_extractor(
+        "image_generate.poll",
+        "image_generate.poll.structured_json_v1",
+        &["field_value", "path", "status"],
+    ),
+    step_json_extractor(
+        "image_generate.cancel",
+        "image_generate.cancel.structured_json_v1",
+        &["field_value", "status"],
+    ),
+    step_json_extractor(
         "image_edit",
         "image_edit.structured_json_v1",
+        &["field_value", "path"],
+    ),
+    step_json_extractor(
+        "image_edit.edit",
+        "image_edit.edit.structured_json_v1",
+        &["field_value", "path"],
+    ),
+    step_json_extractor(
+        "image_edit.outpaint",
+        "image_edit.outpaint.structured_json_v1",
+        &["field_value", "path"],
+    ),
+    step_json_extractor(
+        "image_edit.restyle",
+        "image_edit.restyle.structured_json_v1",
         &["field_value", "path"],
     ),
     step_json_extractor(
@@ -565,9 +626,54 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         &["path"],
     ),
     step_json_extractor(
+        "video_generate.generate",
+        "video_generate.generate.structured_json_v1",
+        &["field_value", "path"],
+    ),
+    step_json_extractor(
+        "video_generate.poll",
+        "video_generate.poll.structured_json_v1",
+        &["field_value", "path", "status"],
+    ),
+    step_json_extractor(
+        "video_generate.cancel",
+        "video_generate.cancel.structured_json_v1",
+        &["field_value", "status"],
+    ),
+    step_json_extractor(
         "music_generate",
         "music_generate.structured_json_v1",
         &["path"],
+    ),
+    step_json_extractor(
+        "music_generate.generate",
+        "music_generate.generate.structured_json_v1",
+        &["field_value", "path"],
+    ),
+    step_json_extractor(
+        "music_generate.poll",
+        "music_generate.poll.structured_json_v1",
+        &["field_value", "path", "status"],
+    ),
+    step_json_extractor(
+        "music_generate.cancel",
+        "music_generate.cancel.structured_json_v1",
+        &["field_value", "status"],
+    ),
+    step_json_extractor(
+        "photo_organize.prepare",
+        "photo_organize.prepare.structured_json_v1",
+        &["candidates", "field_value", "path"],
+    ),
+    step_json_extractor(
+        "photo_organize.preview",
+        "photo_organize.preview.structured_json_v1",
+        &["candidates", "field_value", "path"],
+    ),
+    step_json_extractor(
+        "photo_organize.organize",
+        "photo_organize.organize.structured_json_v1",
+        &["field_value", "path", "status"],
     ),
     step_json_extractor(
         "archive_basic.pack",
@@ -596,6 +702,11 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         ],
     ),
     step_json_extractor(
+        "kb.list_namespaces",
+        "kb.list_namespaces.structured_json_v1",
+        &["candidates", "count", "field_value", "status"],
+    ),
+    step_json_extractor(
         "kb.stats",
         "kb.stats.structured_json_v1",
         &["count", "field_value", "status"],
@@ -603,6 +714,11 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
     step_json_extractor(
         "task_control.list",
         "task_control.list.structured_json_v1",
+        &["content_excerpt", "field_value", "status"],
+    ),
+    step_json_extractor(
+        "task_control.list_with_first_detail",
+        "task_control.list_with_first_detail.structured_json_v1",
         &["content_excerpt", "field_value", "status"],
     ),
     step_json_extractor(
