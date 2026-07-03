@@ -191,16 +191,59 @@ fn resolved_intent_mentions_active_target_basename(
     route_result: &crate::RouteResult,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
 ) -> bool {
-    let resolved = route_result.resolved_intent.to_ascii_lowercase();
-    if resolved.trim().is_empty() {
+    if route_result.resolved_intent.trim().is_empty() {
         return false;
     }
     active_session_target_basenames(session_snapshot)
         .into_iter()
         .any(|basename| {
             let normalized = normalize_locator_identity_token(&basename);
-            normalized.chars().count() >= 3 && resolved.contains(&normalized)
+            normalized.chars().count() >= 3
+                && resolved_intent_has_normalized_structural_value(
+                    &route_result.resolved_intent,
+                    &normalized,
+                )
         })
+}
+
+fn resolved_intent_has_normalized_structural_value(resolved_intent: &str, value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && resolved_intent
+            .lines()
+            .any(|line| structural_text_value_matches_normalized(line, value))
+}
+
+fn structural_text_value_matches_normalized(text: &str, normalized_value: &str) -> bool {
+    let text = text.trim();
+    normalize_locator_identity_token(text) == normalized_value
+        || text
+            .rsplit_once(':')
+            .is_some_and(|(_, suffix)| normalize_locator_identity_token(suffix) == normalized_value)
+}
+
+fn structural_text_value_matches_exact(text: &str, value: &str) -> bool {
+    let text = text.trim();
+    text == value
+        || text
+            .rsplit_once(':')
+            .is_some_and(|(_, suffix)| suffix.trim() == value)
+}
+
+fn resolved_intent_has_structural_value(resolved_intent: &str, value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && resolved_intent
+            .lines()
+            .any(|line| structural_text_value_matches_exact(line, value))
+}
+
+fn locator_hint_has_structural_value(locator_hint: &str, value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && locator_hint
+            .split(|ch| matches!(ch, '\n' | ';' | '|'))
+            .any(|part| structural_text_value_matches_exact(part, value))
 }
 
 fn active_session_target_basenames(
@@ -289,8 +332,11 @@ pub(super) fn session_has_authoritative_deictic_anchor(
 fn route_context_contains_target(route_result: &crate::RouteResult, target: &str) -> bool {
     let target = target.trim();
     !target.is_empty()
-        && (route_result.resolved_intent.contains(target)
-            || route_result.output_contract.locator_hint.contains(target))
+        && (resolved_intent_has_structural_value(&route_result.resolved_intent, target)
+            || locator_hint_has_structural_value(
+                &route_result.output_contract.locator_hint,
+                target,
+            ))
 }
 
 pub(super) fn followup_frame_has_matching_target(

@@ -176,11 +176,54 @@ fn structured_anchor_route_with_resolved_target_basename_stays_chat() {
     };
     let mut route = executable_filename_route();
     route.ask_mode = crate::AskMode::direct_answer();
-    route.resolved_intent = "User only wants the file basename clawd-dev.log".to_string();
+    route.resolved_intent = "answer_candidate: clawd-dev.log".to_string();
     route.output_contract = crate::IntentOutputContract::default();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
 
     assert!(!structured_anchor_route_requires_evidence_repair(
+        "Only say this file name.",
+        &route,
+        &snapshot,
+        "<none>",
+        true,
+        None
+    ));
+}
+
+#[test]
+fn structured_anchor_route_with_prose_basename_requires_evidence() {
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: Some(crate::conversation_state::ConversationState {
+            last_primary_task_prompt: Some("send selected log file".to_string()),
+            last_primary_task_output: Some(
+                "FILE:/home/guagua/rustclaw/logs/clawd-dev.log".to_string(),
+            ),
+            ..crate::conversation_state::ConversationState::default()
+        }),
+        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            source_request: "send selected log file".to_string(),
+            op_kind: crate::followup_frame::FollowupOpKind::Delivery,
+            bound_target: Some("/home/guagua/rustclaw/logs/clawd-dev.log".to_string()),
+            ordered_entries: vec!["clawd-dev.log".to_string()],
+            source_task_id: "task-1".to_string(),
+            updated_at_ts: 1,
+            expires_at_ts: 2,
+            ..crate::followup_frame::FollowupFrame::default()
+        }),
+        active_clarify_state: None,
+        active_observed_facts: Some(crate::observed_facts::ObservedFacts {
+            bound_target: Some("/home/guagua/rustclaw/logs/clawd-dev.log".to_string()),
+            delivery_targets: vec!["/home/guagua/rustclaw/logs/clawd-dev.log".to_string()],
+            ..crate::observed_facts::ObservedFacts::default()
+        }),
+    };
+    let mut route = executable_filename_route();
+    route.ask_mode = crate::AskMode::direct_answer();
+    route.resolved_intent = "User only wants the file basename clawd-dev.log".to_string();
+    route.output_contract = crate::IntentOutputContract::default();
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+
+    assert!(structured_anchor_route_requires_evidence_repair(
         "Only say this file name.",
         &route,
         &snapshot,
