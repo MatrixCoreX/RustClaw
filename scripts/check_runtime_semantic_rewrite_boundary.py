@@ -113,6 +113,7 @@ LEGACY_JSON_SEMANTIC_FIELD_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 LEGACY_RUNTIME_SEMANTIC_OUTPUT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("legacy_semantic_kv_output", re.compile(r'"(?:contract_)?semantic_kind[=:]')),
+    ("legacy_semantic_trace_label", re.compile(r'"[^"]*\bsemantic[=:]')),
     ("legacy_semantic_colon_output", re.compile(r'"semantic_kind:\s')),
     ("legacy_semantic_prompt_instruction", re.compile(r"\bSet\s+semantic_kind\b")),
     ("legacy_expected_semantic_fact", re.compile(r"expected_semantic_kind:")),
@@ -2234,6 +2235,22 @@ def run_self_test() -> int:
     assert (
         blocked_legacy_kv_output
         and blocked_legacy_kv_output[0].kind == "legacy_semantic_kv_output"
+    )
+    blocked_legacy_trace_eq = scan_legacy_runtime_semantic_outputs(
+        "crates/clawd/src/intent_router_route_trace.rs",
+        'format!("shape={};semantic={};locator={}", shape, marker, locator)\n',
+    )
+    assert (
+        blocked_legacy_trace_eq
+        and blocked_legacy_trace_eq[0].kind == "legacy_semantic_trace_label"
+    )
+    blocked_legacy_trace_colon = scan_legacy_runtime_semantic_outputs(
+        "crates/clawd/src/task_journal_decision_envelope.rs",
+        'format!("semantic:{}|shape:{}", marker, shape)\n',
+    )
+    assert (
+        blocked_legacy_trace_colon
+        and blocked_legacy_trace_colon[0].kind == "legacy_semantic_trace_label"
     )
     blocked_legacy_prompt_instruction = scan_legacy_runtime_semantic_outputs(
         "crates/clawd/src/intent_router_prompt_render.rs",
