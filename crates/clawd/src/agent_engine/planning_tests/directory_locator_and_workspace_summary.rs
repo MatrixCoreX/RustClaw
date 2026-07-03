@@ -935,22 +935,38 @@ fn directory_purpose_auto_locator_uses_inventory_for_many_text_candidates() {
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root_path.clone();
+    route.route_reason = "capability_ref=filesystem.list_dir".to_string();
 
-    let plan = directory_purpose_auto_locator_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &test_state(),
-        "summarize directory purpose",
         Some(&route),
         &LoopState::new(1),
         "summarize directory purpose",
         Some("summarize directory purpose"),
-        Some(&root_path),
-    )
-    .expect("large directory purpose plan should use bounded inventory");
+        None,
+        None,
+        vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "list_dir",
+                    "path": root_path.clone(),
+                    "max_entries": 1000,
+                    "dirs_only": true,
+                    "sort_by": "name",
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 3);
-    let list_action = plan.steps[0].to_agent_action().expect("list action");
-    let list_args = expect_planned_call(&list_action, "fs_basic", "list_dir");
+    assert_eq!(normalized.len(), 3);
+    let list_args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
     assert_eq!(
         list_args.get("path").and_then(Value::as_str),
         Some(root_path.as_str())
@@ -964,12 +980,12 @@ fn directory_purpose_auto_locator_uses_inventory_for_many_text_candidates() {
         Some(true)
     );
     assert!(matches!(
-        plan.steps.get(1).and_then(|step| step.to_agent_action()),
+        normalized.get(1),
         Some(AgentAction::SynthesizeAnswer { evidence_refs })
-            if evidence_refs == vec!["last_output".to_string()]
+            if *evidence_refs == vec!["last_output".to_string()]
     ));
     assert!(matches!(
-        plan.steps.get(2).and_then(|step| step.to_agent_action()),
+        normalized.get(2),
         Some(AgentAction::Respond { content }) if content == "{{last_output}}"
     ));
 }
@@ -989,30 +1005,72 @@ fn directory_purpose_extension_locator_uses_recursive_find_entries_not_tree_summ
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "*.toml".to_string();
+    route.route_reason =
+        "capability_ref=filesystem.find_entries capability_ref=filesystem.read_text_range"
+            .to_string();
 
-    assert!(directory_tree_auto_locator_deterministic_plan_result(
-        &test_state(),
-        "summarize representative toml files",
-        Some(&route),
+    assert_empty_planner_actions_stay_empty(
+        &route,
         &LoopState::new(1),
         "summarize representative toml files",
         Some("summarize representative toml files"),
         Some(&root_path),
-    )
-    .is_none());
+    );
 
-    let plan = directory_purpose_extension_inventory_deterministic_plan_result(
-        "summarize representative toml files",
+    let normalized = normalize_planned_actions_with_original_and_context(
+        &test_state(),
         Some(&route),
         &LoopState::new(1),
-        Some(&root_path),
-    )
-    .expect("directory purpose extension inventory plan");
+        "summarize representative toml files",
+        Some("summarize representative toml files"),
+        None,
+        None,
+        vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "find_entries",
+                    "root": root_path.clone(),
+                    "ext": "toml",
+                    "target_kind": "file",
+                    "recursive": true,
+                    "sort_by": "size_desc",
+                    "max_results": 1000,
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": root.path.join("Cargo.toml").display().to_string(),
+                    "mode": "head",
+                    "n": 80,
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": root.path.join("configs/config.toml").display().to_string(),
+                    "mode": "head",
+                    "n": 80,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec![
+                    "step_1".to_string(),
+                    "step_2".to_string(),
+                    "step_3".to_string(),
+                ],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 5);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "find_entries");
+    assert_eq!(normalized.len(), 5);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "find_entries");
     assert_eq!(
         args.get("root").and_then(Value::as_str),
         Some(root_path.as_str())
@@ -1027,23 +1085,22 @@ fn directory_purpose_extension_locator_uses_recursive_find_entries_not_tree_summ
         args.get("sort_by").and_then(Value::as_str),
         Some("size_desc")
     );
-    let read_action = plan.steps[1].to_agent_action().expect("read action");
-    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
+    let read_args = expect_planned_call(&normalized[1], "fs_basic", "read_text_range");
     assert!(read_args
         .get("path")
         .and_then(Value::as_str)
         .is_some_and(|path| path.ends_with("Cargo.toml")));
     assert!(matches!(
-        plan.steps.get(3).and_then(|step| step.to_agent_action()),
+        normalized.get(3),
         Some(AgentAction::SynthesizeAnswer { evidence_refs })
-            if evidence_refs == vec![
+            if *evidence_refs == vec![
                 "step_1".to_string(),
                 "step_2".to_string(),
                 "step_3".to_string()
             ]
     ));
     assert!(matches!(
-        plan.steps.get(4).and_then(|step| step.to_agent_action()),
+        normalized.get(4),
         Some(AgentAction::Respond { content }) if content == "{{last_output}}"
     ));
 }
@@ -1065,19 +1122,64 @@ fn directory_purpose_extension_from_resolved_intent_uses_recursive_find_entries(
     route.output_contract.locator_hint = root_path.clone();
     route.resolved_intent =
         "List .json files, find the largest schema, and summarize its purpose.".to_string();
+    route.route_reason =
+        "capability_ref=filesystem.find_entries capability_ref=filesystem.read_text_range"
+            .to_string();
 
-    let plan = directory_purpose_extension_inventory_deterministic_plan_result(
-        "summarize json schema directory",
+    let normalized = normalize_planned_actions_with_original_and_context(
+        &test_state(),
         Some(&route),
         &LoopState::new(1),
-        Some(&root_path),
-    )
-    .expect("directory purpose extension inventory plan");
+        "summarize json schema directory",
+        Some("summarize json schema directory"),
+        None,
+        None,
+        vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "find_entries",
+                    "root": root_path.clone(),
+                    "ext": "json",
+                    "target_kind": "file",
+                    "recursive": true,
+                    "sort_by": "size_desc",
+                    "max_results": 1000,
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": root.path.join("intent_normalizer.schema.json").display().to_string(),
+                    "mode": "head",
+                    "n": 80,
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": root.path.join("nested/contract_repair.schema.json").display().to_string(),
+                    "mode": "head",
+                    "n": 80,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec![
+                    "step_1".to_string(),
+                    "step_2".to_string(),
+                    "step_3".to_string(),
+                ],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 5);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "find_entries");
+    assert_eq!(normalized.len(), 5);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "find_entries");
     assert_eq!(
         args.get("root").and_then(Value::as_str),
         Some(root_path.as_str())
@@ -1092,10 +1194,8 @@ fn directory_purpose_extension_from_resolved_intent_uses_recursive_find_entries(
         args.get("sort_by").and_then(Value::as_str),
         Some("size_desc")
     );
-    let read_paths = plan
-        .steps
+    let read_paths = normalized
         .iter()
-        .filter_map(|step| step.to_agent_action())
         .filter_map(|action| match action {
             AgentAction::CallTool { tool, args } if tool == "fs_basic" => {
                 let action_name = args.get("action").and_then(Value::as_str)?;
@@ -1129,14 +1229,12 @@ fn directory_purpose_extension_inventory_defers_explicit_extension_assess_gap() 
     route.resolved_intent = "skill=extension_manager action=assess_gap".to_string();
     route.route_reason = "capability=extension.assess_gap".to_string();
 
-    assert!(
-        directory_purpose_extension_inventory_deterministic_plan_result(
-            "extension_manager assess_gap",
-            Some(&route),
-            &LoopState::new(1),
-            Some(&root_path),
-        )
-        .is_none()
+    assert_empty_planner_actions_stay_empty(
+        &route,
+        &LoopState::new(1),
+        "extension_manager assess_gap",
+        Some("extension_manager assess_gap"),
+        Some(&root_path),
     );
 }
 

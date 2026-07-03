@@ -199,12 +199,6 @@ pub(super) fn directory_tree_auto_locator_deterministic_plan_result(
 pub(super) const DIRECTORY_PURPOSE_MAX_TEXT_READS: usize = 24;
 #[cfg(test)]
 pub(super) const DIRECTORY_PURPOSE_TREE_SUMMARY_TEXT_READ_THRESHOLD: usize = 8;
-#[cfg(test)]
-pub(super) const DIRECTORY_PURPOSE_EXTENSION_TEXT_READ_LIMIT: usize = 3;
-#[cfg(test)]
-const DIRECTORY_PURPOSE_EXTENSION_SCAN_DIR_LIMIT: usize = 256;
-#[cfg(test)]
-const DIRECTORY_PURPOSE_EXTENSION_SCAN_ENTRY_LIMIT: usize = 5000;
 
 #[cfg(test)]
 pub(super) fn directory_purpose_text_like_path(path: &Path) -> bool {
@@ -263,92 +257,6 @@ pub(super) fn directory_purpose_direct_text_read_paths(root: &str) -> Vec<String
     let mut selected = Vec::new();
     for candidate in candidates {
         if selected.len() >= DIRECTORY_PURPOSE_MAX_TEXT_READS {
-            break;
-        }
-        let canonical_candidate = candidate
-            .canonicalize()
-            .unwrap_or_else(|_| candidate.clone());
-        if !canonical_candidate.starts_with(&canonical_root) || !canonical_candidate.is_file() {
-            continue;
-        }
-        let read_path = canonical_candidate.display().to_string();
-        if !selected.iter().any(|existing| existing == &read_path) {
-            selected.push(read_path);
-        }
-    }
-    selected
-}
-
-#[cfg(test)]
-pub(super) fn directory_purpose_extension_text_read_paths(root: &str, ext: &str) -> Vec<String> {
-    let normalized_ext = ext.trim().trim_start_matches('.').to_ascii_lowercase();
-    if normalized_ext.is_empty() {
-        return Vec::new();
-    }
-    let root_path = Path::new(root);
-    let canonical_root = root_path
-        .canonicalize()
-        .unwrap_or_else(|_| root_path.to_path_buf());
-    let mut candidates = Vec::new();
-    let mut stack = vec![root_path.to_path_buf()];
-    let mut visited_dirs = 0usize;
-    let mut seen_entries = 0usize;
-    while let Some(dir) = stack.pop() {
-        if visited_dirs >= DIRECTORY_PURPOSE_EXTENSION_SCAN_DIR_LIMIT
-            || seen_entries >= DIRECTORY_PURPOSE_EXTENSION_SCAN_ENTRY_LIMIT
-        {
-            break;
-        }
-        visited_dirs += 1;
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            if seen_entries >= DIRECTORY_PURPOSE_EXTENSION_SCAN_ENTRY_LIMIT {
-                break;
-            }
-            seen_entries += 1;
-            let path = entry.path();
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            if file_type.is_dir() {
-                stack.push(path);
-                continue;
-            }
-            if file_type.is_file()
-                && directory_purpose_text_like_path(&path)
-                && path
-                    .extension()
-                    .and_then(|value| value.to_str())
-                    .map(|value| value.trim().trim_start_matches('.').to_ascii_lowercase())
-                    .is_some_and(|value| value == normalized_ext)
-            {
-                candidates.push(path);
-            }
-        }
-    }
-    candidates.sort_by(|left, right| {
-        let left_size = fs::metadata(left).map(|meta| meta.len()).unwrap_or(0);
-        let right_size = fs::metadata(right).map(|meta| meta.len()).unwrap_or(0);
-        let left_name = left
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        let right_name = right
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        right_size
-            .cmp(&left_size)
-            .then_with(|| left_name.cmp(&right_name))
-    });
-
-    let mut selected = Vec::new();
-    for candidate in candidates {
-        if selected.len() >= DIRECTORY_PURPOSE_EXTENSION_TEXT_READ_LIMIT {
             break;
         }
         let canonical_candidate = candidate
@@ -612,64 +520,6 @@ fn route_has_machine_token(route: &RouteResult, token: &str) -> bool {
 fn machine_token_present(text: &str, token: &str) -> bool {
     text.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
         .any(|part| part == token || part.starts_with(&format!("{token}.")))
-}
-
-#[cfg(test)]
-pub(super) fn directory_purpose_extension_inventory_deterministic_plan_result(
-    goal: &str,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-    auto_locator_path: Option<&str>,
-) -> Option<PlanResult> {
-    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
-        return None;
-    }
-    let route = route_result?;
-    let ext = directory_purpose_extension_locator(route)?;
-    let root = route_directory_locator_path(route, auto_locator_path)?;
-    if !Path::new(&root).is_dir() {
-        return None;
-    }
-    let mut actions = vec![AgentAction::CallTool {
-        tool: "fs_basic".to_string(),
-        args: serde_json::json!({
-            "action": "find_entries",
-            "root": root,
-            "ext": ext.clone(),
-            "target_kind": "file",
-            "max_results": 1000,
-            "recursive": true,
-            "sort_by": "size_desc",
-        }),
-    }];
-    actions.extend(
-        directory_purpose_extension_text_read_paths(&root, &ext)
-            .into_iter()
-            .map(|path| AgentAction::CallTool {
-                tool: "fs_basic".to_string(),
-                args: serde_json::json!({
-                    "action": "read_text_range",
-                    "path": path,
-                    "mode": "head",
-                    "n": 80,
-                }),
-            }),
-    );
-    let evidence_refs = (1..=actions.len())
-        .map(|idx| format!("step_{idx}"))
-        .collect::<Vec<_>>();
-    actions.push(AgentAction::SynthesizeAnswer { evidence_refs });
-    actions.push(AgentAction::Respond {
-        content: "{{last_output}}".to_string(),
-    });
-    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
-        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
-    Some(build_plan_result(
-        goal,
-        &raw_plan_text,
-        PlanKind::Single,
-        &actions,
-    ))
 }
 
 pub(super) fn step_output_action(value: &Value) -> Option<String> {
