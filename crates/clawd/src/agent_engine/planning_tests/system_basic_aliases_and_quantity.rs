@@ -689,6 +689,7 @@ version = "0.1.0"
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = format!("{package_path_text}|{cargo_path_text}");
+    route.route_reason = "capability_ref=config.read_field".to_string();
     route.resolved_intent =
         "Read name field from scripts/nl_tests/fixtures/device_local/package.json and package.name from crates/clawd/Cargo.toml, compare the two values, and output one line with both names followed by same or different"
             .to_string();
