@@ -34,6 +34,7 @@ INTENT_ROUTER_RUNTIME_STATUS_RECIPE_FILE = (
     SRC_ROOT / "intent_router_runtime_status_recipe.rs"
 )
 INTENT_ROUTER_PROMPT_RENDER_FILE = SRC_ROOT / "intent_router_prompt_render.rs"
+INTENT_ROUTER_OUTPUT_TYPES_FILE = SRC_ROOT / "intent_router_output_types.rs"
 INTENT_ROUTER_BINDING_REPAIR_FILES: tuple[Path, ...] = (
     SRC_ROOT / "intent_router_answer_candidate_binding.rs",
     SRC_ROOT / "intent_router_active_task_repair.rs",
@@ -392,6 +393,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_intent_normalizer_schema_ordinary_semantic_tokens())
     findings.extend(scan_intent_normalizer_schema_route_authority_fields())
     findings.extend(scan_boundary_envelope_schema_machine_only())
+    findings.extend(scan_boundary_envelope_rust_type_machine_only())
     findings.extend(scan_contract_repair_schema_ordinary_semantic_tokens())
     findings.extend(scan_skill_registry_metadata_ordinary_semantic_tokens())
     findings.extend(scan_preferred_run_cmd_registry_bridge_fallback())
@@ -905,6 +907,55 @@ def scan_boundary_envelope_schema_json(
                 1,
                 "boundary_envelope_forbidden_field",
                 field,
+            )
+        )
+    return findings
+
+
+def scan_boundary_envelope_rust_type_machine_only() -> list[Finding]:
+    rel_path = rel(INTENT_ROUTER_OUTPUT_TYPES_FILE)
+    return scan_boundary_envelope_rust_type_text(
+        rel_path,
+        INTENT_ROUTER_OUTPUT_TYPES_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_boundary_envelope_rust_type_text(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    match = re.search(
+        r"struct\s+BoundaryEnvelope\s*\{(?P<body>.*?)\n\}",
+        text,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "boundary_envelope_rust_struct_missing",
+                "BoundaryEnvelope struct not found",
+            )
+        ]
+
+    body = match.group("body")
+    body_start = match.start("body")
+    raw_offset = body.find("raw_user_request")
+    if raw_offset >= 0:
+        findings.append(
+            Finding(
+                rel_path,
+                text.count("\n", 0, body_start + raw_offset) + 1,
+                "boundary_envelope_rust_raw_user_request_field",
+                "BoundaryEnvelope must not carry raw_user_request",
+            )
+        )
+    if not re.search(r"\braw_chars\s*:\s*usize\b", body):
+        findings.append(
+            Finding(
+                rel_path,
+                text.count("\n", 0, match.start()) + 1,
+                "boundary_envelope_rust_raw_chars_missing",
+                "BoundaryEnvelope must expose raw_chars: usize",
             )
         )
     return findings
@@ -2638,9 +2689,31 @@ def run_self_test() -> int:
         item.kind == "boundary_envelope_schema_not_closed"
         for item in blocked_boundary_envelope_open_schema
     )
+    blocked_boundary_envelope_rust_raw_text = scan_boundary_envelope_rust_type_text(
+        "crates/clawd/src/intent_router_output_types.rs",
+        "pub(crate) struct BoundaryEnvelope {\n    pub(crate) raw_user_request: String,\n}",
+    )
+    assert (
+        blocked_boundary_envelope_rust_raw_text
+        and blocked_boundary_envelope_rust_raw_text[0].kind
+        == "boundary_envelope_rust_raw_user_request_field"
+    )
+    blocked_boundary_envelope_rust_missing_raw_chars = scan_boundary_envelope_rust_type_text(
+        "crates/clawd/src/intent_router_output_types.rs",
+        "pub(crate) struct BoundaryEnvelope {\n    pub(crate) session_binding: Option<String>,\n}",
+    )
+    assert any(
+        item.kind == "boundary_envelope_rust_raw_chars_missing"
+        for item in blocked_boundary_envelope_rust_missing_raw_chars
+    )
+    assert not scan_boundary_envelope_rust_type_text(
+        "crates/clawd/src/intent_router_output_types.rs",
+        "pub(crate) struct BoundaryEnvelope {\n    pub(crate) raw_chars: usize,\n}",
+    )
     assert not scan_intent_normalizer_schema_ordinary_semantic_tokens()
     assert not scan_intent_normalizer_schema_route_authority_fields()
     assert not scan_boundary_envelope_schema_machine_only()
+    assert not scan_boundary_envelope_rust_type_machine_only()
     blocked_contract_repair_schema = scan_schema_text(
         "prompts/schemas/contract_repair_judge.schema.json",
         '"docker_logs"\n',
