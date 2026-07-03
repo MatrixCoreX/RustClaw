@@ -753,16 +753,16 @@ fn route_reason_machine_codes(route_result: &crate::RouteResult) -> Vec<String> 
 fn boundary_observation_route_reason_codes(route_result: &crate::RouteResult) -> Vec<String> {
     route_reason_machine_codes(route_result)
         .into_iter()
-        .filter(|code| !is_legacy_route_trace_reason_code(code))
+        .filter(|code| !is_route_trace_reason_code(code))
         .collect()
 }
 
-fn is_legacy_route_trace_reason_code(code: &str) -> bool {
+fn is_route_trace_reason_code(code: &str) -> bool {
     matches!(
         code,
         "executionless_finalize_trace_plain"
-            | "direct_answer_trace_inferred"
-            | "planner_execute_trace_inferred"
+            | "respond_trace_inferred"
+            | "act_trace_inferred"
             | "clarify_trace_inferred"
             | "agent_loop_default_entry"
     )

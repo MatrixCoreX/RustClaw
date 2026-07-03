@@ -48,8 +48,8 @@ fn route_trace_reason_code(
         return "route_trace_clarify_required";
     }
     match route_trace_decision {
-        RouteTraceDecision::Respond => "direct_answer_trace_inferred",
-        RouteTraceDecision::Act => "planner_execute_trace_inferred",
+        RouteTraceDecision::Respond => "respond_trace_inferred",
+        RouteTraceDecision::Act => "act_trace_inferred",
         RouteTraceDecision::Clarify => "clarify_trace_inferred",
     }
 }
@@ -155,7 +155,7 @@ mod tests {
             &contract,
             vec!["executable_contract_preserved_for_agent_loop".to_string()],
         );
-        assert_eq!(execute.reason_code, "planner_execute_trace_inferred");
+        assert_eq!(execute.reason_code, "act_trace_inferred");
         assert_eq!(execute.outcome, "allowed");
         assert_eq!(execute.owner_layer, "intent_normalizer_route_trace");
         assert!(execute
@@ -173,7 +173,7 @@ mod tests {
             &IntentOutputContract::default(),
             Vec::new(),
         );
-        assert_eq!(allowed.reason_code, "direct_answer_trace_inferred");
+        assert_eq!(allowed.reason_code, "respond_trace_inferred");
         assert_eq!(allowed.outcome, "allowed");
         assert_eq!(allowed.repair_classes, vec!["none"]);
 
