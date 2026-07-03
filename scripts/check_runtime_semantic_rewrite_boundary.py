@@ -54,6 +54,7 @@ INTENT_ROUTER_RUNTIME_STATUS_RECIPE_FILE = (
 )
 INTENT_ROUTER_PROMPT_RENDER_FILE = SRC_ROOT / "intent_router_prompt_render.rs"
 INTENT_ROUTER_OUTPUT_TYPES_FILE = SRC_ROOT / "intent_router_output_types.rs"
+INTENT_ROUTER_ROUTE_TRACE_FILE = SRC_ROOT / "intent_router_route_trace.rs"
 INTENT_ROUTER_BINDING_REPAIR_FILES: tuple[Path, ...] = (
     SRC_ROOT / "intent_router_answer_candidate_binding.rs",
     SRC_ROOT / "intent_router_active_task_repair.rs",
@@ -727,6 +728,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_intent_normalizer_schema_route_authority_fields())
     findings.extend(scan_boundary_envelope_schema_machine_only())
     findings.extend(scan_boundary_envelope_rust_type_machine_only())
+    findings.extend(scan_route_trace_record_decision_type())
     findings.extend(scan_contract_repair_schema_ordinary_semantic_tokens())
     findings.extend(scan_skill_registry_metadata_ordinary_semantic_tokens())
     findings.extend(scan_preferred_run_cmd_registry_bridge_fallback())
@@ -1324,6 +1326,47 @@ def scan_boundary_envelope_rust_type_text(rel_path: str, text: str) -> list[Find
                 text.count("\n", 0, match.start()) + 1,
                 "boundary_envelope_rust_raw_chars_missing",
                 "BoundaryEnvelope must expose raw_chars: usize",
+            )
+        )
+    return findings
+
+
+def scan_route_trace_record_decision_type() -> list[Finding]:
+    rel_path = rel(INTENT_ROUTER_ROUTE_TRACE_FILE)
+    return scan_route_trace_record_decision_type_text(
+        rel_path,
+        INTENT_ROUTER_ROUTE_TRACE_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_route_trace_record_decision_type_text(rel_path: str, text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    if "enum RouteTraceDecision" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "route_trace_decision_enum_missing",
+                "RouteTraceDecision enum is required for route-trace compatibility",
+            )
+        )
+    match = re.search(
+        r"struct\s+RouteTraceRecord\s*\{(?P<body>.*?)\n\}",
+        text,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return findings
+    body = match.group("body")
+    body_start = match.start("body")
+    field_offset = body.find("route_trace_decision")
+    if field_offset >= 0 and "FirstLayerDecision" in body[field_offset:]:
+        findings.append(
+            Finding(
+                rel_path,
+                text.count("\n", 0, body_start + field_offset) + 1,
+                "route_trace_record_first_layer_decision_field",
+                "RouteTraceRecord must use RouteTraceDecision, not FirstLayerDecision",
             )
         )
     return findings
@@ -3301,6 +3344,28 @@ def run_self_test() -> int:
         "crates/clawd/src/intent_router_output_types.rs",
         "struct IntentNormalizerOutput {\n    boundary_envelope: BoundaryEnvelope,\n}\n"
         "struct BoundaryEnvelope {\n    raw_chars: usize,\n}\n",
+    )
+    missing_route_trace_decision_enum = scan_route_trace_record_decision_type_text(
+        "crates/clawd/src/intent_router_route_trace.rs",
+        "struct RouteTraceRecord {\n    route_trace_decision: RouteTraceDecision,\n}\n",
+    )
+    assert any(
+        item.kind == "route_trace_decision_enum_missing"
+        for item in missing_route_trace_decision_enum
+    )
+    blocked_route_trace_first_layer_field = scan_route_trace_record_decision_type_text(
+        "crates/clawd/src/intent_router_route_trace.rs",
+        "enum RouteTraceDecision {}\n"
+        "struct RouteTraceRecord {\n    route_trace_decision: FirstLayerDecision,\n}\n",
+    )
+    assert any(
+        item.kind == "route_trace_record_first_layer_decision_field"
+        for item in blocked_route_trace_first_layer_field
+    )
+    assert not scan_route_trace_record_decision_type_text(
+        "crates/clawd/src/intent_router_route_trace.rs",
+        "enum RouteTraceDecision {}\n"
+        "struct RouteTraceRecord {\n    route_trace_decision: RouteTraceDecision,\n}\n",
     )
     assert not scan_normalizer_route_result_boundary()
     assert not scan_journal_output_contract_ref_boundary()

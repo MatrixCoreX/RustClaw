@@ -1,11 +1,28 @@
-use crate::{FirstLayerDecision, IntentOutputContract};
+use crate::IntentOutputContract;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RouteTraceDecision {
+    Respond,
+    Act,
+    Clarify,
+}
+
+impl RouteTraceDecision {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Respond => "respond",
+            Self::Act => "act",
+            Self::Clarify => "clarify",
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct RouteTraceRecord {
     pub(crate) owner_layer: &'static str,
     pub(crate) reason_code: &'static str,
     pub(crate) outcome: &'static str,
-    pub(crate) route_trace_decision: FirstLayerDecision,
+    pub(crate) route_trace_decision: RouteTraceDecision,
     pub(crate) needs_clarify: bool,
     pub(crate) output_contract_ref: String,
     pub(crate) repair_codes: Vec<String>,
@@ -24,24 +41,24 @@ fn route_trace_output_contract_ref(contract: &IntentOutputContract) -> String {
 }
 
 fn route_trace_reason_code(
-    route_trace_decision: FirstLayerDecision,
+    route_trace_decision: RouteTraceDecision,
     needs_clarify: bool,
 ) -> &'static str {
-    if needs_clarify && route_trace_decision == FirstLayerDecision::Clarify {
+    if needs_clarify && route_trace_decision == RouteTraceDecision::Clarify {
         return "route_trace_clarify_required";
     }
     match route_trace_decision {
-        FirstLayerDecision::DirectAnswer => "direct_answer_trace_inferred",
-        FirstLayerDecision::PlannerExecute => "planner_execute_trace_inferred",
-        FirstLayerDecision::Clarify => "clarify_trace_inferred",
+        RouteTraceDecision::Respond => "direct_answer_trace_inferred",
+        RouteTraceDecision::Act => "planner_execute_trace_inferred",
+        RouteTraceDecision::Clarify => "clarify_trace_inferred",
     }
 }
 
 fn route_trace_outcome(
-    route_trace_decision: FirstLayerDecision,
+    route_trace_decision: RouteTraceDecision,
     needs_clarify: bool,
 ) -> &'static str {
-    if needs_clarify && route_trace_decision == FirstLayerDecision::Clarify {
+    if needs_clarify && route_trace_decision == RouteTraceDecision::Clarify {
         "blocked"
     } else {
         "allowed"
@@ -49,7 +66,7 @@ fn route_trace_outcome(
 }
 
 pub(crate) fn route_trace_record(
-    route_trace_decision: FirstLayerDecision,
+    route_trace_decision: RouteTraceDecision,
     needs_clarify: bool,
     output_contract: &IntentOutputContract,
     repair_codes: Vec<String>,
@@ -119,11 +136,8 @@ fn route_trace_repair_code_class(code: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::route_trace_record;
-    use crate::{
-        FirstLayerDecision, IntentOutputContract, OutputLocatorKind, OutputResponseShape,
-        OutputSemanticKind,
-    };
+    use super::{route_trace_record, RouteTraceDecision};
+    use crate::{IntentOutputContract, OutputLocatorKind, OutputResponseShape, OutputSemanticKind};
 
     #[test]
     fn route_trace_record_classifies_machine_trace_decisions() {
@@ -136,7 +150,7 @@ mod tests {
         };
 
         let execute = route_trace_record(
-            FirstLayerDecision::PlannerExecute,
+            RouteTraceDecision::Act,
             false,
             &contract,
             vec!["executable_contract_preserved_for_agent_loop".to_string()],
@@ -154,7 +168,7 @@ mod tests {
         assert_eq!(execute.repair_classes, vec!["contract_execution_signal"]);
 
         let allowed = route_trace_record(
-            FirstLayerDecision::DirectAnswer,
+            RouteTraceDecision::Respond,
             false,
             &IntentOutputContract::default(),
             Vec::new(),
@@ -164,7 +178,7 @@ mod tests {
         assert_eq!(allowed.repair_classes, vec!["none"]);
 
         let mixed = route_trace_record(
-            FirstLayerDecision::PlannerExecute,
+            RouteTraceDecision::Act,
             false,
             &contract,
             vec![
@@ -184,7 +198,7 @@ mod tests {
         );
 
         let clarify = route_trace_record(
-            FirstLayerDecision::Clarify,
+            RouteTraceDecision::Clarify,
             true,
             &IntentOutputContract::default(),
             Vec::new(),

@@ -57,7 +57,7 @@ fn boundary_envelope_projects_only_machine_boundary_fields() {
             owner_layer: "normalizer_trace",
             reason_code: "test",
             outcome: "ok",
-            route_trace_decision: crate::FirstLayerDecision::DirectAnswer,
+            route_trace_decision: RouteTraceDecision::Respond,
             needs_clarify: false,
             output_contract_ref: "none".to_string(),
             repair_codes: Vec::new(),

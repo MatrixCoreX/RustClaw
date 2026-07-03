@@ -1,12 +1,13 @@
 // Parse-failed and fallback repair tests for intent_router.
 
-use crate::{execution_recipe::ExecutionRecipeKind, FirstLayerDecision};
+use crate::execution_recipe::ExecutionRecipeKind;
 
 use super::test_support::make_temp_workspace_with_child;
 use super::{
     normalizer_output_from_fallback, parse_execution_recipe_hint, IntentExecutionRecipeOut,
     IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, RouteDecision, ScheduleKind, TargetTaskPolicy, TurnType,
+    OutputSemanticKind, RouteDecision, RouteTraceDecision, ScheduleKind, TargetTaskPolicy,
+    TurnType,
 };
 
 fn test_task(task_id: &str, text: &str) -> crate::ClaimedTask {
@@ -366,7 +367,7 @@ fn fallback_normalizer_output_still_enforces_content_evidence_planner_execute() 
     );
     assert_eq!(
         out.route_trace_record.route_trace_decision,
-        FirstLayerDecision::PlannerExecute
+        RouteTraceDecision::Act
     );
     assert!(!out.needs_clarify);
     assert_eq!(
@@ -392,7 +393,7 @@ fn parse_failed_fallback_no_longer_builds_git_semantic_contract() {
 
     assert_eq!(
         fallback.route_trace_record.route_trace_decision,
-        FirstLayerDecision::Clarify
+        RouteTraceDecision::Clarify
     );
     assert!(fallback.needs_clarify);
     assert_eq!(
@@ -520,7 +521,7 @@ fn inline_json_transform_fallback_builds_planner_execute_contract() {
 
     assert_eq!(
         out.route_trace_record.route_trace_decision,
-        FirstLayerDecision::PlannerExecute
+        RouteTraceDecision::Act
     );
     assert!(!out.needs_clarify);
     assert_eq!(
@@ -626,7 +627,7 @@ fn directory_pair_fallback_builds_planner_execute_locator_contract() {
 
     assert_eq!(
         out.route_trace_record.route_trace_decision,
-        FirstLayerDecision::PlannerExecute
+        RouteTraceDecision::Act
     );
     assert!(!out.needs_clarify);
     assert_eq!(
@@ -846,7 +847,7 @@ fn fallback_normalizer_keeps_llm_failure_on_safe_clarify() {
     );
     assert_eq!(
         out.route_trace_record.route_trace_decision,
-        FirstLayerDecision::Clarify
+        RouteTraceDecision::Clarify
     );
     assert!(out.needs_clarify);
     assert!(matches!(
