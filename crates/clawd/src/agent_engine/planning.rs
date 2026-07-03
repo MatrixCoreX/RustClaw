@@ -72,9 +72,6 @@ mod direct_observed_finalize_support;
 mod directory_entry_group_locator;
 #[path = "directory_unique_entry.rs"]
 mod directory_unique_entry;
-#[cfg(test)]
-#[path = "dry_run_contract_plan.rs"]
-mod dry_run_contract_plan;
 #[path = "explicit_observed_paths.rs"]
 mod explicit_observed_paths;
 #[path = "inline_transform_contract.rs"]
@@ -124,8 +121,6 @@ use directory_entry_group_locator::executed_step_is_successful_text_read;
 #[cfg(test)]
 use directory_entry_group_locator::*;
 use directory_unique_entry::*;
-#[cfg(test)]
-use dry_run_contract_plan::*;
 use explicit_observed_paths::*;
 use inline_transform_contract::*;
 use legacy_file_config_capabilities::*;
