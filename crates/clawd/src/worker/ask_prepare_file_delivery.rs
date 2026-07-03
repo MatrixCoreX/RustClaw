@@ -45,6 +45,34 @@ fn remove_route_reason_structural_marker(route_result: &mut crate::RouteResult, 
         .join("; ");
 }
 
+fn replace_route_reason_structural_value(
+    route_reason: &str,
+    old_value: &str,
+    new_value: &str,
+) -> String {
+    let old_value = old_value.trim();
+    if old_value.is_empty() {
+        return route_reason.to_string();
+    }
+    route_reason
+        .split(';')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            if part == old_value {
+                return new_value.to_string();
+            }
+            if let Some((prefix, suffix)) = part.rsplit_once(':') {
+                if suffix.trim() == old_value {
+                    return format!("{}: {}", prefix.trim_end(), new_value);
+                }
+            }
+            part.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 fn file_delivery_has_concrete_locator(route_result: &crate::RouteResult) -> bool {
     !route_result.output_contract.locator_hint.trim().is_empty()
 }
@@ -288,8 +316,12 @@ pub(super) fn bind_content_read_to_active_delivery_target(
                 .push_str(&format!("\nactive_delivery_content_target: {target}"));
         }
     }
-    if !previous_hint.is_empty() && route_result.route_reason.contains(&previous_hint) {
-        route_result.route_reason = route_result.route_reason.replace(&previous_hint, &target);
+    if !previous_hint.is_empty() {
+        route_result.route_reason = replace_route_reason_structural_value(
+            &route_result.route_reason,
+            &previous_hint,
+            &target,
+        );
     }
     route_result
         .route_reason

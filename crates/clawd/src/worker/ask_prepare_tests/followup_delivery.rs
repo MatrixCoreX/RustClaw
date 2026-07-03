@@ -1295,6 +1295,71 @@ fn content_read_followup_repaired_active_task_binding_overrides_ordered_entry() 
 }
 
 #[test]
+fn content_read_followup_rewrites_only_structural_route_reason_locator() {
+    let target = "/home/guagua/rustclaw/logs/clawd.codex.nltest.log";
+    let stale = "/home/guagua/rustclaw/logs/clawd-dev.log";
+    let stale_with_suffix = format!("{stale}.backup");
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: format!("Read selected log\nordered_entry_target: {stale}"),
+        needs_clarify: false,
+        route_reason: format!(
+            "locator_hint: {stale}; unrelated_path_token: {stale_with_suffix}; semantic_contract_requires_evidence"
+        ),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
+            locator_hint: stale.to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            source_request: "deliver selected log".to_string(),
+            op_kind: crate::followup_frame::FollowupOpKind::Delivery,
+            bound_target: Some(target.to_string()),
+            source_task_id: "task-delivery".to_string(),
+            updated_at_ts: 1,
+            expires_at_ts: 2,
+            ..Default::default()
+        }),
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(bind_content_read_to_active_delivery_target(
+        &mut route,
+        &snapshot,
+        None,
+        "read tail 1"
+    ));
+
+    assert!(route
+        .route_reason
+        .contains(&format!("locator_hint: {target}")));
+    assert!(route.route_reason.contains(&stale_with_suffix));
+    assert!(route
+        .route_reason
+        .contains("active_delivery_content_target_bound"));
+}
+
+#[test]
 fn active_delivery_content_target_token_survives_task_turn_merge_prompt() {
     let target = "/home/guagua/rustclaw/logs/clawd.codex.nltest.log";
     let route = crate::RouteResult {
