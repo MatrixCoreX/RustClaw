@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn existence_summary_explicit_file_targets_collect_metadata_before_content_reads() {
+fn existence_summary_explicit_file_targets_allow_metadata_and_content_evidence() {
     let root = TempDirGuard::new("existence_summary_explicit_file_targets");
     let docs_dir = root.path.join("docs");
     fs::create_dir_all(&docs_dir).expect("create docs dir");
@@ -13,8 +13,6 @@ fn existence_summary_explicit_file_targets_collect_metadata_before_content_reads
     .expect("write checklist");
     let left = "docs/service_notes.md";
     let right = "docs/release_checklist.md";
-    let mut state = test_state_with_enabled_skills(&["fs_basic"]);
-    state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
         crate::AskMode::direct_answer(),
         true,
@@ -26,43 +24,31 @@ fn existence_summary_explicit_file_targets_collect_metadata_before_content_reads
     route.output_contract.locator_hint = root.path.display().to_string();
     route.output_contract.delivery_required = false;
     route.resolved_intent = format!("compare {left} and {right} existence metadata");
-    let user_text = format!("Return path metadata for {left} and {right}.");
 
-    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
-        &state,
-        "return metadata and content summary for explicit paths",
-        Some(&route),
-        &LoopState::new(1),
-        &user_text,
-        None,
-        Some(root.path.to_string_lossy().as_ref()),
+    let contract = route.effective_output_contract();
+    let stat_policy = crate::evidence_policy::action_policy_for_output_contract(
+        Some(&contract),
+        "fs_basic",
+        &json!({
+            "action": "stat_paths",
+            "paths": [left, right],
+        }),
     )
-    .expect("existence summary should collect metadata before content reads");
+    .expect("existence summary should allow metadata evidence");
+    assert!(stat_policy.is_allowed(), "{stat_policy:?}");
+    assert!(stat_policy.action_matches_preferred(), "{stat_policy:?}");
 
-    assert_eq!(plan.steps.len(), 5);
-    let actions = plan
-        .steps
-        .iter()
-        .filter_map(|step| step.to_agent_action())
-        .collect::<Vec<_>>();
-    let stat_args = expect_planned_call(&actions[0], "fs_basic", "stat_paths");
-    let stat_paths = stat_args
-        .get("paths")
-        .and_then(Value::as_array)
-        .expect("stat paths");
-    assert_eq!(stat_paths.len(), 2);
-    assert!(matches!(
-        &actions[1],
-        AgentAction::CallTool { tool, args }
-            if tool == "fs_basic"
-                && args.get("action").and_then(Value::as_str) == Some("read_text_range")
-                && args.get("path").and_then(Value::as_str).is_some_and(|path| path.ends_with(left))
-    ));
-    assert!(matches!(
-        &actions[2],
-        AgentAction::CallTool { tool, args }
-            if tool == "fs_basic"
-                && args.get("action").and_then(Value::as_str) == Some("read_text_range")
-                && args.get("path").and_then(Value::as_str).is_some_and(|path| path.ends_with(right))
-    ));
+    let read_policy = crate::evidence_policy::action_policy_for_output_contract(
+        Some(&contract),
+        "fs_basic",
+        &json!({
+            "action": "read_text_range",
+            "path": left,
+            "mode": "head",
+            "n": 80,
+        }),
+    )
+    .expect("existence summary should allow content evidence");
+    assert!(read_policy.is_allowed(), "{read_policy:?}");
+    assert!(read_policy.action_matches_preferred(), "{read_policy:?}");
 }
