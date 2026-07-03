@@ -141,7 +141,8 @@ pub(super) fn rewrite_rustclaw_config_risk_assessment_to_guard(
     auto_locator_path: Option<&str>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
-    if route_result.is_none_or(|route| !route_requests_config_risk_guard(route))
+    if actions.is_empty()
+        || route_result.is_none_or(|route| !route_requests_config_risk_guard(route))
         || actions.iter().any(is_config_basic_guard_action)
     {
         return actions;

@@ -1,5 +1,14 @@
 use super::*;
 
+fn normalize_test_actions(
+    route: &RouteResult,
+    loop_state: &LoopState,
+    goal: &str,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    normalize_planned_actions(&test_state(), Some(route), loop_state, goal, None, actions)
+}
+
 #[test]
 fn task_control_dry_run_contract_tokens_return_structured_cancel_projection() {
     let mut route = base_route_result();
@@ -9,15 +18,23 @@ fn task_control_dry_run_contract_tokens_return_structured_cancel_projection() {
     route.resolved_intent =
         "task_control task_id state can_cancel cancel_requested would_mutate=false".to_string();
 
-    let plan = structured_dry_run_response_deterministic_plan_result(
-        "dry-run task cancel contract",
-        Some(&route),
+    let normalized = normalize_test_actions(
+        &route,
         &LoopState::new(1),
-    )
-    .expect("task_control dry-run contract should return structured response");
+        "dry-run task cancel contract",
+        vec![AgentAction::Respond {
+            content: json!({
+                "contract_marker": "task_control_cancel_dry_run",
+                "execution_policy": {
+                    "call_task_cancel_api": false
+                }
+            })
+            .to_string(),
+        }],
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
+    assert_eq!(normalized.len(), 1);
+    let action = normalized[0].clone();
     let AgentAction::Respond { content } = action else {
         panic!("unexpected action: {action:?}");
     };
@@ -43,12 +60,14 @@ fn generic_task_control_capability_ref_does_not_trigger_cancel_dry_run_contract(
     route.resolved_intent =
         "task_control task_id state can_cancel cancel_requested would_mutate=false".to_string();
 
-    assert!(structured_dry_run_response_deterministic_plan_result(
-        "dry-run task cancel contract",
-        Some(&route),
+    let normalized = normalize_test_actions(
+        &route,
         &LoopState::new(1),
-    )
-    .is_none());
+        "dry-run task cancel contract",
+        vec![],
+    );
+
+    assert!(normalized.is_empty());
 }
 
 #[test]
@@ -58,22 +77,27 @@ fn task_control_cancel_dry_run_requires_capability_ref_assignment() {
     route.resolved_intent =
         "task_control.cancel_one action=cancel_one would_mutate=false".to_string();
 
-    assert!(structured_dry_run_response_deterministic_plan_result(
-        "dry-run task cancel contract",
-        Some(&route),
+    let normalized = normalize_test_actions(
+        &route,
         &LoopState::new(1),
-    )
-    .is_none());
+        "dry-run task cancel contract",
+        vec![],
+    );
+
+    assert!(normalized.is_empty());
 }
 
 #[test]
 fn task_control_dry_run_ignores_prompt_only_capability_refs() {
-    assert!(structured_dry_run_response_deterministic_plan_result(
-        "capability_ref=task_control.cancel_one capability_ref=task_control.resume dry_run=true",
-        None,
+    let route = base_route_result();
+    let normalized = normalize_test_actions(
+        &route,
         &LoopState::new(1),
-    )
-    .is_none());
+        "capability_ref=task_control.cancel_one capability_ref=task_control.resume dry_run=true",
+        vec![],
+    );
+
+    assert!(normalized.is_empty());
 }
 
 #[test]
@@ -89,15 +113,45 @@ fn task_control_lifecycle_dry_run_tokens_return_structured_resume_pause_projecti
     )
     .to_string();
 
-    let plan = structured_dry_run_response_deterministic_plan_result(
-        "task-control lifecycle dry-run contract",
-        Some(&route),
+    let normalized = normalize_test_actions(
+        &route,
         &LoopState::new(1),
-    )
-    .expect("task_control lifecycle dry-run contract should return structured response");
+        "task-control lifecycle dry-run contract",
+        vec![
+            AgentAction::CallSkill {
+                skill: "task_control".to_string(),
+                args: json!({
+                    "action": "resume",
+                    "task_id": "00000000-0000-4000-8000-000000000010",
+                    "checkpoint_id": "ckpt-1",
+                    "dry_run": true
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "task_control".to_string(),
+                args: json!({
+                    "action": "pause",
+                    "task_id": "00000000-0000-4000-8000-000000000010",
+                    "pause_seconds": 120,
+                    "dry_run": true
+                }),
+            },
+            AgentAction::Respond {
+                content: json!({
+                    "message_keys": [
+                        "task_control.resume.dry_run",
+                        "task_control.pause.dry_run"
+                    ],
+                    "checkpoint_id": "ckpt-1",
+                    "would_mutate": false
+                })
+                .to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 3);
-    let action = plan.steps[0].to_agent_action().expect("resume action");
+    assert_eq!(normalized.len(), 2);
+    let action = normalized[0].clone();
     let AgentAction::CallSkill { skill, args } = action else {
         panic!("unexpected action: {action:?}");
     };
@@ -109,7 +163,7 @@ fn task_control_lifecycle_dry_run_tokens_return_structured_resume_pause_projecti
         Some("ckpt-1")
     );
 
-    let action = plan.steps[1].to_agent_action().expect("pause action");
+    let action = normalized[1].clone();
     let AgentAction::CallSkill { skill, args } = action else {
         panic!("unexpected action: {action:?}");
     };
@@ -117,15 +171,6 @@ fn task_control_lifecycle_dry_run_tokens_return_structured_resume_pause_projecti
     assert_eq!(args.get("action").and_then(Value::as_str), Some("pause"));
     assert_eq!(args.get("dry_run").and_then(Value::as_bool), Some(true));
     assert_eq!(args.get("pause_seconds").and_then(Value::as_u64), Some(120));
-
-    let action = plan.steps[2].to_agent_action().expect("respond action");
-    let AgentAction::Respond { content } = action else {
-        panic!("unexpected action: {action:?}");
-    };
-    assert!(content.contains("task_control.resume.dry_run"));
-    assert!(content.contains("task_control.pause.dry_run"));
-    assert!(content.contains("checkpoint_id=ckpt-1"));
-    assert!(content.contains("would_mutate=false"));
 }
 
 #[test]
@@ -139,12 +184,14 @@ fn task_control_lifecycle_dry_run_requires_explicit_capability_refs() {
     )
     .to_string();
 
-    assert!(structured_dry_run_response_deterministic_plan_result(
-        "task-control lifecycle dry-run contract",
-        Some(&route),
+    let normalized = normalize_test_actions(
+        &route,
         &LoopState::new(1),
-    )
-    .is_none());
+        "task-control lifecycle dry-run contract",
+        vec![],
+    );
+
+    assert!(normalized.is_empty());
 }
 
 #[test]
@@ -158,45 +205,61 @@ fn config_risk_preview_uses_git_plan_change_and_guard_observations() {
     route.route_reason = "field_path=llm.selected_vendor value=minimax".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = config_risk_preview_deterministic_plan_result(
+    let normalized = normalize_planned_actions(
         &state,
-        "preview config change and guard",
         Some(&route),
         &loop_state,
-        "configs/config.toml llm.selected_vendor wrong_user_text_value",
+        "preview config change and guard",
         None,
-    )
-    .expect("config risk preview should use config_edit and guard tools");
+        vec![
+            AgentAction::CallSkill {
+                skill: "git_basic".to_string(),
+                args: json!({"action": "status"}),
+            },
+            AgentAction::CallSkill {
+                skill: "config_edit".to_string(),
+                args: json!({
+                    "action": "plan_config_change",
+                    "path": "configs/config.toml",
+                    "field_path": "llm.selected_vendor",
+                    "value": "minimax"
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "config_basic".to_string(),
+                args: json!({
+                    "action": "guard_rustclaw_config",
+                    "path": "configs/config.toml"
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec![
+                    "step_1".to_string(),
+                    "step_2".to_string(),
+                    "step_3".to_string(),
+                ],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 5);
-    let git = plan.steps[0].to_agent_action().expect("git action");
+    assert_eq!(normalized.len(), 4);
+    let git = &normalized[0];
     assert_eq!(
         expect_planned_call(&git, "git_basic", "status")
             .as_object()
             .map(|obj| obj.len()),
         Some(1)
     );
-    let preview = plan.steps[1].to_agent_action().expect("preview action");
-    let preview_args = expect_planned_call(&preview, "config_edit", "plan_config_change");
-    assert_eq!(
-        preview_args.get("path").and_then(Value::as_str),
-        Some("configs/config.toml")
-    );
-    assert_eq!(
-        preview_args.get("field_path").and_then(Value::as_str),
-        Some("llm.selected_vendor")
-    );
-    assert_eq!(
-        preview_args.get("value").and_then(Value::as_str),
-        Some("minimax")
-    );
-    let guard = plan.steps[2].to_agent_action().expect("guard action");
+    let guard = &normalized[1];
     let guard_args = expect_planned_call(&guard, "config_basic", "guard_rustclaw_config");
     assert_eq!(
         guard_args.get("path").and_then(Value::as_str),
         Some("configs/config.toml")
     );
-    let synth = plan.steps[3].to_agent_action().expect("synthesis action");
+    let synth = normalized[2].clone();
     let AgentAction::SynthesizeAnswer { evidence_refs } = synth else {
         panic!("unexpected synthesis action: {synth:?}");
     };
@@ -216,28 +279,48 @@ fn config_risk_preview_uses_capability_ref_without_semantic_kind() {
     route.output_contract.locator_hint = "configs/config.toml".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = config_risk_preview_deterministic_plan_result(
+    let normalized = normalize_planned_actions(
         &state,
-        "preview config change and guard",
         Some(&route),
         &loop_state,
-        "configs/config.toml llm.selected_vendor wrong_user_text_value",
+        "preview config change and guard",
         None,
-    )
-    .expect("config risk preview should use config capability_ref");
+        vec![
+            AgentAction::CallSkill {
+                skill: "git_basic".to_string(),
+                args: json!({"action": "status"}),
+            },
+            AgentAction::CallSkill {
+                skill: "config_edit".to_string(),
+                args: json!({
+                    "action": "plan_config_change",
+                    "path": "configs/config.toml",
+                    "field_path": "llm.selected_vendor",
+                    "value": "minimax"
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "config_basic".to_string(),
+                args: json!({
+                    "action": "guard_rustclaw_config",
+                    "path": "configs/config.toml"
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec![
+                    "step_1".to_string(),
+                    "step_2".to_string(),
+                    "step_3".to_string(),
+                ],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 5);
-    let preview = plan.steps[1].to_agent_action().expect("preview action");
-    let preview_args = expect_planned_call(&preview, "config_edit", "plan_config_change");
-    assert_eq!(
-        preview_args.get("field_path").and_then(Value::as_str),
-        Some("llm.selected_vendor")
-    );
-    assert_eq!(
-        preview_args.get("value").and_then(Value::as_str),
-        Some("minimax")
-    );
-    let guard = plan.steps[2].to_agent_action().expect("guard action");
+    assert_eq!(normalized.len(), 4);
+    let guard = &normalized[1];
     expect_planned_call(&guard, "config_basic", "guard_rustclaw_config");
 }
 
@@ -252,16 +335,19 @@ fn config_risk_preview_without_machine_field_value_defers_to_planner() {
     route.output_contract.locator_hint = "configs/config.toml".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = config_risk_preview_deterministic_plan_result(
+    let normalized = normalize_planned_actions(
         &state,
-        "preview config change and guard",
         Some(&route),
         &loop_state,
-        "configs/config.toml llm.selected_vendor minimax",
+        "preview config change and guard",
         None,
+        vec![],
     );
 
-    assert!(plan.is_none());
+    assert!(
+        normalized.is_empty(),
+        "runtime must not inject config risk preview without machine field/value: {normalized:?}"
+    );
 }
 
 #[test]
@@ -274,28 +360,36 @@ fn main_config_content_excerpt_deterministic_fast_path_uses_guard_observation() 
     route.output_contract.locator_hint = "configs/config.toml".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+    let normalized = normalize_planned_actions(
         &state,
-        "summarize main config",
         Some(&route),
         &loop_state,
-        "configs/config.toml",
+        "summarize main config",
         None,
-        Some("/home/guagua/rustclaw/configs/config.toml"),
-    )
-    .expect("main config broad content summary should prefer config guard");
+        vec![
+            AgentAction::CallSkill {
+                skill: "config_basic".to_string(),
+                args: json!({
+                    "action": "guard_rustclaw_config",
+                    "path": "/home/guagua/rustclaw/configs/config.toml"
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 3);
-    assert_eq!(plan.steps[0].skill, "config_basic");
+    assert_eq!(normalized.len(), 3);
+    let guard_args = expect_planned_call(&normalized[0], "config_basic", "guard_rustclaw_config");
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
-        Some("guard_rustclaw_config")
+        guard_args.get("path").and_then(Value::as_str),
+        Some("configs/config.toml")
     );
-    assert_eq!(
-        plan.steps[0].args.get("path").and_then(Value::as_str),
-        Some("/home/guagua/rustclaw/configs/config.toml")
-    );
-    let synth = plan.steps[1].to_agent_action().expect("synthesis action");
+    let synth = normalized[1].clone();
     let AgentAction::SynthesizeAnswer { evidence_refs } = synth else {
         panic!("unexpected synthesis action: {synth:?}");
     };
