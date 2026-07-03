@@ -21,8 +21,6 @@ pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
     // 顺序很重要：更具体的匹配放前面，避免被宽泛规则吃掉。
     if s.contains("intent_normalizer") {
         "normalizer"
-    } else if s.contains("direct_answer_gate") {
-        "direct_answer_gate"
     } else if s.contains("contract_repair") {
         "contract_repair"
     } else if s.contains("intent_router") {
@@ -810,7 +808,6 @@ fn recover_normalizer_text_from_openai_tool_calls(
     let resolved_user_intent = extract_request_from_normalizer_prompt(prompt).unwrap_or_default();
     let recovered = json!({
         "resolved_user_intent": resolved_user_intent,
-        "answer_candidate": "",
         "resume_behavior": "none",
         "schedule_kind": "none",
         "schedule_intent": null,
