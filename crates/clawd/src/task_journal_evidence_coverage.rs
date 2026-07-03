@@ -54,6 +54,7 @@ pub(crate) fn evidence_coverage_for_route(
         crate::evidence_policy::evidence_expression_for_output_contract(&effective_output_contract);
     let missing_evidence = evidence_expression
         .as_ref()
+        .filter(|expression| evidence_expression_has_requirements(expression))
         .map(|expression| missing_evidence_for_expression(expression, &observed_canonical))
         .unwrap_or_else(|| missing_required_evidence(&required_evidence, &observed_canonical));
     let confidence = evidence_coverage_confidence(&required_evidence, &missing_evidence);
@@ -174,6 +175,15 @@ pub(super) fn missing_evidence_for_expression(
     );
     missing.dedup();
     missing
+}
+
+fn evidence_expression_has_requirements(
+    expression: &crate::evidence_policy::EvidenceExpression,
+) -> bool {
+    !expression.all_of.is_empty()
+        || !expression.one_of.is_empty()
+        || !expression.any_of.is_empty()
+        || !expression.negative_evidence.is_empty()
 }
 
 pub(super) fn evidence_coverage_trace_json(
@@ -568,13 +578,14 @@ pub(super) fn step_can_supply_contract_evidence(
     ) {
         return false;
     }
-    if route.is_some_and(|route| {
-        !route.output_contract.requires_content_evidence
+    if let Some(route) = route {
+        if !route.output_contract.requires_content_evidence
             && !route.output_contract.delivery_required
             && !route.wants_file_delivery
-    }) && step_reads_text_content(step)
-    {
-        return false;
+            && step_reads_text_content(step)
+        {
+            return false;
+        }
     }
     match step.status {
         crate::executor::StepExecutionStatus::Ok => true,
