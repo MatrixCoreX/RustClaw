@@ -631,49 +631,6 @@ pub(super) fn directory_child_name_pattern_selector(
         .map(|(token, _)| token)
 }
 
-#[cfg(test)]
-pub(super) fn directory_child_name_pattern_selector_from_texts(
-    raw_path: &str,
-    directory: &Path,
-    user_texts: &[&str],
-) -> Option<String> {
-    let mut path_tokens = structural_selector_tokens(raw_path);
-    path_tokens.extend(structural_selector_tokens(&directory.display().to_string()));
-
-    let mut scores: HashMap<String, usize> = HashMap::new();
-    let entries = fs::read_dir(directory).ok()?;
-    for entry in entries.flatten() {
-        let file_name = entry.file_name();
-        let Some(name) = file_name
-            .to_str()
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-        else {
-            continue;
-        };
-        for token in structural_selector_tokens(name) {
-            if token.len() < 2 || path_tokens.contains(&token) {
-                continue;
-            }
-            if user_texts
-                .iter()
-                .any(|text| structural_token_present(text, &token))
-            {
-                *scores.entry(token).or_insert(0) += 1;
-            }
-        }
-    }
-    scores
-        .into_iter()
-        .max_by(|(left_token, left_count), (right_token, right_count)| {
-            left_count
-                .cmp(right_count)
-                .then_with(|| left_token.len().cmp(&right_token.len()))
-                .then_with(|| right_token.cmp(left_token))
-        })
-        .map(|(token, _)| token)
-}
-
 pub(super) fn directory_child_structural_selector_for_file_paths(
     workspace_root: &Path,
     raw_path: &str,
