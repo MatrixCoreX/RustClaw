@@ -164,9 +164,10 @@ pub(super) fn build_normalizer_output_with_final_gate(
 fn log_boundary_envelope(task: &crate::ClaimedTask, output: &IntentNormalizerOutput) {
     let envelope = output.boundary_envelope();
     info!(
-        "{} intent_normalizer_boundary_envelope task_id={} raw_chars={} schedule_intent={} attachment_refs={} explicit_locators={} active_task_reference={} session_binding={} language_hint={} safety_budget_hint={}",
+        "{} intent_normalizer_boundary_envelope task_id={} schema_version={} raw_chars={} schedule_intent={} attachment_refs={} explicit_locators={} active_task_reference={} session_binding={} language_hint={} safety_budget_hint={}",
         crate::highlight_tag("routing"),
         task.task_id,
+        envelope.schema_version(),
         envelope.raw_char_count(),
         envelope
             .schedule_intent
