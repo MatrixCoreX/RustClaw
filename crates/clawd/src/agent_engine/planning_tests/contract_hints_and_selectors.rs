@@ -1,41 +1,39 @@
 use super::*;
 
 #[test]
-fn contract_hint_config_risk_capability_ref_uses_deterministic_guard_action() {
+fn config_risk_capability_ref_allows_planner_supplied_guard_action() {
     let state = test_state_with_enabled_skills(&["config_basic", "config_edit"]);
     let mut route = base_route_result();
-    route.route_reason =
-        "structured_contract_hint_fast_path; contract_hint_fast_path; capability_ref=config.guard_config".into();
+    route.route_reason = "capability_ref=config.guard_rustclaw_config".into();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "guard config",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        "sanitized request without hint block",
-        None,
-    )
-    .expect("config risk contract should use deterministic guard action");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "config_basic");
+        "guard config",
+        Some("sanitized request without hint block"),
+        Some(&route.route_reason),
+        "config_basic",
+        "guard_rustclaw_config",
+        json!({"action": "guard_rustclaw_config", "path": "configs/config.toml"}),
+    );
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("guard_rustclaw_config")
     );
     assert_eq!(
-        plan.steps[0].args.get("path").and_then(Value::as_str),
+        args.get("path").and_then(Value::as_str),
         Some("configs/config.toml")
     );
 }
 
 #[test]
-fn contract_hint_preferred_config_guard_uses_runtime_equivalent_action() {
+fn config_guard_after_change_allows_planner_supplied_runtime_equivalent_action() {
     let state = test_state_with_enabled_skills(&["config_basic", "config_edit"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = false;
@@ -44,274 +42,267 @@ fn contract_hint_preferred_config_guard_uses_runtime_equivalent_action() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
     route.route_reason = "capability_ref=config.guard_after_change".to_string();
-    let request = "[CONTRACT_TEST_HINT]\npreferred_action_ref=config_guard\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let action = AgentAction::CallSkill {
+        skill: "config_edit".to_string(),
+        args: json!({"action": "guard_config", "path": "configs/config.toml"}),
+    };
+    let AgentAction::CallSkill { skill, args } = &action else {
+        unreachable!("test action is a skill call");
+    };
+    assert!(
+        crate::evidence_policy::capability_ref_action_policy_for_route(Some(&route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
+    );
+
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "guard config",
         Some(&route),
         &LoopState::new(1),
-        request,
-        Some("scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"),
-    )
-    .expect("virtual config guard should map to runtime guard action");
+        "guard config",
+        Some("[CONTRACT_TEST_HINT]\npreferred_action_ref=config_guard\n[/CONTRACT_TEST_HINT]"),
+        Some(&route.route_reason),
+        None,
+        vec![action],
+    );
+    let args = normalized
+        .iter()
+        .find_map(|action| {
+            planned_call_is(action, "config_basic", "guard_rustclaw_config")
+                .then(|| expect_planned_call(action, "config_basic", "guard_rustclaw_config"))
+        })
+        .expect("config_edit guard_config should normalize to config_basic guard_rustclaw_config");
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "config_edit");
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
-        Some("guard_config")
+        args.get("action").and_then(Value::as_str),
+        Some("guard_rustclaw_config")
     );
 }
 
 #[test]
-fn contract_hint_file_paths_uses_machine_selector_extension() {
+fn filesystem_find_entries_preserves_planner_supplied_extension_filter() {
     let state = test_state_with_enabled_skills(&["fs_basic"]);
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
-    let request = "[CONTRACT_TEST_HINT]\nsemantic_kind=file_paths\nselector_extension=md\nselector_target_kind=file\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "list markdown paths",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        request,
-        None,
-    )
-    .expect("file path contract should use structured selector hints");
+        "list markdown paths",
+        Some("[CONTRACT_TEST_HINT]\nsemantic_kind=file_paths\nselector_extension=md\nselector_target_kind=file\n[/CONTRACT_TEST_HINT]"),
+        Some(&route.route_reason),
+        "fs_basic",
+        "find_entries",
+        json!({
+            "action": "find_entries",
+            "root": "scripts/nl_tests/fixtures/device_local",
+            "ext": "md",
+            "target_kind": "file"
+        }),
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "fs_basic");
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("find_entries")
     );
     assert_eq!(
-        plan.steps[0].args.get("root").and_then(Value::as_str),
+        args.get("root").and_then(Value::as_str),
         Some("scripts/nl_tests/fixtures/device_local")
     );
+    assert_eq!(args.get("ext").and_then(Value::as_str), Some("md"));
     assert_eq!(
-        plan.steps[0].args.get("extension").and_then(Value::as_str),
-        Some("md")
-    );
-    assert_eq!(
-        plan.steps[0]
-            .args
-            .get("target_kind")
-            .and_then(Value::as_str),
+        args.get("target_kind").and_then(Value::as_str),
         Some("file")
     );
 }
 
 #[test]
-fn contract_hint_recent_artifacts_uses_machine_sort_and_limit_selectors() {
+fn recent_artifacts_preserves_planner_supplied_sort_and_limit() {
     let state = test_state_with_enabled_skills(&["fs_basic"]);
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=filesystem.list_dir selector_target_kind=file".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local/docs".to_string();
-    let request = "[CONTRACT_TEST_HINT]\nsemantic_kind=recent_artifacts_judgment\nselector_limit=2\nselector_sort_by=mtime_desc\nselector_target_kind=file\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "list recent files and judge",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        request,
-        None,
-    )
-    .expect("recent artifact contract should use structured sort selectors");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "fs_basic");
-    assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
-        Some("list_dir")
+        "list recent files and judge",
+        Some("[CONTRACT_TEST_HINT]\nsemantic_kind=recent_artifacts_judgment\nselector_limit=2\nselector_sort_by=mtime_desc\nselector_target_kind=file\n[/CONTRACT_TEST_HINT]"),
+        Some(&route.route_reason),
+        "fs_basic",
+        "list_dir",
+        json!({
+            "action": "list_dir",
+            "path": "scripts/nl_tests/fixtures/device_local/docs",
+            "sort_by": "mtime_desc",
+            "max_entries": 2,
+            "files_only": true
+        }),
     );
+
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
     assert_eq!(
-        plan.steps[0].args.get("sort_by").and_then(Value::as_str),
+        args.get("sort_by").and_then(Value::as_str),
         Some("mtime_desc")
     );
-    assert_eq!(
-        plan.steps[0]
-            .args
-            .get("max_entries")
-            .and_then(Value::as_u64),
-        Some(2)
-    );
-    assert_eq!(
-        plan.steps[0]
-            .args
-            .get("files_only")
-            .and_then(Value::as_bool),
-        Some(true)
-    );
+    assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(2));
+    assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(false));
 }
 
 #[test]
-fn contract_hint_file_names_uses_machine_file_kind_selector() {
+fn file_names_preserves_planner_supplied_file_only_listing() {
     let state = test_state_with_enabled_skills(&["fs_basic"]);
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=filesystem.list_dir".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local/docs".to_string();
-    let request =
-            "[CONTRACT_TEST_HINT]\nsemantic_kind=file_names\nselector_target_kind=file\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "list file names",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        request,
-        None,
-    )
-    .expect("file name contract should use file-only selector hints");
+        "list file names",
+        Some("[CONTRACT_TEST_HINT]\nsemantic_kind=file_names\nselector_target_kind=file\n[/CONTRACT_TEST_HINT]"),
+        Some(&route.route_reason),
+        "fs_basic",
+        "list_dir",
+        json!({
+            "action": "list_dir",
+            "path": "scripts/nl_tests/fixtures/device_local/docs",
+            "files_only": true
+        }),
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "fs_basic");
-    assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
-        Some("list_dir")
-    );
-    assert_eq!(
-        plan.steps[0]
-            .args
-            .get("files_only")
-            .and_then(Value::as_bool),
-        Some(true)
-    );
-    assert!(
-        plan.steps[0].args.get("dirs_only").is_none(),
-        "file-only selector must not also request directories"
-    );
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
+    assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(false));
 }
 
 #[test]
-fn contract_hint_directory_entry_groups_find_entries_defaults_to_any_kind() {
+fn directory_entry_groups_preserves_planner_supplied_any_kind_find_entries() {
     let state = test_state_with_enabled_skills(&["fs_basic"]);
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
-    let request = "[CONTRACT_TEST_HINT]\nsemantic_kind=directory_entry_groups\npreferred_action_ref=fs_basic.find_entries\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "group direct children by kind",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        request,
-        None,
-    )
-    .expect("directory entry grouping should preserve file and directory candidates");
+        "group direct children by kind",
+        Some("[CONTRACT_TEST_HINT]\nsemantic_kind=directory_entry_groups\npreferred_action_ref=fs_basic.find_entries\n[/CONTRACT_TEST_HINT]"),
+        Some(&route.route_reason),
+        "fs_basic",
+        "find_entries",
+        json!({
+            "action": "find_entries",
+            "root": "scripts/nl_tests/fixtures/device_local",
+            "target_kind": "any"
+        }),
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "fs_basic");
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("find_entries")
     );
-    assert_eq!(
-        plan.steps[0]
-            .args
-            .get("target_kind")
-            .and_then(Value::as_str),
-        Some("any")
-    );
+    assert_eq!(args.get("target_kind").and_then(Value::as_str), Some("any"));
 }
 
 #[test]
-fn contract_hint_archive_read_uses_capability_ref_without_nl_matching() {
+fn archive_read_preserves_planner_supplied_member_read() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let mut route = base_route_result();
-    route.route_reason = "contract_hint_fast_path; capability_ref=archive.read".to_string();
+    route.route_reason = "capability_ref=archive.read".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
         "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip|notes.txt".to_string();
-    let request = "[CONTRACT_TEST_HINT]\ncandidate_wrong_action_ref=fs_basic.find_entries\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "read archive member",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        request,
-        None,
-    )
-    .expect("archive read capability should use archive action");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "archive_basic");
-    assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
-        Some("read")
+        "read archive member",
+        Some("[CONTRACT_TEST_HINT]\ncandidate_wrong_action_ref=fs_basic.find_entries\n[/CONTRACT_TEST_HINT]"),
+        Some(&route.route_reason),
+        "archive_basic",
+        "read",
+        json!({
+            "action": "read",
+            "archive": "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
+            "member": "notes.txt"
+        }),
     );
+
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("read"));
     assert_eq!(
-        plan.steps[0].args.get("archive").and_then(Value::as_str),
+        args.get("archive").and_then(Value::as_str),
         Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip")
     );
     assert_eq!(
-        plan.steps[0].args.get("member").and_then(Value::as_str),
+        args.get("member").and_then(Value::as_str),
         Some("notes.txt")
     );
 }
 
 #[test]
-fn contract_hint_content_presence_uses_machine_query_and_case_selector() {
+fn content_presence_preserves_planner_supplied_query_and_case_selector() {
     let state = test_state_with_enabled_skills(&["fs_basic"]);
     let mut route = base_route_result();
-    route.route_reason =
-        "structured_contract_hint_fast_path; contract_hint_fast_path; capability_ref=document.parse"
-            .into();
-    route.resolved_intent = "capability_ref=document.parse".to_string();
+    route.route_reason = "capability_ref=filesystem.grep_text".into();
+    route.resolved_intent = "capability_ref=filesystem.grep_text".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
         "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md".to_string();
-    let request = "[CONTRACT_TEST_HINT]\nsemantic_kind=content_presence_check\nselector_query=release\nselector_case_insensitive=true\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "check content presence",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        request,
-        None,
-    )
-    .expect("content presence contract should use structured query selector");
+        "check content presence",
+        Some("[CONTRACT_TEST_HINT]\nsemantic_kind=content_presence_check\nselector_query=release\nselector_case_insensitive=true\n[/CONTRACT_TEST_HINT]"),
+        Some(&route.route_reason),
+        "fs_basic",
+        "grep_text",
+        json!({
+            "action": "grep_text",
+            "root": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+            "query": "release",
+            "case_insensitive": true
+        }),
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "fs_basic");
     assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
+        args.get("action").and_then(Value::as_str),
         Some("grep_text")
     );
+    assert_eq!(args.get("query").and_then(Value::as_str), Some("release"));
     assert_eq!(
-        plan.steps[0].args.get("query").and_then(Value::as_str),
-        Some("release")
-    );
-    assert_eq!(
-        plan.steps[0]
-            .args
-            .get("case_insensitive")
-            .and_then(Value::as_bool),
+        args.get("case_insensitive").and_then(Value::as_bool),
         Some(true)
     );
 }
@@ -329,59 +320,52 @@ fn contract_hint_preferred_doc_parse_no_longer_bypasses_agent_loop() {
         "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md".to_string();
     let request = "[CONTRACT_TEST_HINT]\nsemantic_kind=content_presence_check\npreferred_action_ref=doc_parse.parse_doc\nselector_query=release\nselector_case_insensitive=true\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "check content presence using preferred parser",
         Some(&route),
         &LoopState::new(1),
-        request,
+        "check content presence using preferred parser",
         None,
+        Some(request),
+        None,
+        Vec::new(),
     );
 
-    assert!(plan.is_none());
+    assert!(normalized.is_empty());
 }
 
 #[test]
-fn quoted_literal_content_presence_uses_deterministic_grep_plan() {
-    let root = TempDirGuard::new("quoted_literal_content_presence");
-    let target = root.path.join("virtual_tools.rs");
-    fs::write(&target, "pub const MARKER: &str = \"NEEDLE_TOKEN_123\";\n").expect("write target");
-    let target_path = target.display().to_string();
-    let mut state = test_state_with_enabled_skills(&["fs_basic"]);
-    state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+fn quoted_literal_content_presence_preserves_planner_supplied_grep_query() {
+    let state = test_state_with_enabled_skills(&["fs_basic"]);
+    let mut route = base_route_result();
+    route.route_reason = "capability_ref=filesystem.grep_text".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = target_path.clone();
-    route.resolved_intent =
-        "Check virtual_tools.rs for the quoted marker NEEDLE_TOKEN_123.".to_string();
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md".to_string();
     let request = "Check virtual_tools.rs for “NEEDLE_TOKEN_123”.";
 
-    let plan = super::super::content_presence_query_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        request,
-        Some(&route),
+        &route,
         &LoopState::new(1),
         request,
         Some(request),
-        Some(target_path.as_str()),
-    )
-    .expect("quoted literal content presence should use grep_text");
+        Some(&route.route_reason),
+        "fs_basic",
+        "grep_text",
+        json!({
+            "action": "grep_text",
+            "root": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+            "query": "NEEDLE_TOKEN_123"
+        }),
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let first = plan.steps[0]
-        .to_agent_action()
-        .expect("first step should be an action");
-    let args = expect_planned_call(&first, "fs_basic", "grep_text");
     assert_eq!(
         args.get("root").and_then(Value::as_str),
-        Some(target_path.as_str())
+        Some("scripts/nl_tests/fixtures/device_local/docs/release_checklist.md")
     );
     assert_eq!(
         args.get("query").and_then(Value::as_str),
@@ -390,86 +374,68 @@ fn quoted_literal_content_presence_uses_deterministic_grep_plan() {
 }
 
 #[test]
-fn selector_query_content_presence_uses_deterministic_grep_plan() {
-    let root = TempDirGuard::new("selector_query_content_presence");
-    let target = root.path.join("app.log");
-    fs::write(
-        &target,
-        "INFO boot\nERROR provider timeout\nINFO recovered\n",
-    )
-    .expect("write target");
-    let target_path = target.display().to_string();
-    let mut state = test_state_with_enabled_skills(&["fs_basic"]);
-    state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+fn selector_query_content_presence_preserves_planner_supplied_grep_query() {
+    let state = test_state_with_enabled_skills(&["fs_basic"]);
+    let mut route = base_route_result();
+    route.route_reason = "capability_ref=filesystem.grep_text".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = target_path.clone();
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md".to_string();
     route.route_reason =
-        "llm_semantic_contract_repair; selector_query=ERROR; locator_kind=path".to_string();
+        "capability_ref=filesystem.grep_text; selector_query=ERROR; locator_kind=path".to_string();
 
-    let plan = super::super::content_presence_query_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "list matching content lines",
-        Some(&route),
+        &route,
         &LoopState::new(1),
         "list matching content lines",
         Some("list matching content lines"),
-        Some(target_path.as_str()),
-    )
-    .expect("selector_query content presence should use grep_text");
+        Some(&route.route_reason),
+        "fs_basic",
+        "grep_text",
+        json!({
+            "action": "grep_text",
+            "root": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+            "query": "ERROR"
+        }),
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let first = plan.steps[0]
-        .to_agent_action()
-        .expect("first step should be an action");
-    let args = expect_planned_call(&first, "fs_basic", "grep_text");
     assert_eq!(
         args.get("root").and_then(Value::as_str),
-        Some(target_path.as_str())
+        Some("scripts/nl_tests/fixtures/device_local/docs/release_checklist.md")
     );
     assert_eq!(args.get("query").and_then(Value::as_str), Some("ERROR"));
 }
 
 #[test]
-fn contract_hint_hidden_entries_list_dir_includes_hidden_entries() {
+fn hidden_entries_preserves_planner_supplied_include_hidden_list_dir() {
     let state = test_state_with_enabled_skills(&["fs_basic"]);
     let mut route = base_route_result();
-    route.route_reason = "structured_contract_hint_fast_path; contract_hint_fast_path".into();
+    route.route_reason = "capability_ref=filesystem.list_dir".into();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::HiddenEntriesCheck;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = ".".to_string();
-    let request = "[CONTRACT_TEST_HINT]\nsemantic_kind=hidden_entries_check\npreferred_action_ref=fs_basic.list_dir\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "check hidden entries",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        request,
-        None,
-    )
-    .expect("hidden entries contract should use deterministic inventory");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "fs_basic");
-    assert_eq!(
-        plan.steps[0].args.get("action").and_then(Value::as_str),
-        Some("list_dir")
+        "check hidden entries",
+        Some("[CONTRACT_TEST_HINT]\nsemantic_kind=hidden_entries_check\npreferred_action_ref=fs_basic.list_dir\n[/CONTRACT_TEST_HINT]"),
+        Some(&route.route_reason),
+        "fs_basic",
+        "list_dir",
+        json!({"action": "list_dir", "path": ".", "include_hidden": true}),
     );
+
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
     assert_eq!(
-        plan.steps[0]
-            .args
-            .get("include_hidden")
-            .and_then(Value::as_bool),
+        args.get("include_hidden").and_then(Value::as_bool),
         Some(true)
     );
 }
@@ -741,20 +707,21 @@ fn contract_hint_process_basic_does_not_use_resolved_intent_as_process_filter() 
     route.output_contract.locator_hint.clear();
     let request = "[CONTRACT_TEST_HINT]\npreferred_action_ref=process_basic\n[/CONTRACT_TEST_HINT]";
 
-    let plan = contract_hint_preferred_action_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "check status",
         Some(&route),
         &LoopState::new(1),
-        request,
+        "check status",
+        Some("telegramd"),
+        Some(request),
         None,
-    )
-    .expect("service status contract hint should use process_basic fallback");
+        Vec::new(),
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "process_basic", "ps");
-    assert_eq!(args.get("filter").and_then(Value::as_str), Some("clawd"));
+    assert!(
+        normalized.is_empty(),
+        "contract hints and resolved_intent text must not synthesize process_basic.ps: {normalized:?}"
+    );
 }
 
 #[test]
@@ -1100,7 +1067,7 @@ fn command_output_summary_does_not_shortcut_to_explicit_file_read_plan() {
 }
 
 #[test]
-fn scratch_filesystem_mutation_uses_structured_fs_basic_plan() {
+fn scratch_filesystem_mutation_preserves_planner_supplied_lifecycle_actions() {
     let state = test_state_with_enabled_skills(&["fs_basic"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -1110,34 +1077,88 @@ fn scratch_filesystem_mutation_uses_structured_fs_basic_plan() {
     route.output_contract.locator_hint = "tmp/nl_codex_resume_smoke".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = filesystem_mutation_deterministic_plan_result(
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "fs_basic".to_string(),
+            args: json!({"action": "make_dir", "path": "tmp/nl_codex_resume_smoke"}),
+        },
+        AgentAction::CallSkill {
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "write_text",
+                "path": "tmp/nl_codex_resume_smoke/note.txt",
+                "content": "alpha\n"
+            }),
+        },
+        AgentAction::CallSkill {
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "append_text",
+                "path": "tmp/nl_codex_resume_smoke/note.txt",
+                "content": "beta\n"
+            }),
+        },
+        AgentAction::CallSkill {
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "tmp/nl_codex_resume_smoke/note.txt",
+                "start_line": 1,
+                "end_line": 20
+            }),
+        },
+        AgentAction::CallSkill {
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "remove_path",
+                "path": "tmp/nl_codex_resume_smoke",
+                "target_kind": "directory",
+                "recursive": true
+            }),
+        },
+    ];
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "scratch filesystem lifecycle",
         Some(&route),
         &loop_state,
-        "在 tmp/nl_codex_resume_smoke 创建目录，写 note.txt 内容 alpha，再追加 beta，读取确认两行都存在，然后删除这个临时目录；只汇总结构化结果。",
-    )
-    .expect("scratch path mutation should get a bounded fs_basic lifecycle plan");
+        "scratch filesystem lifecycle",
+        Some("在 tmp/nl_codex_resume_smoke 创建目录，写 note.txt 内容 alpha，再追加 beta，读取确认两行都存在，然后删除这个临时目录；只汇总结构化结果。"),
+        Some(&route.output_contract.locator_hint),
+        None,
+        actions,
+    );
 
-    assert_eq!(plan.steps.len(), 7);
-    let make_dir = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&make_dir, "fs_basic", "make_dir");
+    assert!(normalized.len() >= 5, "{normalized:?}");
+    let make_dir = normalized
+        .iter()
+        .find(|action| planned_call_is(action, "fs_basic", "make_dir"))
+        .expect("planner-supplied make_dir action should be preserved");
+    let args = expect_planned_call(make_dir, "fs_basic", "make_dir");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some("tmp/nl_codex_resume_smoke")
     );
-    let write = plan.steps[1].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&write, "fs_basic", "write_text");
+    let write_text = normalized
+        .iter()
+        .find(|action| planned_call_is(action, "fs_basic", "write_text"))
+        .expect("planner-supplied write_text action should be preserved");
+    let args = expect_planned_call(write_text, "fs_basic", "write_text");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some("tmp/nl_codex_resume_smoke/note.txt")
     );
     assert_eq!(args.get("content").and_then(Value::as_str), Some("alpha\n"));
-    let append = plan.steps[2].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&append, "fs_basic", "append_text");
+    let append_text = normalized
+        .iter()
+        .find(|action| planned_call_is(action, "fs_basic", "append_text"))
+        .expect("planner-supplied append_text action should be preserved");
+    let args = expect_planned_call(append_text, "fs_basic", "append_text");
     assert_eq!(args.get("content").and_then(Value::as_str), Some("beta\n"));
-    let remove = plan.steps[4].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&remove, "fs_basic", "remove_path");
+    let remove_path = normalized
+        .iter()
+        .find(|action| planned_call_is(action, "fs_basic", "remove_path"))
+        .expect("planner-supplied remove_path action should be preserved");
+    let args = expect_planned_call(remove_path, "fs_basic", "remove_path");
     assert_eq!(
         args.get("path").and_then(Value::as_str),
         Some("tmp/nl_codex_resume_smoke")
