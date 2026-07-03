@@ -177,8 +177,7 @@ fn content_excerpt_archive_member_read_is_not_rewritten_to_unpack() {
 }
 
 #[test]
-fn archive_unpack_contract_plans_direct_unpack_without_model_plan() {
-    let state = test_state_with_enabled_skills(&["archive_basic"]);
+fn archive_unpack_capability_ref_allows_planner_supplied_args_with_semantic_kind() {
     let mut route = base_route_result();
     route.route_reason = "capability_ref=archive.unpack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveUnpack;
@@ -188,32 +187,24 @@ fn archive_unpack_contract_plans_direct_unpack_without_model_plan() {
     route.output_contract.locator_hint =
         "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | tmp/contract_matrix_unpacked"
             .to_string();
-    let loop_state = LoopState::new(1);
 
-    let plan = archive_unpack_deterministic_plan_result(
-        "unpack archive",
-        &state,
+    let policy = crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(&route),
-        &loop_state,
+        "archive_basic",
+        &json!({
+            "action": "unpack",
+            "archive": "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
+            "dest": "tmp/contract_matrix_unpacked",
+        }),
     )
-    .expect("archive unpack deterministic plan");
+    .expect("archive.unpack capability ref should expose archive_basic.unpack");
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "archive_basic", "unpack");
-    assert_eq!(
-        args.get("archive").and_then(Value::as_str),
-        Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip")
-    );
-    assert_eq!(
-        args.get("dest").and_then(Value::as_str),
-        Some("tmp/contract_matrix_unpacked")
-    );
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert!(policy.action_matches_preferred(), "{policy:?}");
 }
 
 #[test]
-fn archive_unpack_capability_ref_plans_direct_unpack_without_semantic_kind() {
-    let state = test_state_with_enabled_skills(&["archive_basic"]);
+fn archive_unpack_capability_ref_allows_planner_supplied_args_without_semantic_kind() {
     let mut route = base_route_result();
     route.route_reason = "capability_ref=archive.unpack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::None;
@@ -223,32 +214,24 @@ fn archive_unpack_capability_ref_plans_direct_unpack_without_semantic_kind() {
     route.output_contract.locator_hint =
         "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | tmp/contract_matrix_unpacked"
             .to_string();
-    let loop_state = LoopState::new(1);
 
-    let plan = archive_unpack_deterministic_plan_result(
-        "unpack archive",
-        &state,
+    let policy = crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(&route),
-        &loop_state,
+        "archive_basic",
+        &json!({
+            "action": "unpack",
+            "archive": "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
+            "dest": "tmp/contract_matrix_unpacked",
+        }),
     )
-    .expect("archive unpack capability_ref should plan without semantic kind");
+    .expect("archive.unpack capability ref should work without ArchiveUnpack semantic kind");
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "archive_basic", "unpack");
-    assert_eq!(
-        args.get("archive").and_then(Value::as_str),
-        Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip")
-    );
-    assert_eq!(
-        args.get("dest").and_then(Value::as_str),
-        Some("tmp/contract_matrix_unpacked")
-    );
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert!(policy.action_matches_preferred(), "{policy:?}");
 }
 
 #[test]
-fn archive_pack_contract_plans_direct_pack_without_model_plan() {
-    let state = test_state_with_enabled_skills(&["archive_basic"]);
+fn archive_pack_capability_ref_allows_planner_supplied_args_with_semantic_kind() {
     let mut route = base_route_result();
     route.route_reason = "capability_ref=archive.pack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ArchivePack;
@@ -257,36 +240,25 @@ fn archive_pack_contract_plans_direct_pack_without_model_plan() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
         "scripts/skill_calls | tmp/nl_archive_case_en.zip".to_string();
-    let loop_state = LoopState::new(1);
 
-    let plan = archive_pack_deterministic_plan_result(
-        "pack archive",
-        &state,
+    let policy = crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(&route),
-        &loop_state,
-        "Zip scripts/skill_calls into tmp/nl_archive_case_en.zip",
-        Some("Zip scripts/skill_calls into tmp/nl_archive_case_en.zip"),
-        None,
+        "archive_basic",
+        &json!({
+            "action": "pack",
+            "source": "scripts/skill_calls",
+            "archive": "tmp/nl_archive_case_en.zip",
+            "format": "zip",
+        }),
     )
-    .expect("archive pack deterministic plan");
+    .expect("archive.pack capability ref should expose archive_basic.pack");
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "archive_basic", "pack");
-    assert_eq!(
-        args.get("source").and_then(Value::as_str),
-        Some("scripts/skill_calls")
-    );
-    assert_eq!(
-        args.get("archive").and_then(Value::as_str),
-        Some("tmp/nl_archive_case_en.zip")
-    );
-    assert_eq!(args.get("format").and_then(Value::as_str), Some("zip"));
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert!(policy.action_matches_preferred(), "{policy:?}");
 }
 
 #[test]
-fn archive_pack_capability_ref_plans_direct_pack_without_semantic_kind() {
-    let state = test_state_with_enabled_skills(&["archive_basic"]);
+fn archive_pack_capability_ref_allows_planner_supplied_args_without_semantic_kind() {
     let mut route = base_route_result();
     route.route_reason = "capability_ref=archive.pack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::None;
@@ -295,42 +267,30 @@ fn archive_pack_capability_ref_plans_direct_pack_without_semantic_kind() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
         "scripts/skill_calls | tmp/nl_archive_case_en.zip".to_string();
-    let loop_state = LoopState::new(1);
 
-    let plan = archive_pack_deterministic_plan_result(
-        "pack archive",
-        &state,
+    let policy = crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(&route),
-        &loop_state,
-        "Zip scripts/skill_calls into tmp/nl_archive_case_en.zip",
-        Some("Zip scripts/skill_calls into tmp/nl_archive_case_en.zip"),
-        None,
+        "archive_basic",
+        &json!({
+            "action": "pack",
+            "source": "scripts/skill_calls",
+            "archive": "tmp/nl_archive_case_en.zip",
+            "format": "zip",
+        }),
     )
-    .expect("archive pack capability_ref should plan without semantic kind");
+    .expect("archive.pack capability ref should work without ArchivePack semantic kind");
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "archive_basic", "pack");
-    assert_eq!(
-        args.get("source").and_then(Value::as_str),
-        Some("scripts/skill_calls")
-    );
-    assert_eq!(
-        args.get("archive").and_then(Value::as_str),
-        Some("tmp/nl_archive_case_en.zip")
-    );
-    assert_eq!(args.get("format").and_then(Value::as_str), Some("zip"));
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert!(policy.action_matches_preferred(), "{policy:?}");
 }
 
 #[test]
-fn filesystem_mutation_archive_target_plans_archive_pack_from_locator_tokens() {
+fn filesystem_mutation_archive_target_capability_ref_allows_pack_policy() {
     let root = TempDirGuard::new("filesystem_mutation_archive_pack");
     fs::create_dir_all(root.path.join("scripts/skill_calls")).expect("create source dir");
     fs::create_dir_all(root.path.join("tmp")).expect("create tmp dir");
     let archive_path = root.path.join("tmp/nl_archive_case_en.zip");
     let archive_path_text = archive_path.display().to_string();
-    let mut state = test_state_with_enabled_skills(&["archive_basic"]);
-    state.skill_rt.workspace_root = root.path.clone();
     let mut route = base_route_result();
     route.route_reason = "capability_ref=archive.pack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
@@ -341,30 +301,21 @@ fn filesystem_mutation_archive_target_plans_archive_pack_from_locator_tokens() {
     route.resolved_intent = format!(
         "Zip the scripts/skill_calls directory into {archive_path_text} and report success"
     );
-    let loop_state = LoopState::new(1);
 
-    let plan = archive_pack_deterministic_plan_result(
-        "pack archive",
-        &state,
+    let policy = crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(&route),
-        &loop_state,
-        "Zip scripts/skill_calls into tmp/nl_archive_case_en.zip",
-        Some("Zip scripts/skill_calls into tmp/nl_archive_case_en.zip"),
-        Some(&archive_path_text),
+        "archive_basic",
+        &json!({
+            "action": "pack",
+            "source": "scripts/skill_calls",
+            "archive": archive_path_text,
+            "format": "zip",
+        }),
     )
-    .expect("archive pack fallback deterministic plan");
+    .expect("archive.pack capability ref should allow planner-supplied filesystem mutation args");
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "archive_basic", "pack");
-    assert_eq!(
-        args.get("source").and_then(Value::as_str),
-        Some("scripts/skill_calls")
-    );
-    assert_eq!(
-        args.get("archive").and_then(Value::as_str),
-        Some(archive_path_text.as_str())
-    );
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert!(policy.action_matches_preferred(), "{policy:?}");
 }
 
 #[test]
@@ -1228,12 +1179,13 @@ fn direct_answer_config_contract_preserves_config_edit_plan() {
 }
 
 #[test]
-fn rustclaw_config_problem_validation_rewrites_to_guard_config() {
+fn rustclaw_config_guard_capability_ref_validation_rewrites_to_guard_config() {
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=config.guard_rustclaw_config".to_string();
     route.resolved_intent =
         "Validate the selected RustClaw config with semantic guard profile.".to_string();
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
     let actions = vec![AgentAction::CallTool {
