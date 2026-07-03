@@ -1,10 +1,10 @@
 use tracing::info;
 
 use super::{
-    ContractRepairReport, IntentNormalizerOutput, TargetTaskPolicy, TurnAnalysis, TurnType,
     append_route_reason, bare_path_only_input_can_fill_active_observable_task,
     execution_finalize_style_for_contract, is_bare_path_only_input_for_clarify,
     push_unique_repair_code, route_trace_record, structured_execution_signal_for_effective_route,
+    ContractRepairReport, IntentNormalizerOutput, TargetTaskPolicy, TurnAnalysis, TurnType,
 };
 use crate::{
     ActFinalizeStyle, FirstLayerDecision, IntentOutputContract, ResumeBehavior, ScheduleKind,
@@ -119,6 +119,14 @@ pub(super) fn build_normalizer_output_with_final_gate(
     let attachment_processing_required = turn_analysis
         .as_ref()
         .is_some_and(|analysis| analysis.attachment_processing_required);
+    let boundary_envelope = crate::intent_router::BoundaryEnvelope::from_request(
+        req.trim(),
+        schedule_intent.clone(),
+        attachment_processing_required,
+        &output_contract,
+        turn_analysis.as_ref(),
+        resume_behavior,
+    );
     info!(
         "{} intent_normalizer_route_trace task_id={} owner_layer={} reason_code={} outcome={} route_trace_decision={} needs_clarify={} output_contract_ref={} repair_codes={} repair_classes={}",
         crate::highlight_tag("routing"),
@@ -133,7 +141,7 @@ pub(super) fn build_normalizer_output_with_final_gate(
         route_trace_record.repair_classes.join(","),
     );
     let output = IntentNormalizerOutput {
-        raw_user_request: req.trim().to_string(),
+        boundary_envelope,
         resolved_user_intent,
         resume_behavior,
         schedule_kind,
@@ -151,7 +159,6 @@ pub(super) fn build_normalizer_output_with_final_gate(
         route_trace_decision: legacy_normalizer_decision_eff,
         execution_finalize_style: execution_finalize_style_eff,
         turn_analysis,
-        attachment_processing_required,
         fallback_source: None,
         route_trace_record,
     };
