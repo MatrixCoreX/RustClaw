@@ -87,7 +87,7 @@ fn capability_resolution_record_covers_resolved_mapping() {
         "filesystem.list_entries",
         json!({"path": "."}),
     );
-    let action = action.expect("static filesystem capability should resolve");
+    let action = action.expect("registry filesystem capability should resolve");
     match action {
         AgentAction::CallTool { tool, .. } => assert_eq!(tool, "fs_basic"),
         AgentAction::CallSkill { skill, .. } => assert_eq!(skill, "fs_basic"),
@@ -115,7 +115,7 @@ fn workspace_registry_requires_explicit_bare_capability_action() {
         resolve_capability_action_with_record_for_state(&state, "config_basic", json!({}));
 
     assert!(action.is_none());
-    assert_eq!(record.reason_code, "capability_resolver_unresolved");
+    assert_eq!(record.reason_code, "capability_unavailable");
     assert_eq!(record.source, "none");
     assert_eq!(record.capability_ref, "config_basic");
 }
@@ -388,7 +388,7 @@ fn registry_resolution_preserves_media_poll_action_arg() {
 }
 
 #[test]
-fn registry_resolves_legacy_machine_capability_aliases_before_static_fallback() {
+fn registry_resolves_legacy_machine_capability_aliases_without_static_fallback() {
     let state = state_with_workspace_registry();
     let cases = [
         ("system.run_cmd", json!({"command": "pwd"}), "skill:run_cmd"),
@@ -471,7 +471,7 @@ fn registry_resolves_legacy_machine_capability_aliases_before_static_fallback() 
         assert!(action.is_some(), "{capability} should resolve");
         assert_eq!(
             record.reason_code, "capability_resolver_registry_mapping_resolved",
-            "{capability} should resolve through registry before static fallback"
+            "{capability} should resolve through registry without static fallback"
         );
         assert_eq!(record.source, "registry");
         assert_eq!(record.capability_ref, capability);
@@ -486,7 +486,7 @@ fn capability_resolution_record_covers_unresolved_mapping() {
         resolve_capability_action_with_record_for_state(&state, "unknown.example", json!({}));
     assert!(action.is_none());
     assert_eq!(record.owner_layer, "capability_resolver");
-    assert_eq!(record.reason_code, "capability_resolver_unresolved");
+    assert_eq!(record.reason_code, "capability_unavailable");
     assert_eq!(record.outcome, "unresolved");
     assert_eq!(record.source, "none");
     assert_eq!(record.capability_ref, "unknown.example");

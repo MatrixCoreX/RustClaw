@@ -38,7 +38,7 @@ impl CapabilityResolutionRecord {
     fn unresolved(capability_ref: impl Into<String>) -> Self {
         Self {
             owner_layer: "capability_resolver",
-            reason_code: "capability_resolver_unresolved",
+            reason_code: "capability_unavailable",
             outcome: "unresolved",
             source: "none",
             capability_ref: capability_ref.into(),
