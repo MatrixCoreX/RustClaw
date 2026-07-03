@@ -50,9 +50,8 @@ pub(crate) fn evidence_coverage_for_route(
         &mut observed_canonical,
     );
     let effective_output_contract = route.effective_output_contract();
-    let evidence_expression = crate::evidence_policy::bundled_contract_matrix()
-        .and_then(|matrix| matrix.match_output_contract(&effective_output_contract))
-        .map(|matched| matched.evidence_expression());
+    let evidence_expression =
+        crate::evidence_policy::evidence_expression_for_output_contract(&effective_output_contract);
     let missing_evidence = evidence_expression
         .as_ref()
         .map(|expression| missing_evidence_for_expression(expression, &observed_canonical))
