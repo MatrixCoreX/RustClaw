@@ -449,6 +449,7 @@ fn directory_entry_groups_selector_include_hidden_reaches_list_dir_args() {
     let mut state = test_state_with_enabled_skills(&["fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = base_route_result();
+    route.route_reason = "capability_ref=filesystem.list_dir".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
@@ -462,20 +463,23 @@ fn directory_entry_groups_selector_include_hidden_reaches_list_dir_args() {
         .include_hidden = Some(true);
     route.output_contract.self_extension.list_selector.limit = Some(3);
 
-    let plan = directory_entry_groups_auto_locator_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "inspect current workspace entries with hidden entries included",
-        Some(&route),
+        &route,
         &LoopState::new(1),
-        "inspect current workspace entries",
-        None,
-        Some(root_path.as_str()),
-    )
-    .expect("directory entry groups plan should use deterministic inventory");
+        "inspect current workspace entries with hidden entries included",
+        Some("inspect current workspace entries"),
+        Some(&route.route_reason),
+        "fs_basic",
+        "list_dir",
+        json!({
+            "action": "list_dir",
+            "path": root_path,
+            "include_hidden": true,
+            "max_entries": 3
+        }),
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "fs_basic", "list_dir");
     assert_eq!(
         args.get("include_hidden").and_then(Value::as_bool),
         Some(true)
@@ -1053,17 +1057,21 @@ fn command_output_summary_does_not_shortcut_to_explicit_file_read_plan() {
     route.output_contract.locator_hint = "tmp/nl_codex_resume_smoke/note.txt".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = content_excerpt_explicit_file_targets_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "filesystem mutation result should not be read-only shortcut",
         Some(&route),
         &loop_state,
-        "tmp/nl_codex_resume_smoke/note.txt",
+        "filesystem mutation result should not be read-only shortcut",
+        Some("tmp/nl_codex_resume_smoke/note.txt"),
         None,
         None,
+        Vec::new(),
     );
 
-    assert!(plan.is_none());
+    assert!(
+        normalized.is_empty(),
+        "command-output summary routes must not synthesize fs_basic.read_text_range without planner action: {normalized:?}"
+    );
 }
 
 #[test]
@@ -1435,44 +1443,27 @@ fn service_status_generic_status_without_machine_target_defers_to_planner() {
 }
 
 #[test]
-fn structured_dry_run_response_emits_task_cancel_machine_contract() {
+fn structured_dry_run_route_does_not_synthesize_response_without_planner_action() {
     let mut route = base_route_result();
     route.route_reason =
         "capability_ref=task_control.cancel_one dry_run=true would_mutate=false".to_string();
     route.resolved_intent = "task_control.cancel_one action=cancel_one".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = structured_dry_run_response_deterministic_plan_result(
-        "dry-run task cancel",
+    let normalized = normalize_planned_actions_with_original_and_context(
+        &test_state_with_enabled_skills(&["task_control"]),
         Some(&route),
         &loop_state,
-    )
-    .expect("machine dry-run cancel tokens should produce structured response");
+        "dry-run task cancel",
+        Some("dry-run task cancel"),
+        Some(&route.route_reason),
+        None,
+        Vec::new(),
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let AgentAction::Respond { content } = action else {
-        panic!("expected structured respond action, got {action:?}");
-    };
-    let value: Value = serde_json::from_str(&content).expect("structured JSON response");
-    assert_eq!(
-        value.get("contract_marker").and_then(Value::as_str),
-        Some("task_control_cancel_dry_run")
-    );
-    assert_eq!(
-        value.get("would_mutate").and_then(Value::as_bool),
-        Some(false)
-    );
-    assert_eq!(
-        value
-            .pointer("/result_projection_fields/can_cancel")
-            .and_then(Value::as_bool),
-        Some(false)
-    );
-    assert_eq!(
-        value
-            .pointer("/execution_policy/call_task_cancel_api")
-            .and_then(Value::as_bool),
-        Some(false)
+    assert!(
+        normalized.is_empty(),
+        "dry-run route machine tokens must not synthesize a response without planner action: {normalized:?}"
     );
 }
 
@@ -1840,6 +1831,7 @@ fn archive_auto_locator_plans_list_instead_of_text_read() {
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = "Inspect the archive contents without unpacking it.".to_string();
+    route.route_reason = "capability_ref=archive.list".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
@@ -1857,25 +1849,24 @@ fn archive_auto_locator_plans_list_instead_of_text_read() {
         "archive files must not be planned as text reads"
     );
 
-    let plan = archive_list_auto_locator_deterministic_plan_result(
-        "Inspect the archive",
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        Some(&route),
+        &route,
         &loop_state,
-        Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"),
-    )
-    .expect("archive list plan");
-
-    assert_eq!(plan.steps.len(), 3);
-    let step = &plan.steps[0];
-    assert_eq!(step.action_type, "call_skill");
-    assert_eq!(step.skill, "archive_basic");
-    assert_eq!(
-        step.args.get("action").and_then(Value::as_str),
-        Some("list")
+        "Inspect the archive",
+        Some("Inspect the archive contents without unpacking it."),
+        Some(&route.route_reason),
+        "archive_basic",
+        "list",
+        json!({
+            "action": "list",
+            "archive": "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"
+        }),
     );
+
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("list"));
     assert_eq!(
-        step.args.get("archive").and_then(Value::as_str),
+        args.get("archive").and_then(Value::as_str),
         Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip")
     );
 }
@@ -1897,19 +1888,24 @@ fn archive_read_contract_plans_direct_member_read() {
         "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | notes.txt".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = archive_read_deterministic_plan_result(
-        "read archive member",
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        Some(&route),
+        &route,
         &loop_state,
-        Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"),
-        "Read member notes.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
-    )
-    .expect("archive read plan");
+        "read archive member",
+        Some(
+            "Read member notes.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
+        ),
+        Some(&route.route_reason),
+        "archive_basic",
+        "read",
+        json!({
+            "action": "read",
+            "archive": "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
+            "member": "notes.txt"
+        }),
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "archive_basic", "read");
     assert_eq!(
         args.get("archive").and_then(Value::as_str),
         Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip")
@@ -1935,18 +1931,22 @@ fn archive_read_contract_ignores_non_archive_auto_locator() {
     route.output_contract.locator_hint = format!("{archive} | notes.txt");
     let loop_state = LoopState::new(1);
 
-    let plan = archive_read_deterministic_plan_result(
-        "read archive member",
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        Some(&route),
+        &route,
         &loop_state,
-        Some("/home/guagua/rustclaw/tmp/contract_matrix_unpacked/notes.txt"),
-        &format!("Read member notes.txt from {archive}"),
-    )
-    .expect("archive read plan should fall back to contract locator");
+        "read archive member",
+        Some(&format!("Read member notes.txt from {archive}")),
+        Some(&route.route_reason),
+        "archive_basic",
+        "read",
+        json!({
+            "action": "read",
+            "archive": archive,
+            "member": "notes.txt"
+        }),
+    );
 
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "archive_basic", "read");
     assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
     assert_eq!(
         args.get("member").and_then(Value::as_str),
