@@ -16,6 +16,9 @@ pub(crate) use crate::contract_matrix::{
     FinalAnswerShapeClass,
 };
 
+#[cfg(test)]
+pub(crate) use crate::contract_matrix::action_policy_for_output_contract;
+
 pub(crate) use crate::task_contract::{
     TaskDeliveryShape as EvidenceDeliveryShape, TaskOperation as EvidenceOperation,
     TaskTargetObject as EvidenceTargetObject,

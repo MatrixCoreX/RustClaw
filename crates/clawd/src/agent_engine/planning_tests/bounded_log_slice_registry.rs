@@ -64,7 +64,7 @@ fn log_content_summary_allows_bounded_slice_with_listing_evidence() {
 }
 
 #[test]
-fn concrete_log_file_slice_locator_builds_listing_and_read_plan() {
+fn concrete_log_file_slice_contract_allows_listing_and_read_evidence() {
     let temp = TempDirGuard::new("concrete_log_file_slice_locator");
     let logs_dir = temp.path.join("logs");
     fs::create_dir_all(&logs_dir).expect("mkdir logs");
@@ -81,25 +81,30 @@ fn concrete_log_file_slice_locator_builds_listing_and_read_plan() {
     route.output_contract.locator_hint = log_path.clone();
     route.resolved_intent = "slice_mode=tail slice_n=20".to_string();
 
-    let plan = content_excerpt_summary_directory_log_slice_deterministic_plan_result(
-        "observe bounded log slice",
-        Some(&route),
-        &LoopState::new(1),
-        Some(&log_path),
+    let contract = route.effective_output_contract();
+    let find_policy = crate::evidence_policy::action_policy_for_output_contract(
+        Some(&contract),
+        "fs_basic",
+        &json!({
+            "action": "find_entries",
+            "path": logs_dir.display().to_string(),
+            "target_kind": "file",
+        }),
     )
-    .expect("concrete log locator should build structured observation plan");
+    .expect("content excerpt contract should allow listing evidence");
+    assert!(find_policy.is_allowed(), "{find_policy:?}");
 
-    let find_action = plan.steps[0].to_agent_action().unwrap();
-    let find_args = expect_planned_call(&find_action, "fs_basic", "find_entries");
-    assert_eq!(
-        find_args.get("target_kind").and_then(Value::as_str),
-        Some("file")
-    );
-    let read_action = plan.steps[1].to_agent_action().unwrap();
-    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
-    assert_eq!(
-        read_args.get("path").and_then(Value::as_str),
-        Some(log_path.as_str())
-    );
-    assert_eq!(read_args.get("mode").and_then(Value::as_str), Some("tail"));
+    let read_policy = crate::evidence_policy::action_policy_for_output_contract(
+        Some(&contract),
+        "fs_basic",
+        &json!({
+            "action": "read_text_range",
+            "path": log_path,
+            "mode": "tail",
+            "n": 20,
+        }),
+    )
+    .expect("content excerpt contract should allow bounded read evidence");
+    assert!(read_policy.is_allowed(), "{read_policy:?}");
+    assert!(read_policy.action_matches_preferred(), "{read_policy:?}");
 }
