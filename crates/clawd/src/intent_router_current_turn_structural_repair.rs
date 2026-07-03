@@ -243,7 +243,6 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     req: &str,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     workspace_root: &Path,
-    _answer_candidate: &str,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
 ) -> Option<&'static str> {

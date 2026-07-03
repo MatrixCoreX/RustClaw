@@ -111,7 +111,6 @@ fn archive_pack_pair_repairs_generated_file_delivery_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -151,7 +150,6 @@ fn archive_pack_pair_without_capability_ref_does_not_select_archive_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -186,7 +184,6 @@ fn archive_pair_does_not_treat_generated_delivery_semantic_kind_as_delivery_cont
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -223,7 +220,6 @@ fn archive_pack_pair_repairs_scalar_path_only_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -266,7 +262,6 @@ fn archive_unpack_pair_repairs_generated_file_delivery_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -311,7 +306,6 @@ fn archive_unpack_pair_repairs_generic_path_content_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -351,7 +345,6 @@ fn archive_unpack_pair_repairs_filesystem_mutation_drift_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -389,7 +382,6 @@ fn archive_unpack_pair_repairs_content_excerpt_drift_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -439,7 +431,6 @@ fn archive_unpack_pair_repairs_policy_suffix_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -496,7 +487,6 @@ fn archive_read_member_repairs_content_excerpt_drift_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -548,7 +538,6 @@ fn archive_read_member_repair_preserves_archive_sqlite_compound_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -579,7 +568,6 @@ fn archive_read_member_pair_is_not_treated_as_unpack_destination() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -614,7 +602,6 @@ fn archive_read_member_repairs_archive_unpack_drift_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -650,7 +637,6 @@ fn archive_list_single_archive_repairs_archive_unpack_drift_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -690,7 +676,6 @@ fn archive_list_single_archive_repairs_file_names_drift_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -734,7 +719,6 @@ fn archive_list_single_archive_repairs_directory_entry_groups_without_locator_hi
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -775,7 +759,6 @@ fn archive_read_nested_member_path_is_not_unpack_destination() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -811,7 +794,6 @@ fn archive_read_member_repair_requires_member_candidate() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -846,7 +828,6 @@ fn archive_pair_does_not_repair_plain_observation_contract() {
         req,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );

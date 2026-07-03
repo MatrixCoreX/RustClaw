@@ -24,7 +24,6 @@ fn observed_context_summary_followup_does_not_force_fresh_evidence() {
         "in one sentence tell me if anything looks abnormal",
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         Some(TurnType::TaskAppend),
         Some(TargetTaskPolicy::ReuseActive),
     );
@@ -49,7 +48,6 @@ fn explicit_locator_summary_still_requires_fresh_evidence() {
         "summarize app.log briefly",
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         Some(TurnType::TaskAppend),
         Some(TargetTaskPolicy::ReuseActive),
     );
@@ -217,7 +215,6 @@ fn media_poll_machine_tokens_override_service_status_contract() {
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -256,7 +253,6 @@ fn media_generation_machine_tokens_build_path_report_contract_without_legacy_pre
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -291,7 +287,6 @@ fn media_generation_path_tokens_force_evidence_for_generic_contract() {
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -326,7 +321,6 @@ fn media_generation_machine_tokens_repair_generic_contract() {
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -365,7 +359,6 @@ fn media_generation_machine_tokens_override_filesystem_mutation_contract() {
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -399,7 +392,6 @@ fn structural_config_field_value_repairs_to_config_mutation_contract() {
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -437,7 +429,6 @@ fn structural_config_field_value_without_capability_ref_does_not_select_config_m
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -468,7 +459,6 @@ fn structural_config_field_value_repairs_direct_misroute_from_current_request() 
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -503,7 +493,6 @@ fn structural_config_field_value_repairs_filesystem_mutation_to_config_mutation_
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -541,7 +530,6 @@ fn structural_config_field_value_overrides_risk_misroute_to_config_mutation_cont
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -577,7 +565,6 @@ fn structural_config_field_value_overrides_failed_step_misroute_to_config_mutati
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -616,7 +603,6 @@ fn config_mutation_contract_repairs_missing_locator_from_current_request() {
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
@@ -654,7 +640,6 @@ fn structural_config_field_without_value_does_not_repair_to_mutation() {
         request,
         &surface,
         std::path::Path::new("/workspace"),
-        "",
         None,
         None,
     );
