@@ -259,6 +259,15 @@ fn route_result_drops_backend_model_display_name_hint() {
     );
     let route = super::route_result_from_normalizer(&state, &task, &out);
     assert_eq!(route.agent_display_name_hint, "MiMo-v2.5-pro");
+
+    let out = super::normalizer_output_from_fallback(
+        "who are you",
+        "test_fallback",
+        identity_decision("Mimosa", false),
+        None,
+    );
+    let route = super::route_result_from_normalizer(&state, &task, &out);
+    assert_eq!(route.agent_display_name_hint, "Mimosa");
 }
 
 #[test]
