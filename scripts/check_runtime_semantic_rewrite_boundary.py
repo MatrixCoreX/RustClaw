@@ -222,6 +222,38 @@ BOUNDARY_PREFLIGHT_FORBIDDEN_BLOCK_PATTERNS: tuple[
         ),
     ),
 )
+WORKER_LOOP_BOUNDARY_DEFERRAL_TOKENS: tuple[str, ...] = (
+    "bare_topic_context_expansion",
+    "unbound_existing_file_delivery",
+    "directory_file_delivery_without_structured_selection",
+    "deictic_bare_locator",
+)
+WORKER_LOOP_BOUNDARY_REASON_CODES: tuple[str, ...] = (
+    "unbound_existing_file_delivery_deferred_to_agent_loop",
+    "directory_file_delivery_deferred_to_agent_loop",
+    "deictic_bare_locator_deferred_to_agent_loop",
+)
+WORKER_LOOP_BOUNDARY_FORBIDDEN_BLOCK_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "worker_loop_boundary_direct_candidate_push",
+        re.compile(
+            r"(?:push_pre_loop_clarify_candidate\s*\(\s*&mut\s+pre_loop_clarify_candidates\s*,"
+            r"\s*|pre_loop_clarify_candidates\.push\s*\()\s*"
+            rf'"(?:{quoted_token_alternation(WORKER_LOOP_BOUNDARY_DEFERRAL_TOKENS)})"',
+            re.DOTALL,
+        ),
+    ),
+    (
+        "worker_loop_boundary_direct_guard_reason",
+        re.compile(
+            r"log_route_guard_record\s*\([^;]*?"
+            rf'"(?:{quoted_token_alternation(WORKER_LOOP_BOUNDARY_REASON_CODES)})"',
+            re.DOTALL,
+        ),
+    ),
+)
 
 ROUTE_RESULT_RAW_SEMANTIC_ACCESS = re.compile(
     r"\b(?:route|route_result|execution_route_result)\.output_contract\.semantic_kind\b"
@@ -511,6 +543,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_contract_repair_judge_boundary())
     findings.extend(scan_contract_repair_loop_observation_boundary())
     findings.extend(scan_boundary_preflight_deferral_typing())
+    findings.extend(scan_worker_loop_boundary_deferral_typing())
     findings.extend(scan_post_route_boundary_candidate_typing())
     findings.extend(scan_prompt_layer_ordinary_semantic_tokens())
     findings.extend(scan_planner_prompt_legacy_semantic_kind_keys())
@@ -1206,6 +1239,34 @@ def scan_boundary_preflight_deferral_typing_text(
             )
         )
     for kind, pattern in BOUNDARY_PREFLIGHT_FORBIDDEN_BLOCK_PATTERNS:
+        for match in pattern.finditer(text):
+            line_no = text[: match.start()].count("\n") + 1
+            findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
+    return findings
+
+
+def scan_worker_loop_boundary_deferral_typing() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_FILE)
+    return scan_worker_loop_boundary_deferral_typing_text(
+        rel_path,
+        ASK_PIPELINE_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_worker_loop_boundary_deferral_typing_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    if "enum WorkerLoopBoundaryDeferral" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "worker_loop_boundary_deferral_enum_missing",
+                "WorkerLoopBoundaryDeferral enum is required for main worker boundary deferrals",
+            )
+        )
+    for kind, pattern in WORKER_LOOP_BOUNDARY_FORBIDDEN_BLOCK_PATTERNS:
         for match in pattern.finditer(text):
             line_no = text[: match.start()].count("\n") + 1
             findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
@@ -2824,6 +2885,33 @@ def run_self_test() -> int:
         "fn f(item: BoundaryPreflightDeferral) { log_route_guard_record(task, \"worker_locator_guard\", item.reason_code(), \"deferred\", before, route); }\n",
     )
     assert not scan_boundary_preflight_deferral_typing()
+    blocked_worker_loop_boundary_string = scan_worker_loop_boundary_deferral_typing_text(
+        "crates/clawd/src/worker/ask_pipeline.rs",
+        "enum WorkerLoopBoundaryDeferral {}\n"
+        'pre_loop_clarify_candidates.push("bare_topic_context_expansion");\n'
+        'push_pre_loop_clarify_candidate(&mut pre_loop_clarify_candidates, "deictic_bare_locator");\n'
+        'log_route_guard_record(task, "worker_locator_guard", "directory_file_delivery_deferred_to_agent_loop", "deferred", before, route);\n',
+    )
+    assert {
+        "worker_loop_boundary_direct_candidate_push",
+        "worker_loop_boundary_direct_guard_reason",
+    }.issubset({item.kind for item in blocked_worker_loop_boundary_string})
+    missing_worker_loop_boundary_enum = scan_worker_loop_boundary_deferral_typing_text(
+        "crates/clawd/src/worker/ask_pipeline.rs",
+        'pre_loop_clarify_candidates.push("x");\n',
+    )
+    assert (
+        missing_worker_loop_boundary_enum
+        and missing_worker_loop_boundary_enum[0].kind
+        == "worker_loop_boundary_deferral_enum_missing"
+    )
+    assert not scan_worker_loop_boundary_deferral_typing_text(
+        "crates/clawd/src/worker/ask_pipeline.rs",
+        "enum WorkerLoopBoundaryDeferral {}\n"
+        "impl WorkerLoopBoundaryDeferral { fn observation_token(self) -> &'static str { \"bare_topic_context_expansion\" } }\n"
+        "fn f(item: WorkerLoopBoundaryDeferral) { log_route_guard_record(task, \"worker_locator_guard\", item.guard_reason_code().unwrap_or(\"\"), \"deferred\", before, route); }\n",
+    )
+    assert not scan_worker_loop_boundary_deferral_typing()
     blocked_post_route_candidate_string = scan_post_route_boundary_candidate_typing_text(
         "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
         "enum BoundaryClarifyCandidate {}\n"
