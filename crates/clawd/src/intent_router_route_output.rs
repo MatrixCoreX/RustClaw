@@ -351,7 +351,6 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
         output_contract: decision.output_contract,
         execution_recipe_hint: None,
         execution_recipe_plan_hint: None,
-        route_trace_decision: legacy_normalizer_decision,
         execution_finalize_style,
         turn_analysis,
         fallback_source,

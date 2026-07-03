@@ -1274,6 +1274,11 @@ def scan_boundary_envelope_rust_type_text(rel_path: str, text: str) -> list[Find
                 "intent_normalizer_output_attachment_required_field",
                 "IntentNormalizerOutput must not keep attachment_processing_required after BoundaryEnvelope projection",
             ),
+            (
+                "route_trace_decision",
+                "intent_normalizer_output_route_trace_decision_field",
+                "IntentNormalizerOutput must not duplicate route_trace_decision outside RouteTraceRecord",
+            ),
         ):
             field_offset = normalizer_output_body.find(field)
             if field_offset >= 0:
@@ -3282,6 +3287,15 @@ def run_self_test() -> int:
     assert any(
         item.kind == "intent_normalizer_output_attachment_required_field"
         for item in blocked_normalizer_output_attachment_field
+    )
+    blocked_normalizer_output_route_trace_field = scan_boundary_envelope_rust_type_text(
+        "crates/clawd/src/intent_router_output_types.rs",
+        "struct IntentNormalizerOutput {\n    route_trace_decision: FirstLayerDecision,\n}\n"
+        "struct BoundaryEnvelope {\n    raw_chars: usize,\n}\n",
+    )
+    assert any(
+        item.kind == "intent_normalizer_output_route_trace_decision_field"
+        for item in blocked_normalizer_output_route_trace_field
     )
     assert not scan_boundary_envelope_rust_type_text(
         "crates/clawd/src/intent_router_output_types.rs",

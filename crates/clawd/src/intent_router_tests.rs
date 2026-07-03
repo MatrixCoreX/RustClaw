@@ -308,7 +308,7 @@ fn route_result_uses_machine_execution_signal_not_legacy_normalizer_hint() {
         decision,
         None,
     );
-    out.route_trace_decision = FirstLayerDecision::DirectAnswer;
+    out.route_trace_record.route_trace_decision = FirstLayerDecision::DirectAnswer;
 
     let route = super::route_result_from_normalizer(&state, &task, &out);
 
@@ -357,7 +357,7 @@ fn route_result_ignores_legacy_planner_hint_without_machine_execution_signal() {
     };
     let mut out =
         super::normalizer_output_from_fallback("plain discussion", "test_fallback", decision, None);
-    out.route_trace_decision = FirstLayerDecision::PlannerExecute;
+    out.route_trace_record.route_trace_decision = FirstLayerDecision::PlannerExecute;
 
     let route = super::route_result_from_normalizer(&state, &task, &out);
 

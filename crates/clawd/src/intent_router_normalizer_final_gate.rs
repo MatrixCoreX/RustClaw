@@ -156,7 +156,6 @@ pub(super) fn build_normalizer_output_with_final_gate(
         output_contract,
         execution_recipe_hint,
         execution_recipe_plan_hint,
-        route_trace_decision: legacy_normalizer_decision_eff,
         execution_finalize_style: execution_finalize_style_eff,
         turn_analysis,
         fallback_source: None,
