@@ -955,7 +955,7 @@ pub(super) fn file_facts_auto_locator_observation_plan(
         return None;
     }
     if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
-        && crate::task_contract::target_locators_for_route(route).len() > 1
+        && crate::evidence_policy::target_locators_for_route(route).len() > 1
     {
         return None;
     }
