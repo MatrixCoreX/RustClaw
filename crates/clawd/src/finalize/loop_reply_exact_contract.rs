@@ -792,7 +792,7 @@ pub(super) fn route_prefers_observed_answer(route: &crate::RouteResult) -> bool 
     if route_path_locator_plain_act_allows_observed_listing(route) {
         return true;
     }
-    let required_evidence_fields = crate::task_contract::required_evidence_fields_for_route(route);
+    let required_evidence_fields = crate::evidence_policy::required_evidence_fields_for_route(route);
     if required_evidence_fields
         .iter()
         .any(|field| field == "content_excerpt")
@@ -802,19 +802,19 @@ pub(super) fn route_prefers_observed_answer(route: &crate::RouteResult) -> bool 
     if required_evidence_fields.is_empty() {
         return false;
     }
-    let delivery_shape = crate::task_contract::delivery_shape_for_route(route);
-    let operation = crate::task_contract::operation_for_route(route);
+    let delivery_shape = crate::evidence_policy::delivery_shape_for_route(route);
+    let operation = crate::evidence_policy::operation_for_route(route);
     match delivery_shape {
-        crate::task_contract::TaskDeliveryShape::Raw
-        | crate::task_contract::TaskDeliveryShape::List
-        | crate::task_contract::TaskDeliveryShape::File => true,
-        crate::task_contract::TaskDeliveryShape::OneSentence
-        | crate::task_contract::TaskDeliveryShape::Summary => matches!(
+        crate::evidence_policy::EvidenceDeliveryShape::Raw
+        | crate::evidence_policy::EvidenceDeliveryShape::List
+        | crate::evidence_policy::EvidenceDeliveryShape::File => true,
+        crate::evidence_policy::EvidenceDeliveryShape::OneSentence
+        | crate::evidence_policy::EvidenceDeliveryShape::Summary => matches!(
             operation,
-            crate::task_contract::TaskOperation::Inspect
-                | crate::task_contract::TaskOperation::List
-                | crate::task_contract::TaskOperation::Count
-                | crate::task_contract::TaskOperation::Run
+            crate::evidence_policy::EvidenceOperation::Inspect
+                | crate::evidence_policy::EvidenceOperation::List
+                | crate::evidence_policy::EvidenceOperation::Count
+                | crate::evidence_policy::EvidenceOperation::Run
         ),
     }
 }
