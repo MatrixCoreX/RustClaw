@@ -240,10 +240,31 @@ fn resolved_intent_has_structural_value(resolved_intent: &str, value: &str) -> b
 
 fn locator_hint_has_structural_value(locator_hint: &str, value: &str) -> bool {
     let value = value.trim();
+    let normalized_value = normalize_locator_identity_token(value);
     !value.is_empty()
         && locator_hint
             .split(|ch| matches!(ch, '\n' | ';' | '|'))
-            .any(|part| structural_text_value_matches_exact(part, value))
+            .any(|part| {
+                structural_text_value_matches_exact(part, value)
+                    || (normalized_value.chars().count() >= 3
+                        && structural_path_basename_matches_normalized(part, &normalized_value))
+            })
+}
+
+fn structural_path_basename_matches_normalized(text: &str, normalized_value: &str) -> bool {
+    let text = text.trim();
+    path_basename_matches_normalized(text, normalized_value)
+        || text
+            .rsplit_once(':')
+            .is_some_and(|(_, suffix)| path_basename_matches_normalized(suffix, normalized_value))
+}
+
+fn path_basename_matches_normalized(text: &str, normalized_value: &str) -> bool {
+    std::path::Path::new(text)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(normalize_locator_identity_token)
+        .is_some_and(|basename| basename == normalized_value)
 }
 
 fn active_session_target_basenames(
