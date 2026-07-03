@@ -76,7 +76,6 @@ use super::{
     scalar_content_auto_locator_observation_plan, scalar_count_filter_hint_for_route_or_turn,
     scalar_path_auto_locator_deterministic_plan_result, scalar_path_auto_locator_observation_plan,
     scalar_path_current_workspace_deterministic_plan_result,
-    scalar_path_directory_locator_search_deterministic_plan_result,
     scalar_path_directory_locator_search_observation_plan, should_force_actionable_plan_repair,
     strip_directory_read_range_after_inventory_dir, strip_file_lines_count_before_tail_read_range,
     strip_intermediate_synthesize_before_later_execution,

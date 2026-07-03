@@ -163,33 +163,6 @@ pub(super) fn scalar_path_directory_locator_search_observation_plan(
 }
 
 #[cfg(test)]
-pub(super) fn scalar_path_directory_locator_search_deterministic_plan_result(
-    goal: &str,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-    auto_locator_path: Option<&str>,
-    current_user_text: &str,
-) -> Option<PlanResult> {
-    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
-        return None;
-    }
-    let actions = scalar_path_directory_locator_search_observation_plan(
-        route_result,
-        auto_locator_path,
-        current_user_text,
-    )?;
-    let actions = canonicalize_legacy_file_config_capabilities(actions);
-    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
-        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
-    Some(build_plan_result(
-        goal,
-        &raw_plan_text,
-        PlanKind::Single,
-        &actions,
-    ))
-}
-
-#[cfg(test)]
 pub(super) fn explicit_command_deterministic_plan_result(
     state: &AppState,
     goal: &str,
