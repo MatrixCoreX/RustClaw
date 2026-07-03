@@ -178,6 +178,33 @@ POST_ROUTE_BOUNDARY_DEFERRAL_FORBIDDEN_BLOCK_PATTERNS: tuple[
         ),
     ),
 )
+POST_ROUTE_BOUNDARY_READY_REASON_CODES: tuple[str, ...] = (
+    "post_route_locator_guard_deferred_to_prompt_targets",
+    "post_route_structural_file_delivery_bound_target",
+)
+POST_ROUTE_BOUNDARY_READY_ROUTE_REASONS: tuple[str, ...] = (
+    "locator_guard_deferred_to_prompt_targets",
+)
+POST_ROUTE_BOUNDARY_READY_FORBIDDEN_BLOCK_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "post_route_boundary_ready_direct_gate_record",
+        re.compile(
+            r"PostRouteGateRecord::new\s*\(\s*"
+            r'"(?:post_route_locator_guard_deferred_to_prompt_targets|post_route_structural_file_delivery_bound_target)"',
+            re.DOTALL,
+        ),
+    ),
+    (
+        "post_route_boundary_ready_direct_route_reason",
+        re.compile(
+            r"append_route_reason\s*\([^;]*?"
+            r'"(?:locator_guard_deferred_to_prompt_targets)"',
+            re.DOTALL,
+        ),
+    ),
+)
 BOUNDARY_PREFLIGHT_DEFERRAL_TOKENS: tuple[str, ...] = (
     "deictic_memory_only",
     "unbound_model_context_target",
@@ -1295,11 +1322,24 @@ def scan_post_route_boundary_candidate_typing_text(
                 "BoundaryContractDeferral enum is required for post-route boundary deferrals",
             )
         )
+    if "enum PostRouteBoundaryReady" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "post_route_boundary_ready_enum_missing",
+                "PostRouteBoundaryReady enum is required for post-route boundary-ready records",
+            )
+        )
     for line_no, line in enumerate(text.splitlines(), start=1):
         for kind, pattern in POST_ROUTE_BOUNDARY_CANDIDATE_FORBIDDEN_PATTERNS:
             if pattern.search(line):
                 findings.append(Finding(rel_path, line_no, kind, line.strip()))
     for kind, pattern in POST_ROUTE_BOUNDARY_DEFERRAL_FORBIDDEN_BLOCK_PATTERNS:
+        for match in pattern.finditer(text):
+            line_no = text[: match.start()].count("\n") + 1
+            findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
+    for kind, pattern in POST_ROUTE_BOUNDARY_READY_FORBIDDEN_BLOCK_PATTERNS:
         for match in pattern.finditer(text):
             line_no = text[: match.start()].count("\n") + 1
             findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
@@ -3305,6 +3345,7 @@ def run_self_test() -> int:
         "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
         "enum BoundaryClarifyCandidate {}\n"
         "enum BoundaryContractDeferral {}\n"
+        "enum PostRouteBoundaryReady {}\n"
         'if candidate == "post_route_unresolved_file_delivery_requires_locator" {}\n'
         'match candidate { "x" => "post_route_missing_path_scoped_locator", _ => "" }\n',
     )
@@ -3316,6 +3357,7 @@ def run_self_test() -> int:
         "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
         "enum BoundaryClarifyCandidate {}\n"
         "enum BoundaryContractDeferral {}\n"
+        "enum PostRouteBoundaryReady {}\n"
         'push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, "auto_locator_scalar_file_without_current_locator");\n'
         'PostRouteGateRecord::new("post_route_directory_file_delivery_deferred_to_agent_loop", outcome);\n',
     )
@@ -3332,10 +3374,32 @@ def run_self_test() -> int:
         and missing_post_route_deferral_enum[0].kind
         == "post_route_boundary_deferral_enum_missing"
     )
+    missing_post_route_ready_enum = scan_post_route_boundary_candidate_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
+        "enum BoundaryClarifyCandidate {}\n"
+        "enum BoundaryContractDeferral {}\n",
+    )
+    assert any(
+        item.kind == "post_route_boundary_ready_enum_missing"
+        for item in missing_post_route_ready_enum
+    )
+    blocked_post_route_ready_string = scan_post_route_boundary_candidate_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
+        "enum BoundaryClarifyCandidate {}\n"
+        "enum BoundaryContractDeferral {}\n"
+        "enum PostRouteBoundaryReady {}\n"
+        'PostRouteGateRecord::new("post_route_locator_guard_deferred_to_prompt_targets", outcome);\n'
+        'append_route_reason(route, "locator_guard_deferred_to_prompt_targets");\n',
+    )
+    assert {
+        "post_route_boundary_ready_direct_gate_record",
+        "post_route_boundary_ready_direct_route_reason",
+    }.issubset({item.kind for item in blocked_post_route_ready_string})
     assert not scan_post_route_boundary_candidate_typing_text(
         "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
         "enum BoundaryClarifyCandidate {}\n"
         "enum BoundaryContractDeferral {}\n"
+        "enum PostRouteBoundaryReady {}\n"
         "impl BoundaryClarifyCandidate { fn observation_token(self) -> &'static str { \"post_route_missing_path_scoped_locator\" } }\n",
     )
     assert not scan_post_route_boundary_candidate_typing()
