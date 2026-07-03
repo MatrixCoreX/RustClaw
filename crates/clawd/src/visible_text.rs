@@ -16,31 +16,6 @@ const INTERNAL_CONTEXT_MARKERS: &[&str] = &[
     "STABLE_FACTS",
 ];
 
-pub(crate) fn strip_internal_context_sections(text: &str) -> &str {
-    const SECTION_MARKERS: &[&str] = &[
-        "### MEMORY_USE_POLICY",
-        "### PLANNER_MEMORY_CONTEXT",
-        "\n### ACTIVE_EXECUTION_ANCHOR",
-        "\n### ACTIVE_TASK",
-        "\n### ALIASES",
-        "\n### ANCHOR",
-        "\n### AUTH",
-        "\n### CAPABILITIES",
-        "\n### HINTS",
-        "\n### MEMORY",
-        "\n### RECENT",
-        "\n### RECENT_EXECUTION_CONTEXT",
-        "\n### RECENT_TURNS_FULL",
-        "\n### SESSION_ALIAS_BINDINGS",
-    ];
-    let stop = SECTION_MARKERS
-        .iter()
-        .filter_map(|marker| text.find(marker))
-        .min()
-        .unwrap_or(text.len());
-    &text[..stop]
-}
-
 pub(crate) fn sanitize_user_visible_text(text: &str) -> String {
     let stripped = strip_ansi_sequences(text);
     let stripped = compact_internal_json_log_lines(&stripped);
