@@ -903,7 +903,7 @@ async fn http_download_artifact_contract_reaches_planner_path() {
 }
 
 #[test]
-fn service_status_task_control_marker_uses_task_control_plan_before_health_check() {
+fn service_status_task_control_marker_allows_planner_supplied_task_list() {
     let state = test_state_with_enabled_skills(&["health_check", "task_control"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -911,24 +911,41 @@ fn service_status_task_control_marker_uses_task_control_plan_before_health_check
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.route_reason = "capability_ref=task_control.list".to_string();
     let loop_state = LoopState::new(1);
+    let action = AgentAction::CallSkill {
+        skill: "task_control".to_string(),
+        args: json!({"action": "list"}),
+    };
+    let AgentAction::CallSkill { skill, args } = &action else {
+        unreachable!("test action is a skill call");
+    };
+    assert!(
+        crate::evidence_policy::capability_ref_action_policy_for_route(Some(&route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
+    );
 
-    let plan = service_status_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "observe current task queue",
         Some(&route),
         &loop_state,
-        "status query",
-    )
-    .expect("task-control marker should use task_control before generic health_check");
+        "observe current task queue",
+        Some("status query"),
+        Some(&route.route_reason),
+        None,
+        vec![action],
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "task_control", "list");
+    let args = normalized
+        .iter()
+        .find_map(|action| {
+            planned_call_is(action, "task_control", "list")
+                .then(|| expect_planned_call(action, "task_control", "list"))
+        })
+        .expect("planner-supplied task_control list action should be preserved");
     assert_eq!(args.as_object().map(|obj| obj.len()), Some(1));
 }
 
 #[test]
-fn service_status_task_id_token_uses_task_control_get_plan() {
+fn service_status_task_id_token_allows_planner_supplied_task_get() {
     let state = test_state_with_enabled_skills(&["health_check", "task_control"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -937,24 +954,41 @@ fn service_status_task_id_token_uses_task_control_get_plan() {
     let task_id = "00000000-0000-4000-8000-000000000000";
     route.resolved_intent = format!("capability_ref=task_control.get task_id={task_id}");
     let loop_state = LoopState::new(1);
+    let action = AgentAction::CallSkill {
+        skill: "task_control".to_string(),
+        args: json!({"action": "get", "task_id": task_id}),
+    };
+    let AgentAction::CallSkill { skill, args } = &action else {
+        unreachable!("test action is a skill call");
+    };
+    assert!(
+        crate::evidence_policy::capability_ref_action_policy_for_route(Some(&route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
+    );
 
-    let plan = service_status_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "observe task lifecycle",
         Some(&route),
         &loop_state,
-        &format!("query task {task_id}"),
-    )
-    .expect("task id token should use task_control.get before generic status tools");
+        "observe task lifecycle",
+        Some(&format!("query task {task_id}")),
+        Some(&route.resolved_intent),
+        None,
+        vec![action],
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "task_control", "get");
+    let args = normalized
+        .iter()
+        .find_map(|action| {
+            planned_call_is(action, "task_control", "get")
+                .then(|| expect_planned_call(action, "task_control", "get"))
+        })
+        .expect("planner-supplied task_control get action should be preserved");
     assert_eq!(args.get("task_id").and_then(Value::as_str), Some(task_id));
 }
 
 #[test]
-fn command_output_summary_task_id_token_uses_task_control_get_plan() {
+fn command_output_summary_task_id_token_allows_planner_supplied_task_get() {
     let state = test_state_with_enabled_skills(&["git_basic", "task_control"]);
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::direct_answer();
@@ -964,46 +998,80 @@ fn command_output_summary_task_id_token_uses_task_control_get_plan() {
     let task_id = "00000000-0000-4000-8000-000000000001";
     route.resolved_intent = format!("capability_ref=task_control.get task_id={task_id}");
     let loop_state = LoopState::new(1);
+    let action = AgentAction::CallSkill {
+        skill: "task_control".to_string(),
+        args: json!({"action": "get", "task_id": task_id}),
+    };
+    let AgentAction::CallSkill { skill, args } = &action else {
+        unreachable!("test action is a skill call");
+    };
+    assert!(
+        crate::evidence_policy::capability_ref_action_policy_for_route(Some(&route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
+    );
 
-    let plan = task_control_get_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "observe task lifecycle fields",
         Some(&route),
         &loop_state,
-        &format!("task_id={task_id} data.lifecycle.can_poll"),
-    )
-    .expect("uuid task locator should use task_control.get before command summary tools");
+        "observe task lifecycle fields",
+        Some(&format!("task_id={task_id} data.lifecycle.can_poll")),
+        Some(&route.resolved_intent),
+        None,
+        vec![action],
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "task_control", "get");
+    let args = normalized
+        .iter()
+        .find_map(|action| {
+            planned_call_is(action, "task_control", "get")
+                .then(|| expect_planned_call(action, "task_control", "get"))
+        })
+        .expect("planner-supplied task_control get action should be preserved");
     assert_eq!(args.get("task_id").and_then(Value::as_str), Some(task_id));
 }
 
 #[test]
-fn content_presence_task_control_list_get_marker_uses_first_detail_plan() {
+fn content_presence_task_control_first_detail_allows_planner_supplied_action() {
     let state = test_state_with_enabled_skills(&["task_control"]);
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::direct_answer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
-    route.route_reason =
-        "capability_ref=task_control.list capability_ref=task_control.get".to_string();
+    route.route_reason = "capability_ref=task_control.list_with_first_detail".to_string();
     route.resolved_intent = "field_selector=lifecycle_field_presence".to_string();
     let loop_state = LoopState::new(1);
+    let action = AgentAction::CallSkill {
+        skill: "task_control".to_string(),
+        args: json!({"action": "list_with_first_detail"}),
+    };
+    let AgentAction::CallSkill { skill, args } = &action else {
+        unreachable!("test action is a skill call");
+    };
+    assert!(
+        crate::evidence_policy::capability_ref_action_policy_for_route(Some(&route), skill, args)
+            .is_some_and(|policy| policy.is_allowed())
+    );
 
-    let plan = task_control_list_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "observe task lifecycle field presence",
         Some(&route),
         &loop_state,
-    )
-    .expect("task_control list/get machine markers should use deterministic observation");
+        "observe task lifecycle field presence",
+        Some("task lifecycle field presence"),
+        Some(&route.route_reason),
+        None,
+        vec![action],
+    );
 
-    assert_eq!(plan.steps.len(), 3);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "task_control", "list_with_first_detail");
+    let args = normalized
+        .iter()
+        .find_map(|action| {
+            planned_call_is(action, "task_control", "list_with_first_detail")
+                .then(|| expect_planned_call(action, "task_control", "list_with_first_detail"))
+        })
+        .expect("planner-supplied task_control list_with_first_detail action should be preserved");
     assert_eq!(args.as_object().map(|obj| obj.len()), Some(1));
 }
 
