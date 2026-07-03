@@ -1056,55 +1056,6 @@ pub(super) fn directory_purpose_representative_reads_after_find_result(
 }
 
 #[cfg(test)]
-pub(super) fn directory_compare_locator_deterministic_plan_result(
-    state: &AppState,
-    goal: &str,
-    route_result: Option<&RouteResult>,
-    loop_state: &LoopState,
-) -> Option<PlanResult> {
-    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
-        return None;
-    }
-    let route = route_result?;
-    if route.needs_clarify
-        || !route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
-    {
-        return None;
-    }
-    let targets = crate::evidence_policy::target_locators_for_route(route);
-    if targets.len() != 2 {
-        return None;
-    }
-    let left =
-        resolve_directory_locator_for_dir_compare(&state.skill_rt.workspace_root, &targets[0])?;
-    let right =
-        resolve_directory_locator_for_dir_compare(&state.skill_rt.workspace_root, &targets[1])?;
-    if left.eq_ignore_ascii_case(&right) {
-        return None;
-    }
-    let actions = vec![AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
-        args: serde_json::json!({
-            "action": "dir_compare",
-            "left_path": left,
-            "right_path": right,
-            "recursive": true,
-            "include_hidden": false,
-            "max_diffs": 20,
-        }),
-    }];
-    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
-        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
-    Some(build_plan_result(
-        goal,
-        &raw_plan_text,
-        PlanKind::Single,
-        &actions,
-    ))
-}
-
-#[cfg(test)]
 pub(super) fn quantity_compare_pair_locator_deterministic_plan_result(
     state: &AppState,
     goal: &str,
