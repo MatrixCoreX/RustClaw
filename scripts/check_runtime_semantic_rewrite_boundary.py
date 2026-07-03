@@ -29,6 +29,7 @@ ASK_PIPELINE_CONTRACT_REPAIR_FILE = SRC_ROOT / "worker/ask_pipeline_contract_rep
 ASK_PIPELINE_BOUNDARY_PREFLIGHT_FILE = (
     SRC_ROOT / "worker/ask_pipeline_boundary_preflight.rs"
 )
+ASK_PIPELINE_EXECUTION_CONTEXT_FILE = SRC_ROOT / "worker/ask_pipeline_execution_context.rs"
 ASK_PIPELINE_FILE_DELIVERY_FILE = SRC_ROOT / "worker/ask_pipeline_file_delivery.rs"
 ASK_PIPELINE_DEFAULT_CONFIG_FILE = SRC_ROOT / "worker/ask_pipeline_default_config.rs"
 ASK_PIPELINE_POST_ROUTE_REFINEMENT_FILE = (
@@ -295,6 +296,22 @@ DEFAULT_CONFIG_CONTRACT_FORBIDDEN_BLOCK_PATTERNS: tuple[
         re.compile(
             r"append_route_reason\s*\([^;]*?"
             rf'"(?:{quoted_token_alternation(DEFAULT_CONFIG_CONTRACT_ROUTE_REASONS)})"',
+            re.DOTALL,
+        ),
+    ),
+)
+EXECUTION_CONTEXT_SANITIZATION_ROUTE_REASONS: tuple[str, ...] = (
+    "untrusted_normalizer_freeform_rewrite_removed_from_execution_context",
+    "untrusted_normalizer_answer_candidate_removed_from_execution_context",
+)
+EXECUTION_CONTEXT_SANITIZATION_FORBIDDEN_BLOCK_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "execution_context_sanitization_direct_route_reason",
+        re.compile(
+            r"append_route_reason\s*\([^;]*?"
+            rf'"(?:{quoted_token_alternation(EXECUTION_CONTEXT_SANITIZATION_ROUTE_REASONS)})"',
             re.DOTALL,
         ),
     ),
@@ -596,6 +613,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_subagent_boundary_deferral_helper())
     findings.extend(scan_file_delivery_boundary_deferral_typing())
     findings.extend(scan_default_config_contract_deferral_typing())
+    findings.extend(scan_execution_context_sanitization_typing())
     findings.extend(scan_post_route_boundary_candidate_typing())
     findings.extend(scan_prompt_layer_ordinary_semantic_tokens())
     findings.extend(scan_planner_prompt_legacy_semantic_kind_keys())
@@ -1419,6 +1437,34 @@ def scan_default_config_contract_deferral_typing_text(
             )
         )
     for kind, pattern in DEFAULT_CONFIG_CONTRACT_FORBIDDEN_BLOCK_PATTERNS:
+        for match in pattern.finditer(text):
+            line_no = text[: match.start()].count("\n") + 1
+            findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
+    return findings
+
+
+def scan_execution_context_sanitization_typing() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_EXECUTION_CONTEXT_FILE)
+    return scan_execution_context_sanitization_typing_text(
+        rel_path,
+        ASK_PIPELINE_EXECUTION_CONTEXT_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_execution_context_sanitization_typing_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    if "enum ExecutionContextSanitization" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "execution_context_sanitization_enum_missing",
+                "ExecutionContextSanitization enum is required for execution-context sanitization markers",
+            )
+        )
+    for kind, pattern in EXECUTION_CONTEXT_SANITIZATION_FORBIDDEN_BLOCK_PATTERNS:
         for match in pattern.finditer(text):
             line_no = text[: match.start()].count("\n") + 1
             findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
@@ -3152,6 +3198,36 @@ def run_self_test() -> int:
         "fn f(item: DefaultConfigContractDeferral) { append_route_reason(route, item.route_reason()); }\n",
     )
     assert not scan_default_config_contract_deferral_typing()
+    blocked_execution_context_sanitization_string = (
+        scan_execution_context_sanitization_typing_text(
+            "crates/clawd/src/worker/ask_pipeline_execution_context.rs",
+            "enum ExecutionContextSanitization {}\n"
+            'append_route_reason(route, "untrusted_normalizer_answer_candidate_removed_from_execution_context");\n',
+        )
+    )
+    assert (
+        blocked_execution_context_sanitization_string
+        and blocked_execution_context_sanitization_string[0].kind
+        == "execution_context_sanitization_direct_route_reason"
+    )
+    missing_execution_context_sanitization_enum = (
+        scan_execution_context_sanitization_typing_text(
+            "crates/clawd/src/worker/ask_pipeline_execution_context.rs",
+            'append_route_reason(route, "x");\n',
+        )
+    )
+    assert (
+        missing_execution_context_sanitization_enum
+        and missing_execution_context_sanitization_enum[0].kind
+        == "execution_context_sanitization_enum_missing"
+    )
+    assert not scan_execution_context_sanitization_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_execution_context.rs",
+        "enum ExecutionContextSanitization {}\n"
+        "impl ExecutionContextSanitization { fn route_reason(self) -> &'static str { \"untrusted_normalizer_answer_candidate_removed_from_execution_context\" } }\n"
+        "fn f(item: ExecutionContextSanitization) { append_route_reason(route, item.route_reason()); }\n",
+    )
+    assert not scan_execution_context_sanitization_typing()
     blocked_post_route_candidate_string = scan_post_route_boundary_candidate_typing_text(
         "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
         "enum BoundaryClarifyCandidate {}\n"
