@@ -378,16 +378,20 @@ pub(crate) fn task_original_user_text(task: &ClaimedTask) -> Option<String> {
 }
 
 fn looks_like_runtime_scaffold(text: &str) -> bool {
-    [
-        "[AUTO_LOCATOR]",
-        "### RUNTIME_CONTEXT",
-        "Current task:",
-        "Continuity rules:",
-        "Structured task updates:",
-        "New user instruction:",
-    ]
-    .iter()
-    .any(|marker| text.contains(marker))
+    let mut task_merge_markers = 0usize;
+    for line in text.lines().map(str::trim_start) {
+        if matches!(line.trim(), "[AUTO_LOCATOR]") || line.starts_with("### RUNTIME_CONTEXT") {
+            return true;
+        }
+        if line.starts_with("Current task:")
+            || line.starts_with("Continuity rules:")
+            || line.starts_with("Structured task updates:")
+            || line.starts_with("New user instruction:")
+        {
+            task_merge_markers += 1;
+        }
+    }
+    task_merge_markers >= 2
 }
 
 fn looks_like_locator_only_clarify_reply(text: &str) -> bool {
