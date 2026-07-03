@@ -1044,11 +1044,11 @@ fn route_trace_label_from_decision(
     finalize_style: ActFinalizeStyle,
 ) -> &'static str {
     match decision {
-        RouteTraceDecision::Clarify => "AskClarify",
-        RouteTraceDecision::Respond => "Chat",
+        RouteTraceDecision::Clarify => "clarify",
+        RouteTraceDecision::Respond => "respond",
         RouteTraceDecision::Act => match finalize_style {
-            ActFinalizeStyle::ChatWrapped => "ChatAct",
-            ActFinalizeStyle::Plain | ActFinalizeStyle::ResumeContinue => "Act",
+            ActFinalizeStyle::ChatWrapped => "act_chat_finalizer",
+            ActFinalizeStyle::Plain | ActFinalizeStyle::ResumeContinue => "act_plain_finalizer",
         },
     }
 }
