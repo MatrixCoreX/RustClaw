@@ -30,6 +30,7 @@ ASK_PIPELINE_BOUNDARY_PREFLIGHT_FILE = (
     SRC_ROOT / "worker/ask_pipeline_boundary_preflight.rs"
 )
 ASK_PIPELINE_FILE_DELIVERY_FILE = SRC_ROOT / "worker/ask_pipeline_file_delivery.rs"
+ASK_PIPELINE_DEFAULT_CONFIG_FILE = SRC_ROOT / "worker/ask_pipeline_default_config.rs"
 ASK_PIPELINE_POST_ROUTE_REFINEMENT_FILE = (
     SRC_ROOT / "worker/ask_pipeline_post_route_refinement.rs"
 )
@@ -279,6 +280,21 @@ FILE_DELIVERY_BOUNDARY_FORBIDDEN_BLOCK_PATTERNS: tuple[
         re.compile(
             r"append_route_reason\s*\([^;]*?"
             rf'"(?:{quoted_token_alternation(FILE_DELIVERY_BOUNDARY_ROUTE_REASONS)})"',
+            re.DOTALL,
+        ),
+    ),
+)
+DEFAULT_CONFIG_CONTRACT_ROUTE_REASONS: tuple[str, ...] = (
+    "config_contract_default_main_config_deferred_to_loop",
+)
+DEFAULT_CONFIG_CONTRACT_FORBIDDEN_BLOCK_PATTERNS: tuple[
+    tuple[str, re.Pattern[str]], ...
+] = (
+    (
+        "default_config_contract_direct_route_reason",
+        re.compile(
+            r"append_route_reason\s*\([^;]*?"
+            rf'"(?:{quoted_token_alternation(DEFAULT_CONFIG_CONTRACT_ROUTE_REASONS)})"',
             re.DOTALL,
         ),
     ),
@@ -579,6 +595,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_worker_loop_boundary_deferral_typing())
     findings.extend(scan_subagent_boundary_deferral_helper())
     findings.extend(scan_file_delivery_boundary_deferral_typing())
+    findings.extend(scan_default_config_contract_deferral_typing())
     findings.extend(scan_post_route_boundary_candidate_typing())
     findings.extend(scan_prompt_layer_ordinary_semantic_tokens())
     findings.extend(scan_planner_prompt_legacy_semantic_kind_keys())
@@ -1374,6 +1391,34 @@ def scan_file_delivery_boundary_deferral_typing_text(
             )
         )
     for kind, pattern in FILE_DELIVERY_BOUNDARY_FORBIDDEN_BLOCK_PATTERNS:
+        for match in pattern.finditer(text):
+            line_no = text[: match.start()].count("\n") + 1
+            findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
+    return findings
+
+
+def scan_default_config_contract_deferral_typing() -> list[Finding]:
+    rel_path = rel(ASK_PIPELINE_DEFAULT_CONFIG_FILE)
+    return scan_default_config_contract_deferral_typing_text(
+        rel_path,
+        ASK_PIPELINE_DEFAULT_CONFIG_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_default_config_contract_deferral_typing_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    if "enum DefaultConfigContractDeferral" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "default_config_contract_deferral_enum_missing",
+                "DefaultConfigContractDeferral enum is required for default config contract deferrals",
+            )
+        )
+    for kind, pattern in DEFAULT_CONFIG_CONTRACT_FORBIDDEN_BLOCK_PATTERNS:
         for match in pattern.finditer(text):
             line_no = text[: match.start()].count("\n") + 1
             findings.append(Finding(rel_path, line_no, kind, match.group(0).strip()))
@@ -3077,6 +3122,36 @@ def run_self_test() -> int:
         "fn f(item: FileDeliveryBoundaryDeferral) { append_route_reason(route, item.route_reason()); }\n",
     )
     assert not scan_file_delivery_boundary_deferral_typing()
+    blocked_default_config_contract_string = (
+        scan_default_config_contract_deferral_typing_text(
+            "crates/clawd/src/worker/ask_pipeline_default_config.rs",
+            "enum DefaultConfigContractDeferral {}\n"
+            'append_route_reason(route, "config_contract_default_main_config_deferred_to_loop");\n',
+        )
+    )
+    assert (
+        blocked_default_config_contract_string
+        and blocked_default_config_contract_string[0].kind
+        == "default_config_contract_direct_route_reason"
+    )
+    missing_default_config_contract_enum = (
+        scan_default_config_contract_deferral_typing_text(
+            "crates/clawd/src/worker/ask_pipeline_default_config.rs",
+            'append_route_reason(route, "x");\n',
+        )
+    )
+    assert (
+        missing_default_config_contract_enum
+        and missing_default_config_contract_enum[0].kind
+        == "default_config_contract_deferral_enum_missing"
+    )
+    assert not scan_default_config_contract_deferral_typing_text(
+        "crates/clawd/src/worker/ask_pipeline_default_config.rs",
+        "enum DefaultConfigContractDeferral {}\n"
+        "impl DefaultConfigContractDeferral { fn route_reason(self) -> &'static str { \"config_contract_default_main_config_deferred_to_loop\" } }\n"
+        "fn f(item: DefaultConfigContractDeferral) { append_route_reason(route, item.route_reason()); }\n",
+    )
+    assert not scan_default_config_contract_deferral_typing()
     blocked_post_route_candidate_string = scan_post_route_boundary_candidate_typing_text(
         "crates/clawd/src/worker/ask_pipeline_post_route_refinement.rs",
         "enum BoundaryClarifyCandidate {}\n"
