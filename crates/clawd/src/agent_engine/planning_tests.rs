@@ -20,7 +20,6 @@ use super::{
     content_excerpt_summary_auto_locator_deterministic_plan_result,
     contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
     directory_purpose_auto_locator_deterministic_plan_result,
-    directory_purpose_extension_inventory_deterministic_plan_result,
     directory_purpose_representative_reads_after_find_result,
     directory_tree_auto_locator_deterministic_plan_result, enforce_output_contract_tool_args,
     ensure_content_excerpt_summary_has_bounded_content, ensure_required_contract_block_present,
