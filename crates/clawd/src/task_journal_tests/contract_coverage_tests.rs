@@ -576,28 +576,36 @@ fn trace_json_reports_required_vs_observed_evidence_coverage() {
             .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
         Some(Vec::<&str>::new())
     );
-    assert!(coverage
-        .get("observed_canonical")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("candidates"))));
-    assert!(coverage
-        .get("observed_extractors")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items
-            .iter()
-            .any(|item| item.as_str() == Some("fs_basic.list_dir.structured_json_v1"))));
-    assert!(coverage
-        .pointer("/observed_evidence_sources/candidates")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items
-            .iter()
-            .any(|item| item.as_str() == Some("fs_basic.list_dir.structured_json_v1"))));
-    assert!(coverage
-        .get("source_refs")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items
-            .iter()
-            .any(|item| item.as_str() == Some("fs_basic.list_dir.structured_json_v1"))));
+    assert!(
+        coverage
+            .get("observed_canonical")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("candidates")))
+    );
+    assert!(
+        coverage
+            .get("observed_extractors")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items
+                .iter()
+                .any(|item| item.as_str() == Some("fs_basic.list_dir.structured_json_v1")))
+    );
+    assert!(
+        coverage
+            .pointer("/observed_evidence_sources/candidates")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items
+                .iter()
+                .any(|item| item.as_str() == Some("fs_basic.list_dir.structured_json_v1")))
+    );
+    assert!(
+        coverage
+            .get("source_refs")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items
+                .iter()
+                .any(|item| item.as_str() == Some("fs_basic.list_dir.structured_json_v1")))
+    );
     assert_eq!(
         coverage.get("confidence").and_then(Value::as_f64),
         Some(1.0)
@@ -752,10 +760,12 @@ fn filesystem_mutation_result_accepts_kb_ingest_path_evidence() {
     assert!(coverage.is_complete());
     assert_eq!(coverage.required_evidence, vec!["path"]);
     assert!(coverage.observed_canonical.contains("path"));
-    assert!(trace
-        .pointer("/step_results/0/observed_evidence/extractor/extractor_ref")
-        .and_then(Value::as_str)
-        .is_some_and(|extractor| extractor == "kb.ingest.structured_json_v1"));
+    assert!(
+        trace
+            .pointer("/step_results/0/observed_evidence/extractor/extractor_ref")
+            .and_then(Value::as_str)
+            .is_some_and(|extractor| extractor == "kb.ingest.structured_json_v1")
+    );
 }
 
 #[test]
@@ -813,7 +823,7 @@ fn evidence_coverage_ignores_failed_and_synthesis_outputs() {
 
     let coverage = evidence_coverage_for_route(&route, &journal);
 
-    assert!(!coverage.is_complete());
+    assert!(!coverage.is_complete(), "coverage: {coverage:?}");
     assert_eq!(
         coverage.missing_evidence,
         vec!["any_of(candidates|content_excerpt|count|field_value)"]
@@ -966,10 +976,12 @@ fn summary_json_includes_user_readable_task_outcome() {
         Some(0)
     );
     assert!(outcome.get("message_zh").and_then(Value::as_str).is_some());
-    assert!(outcome
-        .get("next_step_en")
-        .and_then(Value::as_str)
-        .is_some());
+    assert!(
+        outcome
+            .get("next_step_en")
+            .and_then(Value::as_str)
+            .is_some()
+    );
 }
 
 #[test]
@@ -1023,10 +1035,12 @@ fn trace_json_reports_missing_required_evidence() {
         coverage.get("repair_eligible").and_then(Value::as_bool),
         Some(true)
     );
-    assert!(coverage
-        .get("confidence")
-        .and_then(Value::as_f64)
-        .is_some_and(|value| value > 0.0 && value < 1.0));
+    assert!(
+        coverage
+            .get("confidence")
+            .and_then(Value::as_f64)
+            .is_some_and(|value| value > 0.0 && value < 1.0)
+    );
 }
 
 #[test]
@@ -1240,7 +1254,8 @@ fn non_content_route_ignores_read_text_observation_as_field_value_evidence() {
         "ask",
         "current git commit subject",
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::GitCommitSubject);
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    route.resolved_intent = "capability_ref=git.log".to_string();
     route.output_contract.requires_content_evidence = false;
     journal.record_route_result(&route);
     journal.step_results.push(TaskJournalStepTrace::ok(
@@ -1256,7 +1271,7 @@ fn non_content_route_ignores_read_text_observation_as_field_value_evidence() {
 
     let coverage = evidence_coverage_for_route(&route, &journal);
 
-    assert!(!coverage.is_complete());
+    assert!(!coverage.is_complete(), "coverage: {coverage:?}");
     assert_eq!(coverage.missing_evidence, vec!["field_value"]);
     assert!(!coverage.observed_canonical.contains("field_value"));
     assert!(!coverage.observed_canonical.contains("content_excerpt"));
@@ -1348,12 +1363,14 @@ fn trace_json_counts_nested_builtin_tool_evidence() {
             .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
         Some(Vec::<&str>::new())
     );
-    assert!(coverage
-        .get("observed_fields")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items
-            .iter()
-            .any(|item| item.as_str() == Some("facts[0].path"))));
+    assert!(
+        coverage
+            .get("observed_fields")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items
+                .iter()
+                .any(|item| item.as_str() == Some("facts[0].path")))
+    );
 }
 
 #[test]
@@ -1404,10 +1421,12 @@ fn trace_json_includes_task_level_evidence_policy_snapshot() {
         snapshot.get("final_answer_shape").and_then(Value::as_str),
         Some("name_list")
     );
-    assert!(snapshot
-        .get("evidence_policy_hash")
-        .and_then(Value::as_str)
-        .is_some_and(|hash| !hash.is_empty()));
+    assert!(
+        snapshot
+            .get("evidence_policy_hash")
+            .and_then(Value::as_str)
+            .is_some_and(|hash| !hash.is_empty())
+    );
     let runtime_snapshot = trace
         .get("runtime_contract_snapshot")
         .expect("runtime contract snapshot should be present");
@@ -1418,11 +1437,13 @@ fn trace_json_includes_task_level_evidence_policy_snapshot() {
             .and_then(Value::as_str),
         Some("file_names")
     );
-    assert!(runtime_snapshot
-        .get("compact_contract_block")
-        .and_then(|value| value.get("hash"))
-        .and_then(Value::as_str)
-        .is_some_and(|hash| !hash.is_empty()));
+    assert!(
+        runtime_snapshot
+            .get("compact_contract_block")
+            .and_then(|value| value.get("hash"))
+            .and_then(Value::as_str)
+            .is_some_and(|hash| !hash.is_empty())
+    );
 }
 
 #[test]
@@ -1512,8 +1533,10 @@ fn step_trace_includes_contract_and_action_policy_for_success() {
             .and_then(Value::as_str),
         Some("fs_basic.list_dir")
     );
-    assert!(trace
-        .pointer("/step_results/0/observed_evidence/items")
-        .and_then(Value::as_array)
-        .is_some_and(|items| !items.is_empty()));
+    assert!(
+        trace
+            .pointer("/step_results/0/observed_evidence/items")
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty())
+    );
 }
