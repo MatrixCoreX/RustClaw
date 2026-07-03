@@ -348,9 +348,13 @@ fn agent_loop_boundary_observations_block(
     let file_delivery_target_candidates =
         file_delivery_target_candidate_observations(route, session_snapshot);
     let current_workspace_scope = current_workspace_scope_observation(state, route);
-    let current_request_locator = current_request_locator_observation(state, prompt, route);
     let default_main_config_contract =
         default_main_config_contract_observation(state, prompt, route);
+    let current_request_locator = if default_main_config_contract.is_some() {
+        None
+    } else {
+        current_request_locator_observation(state, prompt, route)
+    };
     let registry_capability_contract =
         registry_capability_contract_observation(resolved_prompt, route);
     let contract_repair_candidates =
