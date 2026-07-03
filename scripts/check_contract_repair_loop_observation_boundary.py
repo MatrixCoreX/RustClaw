@@ -4,7 +4,9 @@
 The Codex/Claude-style migration keeps ordinary semantic repair inside the
 agent loop. Worker-side contract repair may expose structured machine
 candidates to the loop, but it must not mutate RouteResult, gate kind,
-output_contract, or route reason before the planner.
+output_contract, or route reason before the planner. It also must not
+reintroduce legacy OutputSemanticKind-based contract identity; repair
+candidates should emit stable contract_ref machine tokens directly.
 """
 from __future__ import annotations
 
@@ -44,6 +46,14 @@ FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "route_reason_mutation_helper",
         re.compile(r"\b(?:append|push|set)_route_reason(?:_marker)?\s*\("),
+    ),
+    (
+        "legacy_output_semantic_kind",
+        re.compile(r"\bOutputSemanticKind\b"),
+    ),
+    (
+        "legacy_semantic_kind_name",
+        re.compile(r"\bsemantic_kind\b"),
     ),
 )
 
@@ -85,6 +95,7 @@ def run_self_test() -> int:
     assert scan_text(rel_path, "fn f(route_result: &mut crate::RouteResult) {}")
     assert scan_text(rel_path, "let mut route_result = route_result.clone();")
     assert scan_text(rel_path, "route_result.output_contract.semantic_kind = OutputSemanticKind::None;")
+    assert scan_text(rel_path, "let semantic_kind = crate::OutputSemanticKind::RawCommandOutput;")
     assert scan_text(rel_path, "route_result.route_reason.push_str(\";contract_repair\");")
     assert scan_text(rel_path, "route_result.set_clarify_gate();")
     assert scan_text(rel_path, "append_route_reason_marker(route_result, \"x\");")
