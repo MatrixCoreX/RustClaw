@@ -239,11 +239,7 @@ fn normalizer_text_matches_backend_metadata(
             ])
             .map(normalize_backend_identity_token)
             .filter(|token| token.len() >= 4)
-            .any(|token| {
-                normalized_text == token
-                    || normalized_text.contains(&token)
-                    || token.contains(&normalized_text)
-            })
+            .any(|token| normalized_text == token)
     })
 }
 
