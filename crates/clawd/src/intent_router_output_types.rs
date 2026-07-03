@@ -53,10 +53,19 @@ pub(crate) struct BoundaryEnvelope {
     pub(crate) active_task_reference: Option<String>,
     pub(crate) session_binding: Option<String>,
     pub(crate) safety_budget_hint: Option<String>,
+    /// Machine token for request length. Runtime-created envelopes store
+    /// `raw_chars:<n>` here instead of the user's raw natural language.
     pub(crate) raw_user_request: String,
 }
 
 impl BoundaryEnvelope {
+    pub(crate) fn raw_char_count(&self) -> usize {
+        self.raw_user_request
+            .strip_prefix("raw_chars:")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or_else(|| self.raw_user_request.chars().count())
+    }
+
     pub(crate) fn compact_prompt_line(&self) -> String {
         let schedule_kind = self
             .schedule_intent
@@ -65,7 +74,7 @@ impl BoundaryEnvelope {
             .unwrap_or("none");
         format!(
             "- boundary_envelope raw_chars={} schedule_intent={} attachment_refs={} explicit_locators={} active_task_reference={} session_binding={} language_hint={} safety_budget_hint={}",
-            self.raw_user_request.chars().count(),
+            self.raw_char_count(),
             schedule_kind,
             self.attachment_refs.len(),
             self.explicit_locators.len(),
@@ -105,18 +114,14 @@ impl IntentNormalizerOutput {
             session_binding: resume_behavior_boundary_token(self.resume_behavior)
                 .map(str::to_string),
             safety_budget_hint: None,
-            raw_user_request: self.raw_user_request.clone(),
+            raw_user_request: format!("raw_chars:{}", self.raw_user_request.chars().count()),
         }
     }
 }
 
 fn non_empty_token(value: &str) -> &str {
     let trimmed = value.trim();
-    if trimmed.is_empty() {
-        "none"
-    } else {
-        trimmed
-    }
+    if trimmed.is_empty() { "none" } else { trimmed }
 }
 
 fn explicit_locator_refs_for_boundary(contract: &IntentOutputContract) -> Vec<String> {

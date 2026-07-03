@@ -51,7 +51,8 @@ fn boundary_envelope_projects_only_machine_boundary_fields() {
 
     let envelope = output.boundary_envelope();
 
-    assert_eq!(envelope.raw_user_request, "check config/app.toml later");
+    assert_eq!(envelope.raw_user_request, "raw_chars:27");
+    assert_eq!(envelope.raw_char_count(), 27);
     assert_eq!(envelope.explicit_locators, vec!["config/app.toml"]);
     assert_eq!(
         envelope.attachment_refs,
