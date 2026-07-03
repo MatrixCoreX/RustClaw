@@ -1150,7 +1150,7 @@ fn scratch_filesystem_mutation_uses_structured_fs_basic_plan() {
 }
 
 #[test]
-fn service_status_health_check_capability_uses_health_check_plan() {
+fn service_status_health_check_capability_allows_planner_supplied_action() {
     let state = test_state_with_enabled_skills(&["health_check", "process_basic"]);
     let mut route = base_route_result();
     route.resolved_intent = "capability_ref=system.health_check".to_string();
@@ -1159,24 +1159,18 @@ fn service_status_health_check_capability_uses_health_check_plan() {
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     let loop_state = LoopState::new(1);
 
-    let plan = service_status_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "check local project service health",
-        Some(&route),
+        &route,
         &loop_state,
-        "health request",
-    )
-    .expect("system health capability should use health_check plan");
-
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    match action {
-        AgentAction::CallSkill { skill, args } => {
-            assert_eq!(skill, "health_check");
-            assert!(args.as_object().is_some_and(|obj| obj.is_empty()));
-        }
-        other => panic!("expected health_check action, got {other:?}"),
-    }
+        "check local project service health",
+        Some("health request"),
+        Some(&route.resolved_intent),
+        "health_check",
+        "check",
+        json!({"action": "check"}),
+    );
+    assert_eq!(args.as_object().map(|obj| obj.len()), Some(1));
 }
 
 #[test]
@@ -1188,49 +1182,46 @@ fn service_status_workspace_product_text_without_capability_defers_to_planner() 
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     let loop_state = LoopState::new(1);
 
-    let plan = service_status_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "check local project service health",
         Some(&route),
         &loop_state,
-        "check RustClaw health",
+        "check local project service health",
+        Some("check RustClaw health"),
+        Some(&route.resolved_intent),
+        None,
+        Vec::new(),
     );
 
-    assert!(plan.is_none());
+    assert!(normalized.is_empty());
 }
 
 #[test]
-fn service_status_health_check_recipe_marker_uses_health_check_plan() {
+fn service_status_health_check_recipe_uses_explicit_capability_action() {
     let state = test_state_with_enabled_skills(&["health_check", "process_basic"]);
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.route_reason = "execution_recipe_health_check_observation".to_string();
+    route.route_reason = "capability_ref=system.health_check".to_string();
     let loop_state = LoopState::new(1);
 
-    let plan = service_status_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "run a structured health observation",
-        Some(&route),
+        &route,
         &loop_state,
         "run a structured health observation",
-    )
-    .expect("health check recipe marker should use health_check");
-
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    match action {
-        AgentAction::CallSkill { skill, args } => {
-            assert_eq!(skill, "health_check");
-            assert!(args.as_object().is_some_and(|obj| obj.is_empty()));
-        }
-        other => panic!("expected health_check action, got {other:?}"),
-    }
+        Some("run a structured health observation"),
+        Some(&route.route_reason),
+        "health_check",
+        "check",
+        json!({"action": "check"}),
+    );
+    assert_eq!(args.as_object().map(|obj| obj.len()), Some(1));
 }
 
 #[test]
-fn scalar_service_status_uses_health_check_plan() {
+fn scalar_service_status_allows_planner_supplied_health_check() {
     let state = test_state_with_enabled_skills(&["health_check", "process_basic"]);
     let mut route = base_route_result();
     route.resolved_intent = "capability_ref=system.health_check".to_string();
@@ -1239,28 +1230,22 @@ fn scalar_service_status_uses_health_check_plan() {
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let loop_state = LoopState::new(1);
 
-    let plan = service_status_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "return one runtime scalar",
-        Some(&route),
+        &route,
         &loop_state,
-        "current runtime scalar",
-    )
-    .expect("scalar service status should use health check");
-
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    match action {
-        AgentAction::CallSkill { skill, args } => {
-            assert_eq!(skill, "health_check");
-            assert!(args.as_object().is_some_and(|obj| obj.is_empty()));
-        }
-        other => panic!("expected health_check action, got {other:?}"),
-    }
+        "return one runtime scalar",
+        Some("current runtime scalar"),
+        Some(&route.resolved_intent),
+        "health_check",
+        "check",
+        json!({"action": "check"}),
+    );
+    assert_eq!(args.as_object().map(|obj| obj.len()), Some(1));
 }
 
 #[test]
-fn scalar_service_status_named_process_uses_process_basic_filter_plan() {
+fn scalar_service_status_named_process_allows_planner_supplied_filter() {
     let state = test_state_with_enabled_skills(&["health_check", "process_basic"]);
     let mut route = base_route_result();
     route.resolved_intent = "capability_ref=process.ps filter=telegramd".to_string();
@@ -1269,18 +1254,17 @@ fn scalar_service_status_named_process_uses_process_basic_filter_plan() {
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let loop_state = LoopState::new(1);
 
-    let plan = service_status_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "check named service",
-        Some(&route),
+        &route,
         &loop_state,
-        "ordinary request text",
-    )
-    .expect("named service status should use process_basic");
-
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "process_basic", "ps");
+        "check named service",
+        Some("ordinary request text"),
+        Some(&route.resolved_intent),
+        "process_basic",
+        "ps",
+        json!({"action": "ps", "filter": "telegramd", "limit": 200}),
+    );
     assert_eq!(
         args.get("filter").and_then(Value::as_str),
         Some("telegramd")
@@ -1303,7 +1287,7 @@ fn structural_contracts_are_not_blocked_by_literal_command_guard() {
 }
 
 #[test]
-fn service_status_port_request_uses_process_basic_port_filter_plan() {
+fn service_status_port_request_allows_planner_supplied_port_filter() {
     let state = test_state_with_enabled_skills(&["process_basic"]);
     let mut route = base_route_result();
     route.resolved_intent = "capability_ref=process.port_list port=8787".to_string();
@@ -1312,18 +1296,17 @@ fn service_status_port_request_uses_process_basic_port_filter_plan() {
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let loop_state = LoopState::new(1);
 
-    let plan = service_status_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "check local port",
-        Some(&route),
+        &route,
         &loop_state,
-        "ordinary request text",
-    )
-    .expect("port status should use deterministic process_basic plan");
-
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "process_basic", "port_list");
+        "check local port",
+        Some("ordinary request text"),
+        Some(&route.resolved_intent),
+        "process_basic",
+        "port_list",
+        json!({"action": "port_list", "filter": "8787"}),
+    );
     assert_eq!(args.get("filter").and_then(Value::as_str), Some("8787"));
 }
 
@@ -1336,24 +1319,21 @@ fn service_status_process_ranking_count_is_not_port_filter() {
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let loop_state = LoopState::new(1);
 
-    let plan = service_status_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "observe process ranking",
         Some(&route),
         &loop_state,
-        "看一下当前最占 CPU 的前 5 个进程，简短告诉我最值得注意的是哪个",
+        "observe process ranking",
+        Some("看一下当前最占 CPU 的前 5 个进程，简短告诉我最值得注意的是哪个"),
+        Some(&route.resolved_intent),
+        None,
+        Vec::new(),
     );
 
-    if let Some(plan) = plan {
-        for step in plan.steps {
-            if let Some(action) = step.to_agent_action() {
-                assert!(
-                    !planned_call_is(&action, "process_basic", "port_list"),
-                    "process ranking count must not be treated as a port filter: {action:?}"
-                );
-            }
-        }
-    }
+    assert!(
+        normalized.is_empty(),
+        "visible process-ranking text must not synthesize process_basic.port_list: {normalized:?}"
+    );
 }
 
 #[test]
@@ -1365,22 +1345,25 @@ fn service_status_without_machine_target_does_not_use_system_basic_info_fallback
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let loop_state = LoopState::new(1);
 
-    let plan = service_status_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "observe status",
         Some(&route),
         &loop_state,
-        "generic status",
+        "observe status",
+        Some("generic status"),
+        Some(&route.resolved_intent),
+        None,
+        Vec::new(),
     );
 
     assert!(
-        plan.is_none(),
+        normalized.is_empty(),
         "generic service_status without machine target should leave system_basic choice to planner"
     );
 }
 
 #[test]
-fn service_status_identity_field_prefers_system_basic_info_over_health_check() {
+fn service_status_identity_field_allows_planner_supplied_runtime_status() {
     let state = test_state_with_enabled_skills(&["health_check", "system_basic"]);
     let mut route = base_route_result();
     route.resolved_intent = "capability_ref=system.runtime_status".to_string();
@@ -1389,18 +1372,18 @@ fn service_status_identity_field_prefers_system_basic_info_over_health_check() {
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let loop_state = LoopState::new(1);
 
-    let plan = service_status_deterministic_plan_result(
+    let args = assert_planner_supplied_skill_call_preserved(
         &state,
-        "observe local runtime identity",
-        Some(&route),
+        &route,
         &loop_state,
-        "ordinary request text",
-    )
-    .expect("identity field request should use system_basic info");
+        "observe local runtime identity",
+        Some("ordinary request text"),
+        Some(&route.resolved_intent),
+        "system_basic",
+        "runtime_status",
+        json!({"action": "runtime_status"}),
+    );
 
-    assert_eq!(plan.steps.len(), 1);
-    let action = plan.steps[0].to_agent_action().expect("agent action");
-    let args = expect_planned_call(&action, "system_basic", "info");
     assert_eq!(args.as_object().map(|obj| obj.len()), Some(1));
 }
 
@@ -1413,16 +1396,19 @@ fn service_status_generic_status_without_machine_target_defers_to_planner() {
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let loop_state = LoopState::new(1);
 
-    let plan = service_status_deterministic_plan_result(
+    let normalized = normalize_planned_actions_with_original_and_context(
         &state,
-        "observe status",
         Some(&route),
         &loop_state,
-        "generic status",
+        "observe status",
+        Some("generic status"),
+        Some(&route.resolved_intent),
+        None,
+        Vec::new(),
     );
 
     assert!(
-        plan.is_none(),
+        normalized.is_empty(),
         "generic service_status without machine target should leave capability choice to planner"
     );
 }
