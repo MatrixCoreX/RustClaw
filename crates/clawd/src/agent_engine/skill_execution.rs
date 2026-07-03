@@ -19,7 +19,7 @@ mod skill_execution_subagent;
 
 use skill_execution_preflight::{
     capability_isolation_artifact_refs, capability_isolation_policy_error,
-    contract_matrix_action_policy_error, contract_matrix_arg_policy_error,
+    evidence_policy_action_policy_error, evidence_policy_arg_policy_error,
     handle_preflight_argument_failure, structured_observation_path_argument_error,
     unresolved_runtime_template_argument_error, validate_skill_output_contract,
 };
@@ -663,7 +663,7 @@ async fn try_auto_sudo_retry_after_permission_denied(
     };
     let retry_trace_kind = "auto_sudo_retry";
     if let Some(err) =
-        contract_matrix_action_policy_error(state, loop_state, "run_cmd", &retry_args)
+        evidence_policy_action_policy_error(state, loop_state, "run_cmd", &retry_args)
     {
         let outcome = handle_preflight_argument_failure(
             state,
@@ -678,7 +678,7 @@ async fn try_auto_sudo_retry_after_permission_denied(
         );
         return Ok(Some(outcome.stop_signal));
     }
-    if let Some(err) = contract_matrix_arg_policy_error(loop_state, "run_cmd", &retry_args) {
+    if let Some(err) = evidence_policy_arg_policy_error(loop_state, "run_cmd", &retry_args) {
         let outcome = handle_preflight_argument_failure(
             state,
             task,
@@ -1498,7 +1498,7 @@ pub(super) async fn execute_prepared_skill_action(
             action_trace_kind,
         ));
     }
-    if let Some(err) = contract_matrix_action_policy_error(
+    if let Some(err) = evidence_policy_action_policy_error(
         state,
         loop_state,
         normalized_skill,
@@ -1516,7 +1516,7 @@ pub(super) async fn execute_prepared_skill_action(
             action_trace_kind,
         ));
     }
-    if let Some(err) = contract_matrix_arg_policy_error(loop_state, normalized_skill, &exec_args) {
+    if let Some(err) = evidence_policy_arg_policy_error(loop_state, normalized_skill, &exec_args) {
         return Ok(handle_preflight_argument_failure(
             state,
             task,

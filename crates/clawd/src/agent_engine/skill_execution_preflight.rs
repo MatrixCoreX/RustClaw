@@ -145,7 +145,7 @@ pub(super) fn unresolved_runtime_template_argument_error(
     ))
 }
 
-pub(super) fn contract_matrix_action_policy_error(
+pub(super) fn evidence_policy_action_policy_error(
     state: &AppState,
     loop_state: &LoopState,
     normalized_skill: &str,
@@ -279,7 +279,7 @@ pub(super) fn contract_matrix_action_policy_error(
                 normalized_skill,
                 classification_args,
                 "contract_action_rejected",
-                "contract_matrix_preflight",
+                "evidence_policy_preflight",
             ),
         })),
     ))
@@ -837,7 +837,7 @@ fn active_ops_recipe_allows_mutation_despite_contract(
         )
 }
 
-pub(super) fn contract_matrix_arg_policy_error(
+pub(super) fn evidence_policy_arg_policy_error(
     loop_state: &LoopState,
     normalized_skill: &str,
     exec_args: &Value,
