@@ -611,6 +611,12 @@ FORBIDDEN_LEGACY_ROUTE_TRACE_REASON_TOKENS: tuple[str, ...] = (
     "direct_answer_trace_inferred",
     "planner_execute_trace_inferred",
 )
+FORBIDDEN_NORMALIZER_ROUTE_TRACE_LABELS: tuple[str, ...] = (
+    "AskClarify",
+    "ChatAct",
+    "Chat",
+    "Act",
+)
 FORBIDDEN_PREFERRED_RUN_CMD_SEMANTIC_ENUMS: tuple[str, ...] = (
     "OutputSemanticKind::PackageManagerDetection",
     "OutputSemanticKind::DockerPs",
@@ -743,6 +749,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_boundary_envelope_rust_type_machine_only())
     findings.extend(scan_route_trace_record_decision_type())
     findings.extend(scan_normalizer_run_route_trace_decision_type())
+    findings.extend(scan_normalizer_route_trace_label_tokens())
     findings.extend(scan_runtime_journal_route_trace_decision_type())
     findings.extend(scan_first_layer_decision_test_only_boundary())
     findings.extend(scan_intent_normalizer_legacy_decision_field_deleted())
@@ -1474,6 +1481,49 @@ def scan_normalizer_run_route_trace_decision_type_text(
                 text.count("\n", 0, old_label_offset) + 1,
                 "normalizer_route_trace_first_layer_label_helper",
                 "normalizer route-trace labels must be derived from RouteTraceDecision",
+            )
+        )
+    return findings
+
+
+def scan_normalizer_route_trace_label_tokens() -> list[Finding]:
+    return scan_normalizer_route_trace_label_tokens_text(
+        rel(INTENT_ROUTER_NORMALIZER_RUN_FILE),
+        INTENT_ROUTER_NORMALIZER_RUN_FILE.read_text(encoding="utf-8"),
+    )
+
+
+def scan_normalizer_route_trace_label_tokens_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    match = re.search(
+        r"fn\s+route_trace_label_from_decision\b(?P<body>.*?)(?=\nfn\s+route_trace_label_from_state\b|\Z)",
+        text,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return [
+            Finding(
+                rel_path,
+                1,
+                "normalizer_route_trace_label_helper_missing",
+                "route_trace_label_from_decision helper not found",
+            )
+        ]
+    body = match.group("body")
+    body_start = match.start("body")
+    for token in FORBIDDEN_NORMALIZER_ROUTE_TRACE_LABELS:
+        pattern = f'"{token}"'
+        offset = body.find(pattern)
+        if offset < 0:
+            continue
+        findings.append(
+            Finding(
+                rel_path,
+                text.count("\n", 0, body_start + offset) + 1,
+                "normalizer_route_trace_legacy_label",
+                pattern,
             )
         )
     return findings
@@ -3706,6 +3756,24 @@ def run_self_test() -> int:
         "}\n"
         "fn route_trace_label_from_decision() {\n"
         "    RouteTraceDecision::Act.as_str();\n"
+        "}\n",
+    )
+    blocked_normalizer_route_trace_label = scan_normalizer_route_trace_label_tokens_text(
+        "crates/clawd/src/intent_router_normalizer_run.rs",
+        'fn route_trace_label_from_decision() {\n    "ChatAct"\n}\n',
+    )
+    assert (
+        blocked_normalizer_route_trace_label
+        and blocked_normalizer_route_trace_label[0].kind
+        == "normalizer_route_trace_legacy_label"
+    )
+    assert not scan_normalizer_route_trace_label_tokens_text(
+        "crates/clawd/src/intent_router_normalizer_run.rs",
+        'fn route_trace_label_from_decision() {\n'
+        '    "respond";\n'
+        '    "act_chat_finalizer";\n'
+        '    "act_plain_finalizer";\n'
+        '    "clarify";\n'
         "}\n",
     )
     blocked_runtime_route_trace_return_type = (
