@@ -91,8 +91,9 @@ impl BoundaryEnvelope {
 
 impl IntentNormalizerOutput {
     pub(crate) fn boundary_envelope(&self) -> BoundaryEnvelope {
+        let language_hint = crate::language_policy::request_language_hint(&self.raw_user_request);
         BoundaryEnvelope {
-            language_hint: None,
+            language_hint: (language_hint != "config_default").then(|| language_hint.to_string()),
             schedule_intent: self.schedule_intent.clone(),
             attachment_refs: attachment_refs_for_boundary(self.attachment_processing_required),
             explicit_locators: explicit_locator_refs_for_boundary(&self.output_contract),
@@ -111,7 +112,11 @@ impl IntentNormalizerOutput {
 
 fn non_empty_token(value: &str) -> &str {
     let trimmed = value.trim();
-    if trimmed.is_empty() { "none" } else { trimmed }
+    if trimmed.is_empty() {
+        "none"
+    } else {
+        trimmed
+    }
 }
 
 fn explicit_locator_refs_for_boundary(contract: &IntentOutputContract) -> Vec<String> {
