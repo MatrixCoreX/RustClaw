@@ -193,6 +193,14 @@ use machine_envelope::{
 mod machine_kv;
 use machine_kv::replace_delivery_with_requested_machine_kv_summary;
 
+#[path = "loop_reply_machine_payload.rs"]
+mod machine_payload;
+use machine_payload::render_machine_payload_delivery_if_needed;
+#[cfg(test)]
+use machine_payload::{
+    visible_answer_is_machine_payload, visible_machine_payload_should_remain_structured,
+};
+
 #[path = "loop_reply_clarify_envelope.rs"]
 mod clarify_envelope;
 use clarify_envelope::attach_route_clarify_machine_envelope;
@@ -258,10 +266,12 @@ use git_state::{
 
 #[path = "loop_reply_language_closeout.rs"]
 mod language_closeout;
+#[cfg(test)]
+use language_closeout::execution_recipe_closeout_note;
 use language_closeout::{
-    attach_execution_recipe_closeout_to_delivery, auto_requested_success_marker,
-    ensure_requested_success_marker_visible, execution_recipe_budget_exhausted_message,
-    execution_recipe_closeout_note, execution_recipe_missing_success_marker_message,
+    attach_execution_recipe_closeout_to_delivery, attach_execution_recipe_done_machine_closeout,
+    auto_requested_success_marker, ensure_requested_success_marker_visible,
+    execution_recipe_budget_exhausted_message, execution_recipe_missing_success_marker_message,
     final_reply_language_hint, missing_requested_success_marker,
     planned_delivery_is_publishable_model_language_answer,
     prefer_english_for_agent_contextual_user_text, prefer_english_for_user_text,
@@ -307,145 +317,6 @@ use content_evidence_failure::{
 // Stage 3.1：build_loop_journal 已搬移到 `crate::finalize::build_from_loop_state`，
 // 行为零变化。本文件保留 thin alias 以最小化 diff。
 use crate::finalize::build_from_loop_state as build_loop_journal;
-
-fn visible_answer_is_machine_payload(text: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(text.trim())
-        .ok()
-        .and_then(|value| value.as_object().cloned())
-        .is_some_and(|object| {
-            object.contains_key("message_key")
-                || object.contains_key("reason_code")
-                || object.contains_key("candidates")
-                || object.contains_key("risks")
-                || object.contains_key("contract_marker")
-                || object
-                    .get("output_format")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|format| format == "machine_json")
-                || (object.contains_key("status") && object.contains_key("steps"))
-        })
-}
-
-fn route_allows_machine_payload_visible_render(
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
-        return false;
-    };
-    !route.output_contract.delivery_required
-        && !route.wants_file_delivery
-        && matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
-        )
-}
-
-async fn render_machine_payload_delivery_if_needed(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
-    loop_state: &mut LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary>,
-    delivery_messages: &mut Vec<String>,
-) {
-    if !route_allows_machine_payload_visible_render(agent_run_context) {
-        return;
-    }
-    let current = final_answer_text_from_delivery(delivery_messages);
-    if !visible_answer_is_machine_payload(&current) {
-        return;
-    }
-    let delivery_consistent =
-        crate::task_journal::delivery_payload_consistent(&current, delivery_messages);
-    let provisional_journal = build_loop_journal(
-        task,
-        user_text,
-        loop_state,
-        agent_run_context,
-        finalizer_summary,
-        delivery_consistent,
-        &current,
-        successful_delivery_final_status(loop_state, None),
-    );
-    let verifier = crate::answer_verifier::AnswerVerifierOut {
-        pass: false,
-        missing_evidence_fields: vec!["output_format".to_string()],
-        answer_incomplete_reason: "machine_payload_visible".to_string(),
-        should_retry: true,
-        retry_instruction: "output_format".to_string(),
-        confidence: 0.9,
-    }
-    .normalized();
-    let Some(rendered) = crate::finalize::retry_loop_answer_after_verifier(
-        state,
-        task,
-        user_text,
-        &provisional_journal,
-        &current,
-        &verifier,
-    )
-    .await
-    else {
-        return;
-    };
-    if rendered.trim().is_empty() || visible_answer_is_machine_payload(&rendered) {
-        return;
-    }
-    delivery_messages.clear();
-    delivery_messages.push(rendered.clone());
-    loop_state.delivery_messages = delivery_messages.clone();
-    loop_state.last_user_visible_respond = Some(rendered);
-    log_deterministic_delivery_record(
-        &task.task_id,
-        "render_machine_payload_delivery",
-        "replaced",
-        agent_run_context,
-        loop_state.executed_step_results.len(),
-    );
-}
-
-fn attach_execution_recipe_done_machine_closeout(
-    task: &ClaimedTask,
-    user_text: &str,
-    loop_state: &mut LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
-) -> bool {
-    if !loop_state.delivery_messages.is_empty()
-        || !matches!(
-            loop_state.execution_recipe.phase,
-            crate::execution_recipe::ExecutionRecipePhase::Done
-        )
-    {
-        return false;
-    }
-    let Some(answer) = execution_recipe_closeout_note(None, user_text, loop_state) else {
-        return false;
-    };
-    *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
-        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-        parsed: true,
-        contract_ok: true,
-        completion_ok: Some(true),
-        grounded_ok: Some(true),
-        format_ok: Some(true),
-        needs_clarify: Some(false),
-        used_evidence_ids_count: 1,
-        ..Default::default()
-    });
-    loop_state.last_user_visible_respond = Some(answer.clone());
-    append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
-    log_deterministic_delivery_record(
-        &task.task_id,
-        "execution_recipe_done_machine_closeout",
-        "attached",
-        agent_run_context,
-        loop_state.executed_step_results.len(),
-    );
-    true
-}
 
 fn replace_delivery_with_service_status_observed_answer(
     task: &ClaimedTask,
