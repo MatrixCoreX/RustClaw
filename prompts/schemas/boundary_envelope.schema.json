@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/prompts/schemas/boundary_envelope.schema.json",
+  "title": "BoundaryEnvelope",
+  "description": "Target machine-only boundary envelope passed from the front layer into the agent loop. It records session, locator, attachment, schedule, safety, language, and request-length facts, but it must not carry ordinary semantic routing authority, answer text, or raw user natural language.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "raw_chars",
+    "language_hint",
+    "schedule_intent",
+    "attachment_refs",
+    "explicit_locators",
+    "active_task_reference",
+    "session_binding",
+    "safety_budget_hint"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "raw_chars": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Character count of the current request. Do not store raw user text here."
+    },
+    "language_hint": {
+      "type": ["string", "null"],
+      "description": "Machine language/script hint such as zh-CN, en, mixed, or null when unknown."
+    },
+    "schedule_intent": {
+      "type": ["object", "null"],
+      "description": "Structured schedule payload when the turn is a scheduler boundary operation."
+    },
+    "attachment_refs": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Stable machine refs for current-turn attachments, not filenames guessed from prose."
+    },
+    "explicit_locators": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Explicit locator tokens or refs extracted from the request or attachments."
+    },
+    "active_task_reference": {
+      "type": ["string", "null"],
+      "description": "Machine token for active-task binding, reuse, replacement, or null."
+    },
+    "session_binding": {
+      "type": ["string", "null"],
+      "description": "Machine token for resume/session binding, or null."
+    },
+    "safety_budget_hint": {
+      "type": ["string", "null"],
+      "description": "Machine safety or budget hint from the front layer, or null."
+    }
+  }
+}

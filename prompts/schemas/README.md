@@ -50,6 +50,7 @@ For a prompt at `prompts/layers/overlays/<name>.md`:
 | Schema | Backing prompt | Backing parser |
 |--------|----------------|----------------|
 | `intent_normalizer.schema.json` | `prompts/layers/overlays/intent_normalizer_prompt.md` | `crates/clawd/src/intent_router.rs::IntentNormalizerOut` (drift test: `intent_normalizer_schema_drift`) |
+| `boundary_envelope.schema.json` | Target boundary context passed from normalizer/front layer into the planner loop | `crates/clawd/src/intent_router_output_types.rs::BoundaryEnvelope` (migration target; guard: `scripts/check_boundary_envelope_schema.py`) |
 | `plan_result.schema.json`       | `prompts/layers/overlays/{single_plan_execution,loop_incremental_plan,plan_repair}_prompt.md` | `crates/clawd/src/agent_engine.rs::SinglePlanEnvelope` + `crates/clawd/src/runtime/types.rs::AgentAction` (drift test: `plan_result_schema_drift`) |
 | `finalizer_out.schema.json`     | `prompts/layers/overlays/observed_answer_fallback_prompt.md` | `crates/clawd/src/agent_engine/observed_output.rs::ObservedAnswerFallbackOut` (drift test: `finalizer_out_schema_drift`) |
 | `delivery_text_classifier.schema.json` | `prompts/layers/overlays/delivery_text_classifier_prompt.md` | `crates/clawd/src/semantic_judge.rs::DeliveryTextClassifierOut` (drift test: `delivery_text_classifier_schema_drift`) |
