@@ -501,7 +501,7 @@ impl RouteResult {
         self.set_ask_mode(AskMode::Act { finalize });
     }
 
-    pub(crate) fn set_planner_execute_finalize(&mut self, finalize: ActFinalizeStyle) {
+    pub(crate) fn set_act_finalize(&mut self, finalize: ActFinalizeStyle) {
         self.set_ask_mode(AskMode::Act { finalize });
     }
 

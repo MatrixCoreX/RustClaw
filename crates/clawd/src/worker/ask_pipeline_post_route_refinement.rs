@@ -42,7 +42,7 @@ impl BoundaryClarifyCandidate {
     fn apply_route_boundary(self, route_result: &mut crate::RouteResult) {
         route_result.needs_clarify = false;
         route_result.clarify_question.clear();
-        route_result.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+        route_result.set_act_finalize(crate::ActFinalizeStyle::ChatWrapped);
         if !matches!(self, Self::UnresolvedFileDeliveryRequiresLocator) {
             return;
         }
@@ -200,9 +200,7 @@ pub(super) fn apply_post_route_refinements(
             false,
         )
         .unwrap_or(crate::ActFinalizeStyle::ChatWrapped);
-        post_route
-            .execution_route_result
-            .set_planner_execute_finalize(finalize);
+        post_route.execution_route_result.set_act_finalize(finalize);
         PostRouteBoundaryReady::LocatorGuardPromptTargets.record(post_route);
     }
     if defer_config_contract_default_main_config_after_locator_policy(state, prompt, post_route) {

@@ -45,7 +45,7 @@ impl FileDeliveryBoundaryDeferral {
         post_route.execution_route_result.clarify_question.clear();
         post_route
             .execution_route_result
-            .set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+            .set_act_finalize(crate::ActFinalizeStyle::ChatWrapped);
         post_route.execution_route_result.wants_file_delivery = true;
         post_route
             .execution_route_result

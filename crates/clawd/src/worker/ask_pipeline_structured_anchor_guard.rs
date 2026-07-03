@@ -319,7 +319,7 @@ impl StructuredAnchorEvidenceMarker {
 
 pub(super) fn apply_structured_anchor_evidence_repair(route_result: &mut crate::RouteResult) {
     route_result.needs_clarify = false;
-    route_result.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+    route_result.set_act_finalize(crate::ActFinalizeStyle::ChatWrapped);
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.delivery_required = false;
     route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;

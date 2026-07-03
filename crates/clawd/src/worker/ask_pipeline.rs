@@ -233,7 +233,7 @@ fn agent_loop_default_context(
     {
         route.needs_clarify = false;
         route.clarify_question.clear();
-        route.set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+        route.set_act_finalize(crate::ActFinalizeStyle::ChatWrapped);
         WorkerRouteMarker::AgentLoopDefaultEntry.record(route);
     }
     agent_run_context
@@ -821,7 +821,7 @@ fn defer_subagent_boundary_clarify_to_agent_loop(
     post_route.execution_route_result.clarify_question.clear();
     post_route
         .execution_route_result
-        .set_planner_execute_finalize(crate::ActFinalizeStyle::ChatWrapped);
+        .set_act_finalize(crate::ActFinalizeStyle::ChatWrapped);
     post_route.gate_record = crate::post_route_policy::PostRouteGateRecord::new(
         "post_route_subagent_boundary_clarify_deferred_to_agent_loop",
         crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
