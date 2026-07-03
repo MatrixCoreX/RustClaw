@@ -17,12 +17,12 @@ use super::planning_parse::parse_single_plan_actions;
 #[cfg(test)]
 use super::planning_prompt::compact_skill_playbook_from_prompt;
 use super::planning_prompt::{
-    build_incremental_plan_prompt, build_lightweight_skill_playbooks_text,
+    PlanningPromptClass, build_incremental_plan_prompt, build_lightweight_skill_playbooks_text,
     build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
     classify_planning_prompt_class, compact_lightweight_incremental_goal_context,
     contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
     ensure_required_contract_block_present, incremental_prompt_spec_for_class,
-    round1_prompt_spec_for_class, runtime_os_label, runtime_shell_label, PlanningPromptClass,
+    round1_prompt_spec_for_class, runtime_os_label, runtime_shell_label,
 };
 #[cfg(test)]
 use super::planning_registry_preference::registry_preferred_skill_matches_route;
@@ -34,13 +34,14 @@ use super::planning_registry_preference::{
 };
 use regex::Regex;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use tracing::{info, warn};
 
 use super::{
+    AGENT_TOOL_SPEC_PATH, AgentLoopGuardPolicy, LoopState, PLAN_REPAIR_PROMPT_LOGICAL_PATH,
     attempt_ledger::build_attempt_ledger_compact,
     build_loop_history_compact, build_single_plan_prompt, build_skill_playbooks_text_scoped,
     build_skill_quick_index_text_scoped, build_turn_analysis_prompt_block,
@@ -48,9 +49,85 @@ use super::{
         route_allows_structured_candidate_read_target_repair,
         route_has_unresolved_clarify_or_locator_marker, route_reason_has_structural_marker,
     },
-    AgentLoopGuardPolicy, LoopState, AGENT_TOOL_SPEC_PATH, PLAN_REPAIR_PROMPT_LOGICAL_PATH,
 };
-use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResult, RouteResult};
+use crate::{AgentAction, AppState, ClaimedTask, PlanKind, PlanResult, RouteResult, llm_gateway};
+
+/// Planner-visible tool and skill inventory for one loop round.
+///
+/// This helper only prepares prompt/tool-library material. It must not build a
+/// `PlanResult`, choose a capability, or short-circuit the planner LLM.
+struct PlannerToolLibrary<'a> {
+    state: &'a AppState,
+    task: &'a ClaimedTask,
+    planning_class: PlanningPromptClass,
+    route_result: Option<&'a RouteResult>,
+    auto_locator_path: Option<&'a str>,
+    skill_scope: Option<BTreeSet<String>>,
+}
+
+impl<'a> PlannerToolLibrary<'a> {
+    fn new(
+        state: &'a AppState,
+        task: &'a ClaimedTask,
+        planning_class: PlanningPromptClass,
+        route_result: Option<&'a RouteResult>,
+        auto_locator_path: Option<&'a str>,
+    ) -> Self {
+        let skill_scope = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
+            contract_scoped_planner_skill_scope(route_result)
+        } else {
+            contract_scoped_lightweight_planner_skill_scope(route_result)
+        };
+        Self {
+            state,
+            task,
+            planning_class,
+            route_result,
+            auto_locator_path,
+            skill_scope,
+        }
+    }
+
+    fn is_open_planning(&self) -> bool {
+        matches!(self.planning_class, PlanningPromptClass::OpenPlanning)
+    }
+
+    fn skill_playbooks(&self) -> String {
+        if self.is_open_planning() {
+            build_skill_playbooks_text_scoped(self.state, self.task, self.skill_scope.as_ref())
+        } else {
+            build_lightweight_skill_playbooks_text(self.state, self.task, self.skill_scope.as_ref())
+        }
+    }
+
+    fn skill_quick_index(&self) -> String {
+        if self.is_open_planning() {
+            build_skill_quick_index_text_scoped(self.state, self.task, self.skill_scope.as_ref())
+        } else {
+            build_lightweight_skill_quick_index_text(
+                self.state,
+                self.task,
+                self.skill_scope.as_ref(),
+            )
+        }
+    }
+
+    fn tool_spec(&self) -> Result<String, String> {
+        if self.is_open_planning() {
+            crate::bootstrap::load_required_prompt_template_for_state(
+                self.state,
+                AGENT_TOOL_SPEC_PATH,
+            )
+            .map(|resolved| resolved.0)
+            .map_err(|err| err.to_string())
+        } else {
+            Ok(build_lightweight_tool_spec(
+                self.route_result,
+                self.auto_locator_path,
+            ))
+        }
+    }
+}
 
 #[path = "planning_scalar_count_filter.rs"]
 mod scalar_count_filter;
@@ -167,28 +244,11 @@ pub(super) async fn plan_round_actions(
     } else {
         "<omitted: lightweight_execution>".to_string()
     };
-    let contract_skill_scope = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
-        contract_scoped_planner_skill_scope(route_result)
-    } else {
-        contract_scoped_lightweight_planner_skill_scope(route_result)
-    };
-    let skill_playbooks = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
-        build_skill_playbooks_text_scoped(state, task, contract_skill_scope.as_ref())
-    } else {
-        build_lightweight_skill_playbooks_text(state, task, contract_skill_scope.as_ref())
-    };
-    let skill_quick_index = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
-        build_skill_quick_index_text_scoped(state, task, contract_skill_scope.as_ref())
-    } else {
-        build_lightweight_skill_quick_index_text(state, task, contract_skill_scope.as_ref())
-    };
-    let tool_spec_template = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
-        crate::bootstrap::load_required_prompt_template_for_state(state, AGENT_TOOL_SPEC_PATH)
-            .map_err(|e| e.to_string())?
-            .0
-    } else {
-        build_lightweight_tool_spec(route_result, auto_locator_path)
-    };
+    let planner_tool_library =
+        PlannerToolLibrary::new(state, task, planning_class, route_result, auto_locator_path);
+    let skill_playbooks = planner_tool_library.skill_playbooks();
+    let skill_quick_index = planner_tool_library.skill_quick_index();
+    let tool_spec_template = planner_tool_library.tool_spec()?;
     let turn_analysis = build_turn_analysis_prompt_block(
         turn_analysis_for_prompt,
         boundary_envelope_for_prompt,
