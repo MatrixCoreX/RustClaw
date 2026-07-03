@@ -1115,7 +1115,7 @@ pub(super) fn structured_or_text_multi_file_targets(
     route: &RouteResult,
     user_text: &str,
 ) -> Vec<String> {
-    let structured_targets = crate::task_contract::target_locators_for_route(route)
+    let structured_targets = crate::evidence_policy::target_locators_for_route(route)
         .into_iter()
         .filter(|target| target.trim() != ".")
         .collect::<Vec<_>>();
