@@ -73,7 +73,6 @@ use super::{
     rewrite_terminal_synthesis_placeholder_respond,
     rewrite_unresolved_template_arg_multi_file_read_plan, round1_prompt_spec_for_class,
     route_contract_defers_literal_command_to_planner, route_uses_runtime_owned_observed_finalizer,
-    scalar_content_auto_locator_deterministic_plan_result,
     scalar_content_auto_locator_observation_plan, scalar_count_filter_hint_for_route_or_turn,
     scalar_path_auto_locator_deterministic_plan_result, scalar_path_auto_locator_observation_plan,
     scalar_path_current_workspace_deterministic_plan_result,

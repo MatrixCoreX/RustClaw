@@ -148,6 +148,7 @@ pub(super) fn ensure_explicit_multi_file_targets_have_path_facts(
     if route_has_unresolved_clarify_or_locator_marker(route)
         || !route.output_contract.requires_content_evidence
         || loop_state.has_tool_or_skill_output
+        || actions.is_empty()
     {
         return actions;
     }

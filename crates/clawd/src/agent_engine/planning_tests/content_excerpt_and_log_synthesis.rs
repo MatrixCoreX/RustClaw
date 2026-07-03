@@ -1,5 +1,30 @@
 use super::*;
 
+fn assert_empty_planner_actions_stay_empty(
+    state: &AppState,
+    route: &RouteResult,
+    loop_state: &LoopState,
+    goal: &str,
+    user_text: Option<&str>,
+    context_text: Option<&str>,
+    auto_locator_path: Option<&str>,
+) {
+    let normalized = normalize_planned_actions_with_original_and_context(
+        state,
+        Some(route),
+        loop_state,
+        goal,
+        user_text,
+        context_text,
+        auto_locator_path,
+        vec![],
+    );
+    assert!(
+        normalized.is_empty(),
+        "runtime must not inject a pre-LLM deterministic plan: {normalized:?}"
+    );
+}
+
 #[test]
 fn generic_log_analyze_does_not_steal_directory_with_explicit_log_file_target() {
     let root = TempDirGuard::new("generic_log_analyze_skip_explicit_log_file");
@@ -1000,44 +1025,33 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_fs_basic_for_rep
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.read_text_range".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.join("workspace_root");
 
-    let plan = content_excerpt_summary_auto_locator_deterministic_plan_result(
+    let read_args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "summarize a generated skill prompt",
-        Some(&route),
+        &route,
         &loop_state,
-        Some(&prompt_path),
-    )
-    .expect("repo prompt artifact should use a bounded filesystem read");
-
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 3);
-    match &plan.steps[0].to_agent_action() {
-        Some(AgentAction::CallTool { tool, args }) => {
-            assert_eq!(tool, "fs_basic");
-            assert_eq!(
-                args.get("action").and_then(Value::as_str),
-                Some("read_text_range")
-            );
-            assert_eq!(
-                args.get("path").and_then(Value::as_str),
-                Some(prompt_path.as_str())
-            );
-        }
-        other => panic!("expected fs_basic read_text_range action, got {other:?}"),
-    }
-    assert!(matches!(
-        plan.steps[1].to_agent_action(),
-        Some(AgentAction::SynthesizeAnswer { evidence_refs }) if evidence_refs == vec!["last_output".to_string()]
-    ));
-    assert!(matches!(
-        plan.steps[2].to_agent_action(),
-        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
-    ));
+        "summarize a generated skill prompt",
+        Some("summarize a generated skill prompt"),
+        Some(root.path.to_string_lossy().as_ref()),
+        "fs_basic",
+        "read_text_range",
+        json!({
+            "action": "read_text_range",
+            "path": prompt_path.clone(),
+            "mode": "head",
+            "n": 120,
+        }),
+    );
+    assert_eq!(
+        read_args.get("path").and_then(Value::as_str),
+        Some(prompt_path.as_str())
+    );
+    assert_eq!(read_args.get("mode").and_then(Value::as_str), Some("head"));
 }
 
 #[test]
@@ -1067,37 +1081,32 @@ fn excerpt_kind_judgment_resolved_file_path_uses_bounded_read_and_synthesis() {
     route.resolved_intent =
         "Classify the bound file from logs/clawd.codex.minimax.log using bounded content evidence."
             .to_string();
-    route.route_reason = "existing_observed_context_synthesis".to_string();
+    route.route_reason = "capability_ref=filesystem.read_text_range".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = content_excerpt_summary_auto_locator_deterministic_plan_result(
+    let read_args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "classify the bound file content",
-        Some(&route),
+        &route,
         &loop_state,
-        None,
-    )
-    .expect("excerpt kind judgment should read the resolved file before synthesis");
-
-    assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 3);
-    let read_action = plan.steps[0].to_agent_action().expect("read action");
-    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
+        "classify the bound file content",
+        Some("classify the bound file content"),
+        Some(root.path.to_string_lossy().as_ref()),
+        "fs_basic",
+        "read_text_range",
+        json!({
+            "action": "read_text_range",
+            "path": log_path.clone(),
+            "mode": "head",
+            "n": 80,
+        }),
+    );
     assert_eq!(
         read_args.get("path").and_then(Value::as_str),
         Some(log_path.as_str())
     );
     assert_eq!(read_args.get("mode").and_then(Value::as_str), Some("head"));
     assert_eq!(read_args.get("n").and_then(Value::as_u64), Some(80));
-    assert!(matches!(
-        plan.steps[1].to_agent_action(),
-        Some(AgentAction::SynthesizeAnswer { evidence_refs }) if evidence_refs == vec!["last_output".to_string()]
-    ));
-    assert!(matches!(
-        plan.steps[2].to_agent_action(),
-        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
-    ));
 }
 
 #[test]
@@ -1117,15 +1126,14 @@ fn content_excerpt_with_summary_does_not_use_head_read_deterministic_plan() {
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    assert!(
-        content_excerpt_summary_auto_locator_deterministic_plan_result(
-            &test_state(),
-            "show a bounded excerpt and summarize it",
-            Some(&route),
-            &loop_state,
-            Some(&log_path),
-        )
-        .is_none()
+    assert_empty_planner_actions_stay_empty(
+        &test_state(),
+        &route,
+        &loop_state,
+        "show a bounded excerpt and summarize it",
+        Some("show a bounded excerpt and summarize it"),
+        None,
+        Some(&log_path),
     );
 }
 
@@ -1147,16 +1155,15 @@ fn scalar_content_auto_locator_skips_content_excerpt_with_summary_contract() {
     loop_state.round_no = 1;
     let state = test_state();
 
-    assert!(scalar_content_auto_locator_deterministic_plan_result(
+    assert_empty_planner_actions_stay_empty(
         &state,
-        "show a bounded excerpt and summarize it",
-        Some(&route),
+        &route,
         &loop_state,
-        "show the last 4 lines and summarize recovery status",
+        "show a bounded excerpt and summarize it",
         Some("show the last 4 lines and summarize recovery status"),
+        None,
         Some(&log_path),
-    )
-    .is_none());
+    );
 }
 
 #[test]
@@ -1177,15 +1184,14 @@ fn generic_content_evidence_does_not_use_single_file_deterministic_plan() {
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    assert!(
-        content_excerpt_summary_auto_locator_deterministic_plan_result(
-            &test_state(),
-            "summarize a resolved local document",
-            Some(&route),
-            &loop_state,
-            Some(&readme_path),
-        )
-        .is_none()
+    assert_empty_planner_actions_stay_empty(
+        &test_state(),
+        &route,
+        &loop_state,
+        "summarize a resolved local document",
+        Some("summarize a resolved local document"),
+        None,
+        Some(&readme_path),
     );
 }
 
@@ -1208,15 +1214,14 @@ fn structured_scalar_compare_does_not_use_single_file_content_deterministic_plan
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    assert!(
-        content_excerpt_summary_auto_locator_deterministic_plan_result(
-            &test_state(),
-            "compare files",
-            Some(&route),
-            &loop_state,
-            Some(&readme_path),
-        )
-        .is_none()
+    assert_empty_planner_actions_stay_empty(
+        &test_state(),
+        &route,
+        &loop_state,
+        "compare files",
+        Some("compare files"),
+        None,
+        Some(&readme_path),
     );
 }
 
@@ -1238,16 +1243,15 @@ fn scalar_content_auto_locator_does_not_read_path_only_contract() {
     loop_state.round_no = 1;
     let state = test_state();
 
-    assert!(scalar_content_auto_locator_deterministic_plan_result(
+    assert_empty_planner_actions_stay_empty(
         &state,
-        "extract scalar from resolved file content",
-        Some(&route),
+        &route,
         &loop_state,
         "extract scalar from resolved file content",
         Some("extract scalar from resolved file content"),
+        None,
         Some(&note_path),
-    )
-    .is_none());
+    );
 }
 
 #[test]
@@ -1270,16 +1274,15 @@ fn scalar_content_auto_locator_does_not_read_generated_file_path_report_target()
     loop_state.round_no = 1;
     let state = test_state();
 
-    assert!(scalar_content_auto_locator_deterministic_plan_result(
+    assert_empty_planner_actions_stay_empty(
         &state,
-        "generate a media artifact and return the saved path",
-        Some(&route),
+        &route,
         &loop_state,
         "generate a media artifact and return the saved path",
         Some("generate a media artifact and return the saved path"),
+        None,
         Some(&image_path),
-    )
-    .is_none());
+    );
 }
 
 #[test]
@@ -1300,16 +1303,15 @@ fn scalar_content_auto_locator_does_not_read_existence_contract() {
     loop_state.round_no = 1;
     let state = test_state();
 
-    assert!(scalar_content_auto_locator_deterministic_plan_result(
+    assert_empty_planner_actions_stay_empty(
         &state,
-        "check whether the file exists",
-        Some(&route),
+        &route,
         &loop_state,
         "check whether the file exists",
         Some("check whether the file exists"),
+        None,
         Some(&note_path),
-    )
-    .is_none());
+    );
 }
 
 #[test]
@@ -1326,33 +1328,31 @@ fn scalar_content_auto_locator_reads_generic_scalar_content_contract() {
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
+    route.route_reason = "capability_ref=filesystem.read_text_range".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
     let state = test_state();
 
-    let plan = scalar_content_auto_locator_deterministic_plan_result(
+    let read_args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "extract scalar from resolved file content",
-        Some(&route),
+        &route,
         &loop_state,
         "extract scalar from resolved file content",
         Some("extract scalar from resolved file content"),
-        Some(&note_path),
-    )
-    .expect("generic content-evidence scalar contracts should read the resolved file");
-
-    assert_eq!(plan.steps.len(), 3);
-    assert!(matches!(
-        plan.steps[0].to_agent_action(),
-        Some(AgentAction::CallTool { ref tool, ref args })
-            if tool == "fs_basic"
-                && args.get("action").and_then(Value::as_str) == Some("read_text_range")
-                && args.get("path").and_then(Value::as_str) == Some(note_path.as_str())
-    ));
-    assert!(matches!(
-        plan.steps[1].to_agent_action(),
-        Some(AgentAction::SynthesizeAnswer { .. })
-    ));
+        None,
+        "fs_basic",
+        "read_text_range",
+        json!({
+            "action": "read_text_range",
+            "path": note_path.clone(),
+            "mode": "head",
+            "n": 120,
+        }),
+    );
+    assert_eq!(
+        read_args.get("path").and_then(Value::as_str),
+        Some(note_path.as_str())
+    );
 }
 
 #[test]
@@ -1371,31 +1371,36 @@ fn scalar_content_auto_locator_validates_config_contract() {
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
+    route.route_reason = "capability_ref=config.validate".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
     let state = test_state();
 
-    let plan = scalar_content_auto_locator_deterministic_plan_result(
+    let validate_args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "validate structured config syntax",
-        Some(&route),
+        &route,
         &loop_state,
         "validate structured config syntax",
         Some("validate structured config syntax"),
-        Some(&config_path),
-    )
-    .expect("config validation should use structured validation");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert!(matches!(
-        plan.steps[0].to_agent_action(),
-        Some(AgentAction::CallTool { ref tool, ref args })
-            if tool == "config_basic"
-                && args.get("action").and_then(Value::as_str) == Some("validate")
-                && args.get("path").and_then(Value::as_str) == Some(config_path.as_str())
-                && args.get("validation_profile").and_then(Value::as_str)
-                    == Some("syntax_only")
-    ));
+        None,
+        "config_basic",
+        "validate",
+        json!({
+            "action": "validate",
+            "path": config_path.clone(),
+            "validation_profile": "syntax_only",
+        }),
+    );
+    assert_eq!(
+        validate_args.get("path").and_then(Value::as_str),
+        Some(config_path.as_str())
+    );
+    assert_eq!(
+        validate_args
+            .get("validation_profile")
+            .and_then(Value::as_str),
+        Some("syntax_only")
+    );
 }
 
 #[test]
@@ -1419,27 +1424,31 @@ fn scalar_content_auto_locator_validates_config_capability_ref_without_semantic_
     loop_state.round_no = 1;
     let state = test_state();
 
-    let plan = scalar_content_auto_locator_deterministic_plan_result(
+    let validate_args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "validate structured config syntax",
-        Some(&route),
+        &route,
         &loop_state,
         "validate structured config syntax",
         Some("validate structured config syntax"),
-        Some(&config_path),
-    )
-    .expect("config validation capability_ref should use structured validation");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert!(matches!(
-        plan.steps[0].to_agent_action(),
-        Some(AgentAction::CallTool { ref tool, ref args })
-            if tool == "config_basic"
-                && args.get("action").and_then(Value::as_str) == Some("validate")
-                && args.get("path").and_then(Value::as_str) == Some(config_path.as_str())
-                && args.get("validation_profile").and_then(Value::as_str)
-                    == Some("syntax_only")
-    ));
+        None,
+        "config_basic",
+        "validate",
+        json!({
+            "action": "validate",
+            "path": config_path.clone(),
+            "validation_profile": "syntax_only",
+        }),
+    );
+    assert_eq!(
+        validate_args.get("path").and_then(Value::as_str),
+        Some(config_path.as_str())
+    );
+    assert_eq!(
+        validate_args
+            .get("validation_profile")
+            .and_then(Value::as_str),
+        Some("syntax_only")
+    );
 }
 
 #[test]
@@ -1460,35 +1469,34 @@ fn scalar_content_auto_locator_uses_structured_read_field_for_structured_scalar_
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = manifest_path.clone();
+    route.route_reason = "capability_ref=config.read_field".to_string();
     route.resolved_intent =
         "Read package.name from Cargo.toml and output only that value.".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = scalar_content_auto_locator_deterministic_plan_result(
+    let read_args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "Read package.name from Cargo.toml and output only that value.",
-        Some(&route),
+        &route,
         &loop_state,
         "Read package.name from Cargo.toml and output only that value.",
         Some("Read package.name from Cargo.toml and output only that value."),
-        Some(&manifest_path),
-    )
-    .expect("structured scalar contracts should use structured field reads");
-
-    assert_eq!(plan.steps.len(), 1);
-    let actual = plan.steps[0].to_agent_action();
-    assert!(
-        matches!(
-        actual,
-        Some(AgentAction::CallTool { ref tool, ref args })
-            if tool == "config_basic"
-                && args.get("action").and_then(Value::as_str) == Some("read_field")
-                && args.get("path").and_then(Value::as_str) == Some(manifest_path.as_str())
-                && args.get("field_path").and_then(Value::as_str) == Some("package.name")
-        ),
-        "unexpected plan action: {:?}",
-        actual
+        None,
+        "config_basic",
+        "read_field",
+        json!({
+            "action": "read_field",
+            "path": manifest_path.clone(),
+            "field_path": "package.name",
+        }),
+    );
+    assert_eq!(
+        read_args.get("path").and_then(Value::as_str),
+        Some(manifest_path.as_str())
+    );
+    assert_eq!(
+        read_args.get("field_path").and_then(Value::as_str),
+        Some("package.name")
     );
 }
 
@@ -1529,36 +1537,34 @@ version.workspace = true
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = member_path.clone();
+    route.route_reason = "capability_ref=config.read_field".to_string();
     route.resolved_intent =
         "Read package.version from crates/clawd/Cargo.toml and output only the value.".to_string();
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
 
-    let plan = scalar_content_auto_locator_deterministic_plan_result(
+    let read_args = assert_planner_supplied_tool_call_preserved(
         &state,
-        "Read package.version from crates/clawd/Cargo.toml and output only the value.",
-        Some(&route),
+        &route,
         &loop_state,
         "Read package.version from crates/clawd/Cargo.toml and output only the value.",
         Some("Read package.version from crates/clawd/Cargo.toml and output only the value."),
-        Some(&member_path),
-    )
-    .expect("explicit member Cargo scalar contracts should read the member package field");
-
-    assert_eq!(plan.steps.len(), 1);
-    let actual = plan.steps[0].to_agent_action();
-    assert!(
-        matches!(
-            actual,
-        Some(AgentAction::CallTool { ref tool, ref args })
-            if tool == "config_basic"
-                && args.get("action").and_then(Value::as_str) == Some("read_field")
-                && args.get("path").and_then(Value::as_str) == Some(member_path.as_str())
-                && args.get("field_path").and_then(Value::as_str)
-                    == Some("package.version")
-        ),
-        "unexpected plan action: {:?}",
-        actual
+        None,
+        "config_basic",
+        "read_field",
+        json!({
+            "action": "read_field",
+            "path": member_path.clone(),
+            "field_path": "package.version",
+        }),
+    );
+    assert_eq!(
+        read_args.get("path").and_then(Value::as_str),
+        Some(member_path.as_str())
+    );
+    assert_eq!(
+        read_args.get("field_path").and_then(Value::as_str),
+        Some("package.version")
     );
 }
 
@@ -1590,6 +1596,7 @@ fn scalar_content_auto_locator_ignores_memory_field_when_current_request_names_b
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = package_path.clone();
+    route.route_reason = "capability_ref=config.read_field".to_string();
     route.resolved_intent =
             "Extract the name field from scripts/nl_tests/fixtures/device_local/package.json and output only the value."
                 .to_string();
@@ -1601,26 +1608,29 @@ fn scalar_content_auto_locator_ignores_memory_field_when_current_request_names_b
             "### PLANNER_MEMORY_CONTEXT\nfixture fact: scripts.build='echo build'\n\n### CURRENT_REQUEST\n{current_request}"
         );
 
-    let plan = scalar_content_auto_locator_deterministic_plan_result(
+    let read_args = assert_planner_supplied_tool_call_preserved(
         &state,
-        &goal,
-        Some(&route),
+        &route,
         &loop_state,
-        current_request,
+        &goal,
         Some(current_request),
-        Some(&package_path),
-    )
-    .expect("bare schema key should be selected from current request");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert!(matches!(
-        plan.steps[0].to_agent_action(),
-        Some(AgentAction::CallTool { ref tool, ref args })
-            if tool == "config_basic"
-                && args.get("action").and_then(Value::as_str) == Some("read_field")
-                && args.get("path").and_then(Value::as_str) == Some(package_path.as_str())
-                && args.get("field_path").and_then(Value::as_str) == Some("name")
-    ));
+        Some(current_request),
+        "config_basic",
+        "read_field",
+        json!({
+            "action": "read_field",
+            "path": package_path.clone(),
+            "field_path": "name",
+        }),
+    );
+    assert_eq!(
+        read_args.get("path").and_then(Value::as_str),
+        Some(package_path.as_str())
+    );
+    assert_eq!(
+        read_args.get("field_path").and_then(Value::as_str),
+        Some("name")
+    );
 }
 
 #[test]
