@@ -67,7 +67,7 @@ fn apply_model_config_minimax_uses_expected_default_base_url() {
         .expect("minimax");
     assert_eq!(
         minimax.get("base_url").and_then(|x| x.as_str()),
-        Some("https://api.minimax.io/v1")
+        Some("https://api.minimaxi.com/v1")
     );
 }
 

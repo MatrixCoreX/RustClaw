@@ -109,12 +109,12 @@ fn llm_runtime_differs_when_only_api_key_changes() {
         "minimax",
         "MiniMax-M2.7",
         "openai_compat",
-        "https://api.minimax.io/v1",
+        "https://api.minimaxi.com/v1",
         "old-key",
         "minimax",
         "MiniMax-M2.7",
         "openai_compat",
-        "https://api.minimax.io/v1",
+        "https://api.minimaxi.com/v1",
         "new-key",
     ));
 }
@@ -125,7 +125,7 @@ fn llm_runtime_differs_when_only_base_url_changes() {
         "minimax",
         "MiniMax-M2.7",
         "openai_compat",
-        "https://api.minimax.io/v1",
+        "https://api.minimaxi.com/v1",
         "same-key",
         "minimax",
         "MiniMax-M2.7",
@@ -141,12 +141,12 @@ fn llm_runtime_differs_is_false_when_runtime_matches_saved_config() {
         "minimax",
         "MiniMax-M2.7",
         "openai_compat",
-        "https://api.minimax.io/v1",
+        "https://api.minimaxi.com/v1",
         "same-key",
         "minimax",
         "MiniMax-M2.7",
         "openai_compat",
-        "https://api.minimax.io/v1",
+        "https://api.minimaxi.com/v1",
         "same-key",
     ));
 }
@@ -157,12 +157,12 @@ fn llm_runtime_differs_when_only_minimax_provider_type_changes() {
         "minimax",
         "MiniMax-M2.7",
         "anthropic_claude",
-        "https://api.minimax.io/v1",
+        "https://api.minimaxi.com/v1",
         "same-key",
         "minimax",
         "MiniMax-M2.7",
         "openai_compat",
-        "https://api.minimax.io/v1",
+        "https://api.minimaxi.com/v1",
         "same-key",
     ));
 }
@@ -193,7 +193,7 @@ selected_model = "MiniMax-M2.7"
 
 [llm.minimax]
 api_key = ""
-base_url = "https://api.minimax.io/v1"
+base_url = "https://api.minimaxi.com/v1"
 model = "MiniMax-M2.7"
 models = ["MiniMax-M2.7"]
 "#,
@@ -280,14 +280,14 @@ fn upsert_model_section_updates_video_and_music_model_items() {
     let video_item = ModelConfigItem {
         vendor: "minimax".to_string(),
         model: "video-01".to_string(),
-        base_url: Some("https://api.minimax.io/v1".to_string()),
+        base_url: Some("https://api.minimaxi.com/v1".to_string()),
         api_key: Some("video-secret".to_string()),
         ..default_model_item()
     };
     let music_item = ModelConfigItem {
         vendor: "minimax".to_string(),
         model: "music-2.6".to_string(),
-        base_url: Some("https://api.minimax.io/v1".to_string()),
+        base_url: Some("https://api.minimaxi.com/v1".to_string()),
         api_key: Some("music-secret".to_string()),
         ..default_model_item()
     };
