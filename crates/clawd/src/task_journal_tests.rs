@@ -1239,7 +1239,7 @@ fn trace_json_distinguishes_requested_tool_from_executed_skill() {
     );
     assert_eq!(
         step.get("resolution_source").and_then(Value::as_str),
-        Some("direct_tool_or_skill_compat")
+        Some("direct_tool_or_skill_trace")
     );
     assert_eq!(
         step.get("sanitized_args_summary").and_then(Value::as_str),

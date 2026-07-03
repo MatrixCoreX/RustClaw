@@ -757,7 +757,7 @@ fn round_capability_resolution_records_json(
 fn capability_resolution_source(action_type: &str) -> &'static str {
     match action_type {
         "call_capability" => "capability_resolver",
-        "call_tool" | "call_skill" => "direct_tool_or_skill_compat",
+        "call_tool" | "call_skill" => "direct_tool_or_skill_trace",
         "respond" | "synthesize_answer" | "think" => "planner_terminal_action",
         _ => "planner_action",
     }
