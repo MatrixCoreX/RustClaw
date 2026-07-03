@@ -67,6 +67,10 @@ fn boundary_envelope_projects_only_machine_boundary_fields() {
 
     let envelope = output.boundary_envelope();
 
+    assert_eq!(
+        envelope.schema_version(),
+        super::output_types::BOUNDARY_ENVELOPE_SCHEMA_VERSION
+    );
     assert_eq!(envelope.raw_chars, 27);
     assert_eq!(envelope.raw_char_count(), 27);
     assert_eq!(envelope.explicit_locators, vec!["config/app.toml"]);

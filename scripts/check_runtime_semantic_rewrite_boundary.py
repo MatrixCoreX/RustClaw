@@ -1248,6 +1248,16 @@ def scan_boundary_envelope_schema_json(
                 "BoundaryEnvelope schema must expose raw_chars count",
             )
         )
+    schema_version = schema.get("properties", {}).get("schema_version", {})
+    if not isinstance(schema_version, dict) or schema_version.get("const") != 1:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "boundary_envelope_schema_version_missing",
+                "BoundaryEnvelope schema must expose schema_version const=1",
+            )
+        )
     for field in sorted(forbidden):
         findings.append(
             Finding(
@@ -1322,6 +1332,24 @@ def scan_boundary_envelope_rust_type_text(rel_path: str, text: str) -> list[Find
 
     body = match.group("body")
     body_start = match.start("body")
+    if "BOUNDARY_ENVELOPE_SCHEMA_VERSION: u8 = 1" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "boundary_envelope_schema_version_const_missing",
+                "BoundaryEnvelope Rust type must expose BOUNDARY_ENVELOPE_SCHEMA_VERSION = 1",
+            )
+        )
+    if "fn schema_version(&self) -> u8" not in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "boundary_envelope_schema_version_method_missing",
+                "BoundaryEnvelope must expose schema_version()",
+            )
+        )
     raw_offset = body.find("raw_user_request")
     if raw_offset >= 0:
         findings.append(
@@ -3568,8 +3596,11 @@ def run_self_test() -> int:
     )
     assert not scan_boundary_envelope_rust_type_text(
         "crates/clawd/src/intent_router_output_types.rs",
+        "pub(crate) const BOUNDARY_ENVELOPE_SCHEMA_VERSION: u8 = 1;\n"
         "struct IntentNormalizerOutput {\n    boundary_envelope: BoundaryEnvelope,\n}\n"
-        "struct BoundaryEnvelope {\n    raw_chars: usize,\n}\n",
+        "struct BoundaryEnvelope {\n    raw_chars: usize,\n}\n"
+        "impl BoundaryEnvelope {\n    pub(crate) fn schema_version(&self) -> u8 {\n"
+        "        BOUNDARY_ENVELOPE_SCHEMA_VERSION\n    }\n}\n",
     )
     missing_route_trace_decision_enum = scan_route_trace_record_decision_type_text(
         "crates/clawd/src/intent_router_route_trace.rs",
@@ -4233,8 +4264,10 @@ def run_self_test() -> int:
     )
     assert (
         blocked_boundary_envelope_raw_text
-        and blocked_boundary_envelope_raw_text[0].kind
-        == "boundary_envelope_forbidden_field"
+        and any(
+            item.kind == "boundary_envelope_forbidden_field"
+            for item in blocked_boundary_envelope_raw_text
+        )
     )
     blocked_boundary_envelope_open_schema = scan_boundary_envelope_schema_json(
         "prompts/schemas/boundary_envelope.schema.json",
@@ -4249,14 +4282,29 @@ def run_self_test() -> int:
         item.kind == "boundary_envelope_schema_not_closed"
         for item in blocked_boundary_envelope_open_schema
     )
+    blocked_boundary_envelope_missing_schema_version = scan_boundary_envelope_schema_json(
+        "prompts/schemas/boundary_envelope.schema.json",
+        {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["raw_chars"],
+            "properties": {"raw_chars": {"type": "integer"}},
+        },
+    )
+    assert any(
+        item.kind == "boundary_envelope_schema_version_missing"
+        for item in blocked_boundary_envelope_missing_schema_version
+    )
     blocked_boundary_envelope_rust_raw_text = scan_boundary_envelope_rust_type_text(
         "crates/clawd/src/intent_router_output_types.rs",
         "pub(crate) struct BoundaryEnvelope {\n    pub(crate) raw_user_request: String,\n}",
     )
     assert (
         blocked_boundary_envelope_rust_raw_text
-        and blocked_boundary_envelope_rust_raw_text[0].kind
-        == "boundary_envelope_rust_raw_user_request_field"
+        and any(
+            item.kind == "boundary_envelope_rust_raw_user_request_field"
+            for item in blocked_boundary_envelope_rust_raw_text
+        )
     )
     blocked_boundary_envelope_rust_missing_raw_chars = scan_boundary_envelope_rust_type_text(
         "crates/clawd/src/intent_router_output_types.rs",
@@ -4266,9 +4314,22 @@ def run_self_test() -> int:
         item.kind == "boundary_envelope_rust_raw_chars_missing"
         for item in blocked_boundary_envelope_rust_missing_raw_chars
     )
+    blocked_boundary_envelope_rust_missing_schema_version = (
+        scan_boundary_envelope_rust_type_text(
+            "crates/clawd/src/intent_router_output_types.rs",
+            "pub(crate) struct BoundaryEnvelope {\n    pub(crate) raw_chars: usize,\n}",
+        )
+    )
+    assert any(
+        item.kind == "boundary_envelope_schema_version_const_missing"
+        for item in blocked_boundary_envelope_rust_missing_schema_version
+    )
     assert not scan_boundary_envelope_rust_type_text(
         "crates/clawd/src/intent_router_output_types.rs",
-        "pub(crate) struct BoundaryEnvelope {\n    pub(crate) raw_chars: usize,\n}",
+        "pub(crate) const BOUNDARY_ENVELOPE_SCHEMA_VERSION: u8 = 1;\n"
+        "pub(crate) struct BoundaryEnvelope {\n    pub(crate) raw_chars: usize,\n}\n"
+        "impl BoundaryEnvelope {\n    pub(crate) fn schema_version(&self) -> u8 {\n"
+        "        BOUNDARY_ENVELOPE_SCHEMA_VERSION\n    }\n}\n",
     )
     assert not scan_intent_normalizer_schema_ordinary_semantic_tokens()
     assert not scan_intent_normalizer_schema_route_authority_fields()

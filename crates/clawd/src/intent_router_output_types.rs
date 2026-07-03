@@ -3,6 +3,8 @@ use crate::{
     ActFinalizeStyle, IntentOutputContract, OutputLocatorKind, ResumeBehavior, ScheduleKind,
 };
 
+pub(crate) const BOUNDARY_ENVELOPE_SCHEMA_VERSION: u8 = 1;
+
 #[derive(Debug, Clone)]
 pub(crate) struct ContextResolution {
     pub(crate) resolved_user_intent: String,
@@ -50,6 +52,10 @@ pub(crate) struct BoundaryEnvelope {
 }
 
 impl BoundaryEnvelope {
+    pub(crate) fn schema_version(&self) -> u8 {
+        BOUNDARY_ENVELOPE_SCHEMA_VERSION
+    }
+
     pub(crate) fn from_request(
         request: &str,
         schedule_intent: Option<crate::ScheduleIntentOutput>,
