@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -223,6 +225,29 @@ FORBIDDEN_SCHEMA_ORDINARY_SEMANTIC_TOKENS: tuple[str, ...] = (
     "archive_pack",
     "archive_unpack",
 )
+FORBIDDEN_NORMALIZER_SCHEMA_ROUTE_AUTHORITY_TOP_LEVEL_FIELDS: frozenset[str] = frozenset(
+    {
+        "decision",
+        "answer_candidate",
+        "direct_answer",
+        "direct_answer_candidate",
+        "planner_execute",
+        "route_authority",
+        "semantic_route_authority",
+    }
+)
+FORBIDDEN_NORMALIZER_SCHEMA_ROUTE_AUTHORITY_OUTPUT_CONTRACT_FIELDS: frozenset[str] = frozenset(
+    {
+        "semantic_kind",
+        "semantic",
+        "semantic_type",
+        "semantic_route",
+        "semantic_route_kind",
+        "semantic_kind_hint",
+        "answer_kind",
+        "route_kind",
+    }
+)
 FORBIDDEN_PREFERRED_RUN_CMD_SEMANTIC_ENUMS: tuple[str, ...] = (
     "OutputSemanticKind::PackageManagerDetection",
     "OutputSemanticKind::DockerPs",
@@ -337,6 +362,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_intent_normalizer_prompt_contract_marker())
     findings.extend(scan_boundary_prompt_schema_legacy_semantic_kind_fields())
     findings.extend(scan_intent_normalizer_schema_ordinary_semantic_tokens())
+    findings.extend(scan_intent_normalizer_schema_route_authority_fields())
     findings.extend(scan_contract_repair_schema_ordinary_semantic_tokens())
     findings.extend(scan_skill_registry_metadata_ordinary_semantic_tokens())
     findings.extend(scan_preferred_run_cmd_registry_bridge_fallback())
@@ -685,6 +711,92 @@ def scan_boundary_prompt_schema_legacy_semantic_kind_fields() -> list[Finding]:
 def scan_intent_normalizer_schema_ordinary_semantic_tokens() -> list[Finding]:
     rel_path = rel(INTENT_NORMALIZER_SCHEMA)
     return scan_schema_text(rel_path, INTENT_NORMALIZER_SCHEMA.read_text(encoding="utf-8"))
+
+
+def json_object_keys(value: Any) -> set[str]:
+    if isinstance(value, dict):
+        return set(value)
+    return set()
+
+
+def json_list_values(value: Any) -> set[str]:
+    if isinstance(value, list):
+        return {item for item in value if isinstance(item, str)}
+    return set()
+
+
+def scan_intent_normalizer_schema_route_authority_fields() -> list[Finding]:
+    rel_path = rel(INTENT_NORMALIZER_SCHEMA)
+    schema = json.loads(INTENT_NORMALIZER_SCHEMA.read_text(encoding="utf-8"))
+    if not isinstance(schema, dict):
+        return [
+            Finding(
+                rel_path,
+                1,
+                "normalizer_schema_not_object",
+                "intent normalizer schema must be a JSON object",
+            )
+        ]
+    return scan_intent_normalizer_schema_route_authority_json(rel_path, schema)
+
+
+def scan_intent_normalizer_schema_route_authority_json(
+    rel_path: str, schema: dict[str, Any]
+) -> list[Finding]:
+    findings: list[Finding] = []
+    top_properties = json_object_keys(schema.get("properties"))
+    top_required = json_list_values(schema.get("required"))
+    output_contract = schema.get("properties", {}).get("output_contract", {})
+    output_properties = json_object_keys(output_contract.get("properties"))
+    output_required = json_list_values(output_contract.get("required"))
+
+    for field in sorted(
+        top_properties & FORBIDDEN_NORMALIZER_SCHEMA_ROUTE_AUTHORITY_TOP_LEVEL_FIELDS
+    ):
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "normalizer_schema_route_authority_top_level_field",
+                field,
+            )
+        )
+    for field in sorted(
+        top_required & FORBIDDEN_NORMALIZER_SCHEMA_ROUTE_AUTHORITY_TOP_LEVEL_FIELDS
+    ):
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "normalizer_schema_route_authority_top_level_required",
+                field,
+            )
+        )
+    for field in sorted(
+        output_properties
+        & FORBIDDEN_NORMALIZER_SCHEMA_ROUTE_AUTHORITY_OUTPUT_CONTRACT_FIELDS
+    ):
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "normalizer_schema_route_authority_output_contract_field",
+                field,
+            )
+        )
+    for field in sorted(
+        output_required
+        & FORBIDDEN_NORMALIZER_SCHEMA_ROUTE_AUTHORITY_OUTPUT_CONTRACT_FIELDS
+    ):
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "normalizer_schema_route_authority_output_contract_required",
+                field,
+            )
+        )
+    return findings
 
 
 def scan_contract_repair_schema_ordinary_semantic_tokens() -> list[Finding]:
@@ -2335,7 +2447,49 @@ def run_self_test() -> int:
         blocked_schema_git
         and blocked_schema_git[0].kind == "normalizer_schema_ordinary_semantic_token"
     )
+    blocked_schema_route_authority_top_level = (
+        scan_intent_normalizer_schema_route_authority_json(
+            "prompts/schemas/intent_normalizer.schema.json",
+            {"type": "object", "properties": {"decision": {"type": "string"}}},
+        )
+    )
+    assert (
+        blocked_schema_route_authority_top_level
+        and blocked_schema_route_authority_top_level[0].kind
+        == "normalizer_schema_route_authority_top_level_field"
+    )
+    blocked_schema_route_authority_required = (
+        scan_intent_normalizer_schema_route_authority_json(
+            "prompts/schemas/intent_normalizer.schema.json",
+            {"type": "object", "required": ["answer_candidate"], "properties": {}},
+        )
+    )
+    assert (
+        blocked_schema_route_authority_required
+        and blocked_schema_route_authority_required[0].kind
+        == "normalizer_schema_route_authority_top_level_required"
+    )
+    blocked_schema_route_authority_output_contract = (
+        scan_intent_normalizer_schema_route_authority_json(
+            "prompts/schemas/intent_normalizer.schema.json",
+            {
+                "type": "object",
+                "properties": {
+                    "output_contract": {
+                        "type": ["object", "null"],
+                        "properties": {"semantic_kind": {"type": "string"}},
+                    }
+                },
+            },
+        )
+    )
+    assert (
+        blocked_schema_route_authority_output_contract
+        and blocked_schema_route_authority_output_contract[0].kind
+        == "normalizer_schema_route_authority_output_contract_field"
+    )
     assert not scan_intent_normalizer_schema_ordinary_semantic_tokens()
+    assert not scan_intent_normalizer_schema_route_authority_fields()
     blocked_contract_repair_schema = scan_schema_text(
         "prompts/schemas/contract_repair_judge.schema.json",
         '"docker_logs"\n',
