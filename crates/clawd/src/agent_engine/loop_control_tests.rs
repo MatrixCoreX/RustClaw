@@ -22,7 +22,8 @@ use super::{
     try_recover_recent_artifacts_answer_verifier_gap, try_recover_rss_news_answer_verifier_gap,
     try_recover_structured_count_answer_verifier_gap,
     try_recover_structured_scalar_output_format_answer_verifier_gap,
-    try_recover_structured_search_answer_verifier_gap, AgentLoopGuardPolicy, RoundOutcome,
+    try_recover_structured_search_answer_verifier_gap, text_has_exact_marker_line,
+    AgentLoopGuardPolicy, RoundOutcome,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
@@ -39,6 +40,18 @@ use crate::{
     RouteResult, ScheduleKind,
 };
 use serde_json::json;
+
+#[test]
+fn success_marker_matching_requires_exact_line() {
+    assert!(!text_has_exact_marker_line(
+        "status=ok\nVALIDATION_PASSED_EXTRA",
+        "VALIDATION_PASSED",
+    ));
+    assert!(text_has_exact_marker_line(
+        "status=ok\nVALIDATION_PASSED\nnext=done",
+        "VALIDATION_PASSED",
+    ));
+}
 
 fn route_result(shape: OutputResponseShape) -> RouteResult {
     RouteResult {

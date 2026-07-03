@@ -353,7 +353,7 @@ pub(super) fn attach_execution_recipe_closeout_to_delivery(
     if let Some(marker) =
         crate::agent_engine::loop_control::requested_success_marker(agent_run_context)
     {
-        if !note.contains(marker) {
+        if !delivery_text_has_exact_marker_line(&note, marker) {
             note = format!("{note}\n\n{marker}");
         }
     }
@@ -369,7 +369,10 @@ pub(super) fn ensure_requested_success_marker_visible(
     else {
         return;
     };
-    if delivery_messages.iter().any(|item| item.contains(marker)) {
+    if delivery_messages
+        .iter()
+        .any(|item| delivery_text_has_exact_marker_line(item, marker))
+    {
         return;
     }
 
@@ -389,7 +392,9 @@ pub(super) fn missing_requested_success_marker<'a>(
     delivery_messages: &'a [String],
 ) -> Option<&'static str> {
     let marker = crate::agent_engine::loop_control::requested_success_marker(agent_run_context)?;
-    let has_marker = delivery_messages.iter().any(|item| item.contains(marker));
+    let has_marker = delivery_messages
+        .iter()
+        .any(|item| delivery_text_has_exact_marker_line(item, marker));
     if loop_state.execution_recipe.is_active() && !has_marker {
         Some(marker)
     } else {
@@ -403,7 +408,9 @@ pub(super) fn auto_requested_success_marker<'a>(
     delivery_messages: &'a [String],
 ) -> Option<&'static str> {
     let marker = crate::agent_engine::loop_control::requested_success_marker(agent_run_context)?;
-    let has_marker = delivery_messages.iter().any(|item| item.contains(marker));
+    let has_marker = delivery_messages
+        .iter()
+        .any(|item| delivery_text_has_exact_marker_line(item, marker));
     if loop_state.execution_recipe.is_active()
         && matches!(
             loop_state.execution_recipe.phase,
@@ -416,6 +423,11 @@ pub(super) fn auto_requested_success_marker<'a>(
     } else {
         None
     }
+}
+
+pub(super) fn delivery_text_has_exact_marker_line(text: &str, marker: &str) -> bool {
+    let marker = marker.trim();
+    !marker.is_empty() && text.lines().map(str::trim).any(|line| line == marker)
 }
 
 pub(super) fn route_allows_model_language_final_answer(route: &crate::RouteResult) -> bool {
