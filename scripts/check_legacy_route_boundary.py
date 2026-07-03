@@ -21,6 +21,7 @@ LEGACY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("first_layer_decision", re.compile(r"\bfirst_layer_decision\b")),
     ("legacy_route_label", re.compile(r"\blegacy_route_label\b")),
     ("derived_route_label", re.compile(r"\bderived_route_label\b")),
+    ("derived_route_decision", re.compile(r"\bderived_route_decision\b")),
     ("route_label_call", re.compile(r"\.route_label\s*\(")),
     ("intent_normalizer_decision_log", re.compile(r"\bintent_normalizer\b.*\bdecision=")),
     (
@@ -89,6 +90,10 @@ def is_allowed(rel_path: str, kind: str, line_text: str) -> bool:
         return False
     if kind == "derived_route_label":
         # Production code should use boundary_mode, route_trace_decision, or route_trace_label.
+        return False
+    if kind == "derived_route_decision":
+        # Generic decision naming makes normalizer trace compatibility look
+        # authoritative. Production code should spell this as route_trace_*.
         return False
     if kind == "route_label_call":
         # The old route_label() API was removed; route_trace_label_for_log()
@@ -208,6 +213,14 @@ def run_self_test() -> int:
     assert scan_text(
         "crates/clawd/src/ask_flow.rs",
         "let label = route.derived_route_label();",
+    )
+    assert scan_text(
+        "crates/clawd/src/intent_router_normalizer_run.rs",
+        "let derived_route_decision = route_trace_decision_from_state(...);",
+    )
+    assert not scan_text(
+        "crates/clawd/src/intent_router_normalizer_run.rs",
+        "let derived_route_trace_decision = route_trace_decision_from_state(...);",
     )
     assert scan_text(
         "crates/clawd/src/task_journal.rs",
