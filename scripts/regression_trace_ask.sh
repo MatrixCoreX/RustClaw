@@ -358,22 +358,22 @@ if log_path.exists():
 lines = [line for line in log_text.splitlines() if task_id in line]
 
 route_chat = any(
-    re.search(r"route_gate_kind=chat\b", line)
+    re.search(r"(?:boundary_mode|route_gate_kind)=chat\b", line)
     or re.search(r"(?:legacy_route_label|derived_route_label)=Chat\b", line)
     for line in lines
 )
 route_act = any(
-    re.search(r"route_gate_kind=execute\b", line)
+    re.search(r"(?:boundary_mode|route_gate_kind)=execute\b", line)
     or re.search(r"(?:legacy_route_label|derived_route_label)=Act\b", line)
     for line in lines
 )
 route_chat_act = any(
-    re.search(r"ask_mode=planner_execute_chat_wrapped\b", line)
+    re.search(r"ask_mode=act:chat_wrapped\b", line)
     or re.search(r"(?:legacy_route_label|derived_route_label)=ChatAct\b", line)
     for line in lines
 )
 route_clarify = any(
-    re.search(r"route_gate_kind=clarify\b|(?:legacy_first_layer_decision|first_layer_decision)=clarify\b|(?:legacy_route_label|derived_route_label)=AskClarify\b", line)
+    re.search(r"(?:boundary_mode|route_gate_kind)=clarify\b|(?:route_trace_decision|legacy_first_layer_decision|first_layer_decision)=clarify\b|(?:legacy_route_label|derived_route_label)=AskClarify\b", line)
     for line in lines
 )
 has_exec = any("executor_step_execute" in line for line in lines)

@@ -485,10 +485,10 @@ if model_io_path.exists():
         if str(row.get('task_id') or '') == task_id:
             model_rows.append(row)
 
-route_gate_kind = str(route_result.get('route_gate_kind') or '')
+route_gate_kind = str(route_result.get('boundary_mode') or route_result.get('route_gate_kind') or '')
 legacy_route_label = str(route_result.get('legacy_route_label') or route_result.get('derived_route_label') or '')
 legacy_first_layer_decision = str(
-    route_result.get('legacy_first_layer_decision') or route_result.get('first_layer_decision') or ''
+    route_result.get('route_trace_decision') or route_result.get('legacy_first_layer_decision') or route_result.get('first_layer_decision') or ''
 )
 route_chat = (
     route_gate_kind == 'chat'
@@ -511,7 +511,7 @@ route_act = (
 route_chat_act = (
     legacy_route_label == 'ChatAct'
     or any(
-        re.search(r'ask_mode=planner_execute_chat_wrapped\b', line)
+        re.search(r'ask_mode=act:chat_wrapped\b', line)
         or re.search(r'(?:legacy_route_label|derived_route_label)=ChatAct\b', line)
         for line in clawd_lines
     )
@@ -521,7 +521,7 @@ route_clarify = (
     or legacy_first_layer_decision == 'clarify'
     or legacy_route_label == 'AskClarify'
     or any(
-        re.search(r'route_gate_kind=clarify\b|(?:legacy_first_layer_decision|first_layer_decision)=clarify\b|(?:legacy_route_label|derived_route_label)=AskClarify\b', line)
+        re.search(r'(?:boundary_mode|route_gate_kind)=clarify\b|(?:route_trace_decision|legacy_first_layer_decision|first_layer_decision)=clarify\b|(?:legacy_route_label|derived_route_label)=AskClarify\b', line)
         for line in clawd_lines
     )
 )

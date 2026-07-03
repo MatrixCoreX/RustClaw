@@ -89,14 +89,21 @@ def compact(value: Any, max_chars: int = 300) -> str:
     return text
 
 
-def route_legacy_first_layer(route: Any) -> str:
+def route_trace_decision(route: Any) -> str:
     if not isinstance(route, dict):
         return ""
     return str(
-        route.get("legacy_first_layer_decision")
+        route.get("route_trace_decision")
+        or route.get("legacy_first_layer_decision")
         or route.get("first_layer_decision")
         or ""
     )
+
+
+def route_boundary_mode(route: Any) -> str:
+    if not isinstance(route, dict):
+        return ""
+    return str(route.get("boundary_mode") or route.get("route_gate_kind") or "")
 
 
 def sort_key(path: Path) -> tuple[int, int, str]:
@@ -450,9 +457,9 @@ def observe_file(path: Path) -> Observation:
             if isinstance(summary, dict) and isinstance(trace, dict)
             else ""
         ),
-        first_layer=route_legacy_first_layer(route),
+        first_layer=route_trace_decision(route),
         routed_mode=str(route.get("routed_mode") or "") if isinstance(route, dict) else "",
-        route_gate=str(route.get("route_gate_kind") or "") if isinstance(route, dict) else "",
+        route_gate=route_boundary_mode(route),
         plan_targets=collect_plan_targets(trace if isinstance(trace, dict) else {}),
         plan_action_refs=collect_plan_action_refs(trace if isinstance(trace, dict) else {}),
         requested_action_refs=collect_requested_action_refs(trace if isinstance(trace, dict) else {}),
