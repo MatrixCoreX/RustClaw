@@ -1,10 +1,10 @@
 use tracing::info;
 
 use super::{
+    ContractRepairReport, IntentNormalizerOutput, TargetTaskPolicy, TurnAnalysis, TurnType,
     append_route_reason, bare_path_only_input_can_fill_active_observable_task,
     execution_finalize_style_for_contract, is_bare_path_only_input_for_clarify,
     push_unique_repair_code, route_trace_record, structured_execution_signal_for_effective_route,
-    ContractRepairReport, IntentNormalizerOutput, TargetTaskPolicy, TurnAnalysis, TurnType,
 };
 use crate::{
     ActFinalizeStyle, FirstLayerDecision, IntentOutputContract, ResumeBehavior, ScheduleKind,
@@ -50,20 +50,20 @@ pub(super) fn build_normalizer_output_with_final_gate(
     {
         append_route_reason(&mut reason, "bare_path_fills_active_observable_task");
         info!(
-                "{} intent_normalizer task_id={} bare_path_active_observable_fill needs_clarify=false path_token={}",
-                crate::highlight_tag("routing"),
-                task.task_id,
-                crate::truncate_for_log(req.trim())
-            );
+            "{} intent_normalizer task_id={} bare_path_active_observable_fill needs_clarify=false path_token={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            crate::truncate_for_log(req.trim())
+        );
         (false, String::new())
     } else if !needs_clarify && bare_path_only {
         append_route_reason(&mut reason, "bare_path_no_verb");
         info!(
-                "{} intent_normalizer task_id={} bare_path_no_verb_boundary_hint needs_clarify=false path_token={}",
-                crate::highlight_tag("routing"),
-                task.task_id,
-                crate::truncate_for_log(req.trim())
-            );
+            "{} intent_normalizer task_id={} bare_path_no_verb_boundary_hint needs_clarify=false path_token={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            crate::truncate_for_log(req.trim())
+        );
         (false, String::new())
     } else {
         (needs_clarify, clarify_question)
@@ -165,7 +165,7 @@ fn log_boundary_envelope(task: &crate::ClaimedTask, output: &IntentNormalizerOut
         "{} intent_normalizer_boundary_envelope task_id={} raw_chars={} schedule_intent={} attachment_refs={} explicit_locators={} active_task_reference={} session_binding={} language_hint={} safety_budget_hint={}",
         crate::highlight_tag("routing"),
         task.task_id,
-        envelope.raw_user_request.chars().count(),
+        envelope.raw_char_count(),
         envelope
             .schedule_intent
             .as_ref()
