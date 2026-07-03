@@ -1,5 +1,87 @@
 use super::*;
 
+fn normalize_explicit_planner_actions(
+    state: &AppState,
+    route: &RouteResult,
+    loop_state: &LoopState,
+    goal: &str,
+    request: &str,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    normalize_planned_actions_with_original(
+        state,
+        Some(route),
+        loop_state,
+        goal,
+        Some(request),
+        Some(state.skill_rt.workspace_root.to_string_lossy().as_ref()),
+        actions,
+    )
+}
+
+fn planner_run_cmd_action(
+    state: &AppState,
+    request: &str,
+    command: &str,
+    continue_on_error: bool,
+) -> AgentAction {
+    let mut args = json!({
+        "command": command,
+        "request_text": request,
+        "cwd": state.skill_rt.workspace_root.display().to_string(),
+    });
+    if continue_on_error {
+        args[CLAWD_CONTINUE_ON_ERROR_ARG] = Value::Bool(true);
+    }
+    AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args,
+    }
+}
+
+fn assert_run_cmd_action<'a>(action: &'a AgentAction, command: &str) -> &'a Value {
+    let args = super::super::action_args(action).expect("run_cmd args");
+    match action {
+        AgentAction::CallTool { tool, .. } | AgentAction::CallSkill { skill: tool, .. } => {
+            assert_eq!(tool, "run_cmd");
+        }
+        other => panic!("expected run_cmd action, got {other:?}"),
+    }
+    assert_eq!(args.get("command").and_then(Value::as_str), Some(command));
+    assert_eq!(args.get(CLAWD_LITERAL_COMMAND_ARG), Some(&json!(true)));
+    args
+}
+
+fn assert_synthesize_action(action: &AgentAction, evidence_refs: &[&str]) {
+    assert!(matches!(
+        action,
+        AgentAction::SynthesizeAnswer { evidence_refs: refs }
+            if refs == &evidence_refs.iter().map(|value| value.to_string()).collect::<Vec<_>>()
+    ));
+}
+
+fn assert_last_output_respond(action: &AgentAction) {
+    assert!(matches!(
+        action,
+        AgentAction::Respond { content } if content == "{{last_output}}"
+    ));
+}
+
+fn assert_empty_planner_actions_stay_empty(
+    state: &AppState,
+    route: &RouteResult,
+    loop_state: &LoopState,
+    goal: &str,
+    request: &str,
+) {
+    let normalized =
+        normalize_explicit_planner_actions(state, route, loop_state, goal, request, vec![]);
+    assert!(
+        normalized.is_empty(),
+        "runtime must not inject an explicit-command plan before the planner: {normalized:?}"
+    );
+}
+
 #[test]
 fn execution_failed_step_prefixed_bare_sequence_gets_multi_run_cmd_plan() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
@@ -16,41 +98,36 @@ fn execution_failed_step_prefixed_bare_sequence_gets_multi_run_cmd_plan() {
     let request =
         "先执行 pwd，再执行 definitely_missing_command_rustclaw_67890，然后总结成功和失败";
 
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_explicit_planner_actions(
         &state,
-        "run command sequence and summarize success/failure",
-        Some(&route),
+        &route,
         &loop_state,
+        "run command sequence and summarize success/failure",
         request,
-        None,
-    )
-    .expect("prefixed command sequence should produce deterministic run_cmd plan");
+        vec![
+            planner_run_cmd_action(&state, request, "pwd", true),
+            planner_run_cmd_action(
+                &state,
+                request,
+                "definitely_missing_command_rustclaw_67890",
+                true,
+            ),
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 4);
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("pwd")
-    );
-    assert_eq!(
-        plan.steps[1].args.get("command").and_then(Value::as_str),
-        Some("definitely_missing_command_rustclaw_67890")
-    );
-    for step in plan.steps.iter().take(2) {
-        assert_eq!(step.skill, "run_cmd");
-        assert_eq!(step.args.get(CLAWD_LITERAL_COMMAND_ARG), Some(&json!(true)));
-        assert_eq!(
-            step.args.get(CLAWD_CONTINUE_ON_ERROR_ARG),
-            Some(&json!(true))
-        );
-    }
-    assert_eq!(
-        plan.steps[2].args,
-        json!({"evidence_refs": ["step_1", "step_2"]})
-    );
-    assert_eq!(
-        plan.steps[3].args.get("content").and_then(Value::as_str),
-        Some("{{last_output}}")
-    );
+    assert_eq!(normalized.len(), 4);
+    let args = assert_run_cmd_action(&normalized[0], "pwd");
+    assert_eq!(args.get(CLAWD_CONTINUE_ON_ERROR_ARG), Some(&json!(true)));
+    let args = assert_run_cmd_action(&normalized[1], "definitely_missing_command_rustclaw_67890");
+    assert_eq!(args.get(CLAWD_CONTINUE_ON_ERROR_ARG), Some(&json!(true)));
+    assert_synthesize_action(&normalized[2], &["step_1", "step_2"]);
+    assert_last_output_respond(&normalized[3]);
 }
 
 #[test]
@@ -72,42 +149,49 @@ fn execution_failed_step_prefixed_echo_sequence_counts_as_explicit_command_reque
         request,
         Some(&route)
     ));
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_explicit_planner_actions(
         &state,
-        "run command sequence and continue after failure",
-        Some(&route),
+        &route,
         &loop_state,
+        "run command sequence and continue after failure",
         request,
-        None,
-    )
-    .expect("explicit failed-step command sequence should not fall through to auto-locator");
+        vec![
+            planner_run_cmd_action(&state, request, "echo BEFORE_BREAK", false),
+            planner_run_cmd_action(
+                &state,
+                request,
+                "definitely_missing_command_rustclaw_67890",
+                false,
+            ),
+            planner_run_cmd_action(&state, request, "echo AFTER_BREAK_67890", false),
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec![
+                    "step_1".to_string(),
+                    "step_2".to_string(),
+                    "step_3".to_string(),
+                ],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 5);
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("echo BEFORE_BREAK")
-    );
-    assert_eq!(
-        plan.steps[1].args.get("command").and_then(Value::as_str),
-        Some("definitely_missing_command_rustclaw_67890")
-    );
-    assert_eq!(
-        plan.steps[2].args.get("command").and_then(Value::as_str),
-        Some("echo AFTER_BREAK_67890")
-    );
-    for step in plan.steps.iter().take(3) {
-        assert_eq!(step.skill, "run_cmd");
-        assert_eq!(step.args.get(CLAWD_LITERAL_COMMAND_ARG), Some(&json!(true)));
-        assert_eq!(step.args.get(CLAWD_CONTINUE_ON_ERROR_ARG), None);
+    assert_eq!(normalized.len(), 5);
+    for (action, command) in normalized.iter().take(3).zip([
+        "echo BEFORE_BREAK",
+        "definitely_missing_command_rustclaw_67890",
+        "echo AFTER_BREAK_67890",
+    ]) {
+        let args = assert_run_cmd_action(action, command);
+        assert_eq!(
+            args.get(CLAWD_CONTINUE_ON_ERROR_ARG),
+            None,
+            "planner did not request continue-on-error for this command"
+        );
     }
-    assert_eq!(
-        plan.steps[3].args,
-        json!({"evidence_refs": ["step_1", "step_2", "step_3"]})
-    );
-    assert_eq!(
-        plan.steps[4].args.get("content").and_then(Value::as_str),
-        Some("{{last_output}}")
-    );
+    assert_synthesize_action(&normalized[3], &["step_1", "step_2", "step_3"]);
+    assert_last_output_respond(&normalized[4]);
 }
 
 #[test]
@@ -137,41 +221,51 @@ fn conditional_step_update_limits_current_explicit_command_plan_to_pre_update_st
         attachment_processing_required: false,
     };
 
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_explicit_planner_actions(
         &state,
-        "run failed command prefix and remember conditional continuation",
-        Some(&route),
+        &route,
         &loop_state,
+        "run failed command prefix and remember conditional continuation",
         request,
-        Some(&turn_analysis),
-    )
-    .expect("conditional continuation should still produce deterministic run_cmd plan");
+        vec![
+            planner_run_cmd_action(&state, request, "echo BEFORE_CHANGE_EN", false),
+            planner_run_cmd_action(
+                &state,
+                request,
+                "definitely_missing_command_rustclaw_change_24683",
+                false,
+            ),
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 4);
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("echo BEFORE_CHANGE_EN")
-    );
-    assert_eq!(
-        plan.steps[1].args.get("command").and_then(Value::as_str),
-        Some("definitely_missing_command_rustclaw_change_24683")
-    );
-    for step in plan.steps.iter().take(2) {
-        assert_eq!(step.args.get(CLAWD_CONTINUE_ON_ERROR_ARG), None);
+    assert_eq!(normalized.len(), 4);
+    for (action, command) in normalized.iter().take(2).zip([
+        "echo BEFORE_CHANGE_EN",
+        "definitely_missing_command_rustclaw_change_24683",
+    ]) {
+        let args = assert_run_cmd_action(action, command);
+        assert_eq!(args.get(CLAWD_CONTINUE_ON_ERROR_ARG), None);
     }
-    assert_eq!(plan.steps[2].action_type, "synthesize_answer");
-    assert_eq!(
-        plan.steps[2].args,
-        json!({"evidence_refs": ["step_1", "step_2"]})
-    );
-    assert_eq!(plan.steps[3].action_type, "respond");
-    let executed = plan
-        .steps
+    assert_synthesize_action(&normalized[2], &["step_1", "step_2"]);
+    assert_last_output_respond(&normalized[3]);
+    let executed = normalized
         .iter()
-        .filter_map(|step| step.args.get("command").and_then(Value::as_str))
+        .filter_map(|action| {
+            super::super::action_args(action).and_then(|args| args.get("command")?.as_str())
+        })
         .collect::<Vec<_>>();
     assert!(!executed.contains(&"echo AFTER_CHANGE_OLD_EN"));
     assert!(!executed.contains(&"echo AFTER_CHANGE_NEW_EN"));
+    assert_eq!(
+        super::super::conditional_step_update_immediate_command_count(Some(&turn_analysis)),
+        Some(2)
+    );
 }
 
 #[test]
@@ -236,15 +330,13 @@ fn explicit_configured_command_with_followup_skips_single_step_fast_path() {
         super::super::explicit_command_segment(&state.policy.command_intent, request).as_deref(),
         Some("pwd")
     );
-    assert!(explicit_command_deterministic_plan_result(
+    assert_empty_planner_actions_stay_empty(
         &state,
-        "run compound explicit commands",
-        Some(&route),
+        &route,
         &loop_state,
+        "run compound explicit commands",
         request,
-        None,
-    )
-    .is_none());
+    );
 }
 
 #[test]
@@ -301,22 +393,17 @@ fn explicit_configured_command_without_followup_keeps_single_step_fast_path() {
     let loop_state = LoopState::new(1);
     let request = "Run pwd,";
 
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_explicit_planner_actions(
         &state,
-        "run explicit command",
-        Some(&route),
+        &route,
         &loop_state,
+        "run explicit command",
         request,
-        None,
-    )
-    .expect("single configured command should keep deterministic plan");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("pwd")
+        vec![planner_run_cmd_action(&state, request, "pwd", false)],
     );
+
+    assert_eq!(normalized.len(), 1);
+    assert_run_cmd_action(&normalized[0], "pwd");
 }
 
 #[test]
@@ -337,22 +424,17 @@ fn explicit_configured_command_inside_clause_is_detected() {
         super::super::explicit_command_segment(&state.policy.command_intent, request).as_deref(),
         Some("pwd")
     );
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_explicit_planner_actions(
         &state,
-        "run explicit command",
-        Some(&route),
+        &route,
         &loop_state,
+        "run explicit command",
         request,
-        None,
-    )
-    .expect("configured command in a later clause should produce run_cmd plan");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("pwd")
+        vec![planner_run_cmd_action(&state, request, "pwd", false)],
     );
+
+    assert_eq!(normalized.len(), 1);
+    assert_run_cmd_action(&normalized[0], "pwd");
 }
 
 #[test]
@@ -374,22 +456,17 @@ fn embedded_standalone_command_with_structural_args_keeps_single_step_fast_path(
         super::super::explicit_command_segment(&state.policy.command_intent, request).as_deref(),
         Some("pwd -P")
     );
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_explicit_planner_actions(
         &state,
-        "run explicit command",
-        Some(&route),
+        &route,
         &loop_state,
+        "run explicit command",
         request,
-        None,
-    )
-    .expect("embedded standalone command should produce run_cmd plan");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("pwd -P")
+        vec![planner_run_cmd_action(&state, request, "pwd -P", false)],
     );
+
+    assert_eq!(normalized.len(), 1);
+    assert_run_cmd_action(&normalized[0], "pwd -P");
 }
 
 #[test]
@@ -411,22 +488,21 @@ fn embedded_standalone_command_sequence_uses_configured_command_tokens() {
         super::super::explicit_command_segment(&state.policy.command_intent, request).as_deref(),
         Some("pwd; whoami")
     );
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_explicit_planner_actions(
         &state,
-        "run explicit command sequence",
-        Some(&route),
+        &route,
         &loop_state,
+        "run explicit command sequence",
         request,
-        None,
-    )
-    .expect("configured command sequence should produce one run_cmd plan");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("pwd; whoami")
+        vec![
+            planner_run_cmd_action(&state, request, "pwd", false),
+            planner_run_cmd_action(&state, request, "whoami", false),
+        ],
     );
+
+    assert_eq!(normalized.len(), 2);
+    assert_run_cmd_action(&normalized[0], "pwd");
+    assert_run_cmd_action(&normalized[1], "whoami");
 }
 
 #[test]
@@ -483,56 +559,31 @@ fn command_output_summary_explicit_command_plan_synthesizes_configured_sequence(
         .as_deref(),
         Some("whoami; pwd")
     );
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_explicit_planner_actions(
         &state,
-        "run explicit command sequence and synthesize answer",
-        Some(&route),
+        &route,
         &loop_state,
+        "run explicit command sequence and synthesize answer",
         request,
-        None,
-    )
-    .expect("command summary should produce observation plus synthesis plan");
+        vec![
+            planner_run_cmd_action(&state, request, "whoami", true),
+            planner_run_cmd_action(&state, request, "pwd", true),
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 4);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("whoami")
-    );
-    assert_eq!(
-        plan.steps[0].args.get(CLAWD_LITERAL_COMMAND_ARG),
-        Some(&json!(true))
-    );
-    assert_eq!(
-        plan.steps[0]
-            .args
-            .get(super::super::super::CLAWD_CONTINUE_ON_ERROR_ARG),
-        Some(&json!(true))
-    );
-    assert_eq!(
-        plan.steps[1].args.get("command").and_then(Value::as_str),
-        Some("pwd")
-    );
-    assert_eq!(
-        plan.steps[1].args.get(CLAWD_LITERAL_COMMAND_ARG),
-        Some(&json!(true))
-    );
-    assert_eq!(
-        plan.steps[1]
-            .args
-            .get(super::super::super::CLAWD_CONTINUE_ON_ERROR_ARG),
-        Some(&json!(true))
-    );
-    assert_eq!(plan.steps[2].action_type, "synthesize_answer");
-    assert_eq!(
-        plan.steps[2].args,
-        json!({"evidence_refs": ["step_1", "step_2"]})
-    );
-    assert_eq!(plan.steps[3].action_type, "respond");
-    assert_eq!(
-        plan.steps[3].args.get("content").and_then(Value::as_str),
-        Some("{{last_output}}")
-    );
+    assert_eq!(normalized.len(), 4);
+    let args = assert_run_cmd_action(&normalized[0], "whoami");
+    assert_eq!(args.get(CLAWD_CONTINUE_ON_ERROR_ARG), Some(&json!(true)));
+    let args = assert_run_cmd_action(&normalized[1], "pwd");
+    assert_eq!(args.get(CLAWD_CONTINUE_ON_ERROR_ARG), Some(&json!(true)));
+    assert_synthesize_action(&normalized[2], &["step_1", "step_2"]);
+    assert_last_output_respond(&normalized[3]);
 }
 
 #[test]
@@ -559,28 +610,27 @@ fn command_output_summary_embedded_code_span_after_run_prefix_uses_literal_comma
             .as_deref(),
         Some("pwd")
     );
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_explicit_planner_actions(
         &state,
-        "run pwd and summarize related process or port evidence",
-        Some(&route),
+        &route,
         &loop_state,
+        "run pwd and summarize related process or port evidence",
         request,
-        None,
-    )
-    .expect("embedded code span command should use deterministic run_cmd plan");
+        vec![
+            planner_run_cmd_action(&state, request, "pwd", false),
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 3);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("pwd")
-    );
-    assert_eq!(
-        plan.steps[0].args.get(CLAWD_LITERAL_COMMAND_ARG),
-        Some(&json!(true))
-    );
-    assert_eq!(plan.steps[1].action_type, "synthesize_answer");
-    assert_eq!(plan.steps[2].action_type, "respond");
+    assert_eq!(normalized.len(), 3);
+    assert_run_cmd_action(&normalized[0], "pwd");
+    assert_synthesize_action(&normalized[1], &["last_output"]);
+    assert_last_output_respond(&normalized[2]);
 }
 
 #[test]
@@ -599,41 +649,36 @@ fn command_output_summary_prefixed_unknown_second_command_gets_multi_step_plan()
     let request =
         "先执行 pwd，再执行 definitely_missing_command_rustclaw_67890，然后总结成功和失败";
 
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_explicit_planner_actions(
         &state,
-        "run command sequence and summarize success/failure",
-        Some(&route),
+        &route,
         &loop_state,
+        "run command sequence and summarize success/failure",
         request,
-        None,
-    )
-    .expect("command summary should keep both literal command observations");
+        vec![
+            planner_run_cmd_action(&state, request, "pwd", true),
+            planner_run_cmd_action(
+                &state,
+                request,
+                "definitely_missing_command_rustclaw_67890",
+                true,
+            ),
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ],
+    );
 
-    assert_eq!(plan.steps.len(), 4);
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("pwd")
-    );
-    assert_eq!(
-        plan.steps[1].args.get("command").and_then(Value::as_str),
-        Some("definitely_missing_command_rustclaw_67890")
-    );
-    for step in plan.steps.iter().take(2) {
-        assert_eq!(step.skill, "run_cmd");
-        assert_eq!(step.args.get(CLAWD_LITERAL_COMMAND_ARG), Some(&json!(true)));
-        assert_eq!(
-            step.args.get(CLAWD_CONTINUE_ON_ERROR_ARG),
-            Some(&json!(true))
-        );
-    }
-    assert_eq!(
-        plan.steps[2].args,
-        json!({"evidence_refs": ["step_1", "step_2"]})
-    );
-    assert_eq!(
-        plan.steps[3].args.get("content").and_then(Value::as_str),
-        Some("{{last_output}}")
-    );
+    assert_eq!(normalized.len(), 4);
+    let args = assert_run_cmd_action(&normalized[0], "pwd");
+    assert_eq!(args.get(CLAWD_CONTINUE_ON_ERROR_ARG), Some(&json!(true)));
+    let args = assert_run_cmd_action(&normalized[1], "definitely_missing_command_rustclaw_67890");
+    assert_eq!(args.get(CLAWD_CONTINUE_ON_ERROR_ARG), Some(&json!(true)));
+    assert_synthesize_action(&normalized[2], &["step_1", "step_2"]);
+    assert_last_output_respond(&normalized[3]);
 }
 
 #[test]
@@ -674,22 +719,23 @@ fn leading_shellish_command_sequence_gets_deterministic_run_cmd_plan() {
     let loop_state = LoopState::new(1);
     let request = "pwd whoami hostname 三个结果每个一行 不要总结";
 
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_explicit_planner_actions(
         &state,
-        "run explicit command sequence",
-        Some(&route),
+        &route,
         &loop_state,
+        "run explicit command sequence",
         request,
-        None,
-    )
-    .expect("leading command sequence should produce run_cmd plan");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(plan.steps[0].skill, "run_cmd");
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("pwd; whoami; hostname")
+        vec![
+            planner_run_cmd_action(&state, request, "pwd", false),
+            planner_run_cmd_action(&state, request, "whoami", false),
+            planner_run_cmd_action(&state, request, "hostname", false),
+        ],
     );
+
+    assert_eq!(normalized.len(), 3);
+    assert_run_cmd_action(&normalized[0], "pwd");
+    assert_run_cmd_action(&normalized[1], "whoami");
+    assert_run_cmd_action(&normalized[2], "hostname");
 }
 
 #[test]
@@ -736,21 +782,22 @@ fn explicit_prefixed_shellish_code_span_keeps_single_step_fast_path() {
     let loop_state = LoopState::new(1);
     let request = "Run `pwd && ls Cargo.toml`.";
 
-    let plan = explicit_command_deterministic_plan_result(
+    let normalized = normalize_explicit_planner_actions(
         &state,
-        "run explicit shell code span",
-        Some(&route),
+        &route,
         &loop_state,
+        "run explicit shell code span",
         request,
-        None,
-    )
-    .expect("shellish code span should keep deterministic plan");
-
-    assert_eq!(plan.steps.len(), 1);
-    assert_eq!(
-        plan.steps[0].args.get("command").and_then(Value::as_str),
-        Some("pwd && ls Cargo.toml")
+        vec![planner_run_cmd_action(
+            &state,
+            request,
+            "pwd && ls Cargo.toml",
+            false,
+        )],
     );
+
+    assert_eq!(normalized.len(), 1);
+    assert_run_cmd_action(&normalized[0], "pwd && ls Cargo.toml");
 }
 
 #[test]
