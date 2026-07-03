@@ -20,6 +20,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "crates/clawd/src"
 AGENT_ENGINE_FILE = SRC_ROOT / "agent_engine.rs"
+PIPELINE_TYPES_FILE = SRC_ROOT / "pipeline_types.rs"
+RUNTIME_ASK_MODE_FILE = SRC_ROOT / "runtime/ask_mode.rs"
 PREFERRED_RUN_CMD_FILE = SRC_ROOT / "agent_engine/scalar_count_deterministic_plan.rs"
 PREFERRED_STRUCTURED_ACTION_FILE = SRC_ROOT / "agent_engine/preferred_structured_action.rs"
 MIGRATION_CLASS_FILE = SRC_ROOT / "agent_engine/migration_class.rs"
@@ -731,6 +733,7 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_boundary_envelope_rust_type_machine_only())
     findings.extend(scan_route_trace_record_decision_type())
     findings.extend(scan_normalizer_run_route_trace_decision_type())
+    findings.extend(scan_runtime_journal_route_trace_decision_type())
     findings.extend(scan_contract_repair_schema_ordinary_semantic_tokens())
     findings.extend(scan_skill_registry_metadata_ordinary_semantic_tokens())
     findings.extend(scan_preferred_run_cmd_registry_bridge_fallback())
@@ -1432,6 +1435,53 @@ def scan_normalizer_run_route_trace_decision_type_text(
                 "normalizer route-trace labels must be derived from RouteTraceDecision",
             )
         )
+    return findings
+
+
+def scan_runtime_journal_route_trace_decision_type() -> list[Finding]:
+    findings: list[Finding] = []
+    for path in (RUNTIME_ASK_MODE_FILE, PIPELINE_TYPES_FILE):
+        findings.extend(
+            scan_runtime_journal_route_trace_decision_type_text(
+                rel(path),
+                path.read_text(encoding="utf-8"),
+            )
+        )
+    return findings
+
+
+def scan_runtime_journal_route_trace_decision_type_text(
+    rel_path: str, text: str
+) -> list[Finding]:
+    findings: list[Finding] = []
+    for match in re.finditer(
+        r"fn\s+route_trace_decision_for_journal\b(?P<body>.*?)(?=\n\s*(?:pub\(crate\)\s+)?fn\s+|\n\}|\Z)",
+        text,
+        flags=re.DOTALL,
+    ):
+        body = match.group("body")
+        body_start = match.start("body")
+        signature = body.split("{", 1)[0]
+        first_layer_in_signature = signature.find("FirstLayerDecision")
+        if first_layer_in_signature >= 0:
+            findings.append(
+                Finding(
+                    rel_path,
+                    text.count("\n", 0, body_start + first_layer_in_signature) + 1,
+                    "runtime_journal_route_trace_first_layer_return_type",
+                    "route_trace_decision_for_journal must return a route-trace token enum",
+                )
+            )
+        first_layer_variant = body.find("FirstLayerDecision::")
+        if first_layer_variant >= 0:
+            findings.append(
+                Finding(
+                    rel_path,
+                    text.count("\n", 0, body_start + first_layer_variant) + 1,
+                    "runtime_journal_route_trace_first_layer_variant",
+                    "route_trace_decision_for_journal must not construct FirstLayerDecision variants",
+                )
+            )
     return findings
 
 
@@ -3476,6 +3526,36 @@ def run_self_test() -> int:
         "}\n"
         "fn route_trace_label_from_decision() {\n"
         "    RouteTraceDecision::Act.as_str();\n"
+        "}\n",
+    )
+    blocked_runtime_route_trace_return_type = (
+        scan_runtime_journal_route_trace_decision_type_text(
+            "crates/clawd/src/runtime/ask_mode.rs",
+            "pub(crate) fn route_trace_decision_for_journal(&self) -> FirstLayerDecision {\n"
+            "    AskRouteTraceDecision::Respond\n"
+            "}\n",
+        )
+    )
+    assert any(
+        item.kind == "runtime_journal_route_trace_first_layer_return_type"
+        for item in blocked_runtime_route_trace_return_type
+    )
+    blocked_runtime_route_trace_variant = (
+        scan_runtime_journal_route_trace_decision_type_text(
+            "crates/clawd/src/runtime/ask_mode.rs",
+            "pub(crate) fn route_trace_decision_for_journal(&self) -> AskRouteTraceDecision {\n"
+            "    FirstLayerDecision::DirectAnswer\n"
+            "}\n",
+        )
+    )
+    assert any(
+        item.kind == "runtime_journal_route_trace_first_layer_variant"
+        for item in blocked_runtime_route_trace_variant
+    )
+    assert not scan_runtime_journal_route_trace_decision_type_text(
+        "crates/clawd/src/runtime/ask_mode.rs",
+        "pub(crate) fn route_trace_decision_for_journal(&self) -> AskRouteTraceDecision {\n"
+        "    AskRouteTraceDecision::Respond\n"
         "}\n",
     )
     assert not scan_normalizer_route_result_boundary()

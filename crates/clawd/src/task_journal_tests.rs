@@ -226,7 +226,7 @@ fn summary_json_includes_finalizer_and_task_metrics() {
             .get("route_result")
             .and_then(|v| v.get("route_trace_decision"))
             .and_then(Value::as_str),
-        Some("planner_execute")
+        Some("act")
     );
     for legacy_field in [
         "route_gate_kind",

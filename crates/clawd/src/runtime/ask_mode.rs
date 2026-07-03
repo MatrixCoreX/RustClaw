@@ -2,9 +2,9 @@
 //!
 //! `AskMode` is the runtime ask-flow state used for boundary trace and
 //! dispatch compatibility. Ordinary user semantics are owned by the agent loop;
-//! legacy `FirstLayerDecision` values may still be emitted as log/journal hints.
+//! journal hints use route-trace tokens, not legacy first-layer decisions.
 
-use super::types::FirstLayerDecision;
+use super::types::AskRouteTraceDecision;
 use super::types::RouteGateKind;
 
 /// Runtime ask mode after first-layer convergence.
@@ -113,18 +113,18 @@ impl AskMode {
         }
     }
 
-    pub(crate) fn route_trace_decision_for_journal(&self) -> FirstLayerDecision {
+    pub(crate) fn route_trace_decision_for_journal(&self) -> AskRouteTraceDecision {
         match self {
             #[cfg(test)]
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::ClarifyTrace,
-            } => FirstLayerDecision::Clarify,
+            } => AskRouteTraceDecision::Clarify,
             #[cfg(test)]
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::DirectAnswerTrace,
-            } => FirstLayerDecision::DirectAnswer,
-            AskMode::ClarifyOrChat { .. } => FirstLayerDecision::DirectAnswer,
-            AskMode::Act { .. } => FirstLayerDecision::PlannerExecute,
+            } => AskRouteTraceDecision::Respond,
+            AskMode::ClarifyOrChat { .. } => AskRouteTraceDecision::Respond,
+            AskMode::Act { .. } => AskRouteTraceDecision::Act,
         }
     }
 
