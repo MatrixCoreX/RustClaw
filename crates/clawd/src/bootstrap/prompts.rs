@@ -30,10 +30,6 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "contract_repair_judge (routing)",
     ),
     (
-        "prompts/direct_answer_gate_prompt.md",
-        "direct_answer_gate (ask_flow)",
-    ),
-    (
         "prompts/clarify_question_prompt.md",
         "clarify_question (routing)",
     ),
@@ -302,14 +298,6 @@ pub(crate) fn active_prompt_vendor_name(state: &AppState) -> String {
         return prompt_layers::normalize_prompt_vendor_name(active);
     }
     "default".to_string()
-}
-
-pub(crate) fn resolve_prompt_rel_path_for_vendor(
-    workspace_root: &Path,
-    vendor: &str,
-    rel_path: &str,
-) -> String {
-    prompt_layers::resolve_prompt_rel_path_for_vendor(workspace_root, vendor, rel_path)
 }
 
 pub(crate) fn load_prompt_template_for_vendor(

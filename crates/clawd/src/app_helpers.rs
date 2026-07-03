@@ -103,28 +103,6 @@ pub(crate) fn bilingual_t_with_default(
     }
 }
 
-pub(crate) fn localized_t_with_default(
-    state: &AppState,
-    key: &str,
-    default_text: &str,
-    locale_hint: &str,
-) -> String {
-    let locale = match locale_hint.trim().to_ascii_lowercase() {
-        hint if hint.starts_with("en") => Some("en-US"),
-        hint if hint.starts_with("zh") => Some("zh-CN"),
-        hint if hint.starts_with("ja") => Some("ja"),
-        hint if hint.starts_with("ko") => Some("ko"),
-        _ => None,
-    };
-    if let Some(locale) = locale {
-        let text = i18n_t_for_locale_with_default(state, locale, key, default_text);
-        if text != default_text {
-            return text;
-        }
-    }
-    i18n_t_with_default(state, key, default_text)
-}
-
 fn i18n_t_for_locale_with_default(
     state: &AppState,
     locale: &str,

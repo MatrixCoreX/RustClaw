@@ -100,22 +100,6 @@ answer_verifier_retry_limit = 2
 # 若发现 verifier 误判，可回滚到 selected_agent_loop 或 off。
 # 风险/Risk: all 会把 verifier 误判直接放大为用户可见失败；回滚时必须保留 route-delta 观察.
 answer_verifier_enforce_required_scope = "all"
-# 用途/Purpose: 普通语义路由 authority 生命周期；替代单个 bool，区分 legacy/shadow/canary/default.
-# 可选值/Allowed tokens: legacy, shadow, agent_loop_canary, agent_loop_default.
-# 建议修改/Recommended change: 默认使用 agent_loop_default；需要热回滚时改为 legacy。
-# 风险/Risk: canary/default 会把 selected class 的普通语义归属推进到 agent loop；必须保留结构化审计和回滚。
-semantic_route_authority = "agent_loop_default"
-# 兼容说明/Compatibility: 旧 `agent_decides_semantic_route` bool 不再由运行时读取；
-# 新配置必须使用 semantic_route_authority 机器 token。
-# 用途/Purpose: agent_loop_canary 的窄范围 bucket；agent_loop_default 会忽略该字段并接管所有 eligible 低风险 bucket.
-# 可选值/Allowed tokens: none, bound_path_summary, structured_field_read, exact_path_list, recent_artifacts_judgment, scalar_count,
-# low_risk_status_observation, low_risk_config_read, low_risk_log_observation, low_risk_workspace_question,
-# low_risk_tool_discovery, low_risk_direct_response.
-# 建议修改/Recommended change: 默认化后不配置该字段；只有回到 agent_loop_canary 调试单个 bucket 时再设置。
-# 风险/Risk: canary 非 none 会改变该 bucket 的 first-layer 语义归属；必须先有专项 canary 和回滚指标.
-# agent_loop_canary_bucket = "none"
-# 兼容说明/Compatibility: 旧 `agent_decides_migration_class` 不再由运行时读取；
-# 新配置不要再写旧字段名。
 # 用途/Purpose: registry 幂等/去重治理范围；替代全局 bool.
 # 可选值/Allowed tokens: off, selected_agent_loop, all.
 # 建议修改/Recommended change: 285 release-gate equivalent 与 route-delta clean 后默认 all；
