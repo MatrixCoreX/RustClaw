@@ -3,11 +3,10 @@ use super::{
     parse_runtime_async_job_start_plan_hint, structural_alias_binding_fallback_decision,
     structured_execution_signal_for_effective_route, IntentExecutionRecipeOut,
     IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
+    OutputSemanticKind, RouteTraceDecision, ScheduleKind, TargetTaskPolicy, TurnType,
 };
-use crate::{
-    execution_recipe::{ExecutionRecipeKind, ExecutionRecipeProfile, ExecutionRecipeTargetScope},
-    FirstLayerDecision,
+use crate::execution_recipe::{
+    ExecutionRecipeKind, ExecutionRecipeProfile, ExecutionRecipeTargetScope,
 };
 use serde_json::Value;
 
@@ -308,7 +307,7 @@ fn route_result_uses_machine_execution_signal_not_legacy_normalizer_hint() {
         decision,
         None,
     );
-    out.route_trace_record.route_trace_decision = FirstLayerDecision::DirectAnswer;
+    out.route_trace_record.route_trace_decision = RouteTraceDecision::Respond;
 
     let route = super::route_result_from_normalizer(&state, &task, &out);
 
@@ -357,7 +356,7 @@ fn route_result_ignores_legacy_planner_hint_without_machine_execution_signal() {
     };
     let mut out =
         super::normalizer_output_from_fallback("plain discussion", "test_fallback", decision, None);
-    out.route_trace_record.route_trace_decision = FirstLayerDecision::PlannerExecute;
+    out.route_trace_record.route_trace_decision = RouteTraceDecision::Act;
 
     let route = super::route_result_from_normalizer(&state, &task, &out);
 

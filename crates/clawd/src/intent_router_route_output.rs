@@ -6,8 +6,8 @@ use super::{
     state_patch_targets_task_lifecycle_fields, IntentNormalizerOutput, RouteDecision, TurnAnalysis,
 };
 use crate::{
-    ActFinalizeStyle, AppState, AskMode, ClaimedTask, FirstLayerDecision, OutputSemanticKind,
-    ResumeBehavior, RiskCeiling, RouteResult,
+    ActFinalizeStyle, AppState, AskMode, ClaimedTask, OutputSemanticKind, ResumeBehavior,
+    RiskCeiling, RouteResult,
 };
 
 fn ask_mode_from_machine_route_state(
@@ -286,17 +286,17 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
     fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     turn_analysis: Option<TurnAnalysis>,
 ) -> IntentNormalizerOutput {
-    let legacy_normalizer_decision = if decision.needs_clarify {
-        FirstLayerDecision::Clarify
+    let route_trace_decision = if decision.needs_clarify {
+        super::RouteTraceDecision::Clarify
     } else if route_has_structured_execution_signal(
         &decision.output_contract,
         decision.wants_file_delivery,
         decision.schedule_kind,
         None,
     ) {
-        FirstLayerDecision::PlannerExecute
+        super::RouteTraceDecision::Act
     } else {
-        FirstLayerDecision::DirectAnswer
+        super::RouteTraceDecision::Respond
     };
     let mut execution_finalize_style =
         execution_finalize_style_for_contract(&decision.output_contract);
@@ -319,7 +319,7 @@ pub(super) fn normalizer_output_from_fallback_with_turn_analysis(
         decision.resolved_user_intent
     };
     let trace_record = route_trace_record(
-        legacy_normalizer_decision,
+        route_trace_decision,
         decision.needs_clarify,
         &decision.output_contract,
         vec![fallback_reason_prefix.to_string()],

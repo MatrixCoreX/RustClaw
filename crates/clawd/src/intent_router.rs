@@ -44,7 +44,7 @@ use contract_repair_judge::ContractRepairJudgeOut;
 
 #[path = "intent_router_route_trace.rs"]
 mod route_trace;
-use route_trace::{push_unique_repair_code, route_trace_record};
+use route_trace::{push_unique_repair_code, route_trace_record, RouteTraceDecision};
 
 #[path = "intent_router_turn_analysis.rs"]
 mod turn_analysis;

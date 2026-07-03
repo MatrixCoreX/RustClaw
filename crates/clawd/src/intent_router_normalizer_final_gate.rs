@@ -6,9 +6,7 @@ use super::{
     push_unique_repair_code, route_trace_record, structured_execution_signal_for_effective_route,
     ContractRepairReport, IntentNormalizerOutput, TargetTaskPolicy, TurnAnalysis, TurnType,
 };
-use crate::{
-    ActFinalizeStyle, FirstLayerDecision, IntentOutputContract, ResumeBehavior, ScheduleKind,
-};
+use crate::{ActFinalizeStyle, IntentOutputContract, ResumeBehavior, ScheduleKind};
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_normalizer_output_with_final_gate(
@@ -76,31 +74,29 @@ pub(super) fn build_normalizer_output_with_final_gate(
         schedule_kind,
         execution_recipe_hint,
     );
-    let legacy_normalizer_decision_eff = if needs_clarify_eff {
-        FirstLayerDecision::Clarify
+    let route_trace_decision_eff = if needs_clarify_eff {
+        super::RouteTraceDecision::Clarify
     } else if bare_path_active_observable_boundary || structured_execution_signal {
-        FirstLayerDecision::PlannerExecute
+        super::RouteTraceDecision::Act
     } else {
-        FirstLayerDecision::DirectAnswer
+        super::RouteTraceDecision::Respond
     };
-    let execution_finalize_style_eff = if matches!(
-        legacy_normalizer_decision_eff,
-        FirstLayerDecision::PlannerExecute
-    ) {
-        if bare_path_active_observable_boundary {
-            crate::post_route_policy::content_evidence_execution_finalize_style(
-                &output_contract,
-                false,
-            )
-            .unwrap_or_else(|| execution_finalize_style_for_contract(&output_contract))
-        } else if structured_execution_signal {
-            execution_finalize_style_for_contract(&output_contract)
+    let execution_finalize_style_eff =
+        if matches!(route_trace_decision_eff, super::RouteTraceDecision::Act) {
+            if bare_path_active_observable_boundary {
+                crate::post_route_policy::content_evidence_execution_finalize_style(
+                    &output_contract,
+                    false,
+                )
+                .unwrap_or_else(|| execution_finalize_style_for_contract(&output_contract))
+            } else if structured_execution_signal {
+                execution_finalize_style_for_contract(&output_contract)
+            } else {
+                execution_finalize_style
+            }
         } else {
-            execution_finalize_style
-        }
-    } else {
-        ActFinalizeStyle::Plain
-    };
+            ActFinalizeStyle::Plain
+        };
     let mut route_trace_repair_codes = contract_repair_report
         .details
         .iter()
@@ -111,7 +107,7 @@ pub(super) fn build_normalizer_output_with_final_gate(
         push_unique_repair_code(&mut route_trace_repair_codes, code);
     }
     let route_trace_record = route_trace_record(
-        legacy_normalizer_decision_eff,
+        route_trace_decision_eff,
         needs_clarify_eff,
         &output_contract,
         route_trace_repair_codes,
