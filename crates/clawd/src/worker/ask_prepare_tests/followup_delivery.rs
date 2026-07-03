@@ -1470,6 +1470,12 @@ fn active_delivery_content_target_token_survives_task_turn_merge_prompt() {
 
     append_active_delivery_content_target_token(&mut runtime_prompt, &route);
     assert_eq!(runtime_prompt.matches(target).count(), 1);
+
+    let mut suffix_prompt = format!("Current task:\narchived target: {target}.backup");
+    append_active_delivery_content_target_token(&mut suffix_prompt, &route);
+    assert!(suffix_prompt
+        .lines()
+        .any(|line| line.trim() == format!("active_delivery_content_target: {target}")));
 }
 
 #[test]

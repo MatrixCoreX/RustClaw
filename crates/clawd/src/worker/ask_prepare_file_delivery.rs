@@ -84,10 +84,10 @@ fn append_route_reason_structural_marker(route_result: &mut crate::RouteResult, 
     }
 }
 
-fn resolved_intent_has_structural_value(resolved_intent: &str, value: &str) -> bool {
+fn text_has_structural_value(text: &str, value: &str) -> bool {
     let value = value.trim();
     !value.is_empty()
-        && resolved_intent.lines().map(str::trim).any(|line| {
+        && text.lines().map(str::trim).any(|line| {
             line == value
                 || line
                     .rsplit_once(':')
@@ -134,7 +134,7 @@ fn active_delivery_target_line(target: &str) -> String {
 fn append_active_delivery_resolved_target(route_result: &mut crate::RouteResult, target: &str) {
     if route_result.resolved_intent.trim().is_empty() {
         route_result.resolved_intent = active_delivery_target_line(target);
-    } else if !resolved_intent_has_structural_value(&route_result.resolved_intent, target) {
+    } else if !text_has_structural_value(&route_result.resolved_intent, target) {
         route_result.resolved_intent.push('\n');
         route_result
             .resolved_intent
@@ -373,8 +373,8 @@ pub(super) fn bind_content_read_to_active_delivery_target(
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route_result.output_contract.locator_hint = target.clone();
     if !previous_hint.is_empty()
-        && !resolved_intent_has_structural_value(&route_result.resolved_intent, &target)
-        && resolved_intent_has_structural_value(&route_result.resolved_intent, &previous_hint)
+        && !text_has_structural_value(&route_result.resolved_intent, &target)
+        && text_has_structural_value(&route_result.resolved_intent, &previous_hint)
     {
         route_result.resolved_intent = replace_resolved_intent_structural_value(
             &route_result.resolved_intent,
@@ -402,7 +402,7 @@ pub(super) fn append_active_delivery_content_target_token(
         return;
     }
     let target = route_result.output_contract.locator_hint.trim();
-    if target.is_empty() || runtime_prompt.contains(target) {
+    if target.is_empty() || text_has_structural_value(runtime_prompt, target) {
         return;
     }
     if !runtime_prompt.ends_with(char::is_whitespace) && !runtime_prompt.is_empty() {
