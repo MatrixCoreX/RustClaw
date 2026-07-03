@@ -1330,6 +1330,35 @@ fn scalar_direct_answer_candidate_is_not_promoted_by_filename_like_text() {
 }
 
 #[test]
+fn scalar_empty_answer_candidate_does_not_promote_filename_like_literal_text() {
+    let req = "Literal text: app.log, answer only acknowledged.";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Scalar,
+        ..IntentOutputContract::default()
+    };
+    let reason = super::apply_current_turn_structural_contract_repair(
+        "",
+        &mut contract,
+        req,
+        &surface,
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root"),
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(reason, None);
+    assert!(!contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
 fn structural_contract_repair_does_not_bind_workspace_child_mentions() {
     let workspace_root = make_temp_workspace_with_child("workspace_child_mentions", "document");
     let req = "列出document目录下有哪些文件，只输出文件名列表";
