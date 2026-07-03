@@ -18,7 +18,6 @@ use super::{
     compact_skill_playbook_from_prompt, config_risk_preview_deterministic_plan_result,
     content_excerpt_explicit_file_targets_deterministic_plan_result,
     content_excerpt_summary_auto_locator_deterministic_plan_result,
-    content_excerpt_summary_directory_log_slice_deterministic_plan_result,
     contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
     directory_entry_groups_auto_locator_deterministic_plan_result,
     directory_purpose_auto_locator_deterministic_plan_result,
@@ -571,6 +570,8 @@ mod config_guard_capability_repair;
 mod config_structured_field_reads;
 #[path = "planning_tests/content_excerpt_and_log_synthesis.rs"]
 mod content_excerpt_and_log_synthesis;
+#[path = "planning_tests/content_excerpt_log_slice_boundaries.rs"]
+mod content_excerpt_log_slice_boundaries;
 #[path = "planning_tests/contract_hint_agent_loop.rs"]
 mod contract_hint_agent_loop;
 #[path = "planning_tests/contract_hints_and_selectors.rs"]
