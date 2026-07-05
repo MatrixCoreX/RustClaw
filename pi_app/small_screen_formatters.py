@@ -60,9 +60,12 @@ def _fmt_signed_pct(current, prev_close):
 def fmt_duration(sec):
     if sec is None or sec < 0:
         return "--"
+    d = int(sec // 86400)
     h = int(sec // 3600)
     m = int((sec % 3600) // 60)
     s = int(sec % 60)
+    if d > 0:
+        return f"{d}d{h % 24}h"
     if h > 0:
         return f"{h}h{m}m"
     if m > 0:
