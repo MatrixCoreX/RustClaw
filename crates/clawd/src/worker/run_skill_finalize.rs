@@ -262,7 +262,7 @@ fn record_run_skill_task_observation(
             .and_then(Value::as_str)
             .unwrap_or(status),
         "message_key": machine_payload.get("message_key").and_then(Value::as_str),
-        "task_contract": capability_contract,
+        "capability_contract": capability_contract,
     });
     if let Some(obj) = payload.as_object_mut() {
         if let Some(error_code) = machine_payload.get("error_code") {
@@ -312,7 +312,7 @@ fn record_run_skill_task_observation(
             "error_code": machine_payload.get("error_code").cloned(),
             "failure_attribution": machine_payload.get("failure_attribution").cloned(),
             "retryable": machine_payload.get("retryable").cloned(),
-            "task_contract": capability_contract,
+            "capability_contract": capability_contract,
             "capability_ref": capability_contract.get("capability_ref").cloned(),
             "external_skill_admission": external_skill_admission,
             "observed_evidence": observed_evidence,
