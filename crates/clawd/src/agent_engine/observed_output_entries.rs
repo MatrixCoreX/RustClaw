@@ -220,7 +220,7 @@ pub(super) fn execution_failed_step_guard_entry(
                 "success_step.{success_count}.output_is_not_answer={}",
                 trim_for_observed_prompt(
                     &crate::visible_text::sanitize_user_visible_text(
-                        &normalized_success_body_for_direct_answer(output)
+                        &normalized_success_body_for_observed_output(output)
                     )
                     .replace('\n', " "),
                     240,

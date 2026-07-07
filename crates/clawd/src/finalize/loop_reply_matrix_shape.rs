@@ -202,7 +202,9 @@ pub(super) fn file_name_list_prefers_observed_projection(
             return false;
         };
         let output =
-            crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(output);
+            crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
+                output,
+            );
         serde_json::from_str::<serde_json::Value>(&output)
             .ok()
             .is_some_and(|value| value_contains_observed_file_name_list(&value))
@@ -381,7 +383,9 @@ pub(super) fn matrix_strict_list_observed_answer(
             continue;
         };
         let output =
-            crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(output);
+            crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
+                output,
+            );
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&output) else {
             continue;
         };
@@ -456,7 +460,9 @@ fn matrix_inventory_file_paths_observed_answer(
             continue;
         };
         let output =
-            crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(output);
+            crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
+                output,
+            );
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&output) else {
             continue;
         };
@@ -540,7 +546,9 @@ fn matrix_ranked_size_list_observed_answer(
             continue;
         };
         let output =
-            crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(output);
+            crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
+                output,
+            );
         if let Some(answer) = inventory_ranked_size_list_answer(&output, route) {
             return Some((answer, matrix_observed_shape_summary(loop_state)));
         }

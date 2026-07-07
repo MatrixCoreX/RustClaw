@@ -503,7 +503,7 @@ pub(super) fn latest_hidden_entries(loop_state: &LoopState) -> Option<Vec<String
     let body = step.output.as_deref().unwrap_or_default();
     match step.skill.as_str() {
         "system_basic" | "fs_basic" => {
-            let body = normalized_success_body_for_direct_answer(body);
+            let body = normalized_success_body_for_observed_output(body);
             serde_json::from_str::<serde_json::Value>(&body)
                 .ok()
                 .and_then(|value| inventory_dir_hidden_entries(&value))

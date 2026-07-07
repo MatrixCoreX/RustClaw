@@ -11,7 +11,7 @@ fn normalized_success_body_uses_machine_extra_transform_payload() {
     .to_string();
 
     assert_eq!(
-        super::normalized_success_body_for_direct_answer(&raw),
+        super::normalized_success_body_for_observed_output(&raw),
         r#"{"formatted":"done","status":"ok"}"#
     );
 }
@@ -29,7 +29,7 @@ fn normalized_success_body_uses_machine_extra_direct_observation_payload() {
     .to_string();
 
     assert_eq!(
-        super::normalized_success_body_for_direct_answer(&raw),
+        super::normalized_success_body_for_observed_output(&raw),
         r#"{"action":"read_field","field_value":"v1"}"#
     );
 }
@@ -47,5 +47,8 @@ fn normalized_success_body_ignores_json_hidden_in_visible_text() {
     })
     .to_string();
 
-    assert_eq!(super::normalized_success_body_for_direct_answer(&raw), raw);
+    assert_eq!(
+        super::normalized_success_body_for_observed_output(&raw),
+        raw
+    );
 }

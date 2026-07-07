@@ -66,7 +66,7 @@ pub(super) fn extract_latest_generic_successful_output_with_state(
             return false;
         }
         let raw_body = step.output.as_deref().map(str::trim).unwrap_or_default();
-        let body = normalized_success_body_for_direct_answer(raw_body);
+        let body = normalized_success_body_for_observed_output(raw_body);
         let body = body.trim();
         !body.is_empty()
             && (crate::finalize::classify_observed_content_status(body)
@@ -95,7 +95,7 @@ pub(super) fn extract_latest_generic_successful_output_with_state(
         .as_deref()
         .map(str::trim)
         .filter(|text| !text.is_empty())?;
-    let body = normalized_success_body_for_direct_answer(body);
+    let body = normalized_success_body_for_observed_output(body);
     Some(GenericObservedOutput {
         skill: step.skill.clone(),
         #[cfg(test)]
@@ -104,7 +104,7 @@ pub(super) fn extract_latest_generic_successful_output_with_state(
     })
 }
 
-pub(crate) fn normalized_success_body_for_direct_answer(raw: &str) -> String {
+pub(crate) fn normalized_success_body_for_observed_output(raw: &str) -> String {
     let trimmed = raw.trim();
     let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
         return trimmed.to_string();
@@ -119,6 +119,10 @@ pub(crate) fn normalized_success_body_for_direct_answer(raw: &str) -> String {
         return extra.to_string();
     }
     trimmed.to_string()
+}
+
+pub(crate) fn normalized_success_body_for_direct_answer(raw: &str) -> String {
+    normalized_success_body_for_observed_output(raw)
 }
 
 fn json_object_is_transform_observation_body(value: &serde_json::Value) -> bool {

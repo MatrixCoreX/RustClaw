@@ -18,7 +18,7 @@ pub(crate) use output_transform::{
 mod output_success;
 pub(crate) use output_success::{
     extract_latest_generic_successful_output, normalized_success_body_for_direct_answer,
-    GenericObservedOutput,
+    normalized_success_body_for_observed_output, GenericObservedOutput,
 };
 use output_success::{
     extract_latest_generic_successful_output_with_state, has_successful_step_for_skill,
@@ -570,7 +570,7 @@ fn count_inventory_observation_row(
         return None;
     }
     let body = step.output.as_deref()?;
-    let body = normalized_success_body_for_direct_answer(body);
+    let body = normalized_success_body_for_observed_output(body);
     let value = serde_json::from_str::<serde_json::Value>(body.trim()).ok()?;
     if value.get("action").and_then(|v| v.as_str()) != Some("count_inventory") {
         return None;

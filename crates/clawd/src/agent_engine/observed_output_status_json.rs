@@ -57,7 +57,7 @@ fn status_json_observations(loop_state: &LoopState) -> Vec<StatusJsonObservation
         let Some(output) = step.output.as_deref() else {
             continue;
         };
-        let body = normalized_success_body_for_direct_answer(output);
+        let body = normalized_success_body_for_observed_output(output);
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) else {
             continue;
         };
@@ -174,7 +174,7 @@ pub(super) fn latest_find_ext_results(
         .filter(|step| step.is_ok() && matches!(step.skill.as_str(), "fs_basic" | "fs_search"))
         .filter_map(|step| step.output.as_deref())
         .filter_map(|output| {
-            let body = normalized_success_body_for_direct_answer(output);
+            let body = normalized_success_body_for_observed_output(output);
             serde_json::from_str::<serde_json::Value>(&body).ok()
         })
         .find_map(|value| fs_search_find_ext_results(&value))

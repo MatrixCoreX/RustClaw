@@ -136,7 +136,7 @@ pub(super) fn latest_process_basic_service_status_direct_answer_candidate(
         .as_deref()
         .map(str::trim)
         .filter(|body| !body.is_empty())?;
-    let body = normalized_success_body_for_direct_answer(body);
+    let body = normalized_success_body_for_observed_output(body);
     process_basic_service_status_structured_scalar_candidate(&body, response_shape)
         .or_else(|| {
             process_basic_port_list_structured_direct_answer_candidate(&body, response_shape)
