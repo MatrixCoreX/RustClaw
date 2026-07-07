@@ -28,10 +28,6 @@ pub(crate) fn evidence_policy_context_prompt_line_for_route(route: &crate::Route
     crate::task_contract::evidence_policy_context_prompt_line_for_route(route)
 }
 
-pub(crate) fn evidence_required_for_route(route: &crate::RouteResult) -> bool {
-    crate::task_contract::evidence_required_for_route(route)
-}
-
 pub(crate) fn evidence_expression_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> Option<EvidenceExpression> {

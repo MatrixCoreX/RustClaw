@@ -225,6 +225,35 @@ fn unresolved_locator_marker_stays_loop_owned_for_selected_evidence_guard() {
 }
 
 #[test]
+fn clarify_needed_read_stays_loop_owned_instead_of_pre_route_blocked() {
+    let mut route = route_result(OutputResponseShape::Strict, OutputSemanticKind::FileNames);
+    route.needs_clarify = true;
+    route.clarify_question = "missing_detail".to_string();
+
+    let eligibility = agent_loop_eligibility(&route);
+
+    assert!(eligibility.eligible);
+    assert_eq!(
+        eligibility.bucket,
+        Some(AgentLoopEligibilityBucket::LowRiskListing)
+    );
+    assert_eq!(
+        eligibility.compatibility_migration_class(),
+        "exact_path_list"
+    );
+    assert_eq!(eligibility.blocked_reason, "none");
+    assert!(eligibility
+        .boundary_requirements
+        .contains(&"loop_owned_clarify"));
+    assert!(eligibility
+        .boundary_requirements
+        .contains(&"post_observation_evidence_policy"));
+    assert!(!eligibility
+        .boundary_requirements
+        .contains(&"evidence_required"));
+}
+
+#[test]
 fn eligibility_adds_generic_low_risk_buckets() {
     for (shape, kind, expected_class, expected_bucket) in [
         (

@@ -154,7 +154,10 @@ pub(crate) struct EvidencePolicyContract {
 impl EvidencePolicyContract {
     pub(crate) fn from_route_result(route: &RouteResult) -> Self {
         let missing_parameters = missing_parameters_for_route(route);
-        let evidence_required = evidence_required_for_route(route);
+        let required_evidence_fields = required_evidence_fields_for_route(route);
+        let evidence_required = route.output_contract.requires_content_evidence
+            || route.output_contract.delivery_required
+            || !required_evidence_fields.is_empty();
         Self {
             targets: targets_for_route(route),
             target_object: target_object_for_route(route),
@@ -165,7 +168,7 @@ impl EvidencePolicyContract {
                 .clone(),
             operation: operation_for_route(route),
             evidence_required,
-            required_evidence_fields: required_evidence_fields_for_route(route),
+            required_evidence_fields,
             delivery_shape: delivery_shape_for_route(route),
             failure_policy: failure_policy_for_route(route, evidence_required, &missing_parameters),
             missing_parameters,
@@ -552,12 +555,6 @@ pub(crate) fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<Str
         return Vec::new();
     }
     required_evidence_fields_for_output_contract(&output_contract)
-}
-
-pub(crate) fn evidence_required_for_route(route: &RouteResult) -> bool {
-    route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
-        || !required_evidence_fields_for_route(route).is_empty()
 }
 
 fn required_evidence_fields_for_capability_ref(route: &RouteResult) -> Option<Vec<String>> {
