@@ -42,7 +42,7 @@ pub(super) fn apply_missing_read_target_mutation_clarify(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FirstLayerDecision, OutputResponseShape};
+    use crate::OutputResponseShape;
 
     #[test]
     fn missing_read_target_mutation_contract_forces_clarify() {
@@ -58,7 +58,6 @@ mod tests {
         };
         let mut needs_clarify = false;
         let mut clarify_question = String::new();
-        let decision = FirstLayerDecision::PlannerExecute;
         let mut finalize_style = ActFinalizeStyle::ChatWrapped;
 
         let reason = apply_missing_read_target_mutation_clarify(
@@ -71,7 +70,6 @@ mod tests {
 
         assert_eq!(reason, Some("missing_read_target_mutation_clarify"));
         assert!(needs_clarify);
-        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
         assert_eq!(finalize_style, ActFinalizeStyle::Plain);
         assert_eq!(contract.locator_kind, OutputLocatorKind::None);
         assert!(contract.locator_hint.is_empty());
