@@ -441,6 +441,10 @@ mod test_support;
 mod output_types_tests;
 
 #[cfg(test)]
+#[path = "intent_router_boundary_envelope_tests.rs"]
+mod boundary_envelope_tests;
+
+#[cfg(test)]
 #[path = "intent_router_contract_repair_judge_tests.rs"]
 mod contract_repair_judge_tests;
 
