@@ -9,7 +9,7 @@ const LOW_RISK_READ_BOUNDARY_REQUIREMENTS: &[&str] = &[
     "no_schedule",
     "loop_owned_clarify",
     "no_delivery",
-    "evidence_required",
+    "post_observation_evidence_policy",
 ];
 
 const LOW_RISK_CONTEXT_BOUNDARY_REQUIREMENTS: &[&str] = &[
@@ -37,7 +37,7 @@ const LOW_RISK_SINGLE_FILE_DELIVERY_BOUNDARY_REQUIREMENTS: &[&str] = &[
     "delivery_required",
     "file_token_delivery",
     "single_file_delivery",
-    "evidence_required",
+    "post_observation_evidence_policy",
     "bound_locator_or_selector",
     "loop_owned_clarify",
     "delivery_consistency_gate",
@@ -164,8 +164,6 @@ pub(crate) fn agent_decides_eligible_migration_class(route: &RouteResult) -> &'s
 }
 
 pub(crate) fn agent_loop_eligibility(route: &RouteResult) -> AgentLoopEligibility {
-    let evidence_required = crate::evidence_policy::evidence_required_for_route(route);
-    let missing_parameters = crate::evidence_policy::missing_parameters_for_route(route);
     let operation = crate::evidence_policy::operation_for_route(route);
     if route.risk_ceiling == RiskCeiling::High {
         return AgentLoopEligibility::blocked("risk_ceiling_high");
@@ -195,12 +193,6 @@ pub(crate) fn agent_loop_eligibility(route: &RouteResult) -> AgentLoopEligibilit
             AgentLoopEligibilityBucket::LowRiskDirectResponse,
             LOW_RISK_DIRECT_RESPONSE_BOUNDARY_REQUIREMENTS,
         );
-    }
-    if !evidence_required {
-        return AgentLoopEligibility::blocked("evidence_not_required");
-    }
-    if !missing_parameters.is_empty() {
-        return AgentLoopEligibility::blocked("missing_parameters");
     }
     if matches!(
         operation,
