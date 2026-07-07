@@ -29,11 +29,8 @@ fn config_guard_route_allows_failure_recovery(route_result: &crate::RouteResult)
         route_result,
         &["config"],
         &["guard", "risk", "validate"],
-    ) || matches!(
-        route_result.effective_output_contract_semantic_kind(),
-        crate::OutputSemanticKind::ConfigRiskAssessment
-            | crate::OutputSemanticKind::ConfigValidation
-    )
+    ) || crate::finalize::route_matches_validation_verdict_output_contract(route_result)
+        || route_result.output_contract_marker_is(crate::OutputSemanticKind::ConfigRiskAssessment)
 }
 
 fn config_guard_action_matches(action: &str) -> bool {

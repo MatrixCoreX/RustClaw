@@ -80,6 +80,12 @@ pub(crate) fn route_prefers_grouped_name_list_output(route: &crate::RouteResult)
         == Some(crate::evidence_policy::FinalAnswerShape::GroupedNameList)
 }
 
+pub(crate) fn route_matches_validation_verdict_output_contract(route: &crate::RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
+        || crate::evidence_policy::final_answer_shape_for_route(route)
+            == Some(crate::evidence_policy::FinalAnswerShape::ValidationVerdict)
+}
+
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX: &str = "**执行过程**";
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX_EN: &str = "**Execution**";
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX_JA: &str = "**実行過程**";

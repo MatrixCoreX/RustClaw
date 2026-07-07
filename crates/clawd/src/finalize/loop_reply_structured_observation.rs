@@ -523,9 +523,7 @@ pub(super) fn deterministic_structured_file_validation_from_read_range(
 }
 
 fn route_requests_config_validation(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
-        || crate::evidence_policy::final_answer_shape_for_route(route)
-            == Some(crate::evidence_policy::FinalAnswerShape::ValidationVerdict)
+    crate::finalize::route_matches_validation_verdict_output_contract(route)
 }
 
 pub(super) fn attach_deterministic_structured_file_validation_from_read_range(
