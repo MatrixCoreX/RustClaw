@@ -543,11 +543,7 @@ fn requested_machine_kv_summary_from_task_final_answer(
 }
 
 fn route_requests_service_status_machine_kv_summary(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
-        || crate::machine_capability_ref::route_has_capability_namespace(
-            route,
-            &["service", "service_control"],
-        )
+    crate::finalize::route_matches_service_control_machine_summary(route)
 }
 
 fn observed_machine_text_fragments_from_journal_skill(

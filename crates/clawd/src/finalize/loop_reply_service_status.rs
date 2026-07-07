@@ -4,11 +4,7 @@ pub(super) fn service_status_system_basic_info_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<String> {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
-        && !crate::machine_capability_ref::route_has_capability_namespace(route, &["system"])
-        && !crate::machine_capability_ref::route_has_capability_namespace(route, &["service"])
-        && !crate::machine_capability_ref::route_has_capability_namespace(route, &["health"])
-    {
+    if !crate::finalize::route_matches_service_status_output_contract(route) {
         return None;
     }
     let system_health_only = service_status_selector_is_system_health_only(route);

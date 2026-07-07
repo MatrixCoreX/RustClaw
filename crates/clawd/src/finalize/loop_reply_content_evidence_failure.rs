@@ -45,15 +45,7 @@ fn route_is_service_status(agent_run_context: Option<&AgentRunContext>) -> bool 
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    route.effective_output_contract_semantic_kind() == crate::OutputSemanticKind::ServiceStatus
-        || route_has_service_status_capability_ref(route)
-}
-
-fn route_has_service_status_capability_ref(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_namespace(
-        route,
-        &["service", "service_control"],
-    )
+    crate::finalize::route_matches_service_control_machine_summary(route)
 }
 
 fn service_status_observation_from_error(error: &str) -> Option<ServiceStatusFailureObservation> {

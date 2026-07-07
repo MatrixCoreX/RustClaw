@@ -450,7 +450,7 @@ pub(super) fn resume_failure_is_structured_service_status_result(
     route_result: &crate::RouteResult,
     resume_ctx: &Value,
 ) -> bool {
-    route_result.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
+    crate::finalize::route_matches_service_control_machine_summary(route_result)
         && !resume_context_has_remaining_actions(resume_ctx)
         && resume_context_failed_structured_skill_error(resume_ctx)
             .as_ref()

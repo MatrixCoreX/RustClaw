@@ -59,6 +59,22 @@ pub(crate) fn should_attempt_observed_fallback(
     has_tool_or_skill_output || has_recoverable_failure_context
 }
 
+pub(crate) fn route_matches_service_status_output_contract(route: &crate::RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
+        || crate::machine_capability_ref::route_has_capability_namespace(
+            route,
+            &["system", "service", "service_control", "health"],
+        )
+}
+
+pub(crate) fn route_matches_service_control_machine_summary(route: &crate::RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
+        || crate::machine_capability_ref::route_has_capability_namespace(
+            route,
+            &["service", "service_control"],
+        )
+}
+
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX: &str = "**执行过程**";
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX_EN: &str = "**Execution**";
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX_JA: &str = "**実行過程**";
