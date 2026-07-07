@@ -591,10 +591,13 @@ fn current_workspace_scope_observation(
     if !has_current_workspace_scope {
         return None;
     }
+    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route);
     Some(serde_json::json!({
         "source": "current_workspace_scope",
         "target": state.skill_rt.workspace_root.display().to_string(),
         "task_shape": "scalar_count",
+        "final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str),
+        "final_answer_shape_class": final_answer_shape.map(|shape| shape.class().as_str()),
         "contract_marker": route.effective_output_contract_semantic_kind().as_str(),
         "response_shape": route.output_contract.response_shape.as_str(),
     }))

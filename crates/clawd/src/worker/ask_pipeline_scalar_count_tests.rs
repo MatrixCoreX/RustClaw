@@ -28,6 +28,18 @@ fn assert_current_workspace_scope_boundary(prompt: &str, root: &std::path::Path)
             .and_then(serde_json::Value::as_str),
         Some("scalar_count")
     );
+    assert_eq!(
+        scope
+            .get("final_answer_shape")
+            .and_then(serde_json::Value::as_str),
+        Some("scalar")
+    );
+    assert_eq!(
+        scope
+            .get("final_answer_shape_class")
+            .and_then(serde_json::Value::as_str),
+        Some("scalar_value")
+    );
     assert!(scope.get("semantic_kind").is_none());
     let root_display = root.display().to_string();
     assert_eq!(
