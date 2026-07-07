@@ -654,6 +654,14 @@ fn current_delivery_is_richer_than_requested_machine_summary(
     current: &str,
     requested_summary: &str,
 ) -> bool {
+    if current_delivery_has_conflicting_values_for_requested_keys(current, requested_summary) {
+        return false;
+    }
+    if strict_machine_field_contract_requested(agent_run_context)
+        && !current_delivery_is_machine_kv_only(current)
+    {
+        return false;
+    }
     if current_delivery_has_values_for_requested_marker_summary(current, requested_summary) {
         return true;
     }
@@ -673,6 +681,70 @@ fn current_delivery_is_richer_than_requested_machine_summary(
         return false;
     }
     machine_kv_units_strictly_extend(current, requested_summary)
+}
+
+fn current_delivery_has_conflicting_values_for_requested_keys(
+    current: &str,
+    requested_summary: &str,
+) -> bool {
+    requested_machine_keys(requested_summary)
+        .into_iter()
+        .any(|key| machine_kv_values_for_key(current, &key).len() > 1)
+}
+
+fn requested_machine_keys(requested_summary: &str) -> Vec<String> {
+    let mut keys = machine_kv_unit_keys(requested_summary);
+    for marker in bare_machine_markers(requested_summary) {
+        if !keys.iter().any(|key| key == &marker) {
+            keys.push(marker);
+        }
+    }
+    keys
+}
+
+fn machine_kv_values_for_key(text: &str, requested_key: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    for unit in machine_kv_units(text) {
+        let Some((key, value)) = unit.split_once('=') else {
+            continue;
+        };
+        if key != requested_key || values.iter().any(|existing| existing == value) {
+            continue;
+        }
+        values.push(value.to_string());
+    }
+    values
+}
+
+fn strict_machine_field_contract_requested(agent_run_context: Option<&AgentRunContext>) -> bool {
+    agent_run_context
+        .and_then(|ctx| ctx.turn_analysis.as_ref())
+        .and_then(|analysis| analysis.state_patch.as_ref())
+        .is_some_and(state_patch_has_required_machine_field_contract)
+}
+
+fn state_patch_has_required_machine_field_contract(value: &Value) -> bool {
+    match value {
+        Value::Object(object) => object.iter().any(|(key, child)| {
+            let key = normalized_state_patch_key(key);
+            matches!(
+                key.as_str(),
+                "required_field" | "required_machine_field" | "required_machine_fields"
+            ) || state_patch_has_required_machine_field_contract(child)
+        }),
+        Value::Array(items) => items
+            .iter()
+            .any(state_patch_has_required_machine_field_contract),
+        Value::String(_) | Value::Number(_) | Value::Bool(_) | Value::Null => false,
+    }
+}
+
+fn normalized_state_patch_key(key: &str) -> String {
+    key.trim()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+        .collect::<String>()
+        .to_ascii_lowercase()
 }
 
 fn current_delivery_is_publishable_evidence_summary(
