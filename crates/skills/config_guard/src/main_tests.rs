@@ -1,6 +1,26 @@
 use super::*;
 use serde_json::json;
 
+#[test]
+fn error_extra_merges_machine_contract_and_details() {
+    let extra = error_extra_with_details(
+        "not_found",
+        Some(json!({
+            "operation": "read_config",
+            "path": "/tmp/missing.toml"
+        })),
+    );
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "not_found");
+    assert_eq!(extra["message_key"], "skill.config_guard.not_found");
+    assert_eq!(extra["retryable"], false);
+    assert_eq!(extra["operation"], "read_config");
+    assert_eq!(extra["path"], "/tmp/missing.toml");
+}
+
 fn temp_root(name: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!(
         "rustclaw_config_guard_{name}_{}",
