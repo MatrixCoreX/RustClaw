@@ -244,18 +244,21 @@ pub(super) fn candidate_matches_successful_external_observation(
     let candidate = candidate.trim();
     !candidate.is_empty()
         && loop_state.executed_step_results.iter().any(|step| {
-            step.is_ok()
-                && !matches!(
+            if !step.is_ok()
+                || matches!(
                     step.skill.as_str(),
                     "respond" | "synthesize_answer" | "think"
                 )
-                && step.output.as_deref().is_some_and(|output| {
-                    crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(
-                        output,
-                    )
-                    .trim()
-                        == candidate
-                })
+            {
+                return false;
+            }
+            step.output.as_deref().is_some_and(|output| {
+                crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
+                    output,
+                )
+                .trim()
+                    == candidate
+            })
         })
 }
 

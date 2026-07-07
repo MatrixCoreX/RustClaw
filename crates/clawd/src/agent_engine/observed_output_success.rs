@@ -121,10 +121,6 @@ pub(crate) fn normalized_success_body_for_observed_output(raw: &str) -> String {
     trimmed.to_string()
 }
 
-pub(crate) fn normalized_success_body_for_direct_answer(raw: &str) -> String {
-    normalized_success_body_for_observed_output(raw)
-}
-
 fn json_object_is_transform_observation_body(value: &serde_json::Value) -> bool {
     let Some(obj) = value.as_object() else {
         return false;
