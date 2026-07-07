@@ -207,14 +207,22 @@ pub(super) async fn enforce_delivery_output_contract(
             &normalized_text,
             user_text,
         );
+        let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route);
+        let final_answer_shape_token = final_answer_shape
+            .map(crate::evidence_policy::FinalAnswerShape::as_str)
+            .unwrap_or("none");
+        let final_answer_shape_class = final_answer_shape
+            .map(|shape| shape.class().as_str())
+            .unwrap_or("none");
         match &verdict {
             crate::output_contract_verifier::OutputContractVerdict::Pass => {
                 info!(
-                    "verify_contract_emitted task_id={} owner_layer={} verdict=pass response_shape={:?} contract_marker={:?}",
+                    "verify_contract_emitted task_id={} owner_layer={} verdict=pass response_shape={:?} final_answer_shape={} final_answer_shape_class={}",
                     task.task_id,
                     verdict.owner_layer(),
                     route.output_contract.response_shape,
-                    route.effective_output_contract_semantic_kind(),
+                    final_answer_shape_token,
+                    final_answer_shape_class,
                 );
             }
             crate::output_contract_verifier::OutputContractVerdict::Reshape {
@@ -223,11 +231,12 @@ pub(super) async fn enforce_delivery_output_contract(
                 reshaped,
             } => {
                 info!(
-                    "verify_contract_emitted task_id={} owner_layer={} verdict=reshape response_shape={:?} contract_marker={:?} reason_code={} reason={} from={} to={}",
+                    "verify_contract_emitted task_id={} owner_layer={} verdict=reshape response_shape={:?} final_answer_shape={} final_answer_shape_class={} reason_code={} reason={} from={} to={}",
                     task.task_id,
                     verdict.owner_layer(),
                     route.output_contract.response_shape,
-                    route.effective_output_contract_semantic_kind(),
+                    final_answer_shape_token,
+                    final_answer_shape_class,
                     reason_code,
                     reason,
                     crate::truncate_for_log(&normalized_text),
@@ -245,11 +254,12 @@ pub(super) async fn enforce_delivery_output_contract(
                 reason,
             } => {
                 info!(
-                    "verify_contract_emitted task_id={} owner_layer={} verdict=reject response_shape={:?} contract_marker={:?} reason_code={} reason={} dropped_candidate={}",
+                    "verify_contract_emitted task_id={} owner_layer={} verdict=reject response_shape={:?} final_answer_shape={} final_answer_shape_class={} reason_code={} reason={} dropped_candidate={}",
                     task.task_id,
                     verdict.owner_layer(),
                     route.output_contract.response_shape,
-                    route.effective_output_contract_semantic_kind(),
+                    final_answer_shape_token,
+                    final_answer_shape_class,
                     reason_code,
                     reason,
                     crate::truncate_for_log(&normalized_text),
