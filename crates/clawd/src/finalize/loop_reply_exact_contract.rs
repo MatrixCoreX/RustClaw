@@ -21,7 +21,7 @@ use super::{
     publishable_summary_has_multi_source_observation,
     raw_command_output_needs_structural_projection, route_allows_model_language_final_answer,
     route_expects_synthesis_over_raw_observation, route_requires_file_token,
-    route_requires_observed_semantic_projection, scalar_answer_from_json,
+    route_requires_observed_output_projection, scalar_answer_from_json,
     synthetic_task_for_evidence_policy_shape_check,
 };
 
@@ -364,7 +364,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         && !scalar_value_contract
         && !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
         && !command_output_summary_allows_exact_observed_output(route)
-        && !route_requires_observed_semantic_projection(route)
+        && !route_requires_observed_output_projection(route)
         && current_synthesis_satisfies_evidence_policy_shape(
             task_id,
             loop_state,
@@ -639,7 +639,7 @@ fn should_keep_latest_publishable_terminal_delivery_over_observed_projection(
             crate::OutputSemanticKind::CommandOutputSummary,
         ])
         || command_output_summary_allows_exact_observed_output(route)
-        || route_requires_observed_semantic_projection(route)
+        || route_requires_observed_output_projection(route)
     {
         return false;
     }

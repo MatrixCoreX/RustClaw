@@ -64,12 +64,13 @@ pub(super) fn route_has_evidence_policy_final_shape(route: &crate::RouteResult) 
     evidence_policy_final_answer_shape_class(route).is_some()
 }
 
-pub(super) fn route_requires_observed_semantic_projection(route: &crate::RouteResult) -> bool {
+pub(super) fn route_requires_observed_output_projection(route: &crate::RouteResult) -> bool {
+    if crate::finalize::route_matches_service_status_output_contract(route) {
+        return true;
+    }
     matches!(
         route.effective_output_contract_semantic_kind(),
-        crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::QuantityComparison
-            | crate::OutputSemanticKind::ServiceStatus
+        crate::OutputSemanticKind::DirectoryNames | crate::OutputSemanticKind::QuantityComparison
     )
 }
 
