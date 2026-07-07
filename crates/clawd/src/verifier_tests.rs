@@ -8,7 +8,7 @@ use serde_json::json;
 
 use super::{verify_plan, VerifyInput, VerifyIssueKind, VerifyMode};
 use crate::{
-    contract_matrix::FailureAttribution, AgentRuntimeConfig, AppState, ClaimedTask, PlanKind,
+    evidence_policy::FailureAttribution, AgentRuntimeConfig, AppState, ClaimedTask, PlanKind,
     PlanResult, PlanStep, RouteResult, ScheduleKind, SkillViewsSnapshot, ToolsPolicy,
 };
 

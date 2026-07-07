@@ -1020,7 +1020,7 @@ fn contract_matrix_snapshot_ignores_incompatible_scalar_count_hint() {
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     let pre_snapshot =
-        crate::contract_matrix::trace_snapshot_for_route(&route).expect("pre snapshot");
+        crate::evidence_policy::trace_snapshot_for_route(&route).expect("pre snapshot");
     assert_eq!(
         route.output_contract.semantic_kind,
         OutputSemanticKind::ScalarCount
@@ -1044,7 +1044,7 @@ fn contract_matrix_snapshot_ignores_incompatible_scalar_count_hint() {
 
     let result = apply_post_route_policy(route, LocatorResolution::None);
     let post_snapshot =
-        crate::contract_matrix::trace_snapshot_for_route(&result.execution_route_result)
+        crate::evidence_policy::trace_snapshot_for_route(&result.execution_route_result)
             .expect("post snapshot");
 
     assert_eq!(
