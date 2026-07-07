@@ -250,6 +250,148 @@ fn answer_verifier_exhaustion_recovers_latest_terminal_respond_after_retry() {
 }
 
 #[test]
+fn answer_verifier_exhaustion_recovers_structured_archive_db_table() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "tmp/test_bundle.zip | data/test_contract.sqlite".to_string();
+
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-archive-db", "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "archive_basic",
+            r#"{"extra":{"action":"list","archive":"tmp/test_bundle.zip","field_value":{"members":["notes.txt","nested/config.ini"],"member_count":2,"count":2}},"text":"{}"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "archive_basic",
+            r#"{"extra":{"action":"read","field_value":{"path":"notes.txt","content_excerpt":"fixture archive notes"},"content_excerpt":"fixture archive notes"},"text":"{}"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3",
+            "db_basic",
+            r#"{"extra":{"action":"list_tables","db_path":"data/test_contract.sqlite","field_value":{"table_count":3,"tables":["orders","service_logs","users"]},"tables":["orders","service_logs","users"]},"text":"{}"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_4",
+            "db_basic",
+            r#"{"extra":{"action":"schema_version","db_path":"data/test_contract.sqlite","field_value":{"schema_version":3},"schema_version":3},"text":"{}"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_5",
+            "respond",
+            r#"{"archive":{"entries":["notes.txt","nested/config.ini"]},"database":{"tables":["orders","service_logs","users"]}}"#,
+        ));
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string(), "field_value".to_string()],
+        answer_incomplete_reason: "candidate missed required structured projection".to_string(),
+        should_retry: true,
+        retry_instruction: "render observed field_value facts as a table".to_string(),
+        confidence: 0.92,
+    });
+    let mut reply = AskReply::non_llm(
+        r#"{"archive":{"entries":["notes.txt","nested/config.ini"]},"database":{"tables":["orders","service_logs","users"]}}"#
+            .to_string(),
+    )
+    .with_task_journal(journal);
+
+    assert!(try_recover_structured_evidence_table_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+
+    assert!(!reply.should_fail_task);
+    assert!(reply.text.starts_with("| field | value |"));
+    assert!(reply.text.contains("archive.members"));
+    assert!(reply.text.contains("notes.txt, nested/config.ini"));
+    assert!(reply.text.contains("db.tables"));
+    assert!(reply.text.contains("orders, service_logs, users"));
+    assert!(reply.text.contains("db.schema_version"));
+    assert!(reply.text.contains("| 3 |"));
+    let journal = reply.task_journal.as_ref().expect("journal");
+    assert!(journal.answer_verifier_summary.is_none());
+    assert_eq!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+}
+
+#[test]
+fn answer_verifier_exhaustion_does_not_recover_unstructured_terminal_for_field_value_gap() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "tmp/test_bundle.zip | data/test_contract.sqlite".to_string();
+
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-archive-db", "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "archive_basic",
+            r#"{"extra":{"field_value":{"members":["notes.txt","nested/config.ini"],"member_count":2}}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "archive_basic",
+            r#"{"extra":{"field_value":{"path":"notes.txt","content_excerpt":"fixture archive notes"}}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3",
+            "db_basic",
+            r#"{"extra":{"field_value":{"table_count":3,"tables":["orders","service_logs","users"]}}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_4",
+            "db_basic",
+            r#"{"extra":{"field_value":{"schema_version":3},"schema_version":3}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_5",
+            "synthesize_answer",
+            r#"{"archive":{"entries":["notes.txt","nested/config.ini"]},"database":{"tables":["orders","service_logs","users"]}}"#,
+        ));
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string(), "field_value".to_string()],
+        answer_incomplete_reason: "candidate missed required structured projection".to_string(),
+        should_retry: true,
+        retry_instruction: "render observed field_value facts as a table".to_string(),
+        confidence: 0.92,
+    });
+    let mut reply = AskReply::non_llm("previous candidate".to_string()).with_task_journal(journal);
+
+    assert!(!try_recover_latest_synthesis_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+    assert_eq!(reply.text, "previous candidate");
+}
+
+#[test]
 fn answer_verifier_exhaustion_does_not_recover_same_rejected_terminal_respond() {
     let mut route = route_result(OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;

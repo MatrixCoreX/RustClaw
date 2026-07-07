@@ -243,6 +243,7 @@ pub(super) fn answer_verifier_retry_observed_trace(
 ) -> String {
     let trace = journal.to_trace_json();
     let compact = json!({
+        "structured_field_value_projection": answer_verifier_retry_structured_projection(journal),
         "step_results": trace.get("step_results").cloned().unwrap_or_else(|| json!([])),
         "task_observations": trace.get("task_observations").cloned().unwrap_or_else(|| json!([])),
         "evidence_coverage": trace.get("evidence_coverage").cloned().unwrap_or(Value::Null),
@@ -257,6 +258,102 @@ pub(super) fn answer_verifier_retry_observed_trace(
         crate::utf8_safe_prefix(&serialized, ANSWER_VERIFIER_RETRY_TRACE_MAX_CHARS).to_string();
     out.push_str("...(truncated)");
     out
+}
+
+fn answer_verifier_retry_structured_projection(
+    journal: &crate::task_journal::TaskJournal,
+) -> Value {
+    let mut rows = Vec::new();
+    for step in journal.step_results.iter().filter(|step| {
+        step.status == crate::executor::StepExecutionStatus::Ok
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+    }) {
+        let Some(evidence) = crate::task_journal::observed_evidence_for_step_trace(step) else {
+            continue;
+        };
+        collect_answer_verifier_retry_projection_rows(step, &evidence, &mut rows);
+    }
+    Value::Array(rows)
+}
+
+fn collect_answer_verifier_retry_projection_rows(
+    step: &crate::task_journal::TaskJournalStepTrace,
+    evidence: &Value,
+    rows: &mut Vec<Value>,
+) {
+    let Some(items) = evidence.get("items").and_then(Value::as_array) else {
+        return;
+    };
+    for item in items {
+        let Some(field) = item.get("field").and_then(Value::as_str) else {
+            continue;
+        };
+        if !answer_verifier_retry_projection_field_allowed(field) {
+            continue;
+        }
+        let Some(value) = answer_verifier_retry_projection_item_value(item) else {
+            continue;
+        };
+        rows.push(json!({
+            "step_id": &step.step_id,
+            "skill": &step.skill,
+            "field": answer_verifier_retry_projection_label(&step.skill, field),
+            "value": value,
+        }));
+    }
+}
+
+fn answer_verifier_retry_projection_field_allowed(field: &str) -> bool {
+    field.starts_with("extra.field_value.")
+        || matches!(
+            field,
+            "extra.archive"
+                | "extra.db_path"
+                | "extra.path"
+                | "extra.member"
+                | "extra.member_path"
+                | "extra.content_excerpt"
+                | "extra.schema_version"
+                | "path"
+        )
+}
+
+fn answer_verifier_retry_projection_label(skill: &str, field: &str) -> String {
+    let domain = skill.strip_suffix("_basic").unwrap_or(skill);
+    let field = field
+        .strip_prefix("extra.field_value.")
+        .or_else(|| field.strip_prefix("extra."))
+        .unwrap_or(field);
+    format!("{domain}.{field}")
+}
+
+fn answer_verifier_retry_projection_item_value(item: &Value) -> Option<String> {
+    if let Some(values) = item.get("sample_values").and_then(Value::as_array) {
+        let rendered = values
+            .iter()
+            .filter_map(answer_verifier_retry_projection_scalar)
+            .collect::<Vec<_>>();
+        if !rendered.is_empty() {
+            return Some(rendered.join(", "));
+        }
+    }
+    item.get("excerpt")
+        .and_then(answer_verifier_retry_projection_scalar)
+        .map(|value| value.replace(['\n', '\r'], " ").trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn answer_verifier_retry_projection_scalar(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.trim().to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    }
+    .filter(|value| !value.is_empty())
 }
 
 pub(super) async fn retry_answer_after_verifier(
@@ -277,7 +374,7 @@ pub(super) async fn retry_answer_after_verifier(
     let request_language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
     let prompt = format!(
-        "You are rewriting a direct chat answer after answer verification failed.\n\nRequest language hint: {request_language_hint}\nConfigured fallback language: {}\n\nCurrent user request:\n{}\n\nCurrent task context:\n{}\n\nObserved task trace JSON:\n{}\n\nRejected answer:\n{}\n\nVerifier reason:\n{}\n\nVerifier retry instruction:\n{}\n\nReturn only the corrected final answer. Use the request language. Use only observed evidence from Current task context and Observed task trace JSON. Do not re-run tools. Preserve the most recent generated output's factual scope and evidence boundary. If the rejected answer is a JSON object, message_key payload, or other machine-format evidence, treat its fields as evidence to render; do not explain the machine format and do not ask the user to clarify the format. Treat machine status fields such as status, effective_status, result_kind, effective_success, and idempotent_success as authoritative over incidental counters; zero update counters are not a failure when the machine status says ok or effective/idempotent success. If the user asks whether an operation succeeded, result_kind=already_indexed with effective_success=true or idempotent_success=true is a successful completion, not a blocker and not a request for confirmation. If verifier missing_evidence_fields names output_format, keep the observed facts and correct only the visible answer shape. Do not add new setup categories, project-doc references, support/contact recommendations, usage claims, paths, commands, config keys, credentials, callbacks, or verification steps unless they are present in the observed evidence.",
+        "You are rewriting a direct chat answer after answer verification failed.\n\nRequest language hint: {request_language_hint}\nConfigured fallback language: {}\n\nCurrent user request:\n{}\n\nCurrent task context:\n{}\n\nObserved task trace JSON:\n{}\n\nRejected answer:\n{}\n\nVerifier reason:\n{}\n\nVerifier retry instruction:\n{}\n\nReturn only the corrected final answer. Use the request language. Use only observed evidence from Current task context and Observed task trace JSON. Do not re-run tools. Preserve the most recent generated output's factual scope and evidence boundary. If Observed task trace JSON contains structured_field_value_projection rows, treat them as the preferred compact field/value evidence for requested tables, summaries, and missing field_value gaps. Render those observed rows in the user's requested visible shape; do not return raw JSON unless the user explicitly requested JSON. If the rejected answer is a JSON object, message_key payload, or other machine-format evidence, treat its fields as evidence to render; do not explain the machine format and do not ask the user to clarify the format. Treat machine status fields such as status, effective_status, result_kind, effective_success, and idempotent_success as authoritative over incidental counters; zero update counters are not a failure when the machine status says ok or effective/idempotent success. If the user asks whether an operation succeeded, result_kind=already_indexed with effective_success=true or idempotent_success=true is a successful completion, not a blocker and not a request for confirmation. If verifier missing_evidence_fields names output_format, keep the observed facts and correct only the visible answer shape. Do not add new setup categories, project-doc references, support/contact recommendations, usage claims, paths, commands, config keys, credentials, callbacks, or verification steps unless they are present in the observed evidence.",
         state.policy.command_intent.default_locale,
         user_request.trim(),
         context,

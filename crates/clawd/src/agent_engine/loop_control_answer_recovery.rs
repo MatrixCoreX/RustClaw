@@ -1,5 +1,10 @@
 use super::*;
 
+#[path = "loop_control_answer_recovery/structured_evidence_table.rs"]
+mod structured_evidence_table;
+
+pub(super) use structured_evidence_table::try_recover_structured_evidence_table_answer_verifier_gap;
+
 pub(super) fn answer_verifier_retry_summary<'a>(
     reply: &'a AskReply,
     route_result: Option<&RouteResult>,
@@ -1002,6 +1007,9 @@ pub(super) fn try_recover_latest_synthesis_answer_verifier_gap(
     if !crate::task_journal::evidence_coverage_for_route(route, journal).is_complete() {
         return false;
     }
+    if verifier_requires_structured_visible_rewrite(verifier) {
+        return false;
+    }
     let Some(candidate) = latest_recoverable_terminal_answer(route, journal, reply) else {
         return false;
     };
@@ -1018,6 +1026,15 @@ pub(super) fn try_recover_latest_synthesis_answer_verifier_gap(
     reply.is_llm_reply = false;
     info!("answer_verifier_retry_exhausted_recovered_with_latest_synthesis");
     true
+}
+
+fn verifier_requires_structured_visible_rewrite(
+    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
+) -> bool {
+    verifier
+        .missing_evidence_fields
+        .iter()
+        .any(|field| matches!(field.as_str(), "output_format" | "field_value"))
 }
 
 struct TerminalAnswerCandidate {
