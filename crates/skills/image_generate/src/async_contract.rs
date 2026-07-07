@@ -273,7 +273,10 @@ fn image_model_kind(cfg: &RootConfig, vendor: VendorKind, model: &str) -> &'stat
             }
         }
         VendorKind::Anthropic | VendorKind::Grok | VendorKind::DeepSeek => {
-            if matches!(resolve_adapter_mode(&cfg.image_generation), AdapterMode::Native) {
+            if matches!(
+                resolve_adapter_mode(&cfg.image_generation),
+                AdapterMode::Native
+            ) {
                 "native"
             } else {
                 "compat"

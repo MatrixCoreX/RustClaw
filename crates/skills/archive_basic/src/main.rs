@@ -133,9 +133,18 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
                     "action": "list",
                     "archive": archive_path,
                     "count": candidates.len(),
+                    "member_count": candidates.len(),
+                    "members": candidates,
                     "entries": entries,
-                    "candidates": candidates,
-                    "output": listing.output
+                    "candidates": listing.entries.clone(),
+                    "output": listing.output,
+                    "field_value": {
+                        "action": "list",
+                        "archive": archive_path,
+                        "count": listing.entries.len(),
+                        "member_count": listing.entries.len(),
+                        "members": listing.entries,
+                    }
                 });
                 (payload.to_string(), payload)
             })
@@ -146,19 +155,34 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
             let archive = resolve_path(&root, archive, false)?;
             let member = normalize_archive_member(member)?;
             read_archive_member(&archive, &member).map(|text| {
+                let content_excerpt = content_excerpt_for_machine_field(&text);
                 let payload = json!({
                     "action":"read",
                     "archive":archive.display().to_string(),
+                    "path":member,
                     "member":member,
-                    "content":text
+                    "member_path":member,
+                    "content":text,
+                    "content_excerpt":content_excerpt,
                 });
                 (
                     payload.to_string(),
                     json!({
                         "action":"read",
                         "archive":archive.display().to_string(),
+                        "path":payload.get("path").and_then(Value::as_str).unwrap_or_default(),
                         "member":payload.get("member").and_then(Value::as_str).unwrap_or_default(),
-                        "content":payload.get("content").and_then(Value::as_str).unwrap_or_default()
+                        "member_path":payload.get("member_path").and_then(Value::as_str).unwrap_or_default(),
+                        "content":payload.get("content").and_then(Value::as_str).unwrap_or_default(),
+                        "content_excerpt":payload.get("content_excerpt").and_then(Value::as_str).unwrap_or_default(),
+                        "field_value": {
+                            "action": "read",
+                            "archive": archive.display().to_string(),
+                            "path": payload.get("path").and_then(Value::as_str).unwrap_or_default(),
+                            "member": payload.get("member").and_then(Value::as_str).unwrap_or_default(),
+                            "member_path": payload.get("member_path").and_then(Value::as_str).unwrap_or_default(),
+                            "content_excerpt": payload.get("content_excerpt").and_then(Value::as_str).unwrap_or_default(),
+                        }
                     }),
                 )
             })
@@ -213,6 +237,16 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
             "unsupported action; use list|read|pack|unpack",
         )),
     }
+}
+
+fn content_excerpt_for_machine_field(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default()
+        .chars()
+        .take(240)
+        .collect()
 }
 
 fn list_archive(archive: &Path) -> Result<ArchiveListing, SkillError> {

@@ -67,6 +67,14 @@ fn manager_rustclaw_whitelist() {
 }
 
 #[test]
+fn rustclaw_service_target_overrides_incompatible_manager_hint() {
+    let args = json!({"action": "status", "target": "clawd", "manager_type": "systemd"});
+    let out = execute("req-rustclaw-manager-hint".to_string(), args, None).unwrap();
+    assert_eq!(out.manager_type, "rustclaw");
+    assert_eq!(out.status, "ok");
+}
+
+#[test]
 fn rustclaw_status_without_user_key_falls_back_to_process_scan() {
     let args = json!({"action": "status", "target": "clawd"});
     let out = execute("req-rustclaw-fallback".to_string(), args, None).unwrap();
@@ -77,6 +85,20 @@ fn rustclaw_status_without_user_key_falls_back_to_process_scan() {
         out.pre_state.contains("clawd="),
         "pre_state: {}",
         out.pre_state
+    );
+}
+
+#[test]
+fn runner_status_response_serializes_target_alias() {
+    let args = json!({"action": "status", "target": "clawd"});
+    let out = execute("req-target-alias".to_string(), args, None).unwrap();
+    let resp = build_runner_response("req-target-alias".to_string(), Ok(out));
+    assert_eq!(resp.status, "ok");
+    let parsed: Value = serde_json::from_str(&resp.text).expect("structured service status");
+    assert_eq!(parsed.get("target").and_then(Value::as_str), Some("clawd"));
+    assert_eq!(
+        parsed.get("service_name").and_then(Value::as_str),
+        Some("clawd")
     );
 }
 

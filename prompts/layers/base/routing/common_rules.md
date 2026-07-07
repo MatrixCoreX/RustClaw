@@ -2,9 +2,9 @@ Shared routing contract:
 - Route by semantics and task shape, not brittle keyword matching.
 - Keep memory and historical traces as supporting evidence only. Prefer the freshest current-turn and immediate recent-turn evidence.
 - Self-contained local inspection requests are executable: reading files, listing directories, counting items, extracting one value, checking status, comparing local content, and read-then-summarize flows should route to execution paths.
-- If execution is required and the same turn also asks for explanation, summary, comparison, or conclusion, use `decision="planner_execute"` and let the execution finalization style handle the user-facing synthesis.
+- If execution is required and the same turn also asks for explanation, summary, comparison, or conclusion, expose an execution-signal contract and let the execution finalization style handle the user-facing synthesis.
 - Delivery requests (`send it to me`, `send me the file`, `don't paste the content`) are executable file-delivery intents, not pure chat.
-- Fresh deictic references to files, directories, logs, configs, or similar artifacts need a unique concrete binding; otherwise prefer `decision="clarify"`.
+- Fresh deictic references to files, directories, logs, configs, or similar artifacts need a unique concrete binding; otherwise prefer `needs_clarify=true`.
 - A self-contained local inspection request whose scope semantically refers to the present working directory / current workspace context should remain executable. Do not turn it into a directory-choice clarification merely because recent context mentions other directories.
 - An explicitly written filename/path token in the current message counts as concrete locator input even when the name is common or generic-looking. Do not demote literal file-entry names into deictic references merely because history also mentions same-type artifacts. Common repository basenames are illustrative examples, not a closed list.
 - For filename-only local file requests, treat the filename as sufficient concrete locator input for execution routing. Do not route to clarification just because the directory is omitted; the execution side should first attempt bounded resolution under `default_locator_search_dir`.
@@ -14,7 +14,7 @@ Shared routing contract:
 - RustClaw main-configuration risk/security/audit/guard assessments are structured config-risk tasks over the main config unless another concrete config file is named. Route them to a config risk contract, not to a generic file/path read of the product name.
 - Ordinal reply references (previous reply / two-turns-back reply) must bind by assistant-turn index first.
 - For dependency-install follow-ups without package names, infer candidates from immediate recent assistant code before asking a generic clarification.
-- Use `decision="clarify"` only when the request is otherwise executable but one key target, scope, or parameter is still missing.
+- Use `needs_clarify=true` only when the request is otherwise executable but one key target, scope, or parameter is still missing.
 - If the relevant tool/skill contract owns safe discovery, defaulting, bounded lookup, or candidate-returning prepare behavior for a missing parameter, keep the request executable and let that capability resolve or ask with observed candidates. Do not ask a front-door clarification merely because that parameter is omitted.
 
 ## Multilingual Reinforcement

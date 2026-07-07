@@ -2,7 +2,7 @@ use std::io::{self, BufRead, Write};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -15,6 +15,7 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    extra: Option<Value>,
     error_text: Option<String>,
 }
 
@@ -31,6 +32,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: None,
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -43,22 +45,24 @@ fn main() -> anyhow::Result<()> {
 
 fn handle(req: Req) -> Resp {
     match install_modules(req.args) {
-        Ok(text) => Resp {
+        Ok((text, extra)) => Resp {
             request_id: req.request_id,
             status: "ok".to_string(),
             text,
+            extra: Some(extra),
             error_text: None,
         },
         Err(err) => Resp {
             request_id: req.request_id,
             status: "error".to_string(),
             text: String::new(),
+            extra: None,
             error_text: Some(err),
         },
     }
 }
 
-fn install_modules(args: Value) -> Result<String, String> {
+fn install_modules(args: Value) -> Result<(String, Value), String> {
     let ecosystem = extract_ecosystem(&args);
     let modules = extract_modules(&args)?;
     if modules.is_empty() {
@@ -72,11 +76,46 @@ fn install_modules(args: Value) -> Result<String, String> {
     }
 
     let version = extract_version(&args);
-    ensure_installer_available(ecosystem)?;
+    let dry_run = extract_dry_run(&args);
+    let installer_available = installer_available(ecosystem)?;
+    if !dry_run && !installer_available {
+        return Err(installer_unavailable_message(ecosystem));
+    }
+
+    let commands = modules
+        .iter()
+        .map(|module| install_command_args(ecosystem, module, version.as_deref()))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if dry_run {
+        let text = module_install_summary(
+            ecosystem,
+            &modules,
+            version.as_deref(),
+            true,
+            installer_available,
+            &commands,
+        );
+        return Ok((
+            text.clone(),
+            json!({
+                "action": "install",
+                "skill": "install_module",
+                "ecosystem": ecosystem,
+                "module": single_module(&modules),
+                "modules": modules,
+                "version": version,
+                "dry_run": true,
+                "installer_available": installer_available,
+                "commands": commands.iter().map(|argv| argv.join(" ")).collect::<Vec<_>>(),
+                "output": text,
+            }),
+        ));
+    }
 
     let mut installed = Vec::new();
-    for module in modules {
-        let out = run_install_command(ecosystem, &module, version.as_deref())?;
+    for (module, command_args) in modules.iter().zip(commands.iter()) {
+        let out = run_install_command(command_args)?;
 
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr);
@@ -93,9 +132,28 @@ fn install_modules(args: Value) -> Result<String, String> {
         installed.push(render_installed_name(&module, version.as_deref()));
     }
 
-    Ok(format!(
-        "installed modules: ecosystem={ecosystem}; {}",
-        installed.join(", ")
+    let text = module_install_summary(
+        ecosystem,
+        &installed,
+        version.as_deref(),
+        false,
+        installer_available,
+        &commands,
+    );
+    Ok((
+        text.clone(),
+        json!({
+            "action": "install",
+            "skill": "install_module",
+            "ecosystem": ecosystem,
+            "module": single_module(&installed),
+            "modules": installed,
+            "version": version,
+            "dry_run": false,
+            "installer_available": installer_available,
+            "commands": commands.iter().map(|argv| argv.join(" ")).collect::<Vec<_>>(),
+            "output": text,
+        }),
     ))
 }
 
@@ -127,7 +185,14 @@ fn extract_version(args: &Value) -> Option<String> {
         .filter(|s| !s.is_empty() && is_safe_module_name(s))
 }
 
-fn ensure_installer_available(ecosystem: &str) -> Result<(), String> {
+fn extract_dry_run(args: &Value) -> bool {
+    args.as_object()
+        .and_then(|obj| obj.get("dry_run"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn installer_available(ecosystem: &str) -> Result<bool, String> {
     let mut cmd = match ecosystem {
         "python" => {
             let mut c = Command::new("python3");
@@ -155,54 +220,106 @@ fn ensure_installer_available(ecosystem: &str) -> Result<(), String> {
     let out = cmd
         .output()
         .map_err(|err| format!("check installer failed: {err}"))?;
-    if out.status.success() {
-        return Ok(());
-    }
+    Ok(out.status.success())
+}
+
+fn installer_unavailable_message(ecosystem: &str) -> String {
     match ecosystem {
-        "python" => Err("python3 pip is not available. install python3-pip first".to_string()),
-        "node" => Err("npm is not available. install nodejs/npm first".to_string()),
-        "rust" => Err("cargo is not available. install Rust toolchain first".to_string()),
-        "go" => Err("go is not available. install golang toolchain first".to_string()),
-        _ => Err(format!("unsupported ecosystem: {ecosystem}")),
+        "python" => "python3 pip is not available. install python3-pip first".to_string(),
+        "node" => "npm is not available. install nodejs/npm first".to_string(),
+        "rust" => "cargo is not available. install Rust toolchain first".to_string(),
+        "go" => "go is not available. install golang toolchain first".to_string(),
+        _ => format!("unsupported ecosystem: {ecosystem}"),
     }
 }
 
-fn run_install_command(
+fn install_command_args(
     ecosystem: &str,
     module: &str,
     version: Option<&str>,
-) -> Result<std::process::Output, String> {
-    let mut cmd = match ecosystem {
-        "python" => {
-            let mut c = Command::new("python3");
-            c.arg("-m").arg("pip").arg("install").arg("--user");
-            c.arg(render_module_for_python(module, version));
-            c
-        }
-        "node" => {
-            let mut c = Command::new("npm");
-            c.arg("install").arg("-g");
-            c.arg(render_module_for_node(module, version));
-            c
-        }
+) -> Result<Vec<String>, String> {
+    let args = match ecosystem {
+        "python" => vec![
+            "python3".to_string(),
+            "-m".to_string(),
+            "pip".to_string(),
+            "install".to_string(),
+            "--user".to_string(),
+            render_module_for_python(module, version),
+        ],
+        "node" => vec![
+            "npm".to_string(),
+            "install".to_string(),
+            "-g".to_string(),
+            render_module_for_node(module, version),
+        ],
         "rust" => {
-            let mut c = Command::new("cargo");
-            c.arg("install").arg(module);
+            let mut args = vec![
+                "cargo".to_string(),
+                "install".to_string(),
+                module.to_string(),
+            ];
             if let Some(v) = version {
-                c.arg("--version").arg(v);
+                args.push("--version".to_string());
+                args.push(v.to_string());
             }
-            c
+            args
         }
-        "go" => {
-            let mut c = Command::new("go");
-            c.arg("install").arg(render_module_for_go(module, version));
-            c
-        }
+        "go" => vec![
+            "go".to_string(),
+            "install".to_string(),
+            render_module_for_go(module, version),
+        ],
         _ => return Err(format!("unsupported ecosystem: {ecosystem}")),
     };
+    Ok(args)
+}
 
-    cmd.output()
+fn run_install_command(command_args: &[String]) -> Result<std::process::Output, String> {
+    let (bin, rest) = command_args
+        .split_first()
+        .ok_or_else(|| "empty install command".to_string())?;
+
+    Command::new(bin)
+        .args(rest)
+        .output()
         .map_err(|err| format!("run installer failed: {err}"))
+}
+
+fn module_install_summary(
+    ecosystem: &str,
+    modules: &[String],
+    version: Option<&str>,
+    dry_run: bool,
+    installer_available: bool,
+    commands: &[Vec<String>],
+) -> String {
+    let mut fields = vec![
+        "skill=install_module".to_string(),
+        "action=install".to_string(),
+        format!("ecosystem={ecosystem}"),
+        format!("dry_run={dry_run}"),
+        format!("installer_available={installer_available}"),
+        format!("modules={}", modules.join(",")),
+    ];
+    if let Some(module) = single_module(modules) {
+        fields.push(format!("module={module}"));
+    }
+    if let Some(version) = version {
+        fields.push(format!("version={version}"));
+    }
+    for (idx, command) in commands.iter().enumerate() {
+        fields.push(format!("command_{idx}={}", command.join(" ")));
+    }
+    fields.join("\n")
+}
+
+fn single_module(modules: &[String]) -> Option<&str> {
+    if modules.len() == 1 {
+        modules.first().map(String::as_str)
+    } else {
+        None
+    }
 }
 
 fn render_module_for_python(module: &str, version: Option<&str>) -> String {
@@ -278,3 +395,7 @@ fn is_safe_module_name(name: &str) -> bool {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
 }
+
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;

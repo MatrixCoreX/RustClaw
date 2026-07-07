@@ -31,7 +31,7 @@ runtime_semantic_rewrite_convergence|task_lifecycle_fields_zh|covers:task_contro
 
 runtime_semantic_rewrite_convergence|direct_run_skill_boundary_zh|covers:run_skill_boundary,skill_dispatch,no_semantic_route;requires_tool_call=true;local_readonly|用 read_range 读取 /home/guagua/rustclaw/README.md 第 88 到 95 行，只回答机器摘要：run_skill=kind=run_skill planner=No。|expect=contains:run_skill=kind=run_skill;contains:planner=No
 
-runtime_semantic_rewrite_convergence|pre_planner_inventory_doc_zh|covers:pre_planner_exit,inventory,semantic_rewrite_debt;requires_tool_call=true;local_readonly|用只读 read_range 读取 /home/guagua/rustclaw/AGENTS.md 第 246 到 247 行，只回答机器摘要：required=yes script=check_pre_planner_exit_inventory.py。|expect=contains:required=yes;contains:check_pre_planner_exit_inventory.py
+runtime_semantic_rewrite_convergence|pre_planner_removal_guard_doc_zh|covers:loop_boundary_removal_guard,pre_planner_removal_guard,no_semantic_route;requires_tool_call=true;local_readonly|用只读 read_range 读取 /home/guagua/rustclaw/AGENTS.md 第 246 到 247 行，只回答机器摘要：required=yes script=check_pre_planner_exit_inventory.py。|expect=contains:required=yes;contains:check_pre_planner_exit_inventory.py
 
 runtime_semantic_rewrite_convergence|runtime_semantic_guard_doc_en|covers:semantic_rewrite_guard,agents_rules,no_hardmatch;requires_tool_call=true;local_readonly|Use read_range only for /home/guagua/rustclaw/AGENTS.md lines 248 to 249. Answer exactly as machine summary: required=yes script=check_runtime_semantic_rewrite_boundary.py.|expect=contains:required=yes;contains:check_runtime_semantic_rewrite_boundary.py
 

@@ -141,6 +141,8 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
         }),
         "list_tables" | "table_names" | "sqlite_table_names" | "sqlite_tables" => {
             run_query(&conn, &sql, obj).map(|payload| {
+                let tables = table_names_from_query_payload(&payload);
+                let table_count = tables.len();
                 (
                     payload.to_string(),
                     json!({
@@ -148,6 +150,12 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
                         "db_path": db_path_text,
                         "sql": sql,
                         "result": payload,
+                        "table_count": table_count,
+                        "tables": tables.clone(),
+                        "field_value": {
+                            "table_count": table_count,
+                            "tables": tables,
+                        },
                     }),
                 )
             })
@@ -209,6 +217,21 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
             "allowed_actions": ["sqlite_query", "sqlite_execute", "schema_version", "list_tables"],
         }))),
     }
+}
+
+fn table_names_from_query_payload(payload: &Value) -> Vec<String> {
+    payload
+        .get("rows")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter_map(|row| row.get("name"))
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 fn required_sql(obj: &serde_json::Map<String, Value>) -> Result<String, SkillError> {

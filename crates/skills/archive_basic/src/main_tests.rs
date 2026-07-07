@@ -48,6 +48,32 @@ fn list_zip_archive_returns_structured_member_entries() {
 }
 
 #[test]
+fn execute_list_projects_member_count_and_members() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip")
+        .canonicalize()
+        .expect("fixture archive exists");
+
+    let (_text, extra) = execute(json!({
+        "action": "list",
+        "archive": fixture.display().to_string()
+    }))
+    .expect("execute list");
+
+    assert_eq!(extra.get("member_count").and_then(Value::as_u64), Some(2));
+    assert_eq!(
+        extra.pointer("/members/0").and_then(Value::as_str),
+        Some("notes.txt")
+    );
+    assert_eq!(
+        extra
+            .pointer("/field_value/member_count")
+            .and_then(Value::as_u64),
+        Some(2)
+    );
+}
+
+#[test]
 fn archive_member_rejects_traversal() {
     let err = normalize_archive_member("../secret.txt").expect_err("reject traversal");
     assert_eq!(err.kind, "invalid_input");
@@ -76,4 +102,35 @@ fn read_archive_member_returns_member_content() {
 
     assert_eq!(content, "fixture archive notes\n");
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn execute_read_projects_member_path_and_content_excerpt() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip")
+        .canonicalize()
+        .expect("fixture archive exists");
+
+    let (_text, extra) = execute(json!({
+        "action": "read",
+        "archive": fixture.display().to_string(),
+        "member": "notes.txt"
+    }))
+    .expect("execute read");
+
+    assert_eq!(extra.get("path").and_then(Value::as_str), Some("notes.txt"));
+    assert_eq!(
+        extra.get("member_path").and_then(Value::as_str),
+        Some("notes.txt")
+    );
+    assert_eq!(
+        extra.get("content_excerpt").and_then(Value::as_str),
+        Some("fixture archive notes")
+    );
+    assert_eq!(
+        extra
+            .pointer("/field_value/content_excerpt")
+            .and_then(Value::as_str),
+        Some("fixture archive notes")
+    );
 }

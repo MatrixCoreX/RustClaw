@@ -649,6 +649,7 @@ async fn parse_api_response<T: for<'de> Deserialize<'de>>(
 }
 
 fn task_list_extra(tasks: &[ActiveTaskItem]) -> Value {
+    let states = task_list_states_surface(tasks);
     let items: Vec<Value> = tasks
         .iter()
         .map(|task| {
@@ -677,6 +678,10 @@ fn task_list_extra(tasks: &[ActiveTaskItem]) -> Value {
         "count": task_count,
         "task_count": task_count,
         "has_unfinished": task_count > 0,
+        "states": states,
+        "can_poll": task_count > 0,
+        "can_cancel": task_count > 0,
+        "checkpoint_id_present": false,
         "items": items,
         "field_value": {
             "action": "list",
@@ -685,8 +690,28 @@ fn task_list_extra(tasks: &[ActiveTaskItem]) -> Value {
             "count": task_count,
             "task_count": task_count,
             "has_unfinished": task_count > 0,
+            "states": states,
+            "can_poll": task_count > 0,
+            "can_cancel": task_count > 0,
+            "checkpoint_id_present": false,
         },
     })
+}
+
+fn task_list_states_surface(tasks: &[ActiveTaskItem]) -> String {
+    let mut states = Vec::new();
+    for task in tasks {
+        let status = task.status.trim();
+        if status.is_empty() || states.iter().any(|existing| existing == status) {
+            continue;
+        }
+        states.push(status.to_string());
+    }
+    if states.is_empty() {
+        "none".to_string()
+    } else {
+        states.join(",")
+    }
 }
 
 fn task_list_with_first_detail_extra(tasks: &[ActiveTaskItem], detail: Option<&Value>) -> Value {
@@ -712,16 +737,41 @@ fn task_list_with_first_detail_extra(tasks: &[ActiveTaskItem], detail: Option<&V
         .and_then(|value| value.get("db_status"))
         .cloned()
         .unwrap_or(Value::Null);
-    let lifecycle_field_presence = json!({
-        "state": lifecycle.get("state").is_some(),
-        "can_poll": lifecycle.get("can_poll").is_some(),
-        "can_cancel": lifecycle.get("can_cancel").is_some(),
-        "last_heartbeat_ts": lifecycle.get("last_heartbeat_ts").is_some(),
-        "checkpoint_id": lifecycle.get("checkpoint_id").is_some(),
-        "db_status": !db_status.is_null(),
+    let lifecycle_present_fields = json!({
+        "has_state": lifecycle.get("state").is_some(),
+        "has_can_poll": lifecycle.get("can_poll").is_some(),
+        "has_can_cancel": lifecycle.get("can_cancel").is_some(),
+        "has_last_heartbeat_ts": lifecycle.get("last_heartbeat_ts").is_some(),
+        "has_checkpoint_id": lifecycle.get("checkpoint_id").is_some(),
+        "has_db_status": !db_status.is_null(),
     });
     let detail_available = detail_extra.is_some();
     let count = tasks.len();
+    let state = lifecycle
+        .get("state")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            detail_extra
+                .as_ref()
+                .and_then(|value| value.get("status"))
+                .and_then(Value::as_str)
+        })
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(if count == 0 { "none" } else { "unknown" })
+        .to_string();
+    let can_poll = lifecycle
+        .get("can_poll")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let can_cancel = lifecycle
+        .get("can_cancel")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let checkpoint_id_present = lifecycle
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty());
     json!({
         "schema_version": 1,
         "action": "list_with_first_detail",
@@ -729,6 +779,10 @@ fn task_list_with_first_detail_extra(tasks: &[ActiveTaskItem], detail: Option<&V
         "message_key": if count == 0 { "task_control.list.empty" } else { "task_control.list_with_first_detail.ok" },
         "count": count,
         "selected_task_id": selected_task_id,
+        "state": state.clone(),
+        "can_poll": can_poll,
+        "can_cancel": can_cancel,
+        "checkpoint_id_present": checkpoint_id_present,
         "list": list,
         "detail": detail_extra.unwrap_or(Value::Null),
         "field_value": {
@@ -737,11 +791,15 @@ fn task_list_with_first_detail_extra(tasks: &[ActiveTaskItem], detail: Option<&V
             "message_key": if count == 0 { "task_control.list.empty" } else { "task_control.list_with_first_detail.ok" },
             "count": count,
             "selected_task_id": selected_task_id,
+            "state": state,
+            "can_poll": can_poll,
+            "can_cancel": can_cancel,
+            "checkpoint_id_present": checkpoint_id_present,
             "detail_available": detail_available,
             "list_item_fields": ["index", "task_id", "kind", "status", "summary", "age_seconds"],
             "db_status": db_status,
             "lifecycle": lifecycle,
-            "lifecycle_field_presence": lifecycle_field_presence,
+            "lifecycle_present_fields": lifecycle_present_fields,
         },
     })
 }

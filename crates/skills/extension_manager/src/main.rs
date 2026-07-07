@@ -554,9 +554,48 @@ async fn build_temporary_fix_plan(
     request_id: &str,
     request: &str,
 ) -> Result<TemporaryFixPlan, String> {
-    let raw = llm_generate_temporary_fix_plan(request).await?;
-    let parsed = parse_temporary_fix_plan_from_text(&raw)?;
-    normalize_plan(&workspace_root(), request_id, parsed)
+    let raw = match llm_generate_temporary_fix_plan(request).await {
+        Ok(raw) if !raw.trim().is_empty() => raw,
+        Ok(_) => {
+            return normalize_plan(
+                &workspace_root(),
+                request_id,
+                fallback_temporary_fix_plan("provider_empty_content"),
+            )
+        }
+        Err(_err) => {
+            return normalize_plan(
+                &workspace_root(),
+                request_id,
+                fallback_temporary_fix_plan("provider_error"),
+            )
+        }
+    };
+    match parse_temporary_fix_plan_from_text(&raw) {
+        Ok(parsed) => normalize_plan(&workspace_root(), request_id, parsed),
+        Err(_err) => normalize_plan(
+            &workspace_root(),
+            request_id,
+            fallback_temporary_fix_plan("provider_invalid_plan"),
+        ),
+    }
+}
+
+fn fallback_temporary_fix_plan(reason_code: &str) -> TemporaryFixPlan {
+    TemporaryFixPlan {
+        summary: "temporary_fix_plan_dry_run_fallback".to_string(),
+        plan_root: String::new(),
+        packages: Vec::new(),
+        files: Vec::new(),
+        commands: Vec::new(),
+        notes: vec![
+            format!("reason_code={reason_code}"),
+            "dry_run_only=true".to_string(),
+            "does_not_scaffold=true".to_string(),
+            "does_not_validate=true".to_string(),
+            "does_not_register=true".to_string(),
+        ],
+    }
 }
 
 async fn build_permanent_extension_plan(

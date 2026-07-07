@@ -196,6 +196,25 @@ fn parse_temporary_fix_plan_rejects_extra_fields() {
 }
 
 #[test]
+fn fallback_temporary_fix_plan_has_no_side_effect_steps() {
+    let plan = fallback_temporary_fix_plan("provider_empty_content");
+
+    assert_eq!(plan.summary, "temporary_fix_plan_dry_run_fallback");
+    assert!(plan.packages.is_empty());
+    assert!(plan.files.is_empty());
+    assert!(plan.commands.is_empty());
+    assert!(plan
+        .notes
+        .iter()
+        .any(|note| note == "reason_code=provider_empty_content"));
+    assert!(plan.notes.iter().any(|note| note == "dry_run_only=true"));
+    assert!(plan
+        .notes
+        .iter()
+        .any(|note| note == "does_not_register=true"));
+}
+
+#[test]
 fn parse_permanent_extension_plan_accepts_json_object() {
     let raw = r#"{
             "skill_name":"pdf_compare",

@@ -49,6 +49,12 @@ fn empty_list_extra_uses_message_key_not_sentence_contract() {
             .and_then(Value::as_bool),
         Some(false)
     );
+    assert_eq!(extra.get("states").and_then(Value::as_str), Some("none"));
+    assert_eq!(extra.get("can_poll").and_then(Value::as_bool), Some(false));
+    assert_eq!(
+        extra.get("checkpoint_id_present").and_then(Value::as_bool),
+        Some(false)
+    );
 }
 
 #[test]
@@ -225,4 +231,54 @@ fn task_control_by_id_result_extra_projects_lifecycle() {
             .and_then(Value::as_str),
         Some("ckpt-2")
     );
+}
+
+#[test]
+fn list_with_first_detail_projects_requested_lifecycle_fields() {
+    let tasks = vec![sample_task(
+        1,
+        "00000000-0000-4000-8000-000000000020",
+        "running",
+    )];
+    let detail = json!({
+        "task_id": "00000000-0000-4000-8000-000000000020",
+        "status": "running",
+        "lifecycle": {
+            "state": "background",
+            "checkpoint_id": "ckpt-20",
+            "can_poll": true,
+            "can_cancel": false
+        }
+    });
+
+    let extra = task_list_with_first_detail_extra(&tasks, Some(&detail));
+
+    assert_eq!(
+        extra.get("state").and_then(Value::as_str),
+        Some("background")
+    );
+    assert_eq!(extra.get("can_poll").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        extra.get("can_cancel").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        extra.get("checkpoint_id_present").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        extra
+            .pointer("/field_value/checkpoint_id_present")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        extra
+            .pointer("/field_value/lifecycle_present_fields/has_state")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert!(extra
+        .pointer("/field_value/lifecycle_field_presence")
+        .is_none());
 }

@@ -25,6 +25,7 @@ Current runtime notes:
 Natural-language intent mapping:
 - Requests that semantically mean "add documents to an indexed knowledge base" should use `ingest` when required args are available; examples are illustrative only.
 - Requests that semantically mean "retrieve from an indexed knowledge base" should use `search` when the namespace is known or uniquely bound; examples are illustrative only.
+- Requests that ask to inspect available knowledge-base namespaces, namespace catalog entries, or global KB counts should use `list_namespaces` or `stats`, not filesystem directory listing, unless the user explicitly asks to inspect the backing `data/kb` files/directories.
 - `kb` is for indexed retrieval over previously ingested local content, not for direct file reading, ad hoc filesystem search, or open-ended chat.
 
 ## Config Entry Points (from interface)
@@ -42,9 +43,11 @@ Natural-language intent mapping:
 - `list_namespaces`: inspect which namespaces are already available
   - best for requests like `看看现在有哪些知识库`、`列出所有资料库`
   - does not require `namespace`
+  - response JSON includes `namespaces` plus machine fields `names`, `count`, and `namespace_count`
 - `stats`: inspect namespace-level or global KB stats
   - best for requests like `看 docs 知识库的统计`、`看看知识库现在一共有多少库`
   - `namespace` is optional; omitted means global KB stats
+  - namespace-scoped response JSON includes top-level `namespace`, `document_count`, and `chunk_count`; nested `stats` also keeps `docs/chunks` compatibility fields
 - Returned `text` is a JSON string payload describing the inner skill result.
 
 ## Parameter Contract (from interface)

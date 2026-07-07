@@ -9,6 +9,7 @@ It is search-only:
 - does not perform browser rendering or page content extraction
 - can provide URL list for downstream `browser_web` extraction
 - successful responses mirror the structured search payload into `extra.items`, `extra.candidates`, and `extra.field_value` so runtime evidence checks do not parse the JSON string in `text`
+- uses zero-key fallback sources when a configured HTML search backend is empty or blocked; `site:<domain>` operators are projected into structured domain filtering
 
 ## Actions
 
@@ -26,14 +27,14 @@ It is search-only:
 - `time_range` (optional, string): backend-dependent passthrough
 - `domains_allow` (optional, string[])
 - `domains_deny` (optional, string[])
-- `backend` (optional, string): `serpapi|bing_html|duckduckgo_html`
+- `backend` (optional, string): `serpapi|bing_html|duckduckgo_html`; defaults to `duckduckgo_html` when no API-backed backend is configured.
 - `include_snippet` (optional, bool, default `true`)
 
 ## Error Contract
 
 - `INVALID_INPUT`: required fields like `query` are missing or malformed.
 - `INVALID_ACTION`: `action` is not one of `search` or `search_extract`.
-- `SEARCH_FAILED`: configured backend failed or no backend is configured.
+- `SEARCH_FAILED`: configured backend failed or no fallback backend can complete the request.
 - Never return fake empty success when backend configuration is missing.
 
 ## Request/Response Examples
@@ -103,5 +104,8 @@ Returned JSON inside `text` contains:
 - Dedup by normalized URL.
 - URL normalization removes fragments and common tracking params (`utm_*`, `gclid`, `fbclid`).
 - Apply domain allow/deny filtering after normalization.
-- If backend is not configured, return explicit error (do not fake empty success).
+- If backend is not configured, use the zero-key `duckduckgo_html` backend. Still return explicit error if the selected backend fails.
+- When HTML search returns no candidates, fallback sources may be used:
+  - `docs_rs_search` when `domains_allow` includes `docs.rs` or the query uses `site:docs.rs`
+  - `github_repositories` when no domain filter is set or `github.com` is allowed
 - Keep search responsibility separate from `browser_web`.

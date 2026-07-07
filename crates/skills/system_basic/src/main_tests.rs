@@ -146,6 +146,131 @@ fn path_batch_facts_resolves_unique_stem_leaf() {
 }
 
 #[test]
+fn compare_paths_returns_exists_and_same_path_fields() {
+    let root = temp_root("compare_paths_machine_fields");
+    std::fs::write(root.join("left.txt"), "same").expect("write left");
+    std::fs::write(root.join("right.txt"), "same").expect("write right");
+    let mut obj = Map::new();
+    obj.insert("left_path".to_string(), json!("left.txt"));
+    obj.insert("right_path".to_string(), json!("right.txt"));
+
+    let out = compare_paths(&root, &obj, false).expect("compare paths");
+    let value: Value = serde_json::from_str(&out).expect("json");
+
+    assert_eq!(
+        value.get("action").and_then(Value::as_str),
+        Some("compare_paths")
+    );
+    assert_eq!(
+        value
+            .get("left")
+            .and_then(|left| left.get("exists"))
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        value
+            .get("right")
+            .and_then(|right| right.get("exists"))
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        value
+            .get("comparison")
+            .and_then(|comparison| comparison.get("same_path"))
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        value
+            .get("field_value")
+            .and_then(|field_value| field_value.get("same_path"))
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        value
+            .get("field_value")
+            .and_then(|field_value| field_value.get("left_exists"))
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        value
+            .get("field_value")
+            .and_then(|field_value| field_value.get("right_exists"))
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        value
+            .get("comparison")
+            .and_then(|comparison| comparison.get("same_content"))
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn tree_summary_returns_machine_readable_directory_rows() {
+    let root = temp_root("tree_summary_rows");
+    std::fs::create_dir_all(root.join("docs/archive")).expect("create docs");
+    std::fs::create_dir_all(root.join("tmp/cache")).expect("create tmp");
+    std::fs::write(root.join("docs/service_notes.md"), "service notes").expect("write docs file");
+    std::fs::write(root.join("docs/archive/README.txt"), "archive").expect("write archive file");
+    std::fs::write(root.join("tmp/cache.dat"), "cache").expect("write tmp file");
+
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!("."));
+    obj.insert("max_depth".to_string(), json!(2));
+    obj.insert("max_children_per_dir".to_string(), json!(12));
+
+    let out = tree_summary(&root, &obj, false).expect("tree summary");
+    let value: Value = serde_json::from_str(&out).expect("json");
+    let rows = value
+        .get("summary_rows")
+        .and_then(Value::as_array)
+        .expect("summary rows");
+    let candidates = value
+        .get("candidates")
+        .and_then(Value::as_array)
+        .expect("candidate rows");
+
+    assert_eq!(
+        value.get("count").and_then(Value::as_u64),
+        Some(rows.len() as u64)
+    );
+    assert_eq!(candidates, rows);
+
+    let docs = rows
+        .iter()
+        .find(|row| row.get("path").and_then(Value::as_str) == Some("docs"))
+        .expect("docs row");
+    assert_eq!(docs.get("name").and_then(Value::as_str), Some("docs"));
+    assert_eq!(docs.get("file_count").and_then(Value::as_u64), Some(1));
+    assert_eq!(docs.get("dir_count").and_then(Value::as_u64), Some(1));
+    assert_eq!(docs.get("truncated").and_then(Value::as_bool), Some(false));
+
+    let archive = rows
+        .iter()
+        .find(|row| row.get("path").and_then(Value::as_str) == Some("docs/archive"))
+        .expect("archive row");
+    assert_eq!(archive.get("file_count").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        archive.get("omitted_children").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        archive.get("truncated").and_then(Value::as_bool),
+        Some(true)
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn path_batch_facts_keeps_ambiguous_stem_missing() {
     let root = temp_root("path_facts_ambiguous_stem");
     let dir = root.join("stem_ambiguous");

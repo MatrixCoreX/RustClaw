@@ -112,6 +112,21 @@ fn list_tables_action_runs_internal_catalog_query_without_sql_arg() {
             .and_then(Value::as_str),
         Some("demo")
     );
+    assert_eq!(extra.get("table_count").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        extra
+            .get("tables")
+            .and_then(Value::as_array)
+            .and_then(|tables| tables.first())
+            .and_then(Value::as_str),
+        Some("demo")
+    );
+    assert_eq!(
+        extra
+            .pointer("/field_value/table_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
 }
 
 #[test]
