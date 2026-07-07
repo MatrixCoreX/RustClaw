@@ -30,7 +30,8 @@ pub(crate) struct RouteTraceRecord {
 }
 
 fn route_trace_output_contract_ref(contract: &IntentOutputContract) -> String {
-    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_output_contract(contract);
+    let final_answer_shape =
+        crate::evidence_policy::final_answer_shape_for_output_contract(contract);
     format!(
         "shape={};final_answer_shape={};final_answer_shape_class={};locator={};delivery_required={};content_evidence={}",
         contract.response_shape.as_str(),

@@ -66,9 +66,7 @@ pub(super) fn route_structured_clarify_context(
     )
 }
 
-pub(super) fn route_output_contract_machine_json(
-    route: &crate::RouteResult,
-) -> serde_json::Value {
+pub(super) fn route_output_contract_machine_json(route: &crate::RouteResult) -> serde_json::Value {
     let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route);
     serde_json::json!({
         "response_shape": route.output_contract.response_shape.as_str(),

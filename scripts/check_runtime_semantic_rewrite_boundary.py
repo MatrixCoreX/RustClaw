@@ -1051,33 +1051,48 @@ def scan_prompt_layer_text(rel_path: str, text: str) -> list[Finding]:
 
 
 def scan_intent_normalizer_prompt_contract_marker() -> list[Finding]:
-    rel_path = rel(INTENT_NORMALIZER_PROMPT)
-    text = INTENT_NORMALIZER_PROMPT.read_text(encoding="utf-8")
     findings: list[Finding] = []
-    if "output_contract.contract_marker" not in text:
-        findings.append(
-            Finding(
-                rel_path,
-                1,
-                "intent_normalizer_contract_marker_missing",
-                "intent normalizer prompt should emit output_contract.contract_marker",
-            )
-        )
     forbidden_tokens = [
+        "Always emit boundary schema keys",
+        "Always include boundary schema keys",
+        "Set `output_contract.contract_marker",
+        "set `output_contract.contract_marker",
+        "set output_contract.contract_marker",
         "Set `output_contract.semantic_kind",
         "`delivery_intent`, `semantic_kind`, `locator_hint`",
     ]
-    for token in forbidden_tokens:
-        if token not in text:
-            continue
-        findings.append(
-            Finding(
-                rel_path,
-                1,
-                "intent_normalizer_semantic_kind_output_target",
-                f"forbidden normalizer prompt output target: {token}",
+    for path in (INTENT_NORMALIZER_PROMPT, *CHINA_MODEL_ROUTING_PATCH_FILES):
+        rel_path = rel(path)
+        text = path.read_text(encoding="utf-8")
+        if "Prefer the compact `boundary_envelope`" not in text:
+            findings.append(
+                Finding(
+                    rel_path,
+                    1,
+                    "intent_normalizer_boundary_envelope_not_primary",
+                    "intent normalizer prompt should make boundary_envelope the primary output",
+                )
             )
-        )
+        if "Runtime fills missing compatibility schema slots with neutral defaults" not in text:
+            findings.append(
+                Finding(
+                    rel_path,
+                    1,
+                    "intent_normalizer_compat_defaults_missing",
+                    "intent normalizer prompt should rely on runtime-filled compatibility defaults",
+                )
+            )
+        for token in forbidden_tokens:
+            if token not in text:
+                continue
+            findings.append(
+                Finding(
+                    rel_path,
+                    1,
+                    "intent_normalizer_semantic_kind_output_target",
+                    f"forbidden normalizer prompt output target: {token}",
+                )
+            )
     return findings
 
 
