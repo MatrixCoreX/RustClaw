@@ -30,10 +30,16 @@ pub(crate) struct RouteTraceRecord {
 }
 
 fn route_trace_output_contract_ref(contract: &IntentOutputContract) -> String {
+    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_output_contract(contract);
     format!(
-        "shape={};contract_marker={};locator={};delivery_required={};content_evidence={}",
+        "shape={};final_answer_shape={};final_answer_shape_class={};locator={};delivery_required={};content_evidence={}",
         contract.response_shape.as_str(),
-        contract.semantic_kind.as_str(),
+        final_answer_shape
+            .map(crate::evidence_policy::FinalAnswerShape::as_str)
+            .unwrap_or("none"),
+        final_answer_shape
+            .map(|shape| shape.class().as_str())
+            .unwrap_or("none"),
         contract.locator_kind.as_str(),
         contract.delivery_required,
         contract.requires_content_evidence
@@ -160,7 +166,7 @@ mod tests {
         assert_eq!(execute.owner_layer, "intent_normalizer_route_trace");
         assert!(execute
             .output_contract_ref
-            .contains("contract_marker=file_paths"));
+            .contains("final_answer_shape=path_list"));
         assert_eq!(
             execute.repair_codes,
             vec!["executable_contract_preserved_for_agent_loop"]
