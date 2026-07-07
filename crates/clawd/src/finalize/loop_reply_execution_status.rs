@@ -57,8 +57,8 @@ pub(super) fn successful_content_observation_should_precede_status_summary(
     if route.output_contract_marker_is_any(&[
         crate::OutputSemanticKind::ExecutionFailedStep,
         crate::OutputSemanticKind::RawCommandOutput,
-        crate::OutputSemanticKind::ServiceStatus,
-    ]) {
+    ]) || crate::finalize::route_matches_service_status_output_contract(route)
+    {
         return false;
     }
     loop_state.executed_step_results.iter().any(|step| {
