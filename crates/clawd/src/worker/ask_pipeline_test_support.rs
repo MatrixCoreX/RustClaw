@@ -56,7 +56,7 @@ pub(super) fn test_state_with_root(root: PathBuf) -> AppState {
 
 pub(super) fn executable_filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "读取 README 开头并总结".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
