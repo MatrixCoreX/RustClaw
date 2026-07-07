@@ -182,8 +182,15 @@ fn log_route_guard_record(
     before_gate_kind: crate::RouteGateKind,
     route_result: &crate::RouteResult,
 ) {
+    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route_result);
+    let final_answer_shape_token = final_answer_shape
+        .map(crate::evidence_policy::FinalAnswerShape::as_str)
+        .unwrap_or("none");
+    let final_answer_shape_class = final_answer_shape
+        .map(|shape| shape.class().as_str())
+        .unwrap_or("none");
     info!(
-        "route_guard_record task_id={} owner_layer={} reason_code={} outcome={} before_gate_kind={} after_gate_kind={} needs_clarify={} locator_kind={} contract_marker={} response_shape={} delivery_required={} content_evidence={}",
+        "route_guard_record task_id={} owner_layer={} reason_code={} outcome={} before_gate_kind={} after_gate_kind={} needs_clarify={} locator_kind={} final_answer_shape={} final_answer_shape_class={} response_shape={} delivery_required={} content_evidence={}",
         task.task_id,
         owner_layer,
         reason_code,
@@ -192,9 +199,8 @@ fn log_route_guard_record(
         route_result.gate_kind().as_str(),
         route_result.needs_clarify,
         route_result.output_contract.locator_kind.as_str(),
-        route_result
-            .effective_output_contract_semantic_kind()
-            .as_str(),
+        final_answer_shape_token,
+        final_answer_shape_class,
         route_result.output_contract.response_shape.as_str(),
         route_result.output_contract.delivery_required,
         route_result.output_contract.requires_content_evidence,
