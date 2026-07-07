@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use toml_edit::{value as toml_value_item, DocumentMut, Item};
 
+const SKILL_NAME: &str = "config_edit";
+
 #[derive(Debug, Deserialize)]
 struct Req {
     request_id: String,
@@ -94,7 +96,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
-                extra: None,
+                extra: Some(error_extra("invalid_input")),
                 error_text: Some(format!("invalid input: {err}")),
                 error_kind: Some("invalid_input".to_string()),
                 platform: Some(std::env::consts::OS.to_string()),
@@ -125,12 +127,37 @@ fn handle(req: Req) -> Resp {
             request_id: req.request_id,
             status: "error".to_string(),
             text: String::new(),
-            extra: err.extra,
+            extra: Some(error_extra_with_details(err.kind, err.extra)),
             error_text: Some(err.message),
             error_kind: Some(err.kind.to_string()),
             platform: Some(std::env::consts::OS.to_string()),
         },
     }
+}
+
+fn error_extra(error_kind: &str) -> Value {
+    error_extra_with_details(error_kind, None)
+}
+
+fn error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
+    let mut extra = json!({
+        "schema_version": 1,
+        "source_skill": SKILL_NAME,
+        "status": "error",
+        "error_kind": error_kind,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "retryable": false,
+    });
+    if let Some(details) = details {
+        if let (Some(base), Some(details_obj)) = (extra.as_object_mut(), details.as_object()) {
+            for (key, value) in details_obj {
+                base.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        } else if let Some(base) = extra.as_object_mut() {
+            base.insert("details".to_string(), details);
+        }
+    }
+    extra
 }
 
 fn execute_action(

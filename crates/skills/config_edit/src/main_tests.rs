@@ -1,5 +1,25 @@
 use super::*;
 
+#[test]
+fn error_extra_merges_machine_contract_and_details() {
+    let extra = error_extra_with_details(
+        "path_denied",
+        Some(json!({
+            "operation": "write_config",
+            "path": "/tmp/config.toml"
+        })),
+    );
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "path_denied");
+    assert_eq!(extra["message_key"], "skill.config_edit.path_denied");
+    assert_eq!(extra["retryable"], false);
+    assert_eq!(extra["operation"], "write_config");
+    assert_eq!(extra["path"], "/tmp/config.toml");
+}
+
 fn temp_root(name: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!(
         "rustclaw_config_edit_{name}_{}",

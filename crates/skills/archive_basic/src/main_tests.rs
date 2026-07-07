@@ -1,6 +1,26 @@
 use super::*;
 
 #[test]
+fn error_extra_merges_machine_contract_and_details() {
+    let extra = error_extra_with_details(
+        "not_found",
+        Some(json!({
+            "path": "/tmp/missing.zip",
+            "role": "archive"
+        })),
+    );
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "not_found");
+    assert_eq!(extra["message_key"], "skill.archive_basic.not_found");
+    assert_eq!(extra["retryable"], false);
+    assert_eq!(extra["path"], "/tmp/missing.zip");
+    assert_eq!(extra["role"], "archive");
+}
+
+#[test]
 fn list_missing_archive_returns_structured_not_found() {
     let path = std::env::temp_dir().join(format!(
         "rustclaw_missing_archive_{}_{}.zip",

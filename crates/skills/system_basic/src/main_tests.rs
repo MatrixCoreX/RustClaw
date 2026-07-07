@@ -1,5 +1,25 @@
 use super::*;
 
+#[test]
+fn error_extra_merges_machine_contract_and_details() {
+    let extra = error_extra_with_details(
+        "io_error",
+        Some(json!({
+            "operation": "read_file",
+            "path": "/tmp/missing.txt"
+        })),
+    );
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "io_error");
+    assert_eq!(extra["message_key"], "skill.system_basic.io_error");
+    assert_eq!(extra["retryable"], false);
+    assert_eq!(extra["operation"], "read_file");
+    assert_eq!(extra["path"], "/tmp/missing.txt");
+}
+
 fn temp_root(name: &str) -> PathBuf {
     let mut root = std::env::temp_dir();
     root.push(format!(
