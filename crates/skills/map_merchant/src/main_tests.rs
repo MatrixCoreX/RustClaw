@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn error_extra_exposes_machine_contract() {
+    let extra = error_extra("execution_failed");
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(extra["message_key"], "skill.map_merchant.execution_failed");
+    assert_eq!(extra["retryable"], false);
+}
+
+#[test]
 fn amap_poi_parser_tolerates_array_fields() {
     let body = json!({
         "status": "1",

@@ -38,6 +38,7 @@ const CRYPTO_ACCOUNT_ACCESS_ERROR_KIND: &str = "account_access_failed";
 const CRYPTO_ACCOUNT_ACCESS_MESSAGE_KEY: &str = "crypto.err.account_access_failed";
 const CRYPTO_CREDENTIAL_NOT_BOUND_ERROR_KIND: &str = "credential_not_bound";
 const CRYPTO_CREDENTIAL_INCOMPLETE_ERROR_KIND: &str = "credential_incomplete";
+const SKILL_NAME: &str = "crypto";
 
 fn crypto_account_access_error(exchange: &str, err: impl AsRef<str>) -> String {
     if err
@@ -144,8 +145,39 @@ fn crypto_config_error_extra_from_text(error_text: &str) -> Option<Value> {
 }
 
 fn crypto_error_extra_from_text(error_text: &str) -> Option<Value> {
-    crypto_account_access_error_extra_from_text(error_text)
-        .or_else(|| crypto_config_error_extra_from_text(error_text))
+    let details = crypto_account_access_error_extra_from_text(error_text)
+        .or_else(|| crypto_config_error_extra_from_text(error_text))?;
+    let error_kind = details
+        .get("error_kind")
+        .and_then(Value::as_str)
+        .unwrap_or("execution_failed")
+        .to_string();
+    Some(crypto_error_extra_with_details(&error_kind, Some(details)))
+}
+
+fn crypto_error_extra(error_kind: &str) -> Value {
+    crypto_error_extra_with_details(error_kind, None)
+}
+
+fn crypto_error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
+    let mut extra = json!({
+        "schema_version": 1,
+        "source_skill": SKILL_NAME,
+        "status": "error",
+        "error_kind": error_kind,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "retryable": false,
+    });
+    if let Some(details) = details {
+        if let (Some(base), Some(details_obj)) = (extra.as_object_mut(), details.as_object()) {
+            for (key, value) in details_obj {
+                base.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        } else if let Some(base) = extra.as_object_mut() {
+            base.insert("details".to_string(), details);
+        }
+    }
+    extra
 }
 
 fn crypto_error_text_for_response(error_text: &str) -> String {
@@ -453,7 +485,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
-                extra: None,
+                extra: Some(crypto_error_extra("invalid_input")),
                 error_text: Some(tr_with(
                     "crypto.err.invalid_input",
                     &[("error", &err.to_string())],
