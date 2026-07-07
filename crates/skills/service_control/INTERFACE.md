@@ -50,6 +50,7 @@
 The skill always returns a JSON object (in the runner response `text` field) with at least:
 
 - `status` — `"ok"` or `"error"`.
+- `target` — Alias of the resolved service target, equal to `service_name` for normal service status responses.
 - `service_name` — Target name.
 - `manager_type` — Resolved or specified manager.
 - `requested_action` — Requested action.
@@ -68,6 +69,7 @@ Failure responses must include `failure_reason` and should include stable `error
 - Matrix admission status: built-in structured evidence only; service state evidence must come from the structured JSON object in `text`/`extra`, not from natural-language summaries.
 - Successful and failed service observation fields:
   - `status`: string operation status; evidence role `status`.
+  - `target`: string resolved target alias; evidence role `field_value`.
   - `service_name`: string resolved target; evidence role `field_value`.
   - `manager_type`: string resolved manager; evidence role `field_value`.
   - `requested_action`: string requested action; evidence role `status`.

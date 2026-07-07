@@ -613,9 +613,17 @@ fn do_list_namespaces(runtime: &KbRuntime) -> Result<Value> {
         )
     });
     let namespace_count = namespaces.len();
+    let names: Vec<Value> = namespaces
+        .iter()
+        .filter_map(|item| item.get("namespace").and_then(Value::as_str))
+        .map(|namespace| json!(namespace))
+        .collect();
     Ok(json!({
         "status": "ok",
         "namespaces": namespaces,
+        "names": names,
+        "count": namespace_count,
+        "namespace_count": namespace_count,
         "summary": format!("found {} namespace(s)", namespace_count)
     }))
 }
@@ -625,6 +633,8 @@ fn do_stats(runtime: &KbRuntime, args: &Value) -> Result<Value> {
     if let Some(namespace) = stats.namespace {
         let index = load_namespace(runtime, &namespace)
             .with_context(|| format!("load namespace failed: {namespace}"))?;
+        let document_count = index.docs.len();
+        let chunk_count = index.chunks.len();
         let file_types =
             index
                 .docs
@@ -637,9 +647,13 @@ fn do_stats(runtime: &KbRuntime, args: &Value) -> Result<Value> {
             "action": "stats",
             "status": "ok",
             "namespace": namespace,
+            "document_count": document_count,
+            "chunk_count": chunk_count,
             "stats": {
-                "docs": index.docs.len(),
-                "chunks": index.chunks.len(),
+                "docs": document_count,
+                "chunks": chunk_count,
+                "document_count": document_count,
+                "chunk_count": chunk_count,
                 "updated_at_epoch": index.updated_at_epoch,
                 "file_types": file_types
             },

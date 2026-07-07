@@ -110,7 +110,7 @@
 - `extract_field` / `extract_fields` return explicit parse errors for unsupported/invalid JSON, TOML, or YAML.
 - `dir_compare` requires both target paths to be directories and reports summary diffs instead of a full recursive listing.
 - `read_range` and `compare_paths` return explicit read/metadata errors for missing or unreadable target paths.
-- `tree_summary` intentionally truncates deep/wide trees and reports truncation metadata instead of dumping the full directory.
+- `tree_summary` intentionally truncates deep/wide trees and reports truncation metadata instead of dumping the full directory. Success output includes `summary_rows` mirrored as `results` and `candidates`; each directory row carries machine fields such as `path`, `name`, `file_count`, `dir_count`, `child_count`, `omitted_children`, and `truncated`.
 - Runtime data collection should degrade gracefully where possible (for example, missing `/proc` fields produce fallback values instead of fabricated data).
 - Successful responses that already use JSON text are also mirrored into the optional `extra` field for machine-readable consumers.
 
@@ -126,7 +126,7 @@
 - `count_inventory` success `extra` fields:
   - `action`, `path`, `resolved_path`, `counts`, filters, and recursion flags; evidence roles `path` and `count`.
 - `workspace_glance`, `tree_summary`, and `dir_compare` success `extra` fields:
-  - structured path/count/entry/diff fields; evidence roles `path`, `entries`, `results`, and `count`.
+  - structured path/count/entry/diff fields; evidence roles `path`, `entries`, `results`, `candidates`, and `count`.
 - `extract_field` success `extra` fields:
   - `action`, `path`, `field_path`, `exists`, `value_type`, `value_text`, `value`, `resolved_field_path`, `match_strategy`, and `match_count`; evidence roles `field_value`, `status`, and `count`.
 - `extract_fields` success `extra` fields:
@@ -139,7 +139,11 @@
   - `action`, `root`, `count`, and `results`; evidence roles `path`, `results`, and `count`.
 - `read_range` success `extra` fields:
   - `action`, `path`, `start_line`, `end_line`, `line_count`, and `excerpt`; evidence roles `path`, `field_value`, and `count`.
-- `compare_paths` and `path_batch_facts` success `extra` fields:
+- `compare_paths` success `extra` fields:
+  - `left` and `right` structured path fact objects with `exists`, `kind`, `size`, and modified time fields.
+  - `comparison` structured comparison fields such as `same_path`, `same_kind`, `same_name`, `same_size`, `size_delta_bytes`, `left_newer`, and `same_content`.
+  - `field_value` mirrors the machine comparison facts needed by scalar/verdict contracts, including `same_path`, `left_exists`, and `right_exists`; evidence roles `path`, `status`, and `field_value`.
+- `path_batch_facts` success `extra` fields:
   - structured path fact objects with `exists`, `kind`, `size`, modified time, and requested fields; evidence roles `path`, `status`, `field_value`, and `count`.
 - `diagnose_runtime` success `extra` fields:
   - selected process, port, and environment summary fields; evidence roles `status`, `entries`, and `count`.

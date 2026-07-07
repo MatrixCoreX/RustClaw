@@ -82,6 +82,7 @@ Client-like continuous regression:
   `python3 scripts/nl_tests/generate_contract_matrix_cases.py --count 100 --check --nl --report > /tmp/rustclaw-contract-nl.jsonl`
   Add `--expectations /tmp/rustclaw-contract-nl.expectations.jsonl` to write matching evaluator expectations for contract match, allowed-action phase plan refs, executed skill family, required evidence, missing-evidence status, and final answer shape.
   Add `--multilingual-variants` to emit zh-CN, en-US, ja-JP, ko-KR, fr-FR, and mixed-language prompts for each selected contract cell while preserving the same structured `[CONTRACT_TEST_HINT]`; this is the preferred regression path for checking that multilingual wording converges to the same semantic kind, allowed action, required evidence, and final answer shape without runtime natural-language hard matching.
+  Because `[CONTRACT_TEST_HINT]` is a test-matrix machine protocol and is disabled in normal runtime, start `clawd` for these live replay rows with `RUSTCLAW_ENABLE_CONTRACT_TEST_HINT=1`.
   Run them through the client-like path with:
   `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-jsonl /tmp/rustclaw-contract-nl.jsonl --prompt-reply-only --quality-guard`
   Then evaluate the finished run with:

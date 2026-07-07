@@ -55,6 +55,7 @@
 - Matrix admission status: built-in structured evidence only; service state evidence must come from the structured JSON object in `text`/`extra`, not from natural-language summaries.
 - Successful and failed service observation fields:
   - `status`: string operation status; evidence role `status`.
+  - `target`: string resolved target alias; evidence role `field_value`.
   - `service_name`: string resolved target; evidence role `field_value`.
   - `manager_type`: string resolved manager; evidence role `field_value`.
   - `requested_action`: string requested action; evidence role `status`.

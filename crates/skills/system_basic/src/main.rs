@@ -783,6 +783,8 @@ fn tree_summary(
         0,
         &mut state,
     )?;
+    let summary_rows = tree_summary_rows(&tree);
+    let summary_count = summary_rows.len();
 
     Ok(json!({
         "action": "tree_summary",
@@ -793,6 +795,10 @@ fn tree_summary(
         "max_children_per_dir": max_children_per_dir,
         "max_nodes": max_nodes,
         "truncated_nodes": state.truncated_nodes,
+        "count": summary_count,
+        "summary_rows": summary_rows.clone(),
+        "results": summary_rows.clone(),
+        "candidates": summary_rows,
         "tree": tree,
     })
     .to_string())

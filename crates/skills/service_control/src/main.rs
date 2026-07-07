@@ -223,6 +223,8 @@ struct OutputContract {
     status: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     error_kind: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    target: String,
     service_name: String,
     manager_type: String,
     requested_action: String,
@@ -295,16 +297,18 @@ fn detect_manager_for_target(target: &str) -> Option<&'static str> {
 }
 
 fn resolve_manager(input: &SkillInput, effective_target: Option<&str>) -> String {
-    if let Some(ref mt) = input.manager_type {
-        if MANAGER_TYPES.contains(&mt.as_str()) {
-            return mt.clone();
-        }
-    }
     let t = effective_target.or_else(|| input.target.as_deref());
     if let Some(t) = t {
         if RUSTCLAW_SERVICES.contains(&t) {
             return "rustclaw".to_string();
         }
+    }
+    if let Some(ref mt) = input.manager_type {
+        if MANAGER_TYPES.contains(&mt.as_str()) {
+            return mt.clone();
+        }
+    }
+    if let Some(t) = t {
         return detect_manager_for_target(t)
             .unwrap_or("unknown")
             .to_string();
@@ -321,6 +325,10 @@ fn resolve_manager(input: &SkillInput, effective_target: Option<&str>) -> String
 fn build_runner_response(request_id: String, result: Result<OutputContract, String>) -> Resp {
     match result {
         Ok(out) => {
+            let mut out = out;
+            if out.target.is_empty() {
+                out.target = out.service_name.clone();
+            }
             let text = serde_json::to_string(&out).unwrap_or_default();
             let is_business_error = out.status == "error";
             Resp {

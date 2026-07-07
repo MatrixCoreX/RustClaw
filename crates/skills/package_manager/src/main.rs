@@ -76,13 +76,23 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 .transpose()?;
             if let Some(path) = project_path.as_deref() {
                 if let Some(project) = detect_project_manager(path) {
-                    let output = format!("package_manager={}", project.manager);
+                    let version = manager_version(project.manager);
+                    let available = version.is_some();
+                    let version_present = version.is_some();
+                    let output = package_manager_detection_output(
+                        project.manager,
+                        available,
+                        version_present,
+                    );
                     return Ok((
                         output.clone(),
                         json!({
                             "action":"detect",
                             "manager":project.manager,
                             "manager_scope":"project",
+                            "available":available,
+                            "version_present":version_present,
+                            "version":version,
                             "platform":std::env::consts::OS,
                             "path":path.display().to_string(),
                             "marker":project.marker,
@@ -95,13 +105,19 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 }
             }
             let mgr = detect_manager().unwrap_or_else(|| "unknown".to_string());
-            let output = format!("package_manager={mgr}");
+            let version = manager_version(&mgr);
+            let available = mgr != "unknown";
+            let version_present = version.is_some();
+            let output = package_manager_detection_output(&mgr, available, version_present);
             Ok((
                 output.clone(),
                 json!({
                     "action":"detect",
                     "manager":mgr,
                     "manager_scope":"system",
+                    "available":available,
+                    "version_present":version_present,
+                    "version":version,
                     "platform":std::env::consts::OS,
                     "candidate_order":package_manager_candidates(),
                     "output":output
@@ -120,7 +136,14 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 .get("use_sudo")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
-            install_packages("smart_install", &manager, &packages, dry_run, use_sudo)
+            manage_packages(
+                "smart_install",
+                PackageOperation::Install,
+                &manager,
+                &packages,
+                dry_run,
+                use_sudo,
+            )
         }
         "install" => {
             let manager = obj
@@ -137,9 +160,40 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 .get("use_sudo")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
-            install_packages("install", &manager, &packages, dry_run, use_sudo)
+            manage_packages(
+                "install",
+                PackageOperation::Install,
+                &manager,
+                &packages,
+                dry_run,
+                use_sudo,
+            )
         }
-        _ => Err("unsupported action; use detect|install|smart_install".to_string()),
+        "uninstall" => {
+            let manager = obj
+                .get("manager")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_ascii_lowercase())
+                .or_else(detect_manager)
+                .ok_or_else(|| "cannot detect package manager; set args.manager".to_string())?;
+
+            let packages = extract_safe_packages(obj)?;
+
+            let dry_run = obj.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(true);
+            let use_sudo = obj
+                .get("use_sudo")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            manage_packages(
+                "uninstall",
+                PackageOperation::Uninstall,
+                &manager,
+                &packages,
+                dry_run,
+                use_sudo,
+            )
+        }
+        _ => Err("unsupported action; use detect|install|smart_install|uninstall".to_string()),
     }
 }
 
@@ -179,6 +233,34 @@ fn detect_manager() -> Option<String> {
         }
     }
     None
+}
+
+fn package_manager_detection_output(
+    manager: &str,
+    available: bool,
+    version_present: bool,
+) -> String {
+    format!("manager={manager} available={available} version_present={version_present}")
+}
+
+fn manager_version(manager: &str) -> Option<String> {
+    if manager == "unknown" || !is_safe_token(manager) {
+        return None;
+    }
+    let output = Command::new(manager).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    first_nonempty_version_line(&output.stdout)
+        .or_else(|| first_nonempty_version_line(&output.stderr))
+}
+
+fn first_nonempty_version_line(bytes: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| line.chars().take(160).collect::<String>())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,56 +322,125 @@ fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
     Ok(workspace_root.join(normalized))
 }
 
-fn install_packages(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PackageOperation {
+    Install,
+    Uninstall,
+}
+
+fn append_package_manager_argv(
+    argv: &mut Vec<String>,
+    manager: &str,
+    operation: PackageOperation,
+) -> Result<(), String> {
+    match (manager, operation) {
+        ("apt-get", PackageOperation::Install) => {
+            argv.extend(["apt-get", "install", "-y"].into_iter().map(str::to_string));
+        }
+        ("apt-get", PackageOperation::Uninstall) => {
+            argv.extend(["apt-get", "remove", "-y"].into_iter().map(str::to_string));
+        }
+        ("apt", PackageOperation::Install) => {
+            argv.extend(["apt", "install", "-y"].into_iter().map(str::to_string));
+        }
+        ("apt", PackageOperation::Uninstall) => {
+            argv.extend(["apt", "remove", "-y"].into_iter().map(str::to_string));
+        }
+        ("dnf", PackageOperation::Install) => {
+            argv.extend(["dnf", "install", "-y"].into_iter().map(str::to_string));
+        }
+        ("dnf", PackageOperation::Uninstall) => {
+            argv.extend(["dnf", "remove", "-y"].into_iter().map(str::to_string));
+        }
+        ("yum", PackageOperation::Install) => {
+            argv.extend(["yum", "install", "-y"].into_iter().map(str::to_string));
+        }
+        ("yum", PackageOperation::Uninstall) => {
+            argv.extend(["yum", "remove", "-y"].into_iter().map(str::to_string));
+        }
+        ("pacman", PackageOperation::Install) => {
+            argv.extend(
+                ["pacman", "-S", "--noconfirm"]
+                    .into_iter()
+                    .map(str::to_string),
+            );
+        }
+        ("pacman", PackageOperation::Uninstall) => {
+            argv.extend(
+                ["pacman", "-R", "--noconfirm"]
+                    .into_iter()
+                    .map(str::to_string),
+            );
+        }
+        ("apk", PackageOperation::Install) => {
+            argv.extend(["apk", "add", "--no-cache"].into_iter().map(str::to_string));
+        }
+        ("apk", PackageOperation::Uninstall) => {
+            argv.extend(["apk", "del"].into_iter().map(str::to_string));
+        }
+        ("zypper", PackageOperation::Install) => {
+            argv.extend(
+                ["zypper", "--non-interactive", "install"]
+                    .into_iter()
+                    .map(str::to_string),
+            );
+        }
+        ("zypper", PackageOperation::Uninstall) => {
+            argv.extend(
+                ["zypper", "--non-interactive", "remove"]
+                    .into_iter()
+                    .map(str::to_string),
+            );
+        }
+        ("brew", PackageOperation::Install) => {
+            argv.extend(["brew", "install"].into_iter().map(str::to_string));
+        }
+        ("brew", PackageOperation::Uninstall) => {
+            argv.extend(["brew", "uninstall"].into_iter().map(str::to_string));
+        }
+        _ => return Err(format!("unsupported manager: {manager}")),
+    }
+    Ok(())
+}
+
+fn package_manager_action_output(
     action: &str,
+    manager: &str,
+    packages: &[String],
+    dry_run: bool,
+    command: &str,
+) -> String {
+    let mut fields = vec![
+        format!("action={action}"),
+        format!("manager={manager}"),
+        format!("dry_run={dry_run}"),
+        format!("packages={}", packages.join(",")),
+    ];
+    if let Some(package) = single_package(packages) {
+        fields.push(format!("package={package}"));
+    }
+    fields.push(format!("command={command}"));
+    fields.join("\n")
+}
+
+fn single_package(packages: &[String]) -> Option<&str> {
+    if packages.len() == 1 {
+        packages.first().map(String::as_str)
+    } else {
+        None
+    }
+}
+
+fn manage_packages(
+    action: &str,
+    operation: PackageOperation,
     manager: &str,
     packages: &[String],
     dry_run: bool,
     use_sudo: bool,
 ) -> Result<(String, Value), String> {
     let mut argv: Vec<String> = Vec::new();
-    match manager {
-        "apt-get" => {
-            argv.push("apt-get".to_string());
-            argv.push("install".to_string());
-            argv.push("-y".to_string());
-        }
-        "apt" => {
-            argv.push("apt".to_string());
-            argv.push("install".to_string());
-            argv.push("-y".to_string());
-        }
-        "dnf" => {
-            argv.push("dnf".to_string());
-            argv.push("install".to_string());
-            argv.push("-y".to_string());
-        }
-        "yum" => {
-            argv.push("yum".to_string());
-            argv.push("install".to_string());
-            argv.push("-y".to_string());
-        }
-        "pacman" => {
-            argv.push("pacman".to_string());
-            argv.push("-S".to_string());
-            argv.push("--noconfirm".to_string());
-        }
-        "apk" => {
-            argv.push("apk".to_string());
-            argv.push("add".to_string());
-            argv.push("--no-cache".to_string());
-        }
-        "zypper" => {
-            argv.push("zypper".to_string());
-            argv.push("--non-interactive".to_string());
-            argv.push("install".to_string());
-        }
-        "brew" => {
-            argv.push("brew".to_string());
-            argv.push("install".to_string());
-        }
-        _ => return Err(format!("unsupported manager: {manager}")),
-    }
+    append_package_manager_argv(&mut argv, manager, operation)?;
     argv.extend(packages.iter().cloned());
 
     let mut full_cmd = Vec::new();
@@ -302,6 +453,7 @@ fn install_packages(
     if dry_run {
         append_install_log(
             "dry_run",
+            action,
             manager,
             packages,
             &full_cmd,
@@ -311,17 +463,19 @@ fn install_packages(
             dry_run,
             use_sudo,
         );
-        let output = format!("dry_run=1 command: {}", full_cmd.join(" "));
+        let command = full_cmd.join(" ");
+        let output = package_manager_action_output(action, manager, packages, dry_run, &command);
         return Ok((
             output.clone(),
             json!({
                 "action": action,
                 "manager": manager,
+                "package": single_package(packages),
                 "packages": packages,
                 "dry_run": true,
                 "use_sudo": use_sudo,
                 "platform": std::env::consts::OS,
-                "command": full_cmd.join(" "),
+                "command": command,
                 "output": output,
             }),
         ));
@@ -346,6 +500,7 @@ fn install_packages(
         } else {
             "failed"
         },
+        action,
         manager,
         packages,
         &full_cmd,
@@ -356,18 +511,25 @@ fn install_packages(
         use_sudo,
     );
     if output.status.success() {
-        let output = format!("exit={exit_code}\n{text}");
+        let command = full_cmd.join(" ");
+        let summary = package_manager_action_output(action, manager, packages, dry_run, &command);
+        let output = if text.trim().is_empty() {
+            format!("{summary}\nexit_code={exit_code}")
+        } else {
+            format!("{summary}\nexit_code={exit_code}\n{text}")
+        };
         Ok((
             output.clone(),
             json!({
                 "action": action,
                 "manager": manager,
+                "package": single_package(packages),
                 "packages": packages,
                 "dry_run": false,
                 "use_sudo": use_sudo,
                 "platform": std::env::consts::OS,
                 "exit_code": exit_code,
-                "command": full_cmd.join(" "),
+                "command": command,
                 "output": output,
             }),
         ))
@@ -389,22 +551,26 @@ fn format_command_output(stdout: &[u8], stderr: &[u8]) -> String {
 }
 
 fn extract_packages(obj: &serde_json::Map<String, Value>) -> Result<Vec<String>, String> {
-    if let Some(arr) = obj.get("packages").and_then(|v| v.as_array()) {
-        let mut out = Vec::new();
-        for v in arr {
-            if let Some(s) = v.as_str() {
-                let t = s.trim();
-                if !t.is_empty() {
-                    out.push(t.to_string());
+    for key in ["packages", "modules"] {
+        if let Some(arr) = obj.get(key).and_then(|v| v.as_array()) {
+            let mut out = Vec::new();
+            for v in arr {
+                if let Some(s) = v.as_str() {
+                    let t = s.trim();
+                    if !t.is_empty() {
+                        out.push(t.to_string());
+                    }
                 }
             }
+            return Ok(out);
         }
-        return Ok(out);
     }
-    if let Some(p) = obj.get("package").and_then(|v| v.as_str()) {
-        let t = p.trim();
-        if !t.is_empty() {
-            return Ok(vec![t.to_string()]);
+    for key in ["package", "module"] {
+        if let Some(p) = obj.get(key).and_then(|v| v.as_str()) {
+            let t = p.trim();
+            if !t.is_empty() {
+                return Ok(vec![t.to_string()]);
+            }
         }
     }
     Err("args.package or args.packages is required".to_string())
@@ -441,6 +607,7 @@ fn is_safe_token(s: &str) -> bool {
 
 fn append_install_log(
     status: &str,
+    action: &str,
     manager: &str,
     packages: &[String],
     command: &[String],
@@ -472,6 +639,7 @@ fn append_install_log(
     let line = serde_json::json!({
         "ts": now_ts(),
         "status": status,
+        "action": action,
         "manager": manager,
         "packages": packages,
         "dry_run": dry_run,

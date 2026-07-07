@@ -45,3 +45,79 @@ fn detects_cargo_project_from_manifest() {
     assert_eq!(detected.manager, "cargo");
     assert_eq!(detected.marker, "Cargo.toml");
 }
+
+#[test]
+fn detect_response_includes_machine_availability_fields() {
+    let (text, extra) = execute(serde_json::json!({"action": "detect"})).expect("detect");
+
+    assert!(text.contains("manager="));
+    assert!(text.contains("available="));
+    assert!(text.contains("version_present="));
+    assert!(extra
+        .get("manager")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
+    assert!(extra
+        .get("available")
+        .and_then(serde_json::Value::as_bool)
+        .is_some());
+    assert!(extra
+        .get("version_present")
+        .and_then(serde_json::Value::as_bool)
+        .is_some());
+}
+
+#[test]
+fn dry_run_install_accepts_structured_module_alias() {
+    let (text, extra) = execute(serde_json::json!({
+        "action": "install",
+        "manager": "apt-get",
+        "modules": ["jq"],
+        "dry_run": true,
+        "use_sudo": false
+    }))
+    .expect("dry-run install");
+
+    assert!(text.contains("package=jq"));
+    assert!(text.contains("dry_run=true"));
+    assert_eq!(
+        extra.get("package").and_then(serde_json::Value::as_str),
+        Some("jq")
+    );
+    assert_eq!(
+        extra
+            .get("packages")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|packages| packages.first())
+            .and_then(serde_json::Value::as_str),
+        Some("jq")
+    );
+    assert_eq!(
+        extra.get("dry_run").and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
+fn dry_run_uninstall_returns_machine_fields() {
+    let (text, extra) = execute(serde_json::json!({
+        "action": "uninstall",
+        "manager": "apt-get",
+        "package": "jq",
+        "dry_run": true,
+        "use_sudo": false
+    }))
+    .expect("dry-run uninstall");
+
+    assert!(text.contains("action=uninstall"));
+    assert!(text.contains("package=jq"));
+    assert!(text.contains("dry_run=true"));
+    assert_eq!(
+        extra.get("action").and_then(serde_json::Value::as_str),
+        Some("uninstall")
+    );
+    assert_eq!(
+        extra.get("package").and_then(serde_json::Value::as_str),
+        Some("jq")
+    );
+}

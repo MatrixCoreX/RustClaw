@@ -1,6 +1,6 @@
 use super::{
-    do_ingest, normalize_search_path_prefix, parse_ingest_args, parse_stats_args, split_chunks,
-    storage_path_for, storage_segment, tokenize, KbRuntime,
+    do_ingest, do_list_namespaces, do_stats, normalize_search_path_prefix, parse_ingest_args,
+    parse_stats_args, split_chunks, storage_path_for, storage_segment, tokenize, KbRuntime,
 };
 use serde_json::json;
 use std::fs;
@@ -82,6 +82,112 @@ fn ingest_success_extra_includes_path_evidence_fields() {
     );
     assert_eq!(
         out.pointer("/stats/ingested_docs")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn list_namespaces_extra_includes_names_and_count_fields() {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw_kb_list_namespaces_fields_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp kb workspace");
+    fs::write(
+        root.join("README.md"),
+        "# Demo\n\nThis document is indexed for a knowledge-base namespace listing test.",
+    )
+    .expect("write README fixture");
+    let runtime = KbRuntime {
+        scope_user_key: "user:test".to_string(),
+        workspace_root: root.clone(),
+        unified_index_db_path: Some(root.join("data").join("rustclaw.db")),
+        unified_index_busy_timeout_ms: None,
+    };
+
+    do_ingest(
+        &runtime,
+        &json!({
+            "action": "ingest",
+            "namespace": "demo_docs_nl",
+            "paths": ["README.md"],
+            "overwrite": true
+        }),
+    )
+    .expect("ingest succeeds");
+    let out = do_list_namespaces(&runtime).expect("list namespaces succeeds");
+
+    assert_eq!(out.get("count").and_then(|value| value.as_u64()), Some(1));
+    assert_eq!(
+        out.get("namespace_count").and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        out.get("names")
+            .and_then(|value| value.as_array())
+            .and_then(|items| items.first())
+            .and_then(|value| value.as_str()),
+        Some("demo_docs_nl")
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn stats_extra_includes_document_and_chunk_count_aliases() {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw_kb_stats_count_aliases_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp kb workspace");
+    fs::write(
+        root.join("README.md"),
+        "# Demo\n\nThis document is indexed for a knowledge-base stats test.",
+    )
+    .expect("write README fixture");
+    let runtime = KbRuntime {
+        scope_user_key: "user:test".to_string(),
+        workspace_root: root.clone(),
+        unified_index_db_path: Some(root.join("data").join("rustclaw.db")),
+        unified_index_busy_timeout_ms: None,
+    };
+
+    do_ingest(
+        &runtime,
+        &json!({
+            "action": "ingest",
+            "namespace": "demo_docs_nl",
+            "paths": ["README.md"],
+            "overwrite": true
+        }),
+    )
+    .expect("ingest succeeds");
+    let out = do_stats(&runtime, &json!({"namespace": "demo_docs_nl"})).expect("stats succeeds");
+
+    assert_eq!(
+        out.get("namespace").and_then(|value| value.as_str()),
+        Some("demo_docs_nl")
+    );
+    assert_eq!(
+        out.get("document_count").and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        out.get("chunk_count").and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        out.pointer("/stats/document_count")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        out.pointer("/stats/chunk_count")
             .and_then(|value| value.as_u64()),
         Some(1)
     );

@@ -15,8 +15,7 @@ mod i18n;
 mod response_projection;
 
 use async_contract::{
-    execute_cancel, execute_poll, image_expires_at, image_poll_after_seconds,
-    provider_image_job_id,
+    execute_cancel, execute_poll, image_expires_at, image_poll_after_seconds, provider_image_job_id,
 };
 use i18n::*;
 use response_projection::{build_dry_run_response, build_success_response};

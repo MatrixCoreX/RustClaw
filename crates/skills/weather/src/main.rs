@@ -89,6 +89,14 @@ struct CurrentWeather {
     is_day: u8,
 }
 
+#[derive(Debug, Clone)]
+struct CurrentWeatherResult {
+    text: String,
+    temperature: f64,
+    weather_code: u32,
+    weather_desc: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct DailyForecastResponse {
     daily: Option<DailySeries>,
@@ -289,6 +297,13 @@ fn execute(args: &Value, cat: &TextCatalog, lang: &str) -> Result<(String, Value
         .and_then(|v| v.as_str())
         .map(|s| s.trim())
         .filter(|s| !s.is_empty());
+    let display_location = obj
+        .get("display_location")
+        .or_else(|| obj.get("requested_location"))
+        .or_else(|| obj.get("original_location"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
 
     let lat = obj.get("latitude").and_then(|v| v.as_f64());
     let lon = obj.get("longitude").and_then(|v| v.as_f64());
@@ -315,26 +330,52 @@ fn execute(args: &Value, cat: &TextCatalog, lang: &str) -> Result<(String, Value
         .build()
         .map_err(|e| e.to_string())?;
 
+    let location = weather_location_display(display_location, city, &place_name);
+
     if let Some(spec) = parse_forecast_days_arg(obj, cat)? {
         let text = fetch_daily_forecast(&client, lat, lon, &place_name, &spec, cat)?;
         let extra = json!({
             "action": "query",
             "mode": "daily",
             "locale": lang,
+            "location": location,
+            "resolved_location": place_name,
+            "latitude": lat,
+            "longitude": lon,
             "forecast_days_requested": spec.requested,
             "forecast_days_applied": spec.applied,
             "forecast_days_capped": spec.capped,
         });
         Ok((text, extra))
     } else {
-        let text = fetch_current_weather(&client, lat, lon, &place_name, cat)?;
+        let current = fetch_current_weather(&client, lat, lon, &place_name, cat)?;
         let extra = json!({
             "action": "query",
             "mode": "current",
             "locale": lang,
+            "location": location,
+            "resolved_location": place_name,
+            "latitude": lat,
+            "longitude": lon,
+            "temperature": current.temperature,
+            "weather_code": current.weather_desc,
+            "weather_code_raw": current.weather_code,
         });
-        Ok((text, extra))
+        Ok((current.text, extra))
     }
+}
+
+fn weather_location_display(
+    display_location: Option<&str>,
+    city: Option<&str>,
+    resolved_place_name: &str,
+) -> String {
+    display_location
+        .or(city)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(resolved_place_name)
+        .to_string()
 }
 
 fn parse_forecast_days_arg(
@@ -414,7 +455,7 @@ fn fetch_current_weather(
     lon: f64,
     place_name: &str,
     cat: &TextCatalog,
-) -> Result<String, String> {
+) -> Result<CurrentWeatherResult, String> {
     let url = format!(
         "{}?latitude={}&longitude={}&current_weather=true",
         FORECAST_URL, lat, lon
@@ -452,7 +493,7 @@ fn fetch_current_weather(
         "weather.msg.day_night_night"
     };
     let day_night = tr(cat, day_night_key);
-    Ok(tr_with(
+    let text = tr_with(
         cat,
         "weather.msg.current_line",
         &[
@@ -463,7 +504,13 @@ fn fetch_current_weather(
             ("wind", &format!("{}", cur.windspeed)),
             ("dir", &format!("{}", cur.winddirection as u32)),
         ],
-    ))
+    );
+    Ok(CurrentWeatherResult {
+        text,
+        temperature: cur.temperature,
+        weather_code: cur.weathercode,
+        weather_desc: desc,
+    })
 }
 
 fn fetch_daily_forecast(
@@ -586,3 +633,7 @@ fn geocode(query: &str, cat: &TextCatalog) -> Result<(f64, f64, String), String>
     };
     Ok((first.latitude, first.longitude, name))
 }
+
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;

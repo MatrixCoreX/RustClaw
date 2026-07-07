@@ -20,25 +20,57 @@ pub(super) fn compare_paths(
     let right_mtime = right_meta.modified().ok().and_then(system_time_to_ts);
     let left_name = left_real.file_name().and_then(OsStr::to_str).unwrap_or("");
     let right_name = right_real.file_name().and_then(OsStr::to_str).unwrap_or("");
+    let left_canonical = left_real
+        .canonicalize()
+        .unwrap_or_else(|_| left_real.to_path_buf());
+    let right_canonical = right_real
+        .canonicalize()
+        .unwrap_or_else(|_| right_real.to_path_buf());
     let same_content = if left_meta.is_file() && right_meta.is_file() {
         same_file_content(&left_real, &right_real).ok()
     } else {
         None
     };
+    let mut left_fact = build_path_fact(workspace_root, &left_real, &left_meta);
+    if let Some(obj) = left_fact.as_object_mut() {
+        obj.insert("exists".to_string(), json!(true));
+    }
+    let mut right_fact = build_path_fact(workspace_root, &right_real, &right_meta);
+    if let Some(obj) = right_fact.as_object_mut() {
+        obj.insert("exists".to_string(), json!(true));
+    }
+    let same_path = left_canonical == right_canonical;
+    let same_kind = left_kind == right_kind;
+    let same_name = left_name == right_name;
+    let same_size = left_meta.len() == right_meta.len();
+    let size_delta_bytes = left_meta.len() as i128 - right_meta.len() as i128;
+    let left_newer = match (left_mtime, right_mtime) {
+        (Some(l), Some(r)) => Some(l > r),
+        _ => None,
+    };
 
     Ok(json!({
         "action": "compare_paths",
-        "left": build_path_fact(workspace_root, &left_real, &left_meta),
-        "right": build_path_fact(workspace_root, &right_real, &right_meta),
+        "field_value": {
+            "same_path": same_path,
+            "left_exists": true,
+            "right_exists": true,
+            "same_kind": same_kind,
+            "same_name": same_name,
+            "same_size": same_size,
+            "size_delta_bytes": size_delta_bytes,
+            "left_newer": left_newer,
+            "same_content": same_content,
+        },
+        "left": left_fact,
+        "right": right_fact,
         "comparison": {
-            "same_kind": left_kind == right_kind,
-            "same_name": left_name == right_name,
-            "same_size": left_meta.len() == right_meta.len(),
-            "size_delta_bytes": (left_meta.len() as i128 - right_meta.len() as i128),
-            "left_newer": match (left_mtime, right_mtime) {
-                (Some(l), Some(r)) => Some(l > r),
-                _ => None,
-            },
+            "same_path": same_path,
+            "same_kind": same_kind,
+            "same_name": same_name,
+            "same_size": same_size,
+            "size_delta_bytes": size_delta_bytes,
+            "left_newer": left_newer,
             "same_content": same_content,
         }
     })
@@ -254,6 +286,7 @@ pub(super) fn build_tree_summary_node(
             .cmp(b.file_name().and_then(OsStr::to_str).unwrap_or(""))
     });
 
+    let (file_count, dir_count, other_count) = tree_child_kind_counts(&visible_entries);
     let child_count = visible_entries.len();
     let omitted_children = if depth >= max_depth {
         child_count
@@ -278,10 +311,71 @@ pub(super) fn build_tree_summary_node(
     if let Some(obj) = node.as_object_mut() {
         obj.insert("depth".to_string(), json!(depth));
         obj.insert("child_count".to_string(), json!(child_count));
+        obj.insert("file_count".to_string(), json!(file_count));
+        obj.insert("dir_count".to_string(), json!(dir_count));
+        obj.insert("other_count".to_string(), json!(other_count));
         obj.insert("omitted_children".to_string(), json!(omitted_children));
+        obj.insert("truncated".to_string(), json!(omitted_children > 0));
         obj.insert("children".to_string(), Value::Array(children));
     }
     Ok(node)
+}
+
+fn tree_child_kind_counts(paths: &[PathBuf]) -> (usize, usize, usize) {
+    let mut file_count = 0;
+    let mut dir_count = 0;
+    let mut other_count = 0;
+    for path in paths {
+        match std::fs::metadata(path).as_ref().map(path_kind) {
+            Ok("file") => file_count += 1,
+            Ok("dir") => dir_count += 1,
+            Ok(_) | Err(_) => other_count += 1,
+        }
+    }
+    (file_count, dir_count, other_count)
+}
+
+pub(super) fn tree_summary_rows(tree: &Value) -> Vec<Value> {
+    let mut rows = Vec::new();
+    collect_tree_summary_rows(tree, &mut rows);
+    rows
+}
+
+fn collect_tree_summary_rows(node: &Value, rows: &mut Vec<Value>) {
+    let Some(obj) = node.as_object() else {
+        return;
+    };
+    if obj.get("kind").and_then(Value::as_str) == Some("dir") {
+        let path = obj.get("path").and_then(Value::as_str).unwrap_or("");
+        let name = Path::new(path)
+            .file_name()
+            .and_then(OsStr::to_str)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(path);
+        rows.push(json!({
+            "path": path,
+            "name": name,
+            "kind": "dir",
+            "depth": obj.get("depth").and_then(Value::as_u64).unwrap_or(0),
+            "child_count": obj.get("child_count").and_then(Value::as_u64).unwrap_or(0),
+            "file_count": obj.get("file_count").and_then(Value::as_u64).unwrap_or(0),
+            "dir_count": obj.get("dir_count").and_then(Value::as_u64).unwrap_or(0),
+            "other_count": obj.get("other_count").and_then(Value::as_u64).unwrap_or(0),
+            "omitted_children": obj
+                .get("omitted_children")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            "truncated": obj
+                .get("truncated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }));
+    }
+    if let Some(children) = obj.get("children").and_then(Value::as_array) {
+        for child in children {
+            collect_tree_summary_rows(child, rows);
+        }
+    }
 }
 
 pub(super) fn same_file_content(left: &Path, right: &Path) -> SkillResult<bool> {

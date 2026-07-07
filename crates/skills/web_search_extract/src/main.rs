@@ -167,7 +167,10 @@ fn parse_input(req: &Value) -> SearchInput {
         .get("time_range")
         .and_then(Value::as_str)
         .map(|s| s.to_string());
-    let domains_allow = get_string_array(args.get("domains_allow"));
+    let mut domains_allow = get_string_array(args.get("domains_allow"));
+    if domains_allow.is_empty() {
+        domains_allow = site_domains_from_query(&query);
+    }
     let domains_deny = get_string_array(args.get("domains_deny"));
     let backend = args
         .get("backend")
@@ -242,8 +245,18 @@ fn handle(input: &SearchInput) -> Result<Value> {
         Backend::DuckDuckGoHtml => search_duckduckgo_html(input)?,
         Backend::BingHtml => search_bing_html(input)?,
     };
+    let mut backend_label = backend.as_str().to_string();
 
     normalize_and_filter(&mut items, input);
+    if items.is_empty() {
+        if let Ok((fallback_backend, mut fallback_items)) = search_fallback_sources(input) {
+            normalize_and_filter(&mut fallback_items, input);
+            if !fallback_items.is_empty() {
+                backend_label = fallback_backend;
+                items = fallback_items;
+            }
+        }
+    }
     if items.len() > input.top_k {
         items.truncate(input.top_k);
     }
@@ -260,13 +273,13 @@ fn handle(input: &SearchInput) -> Result<Value> {
 
     let extract_urls = items.iter().map(|x| x.url.clone()).collect::<Vec<_>>();
     let citations = extract_urls.clone();
-    let summary = build_summary(&items, &input.query, backend.as_str());
+    let summary = build_summary(&items, &input.query, &backend_label);
 
     Ok(json!({
         "status":"ok",
         "error_code": Value::Null,
         "error": Value::Null,
-        "backend": backend.as_str(),
+        "backend": backend_label,
         "items": items,
         "extract_urls": extract_urls,
         "summary": summary,
@@ -285,12 +298,7 @@ fn resolve_backend(raw: Option<&str>) -> Result<Backend> {
     if env::var("SERPAPI_API_KEY").is_ok() {
         return Ok(Backend::SerpApi);
     }
-    if env::var("WEB_SEARCH_ALLOW_DDG").ok().as_deref() == Some("1") {
-        return Ok(Backend::DuckDuckGoHtml);
-    }
-    Err(anyhow!(
-        "no search backend configured: set args.backend or WEB_SEARCH_BACKEND, or provide SERPAPI_API_KEY"
-    ))
+    Ok(Backend::DuckDuckGoHtml)
 }
 
 fn search_serpapi(input: &SearchInput) -> Result<Vec<SearchItem>> {
@@ -369,7 +377,7 @@ fn search_duckduckgo_html(input: &SearchInput) -> Result<Vec<SearchItem>> {
         .timeout(Duration::from_secs(20))
         .build()
         .context("build http client failed")?;
-    let mut url = Url::parse("https://duckduckgo.com/html/").expect("valid url");
+    let mut url = Url::parse("https://html.duckduckgo.com/html/").expect("valid url");
     {
         let mut q = url.query_pairs_mut();
         q.append_pair("q", &input.query);
@@ -390,19 +398,21 @@ fn search_duckduckgo_html(input: &SearchInput) -> Result<Vec<SearchItem>> {
         .text()
         .context("duckduckgo body read failed")?;
 
-    let row_re = Regex::new(r#"(?is)<div class="result__body".*?</div>\s*</div>"#).expect("regex");
-    let a_re = Regex::new(r#"(?is)<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#)
-        .expect("regex");
-    let sn_re = Regex::new(r#"(?is)<a[^>]*class="result__snippet"[^>]*>(.*?)</a>|<div[^>]*class="result__snippet"[^>]*>(.*?)</div>"#)
+    Ok(parse_duckduckgo_html_results(&html, input))
+}
+
+fn parse_duckduckgo_html_results(html: &str, input: &SearchInput) -> Vec<SearchItem> {
+    let a_re = Regex::new(
+        r#"(?is)<a[^>]*class="[^"]*\bresult__a\b[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#,
+    )
+    .expect("regex");
+    let sn_re = Regex::new(r#"(?is)<a[^>]*class="[^"]*\bresult__snippet\b[^"]*"[^>]*>(.*?)</a>|<div[^>]*class="[^"]*\bresult__snippet\b[^"]*"[^>]*>(.*?)</div>"#)
         .expect("regex");
     let tag_re = Regex::new(r"(?is)<[^>]+>").expect("regex");
 
     let mut out = vec![];
-    for row in row_re.find_iter(&html) {
-        let block = row.as_str();
-        let Some(ac) = a_re.captures(block) else {
-            continue;
-        };
+    let captures = a_re.captures_iter(&html).collect::<Vec<_>>();
+    for (idx, ac) in captures.iter().enumerate() {
         let href = ac.get(1).map(|m| m.as_str()).unwrap_or("").trim();
         let title_html = ac.get(2).map(|m| m.as_str()).unwrap_or("").trim();
         let title = tag_re
@@ -413,6 +423,12 @@ fn search_duckduckgo_html(input: &SearchInput) -> Result<Vec<SearchItem>> {
         if title.trim().is_empty() || url.trim().is_empty() {
             continue;
         }
+        let block_start = ac.get(0).map(|m| m.end()).unwrap_or(0);
+        let block_end = captures
+            .get(idx + 1)
+            .and_then(|next| next.get(0).map(|m| m.start()))
+            .unwrap_or(html.len());
+        let block = html.get(block_start..block_end).unwrap_or_default();
         let snippet = sn_re.captures(block).and_then(|c| {
             let s = c
                 .get(1)
@@ -438,7 +454,174 @@ fn search_duckduckgo_html(input: &SearchInput) -> Result<Vec<SearchItem>> {
             break;
         }
     }
+    out
+}
+
+fn search_fallback_sources(input: &SearchInput) -> Result<(String, Vec<SearchItem>)> {
+    if domain_explicitly_allowed(input, "docs.rs") {
+        if let Ok(items) = search_docs_rs(input) {
+            if !items.is_empty() {
+                return Ok(("docs_rs_search".to_string(), items));
+            }
+        }
+    }
+    if domain_allowed_by_filter(input, "github.com") {
+        if let Ok(items) = search_github_repositories(input) {
+            if !items.is_empty() {
+                return Ok(("github_repositories".to_string(), items));
+            }
+        }
+    }
+    Err(anyhow!("no fallback search source returned candidates"))
+}
+
+fn domain_explicitly_allowed(input: &SearchInput, domain: &str) -> bool {
+    input
+        .domains_allow
+        .iter()
+        .any(|allowed| domain == allowed || domain.ends_with(&format!(".{allowed}")))
+}
+
+fn domain_allowed_by_filter(input: &SearchInput, domain: &str) -> bool {
+    if input
+        .domains_deny
+        .iter()
+        .any(|denied| domain == denied || domain.ends_with(&format!(".{denied}")))
+    {
+        return false;
+    }
+    input.domains_allow.is_empty()
+        || input
+            .domains_allow
+            .iter()
+            .any(|allowed| domain == allowed || domain.ends_with(&format!(".{allowed}")))
+}
+
+fn search_github_repositories(input: &SearchInput) -> Result<Vec<SearchItem>> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .context("build http client failed")?;
+    let mut url = Url::parse("https://api.github.com/search/repositories").expect("valid url");
+    {
+        let mut q = url.query_pairs_mut();
+        q.append_pair("q", &query_without_site_operators(&input.query));
+        q.append_pair("per_page", &(input.top_k * 3).min(10).to_string());
+    }
+    let res = client
+        .get(url)
+        .header("user-agent", "rustclaw-web-search-extract")
+        .send()
+        .context("github search request failed")?
+        .error_for_status()
+        .context("github search non-success response")?;
+    let payload: Value = res.json().context("github search json parse failed")?;
+    let mut out = Vec::new();
+    for item in payload
+        .get("items")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+    {
+        let full_name = item
+            .get("full_name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let url = item
+            .get("html_url")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if full_name.is_empty() || url.is_empty() {
+            continue;
+        }
+        let snippet = item
+            .get("description")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string);
+        let title = snippet
+            .as_deref()
+            .map(|description| format!("{full_name} - {description}"))
+            .unwrap_or(full_name);
+        out.push(SearchItem {
+            title,
+            url,
+            snippet,
+            source: "github.com".to_string(),
+            rank: out.len() + 1,
+        });
+    }
     Ok(out)
+}
+
+fn search_docs_rs(input: &SearchInput) -> Result<Vec<SearchItem>> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .context("build http client failed")?;
+    let mut url = Url::parse("https://docs.rs/releases/search").expect("valid url");
+    {
+        let mut q = url.query_pairs_mut();
+        q.append_pair("query", &query_without_site_operators(&input.query));
+    }
+    let html = client
+        .get(url)
+        .header(
+            "user-agent",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        )
+        .send()
+        .context("docs.rs search request failed")?
+        .error_for_status()
+        .context("docs.rs search non-success response")?
+        .text()
+        .context("docs.rs body read failed")?;
+    Ok(parse_docs_rs_results(&html, input.top_k * 3))
+}
+
+fn parse_docs_rs_results(html: &str, max_items: usize) -> Vec<SearchItem> {
+    let row_re =
+        Regex::new(r#"(?is)<a\s+href="([^"]+)"\s+class="release"\s*>(.*?)</a>"#).expect("regex");
+    let name_re =
+        Regex::new(r#"(?is)<div[^>]*class="[^"]*\bname\b[^"]*"[^>]*>(.*?)</div>"#).expect("regex");
+    let desc_re = Regex::new(r#"(?is)<div[^>]*class="[^"]*\bdescription\b[^"]*"[^>]*>(.*?)</div>"#)
+        .expect("regex");
+    let tag_re = Regex::new(r"(?is)<[^>]+>").expect("regex");
+
+    let mut out = Vec::new();
+    for row in row_re.captures_iter(html) {
+        let href = row.get(1).map(|m| m.as_str()).unwrap_or("").trim();
+        let block = row.get(2).map(|m| m.as_str()).unwrap_or("");
+        let title = name_re
+            .captures(block)
+            .and_then(|c| c.get(1))
+            .map(|m| clean_html_text(m.as_str(), &tag_re))
+            .unwrap_or_default();
+        if title.is_empty() || href.is_empty() {
+            continue;
+        }
+        let snippet = desc_re
+            .captures(block)
+            .and_then(|c| c.get(1))
+            .map(|m| clean_html_text(m.as_str(), &tag_re))
+            .filter(|value| !value.is_empty());
+        out.push(SearchItem {
+            title,
+            url: format!("https://docs.rs{href}"),
+            snippet,
+            source: "docs.rs".to_string(),
+            rank: out.len() + 1,
+        });
+        if out.len() >= max_items {
+            break;
+        }
+    }
+    out
 }
 
 fn search_bing_html(input: &SearchInput) -> Result<Vec<SearchItem>> {
@@ -531,7 +714,13 @@ fn decode_basic_html_entities(raw: &str) -> String {
 }
 
 fn unwrap_ddg_redirect(href: &str) -> Option<String> {
-    let parsed = Url::parse(href).ok()?;
+    let href = href.replace("&amp;", "&");
+    let href = if href.starts_with("//") {
+        format!("https:{href}")
+    } else {
+        href
+    };
+    let parsed = Url::parse(&href).ok()?;
     if parsed.domain() == Some("duckduckgo.com") && parsed.path() == "/l/" {
         let uddg = parsed
             .query_pairs()
@@ -540,6 +729,30 @@ fn unwrap_ddg_redirect(href: &str) -> Option<String> {
         return uddg;
     }
     Some(href.to_string())
+}
+
+fn site_domains_from_query(query: &str) -> Vec<String> {
+    let re =
+        Regex::new(r"(?i)(?:^|\s)site:([a-z0-9][a-z0-9.-]*\.[a-z]{2,})(?:\s|$)").expect("regex");
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for cap in re.captures_iter(query) {
+        let Some(domain) = cap.get(1).map(|m| m.as_str().to_ascii_lowercase()) else {
+            continue;
+        };
+        if seen.insert(domain.clone()) {
+            out.push(domain);
+        }
+    }
+    out
+}
+
+fn query_without_site_operators(query: &str) -> String {
+    let re = Regex::new(r"(?i)(?:^|\s)site:[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:\s|$)").expect("regex");
+    re.replace_all(query, " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn normalize_and_filter(items: &mut Vec<SearchItem>, input: &SearchInput) {
@@ -638,120 +851,5 @@ fn build_summary(items: &[SearchItem], query: &str, backend: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn input_for_test() -> SearchInput {
-        SearchInput {
-            request_id: "test".to_string(),
-            action: "search".to_string(),
-            query: "rust async tutorial".to_string(),
-            top_k: 3,
-            lang: None,
-            time_range: None,
-            domains_allow: Vec::new(),
-            domains_deny: Vec::new(),
-            backend: Some("duckduckgo_html".to_string()),
-            include_snippet: true,
-        }
-    }
-
-    #[test]
-    fn response_extra_exposes_empty_candidates_for_search_evidence() {
-        let payload = json!({
-            "status": "ok",
-            "backend": "duckduckgo_html",
-            "items": [],
-            "extract_urls": [],
-            "summary": "No results found",
-            "citations": []
-        });
-
-        let extra = build_response_extra(&input_for_test(), &payload);
-
-        assert_eq!(extra.get("action").and_then(Value::as_str), Some("search"));
-        assert_eq!(
-            extra
-                .get("candidates")
-                .and_then(Value::as_array)
-                .map(Vec::len),
-            Some(0)
-        );
-        assert_eq!(
-            extra
-                .pointer("/field_value/result_count")
-                .and_then(Value::as_u64),
-            Some(0)
-        );
-    }
-
-    #[test]
-    fn response_extra_exposes_structured_candidates_for_search_evidence() {
-        let payload = json!({
-            "status": "ok",
-            "backend": "duckduckgo_html",
-            "items": [
-                {
-                    "title": "Rust Async",
-                    "url": "https://example.com/rust-async",
-                    "rank": 1,
-                    "source": "example.com",
-                    "snippet": "Tutorial"
-                }
-            ],
-            "extract_urls": ["https://example.com/rust-async"],
-            "summary": "result_count=1 backend=duckduckgo_html",
-            "citations": ["https://example.com/rust-async"]
-        });
-
-        let extra = build_response_extra(&input_for_test(), &payload);
-
-        assert_eq!(
-            extra
-                .pointer("/field_value/result_count")
-                .and_then(Value::as_u64),
-            Some(1)
-        );
-        assert_eq!(
-            extra.pointer("/items/0/url").and_then(Value::as_str),
-            Some("https://example.com/rust-async")
-        );
-        assert_eq!(
-            extra
-                .pointer("/candidates/0/source")
-                .and_then(Value::as_str),
-            Some("example.com")
-        );
-        assert_eq!(
-            extra.pointer("/extract_urls/0").and_then(Value::as_str),
-            Some("https://example.com/rust-async")
-        );
-    }
-
-    #[test]
-    fn parse_bing_html_results_extracts_title_url_and_snippet() {
-        let html = r#"
-        <ol id="b_results">
-          <li class="b_algo">
-            <h2><a href="https://rust-lang.github.io/async-book/">Asynchronous Programming in Rust</a></h2>
-            <div class="b_caption"><p>The Async Book explains futures, async, and await in Rust.</p></div>
-          </li>
-          <li class="b_algo">
-            <h2><a href="https://tokio.rs/tokio/tutorial">Tokio Tutorial</a></h2>
-            <div class="b_caption"><p>Learn to build asynchronous applications with Tokio.</p></div>
-          </li>
-        </ol>
-        "#;
-
-        let items = parse_bing_html_results(html, 3);
-
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0].title, "Asynchronous Programming in Rust");
-        assert_eq!(items[0].url, "https://rust-lang.github.io/async-book/");
-        assert_eq!(
-            items[0].snippet.as_deref(),
-            Some("The Async Book explains futures, async, and await in Rust.")
-        );
-        assert_eq!(items[1].source, "bing");
-    }
-}
+#[path = "main_tests.rs"]
+mod tests;
