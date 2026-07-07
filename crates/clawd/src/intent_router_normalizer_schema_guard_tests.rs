@@ -52,6 +52,43 @@ fn normalizer_schema_normalization_recovers_minimax_file_list_search_payload() {
 }
 
 #[test]
+fn normalizer_schema_normalization_drops_unknown_top_level_fields() {
+    let raw = r#"{
+          "resolved_user_intent":"read README metadata",
+          "resume_behavior":"none",
+          "schedule_kind":"none",
+          "schedule_intent":null,
+          "wants_file_delivery":false,
+          "should_refresh_long_term_memory":false,
+          "agent_display_name_hint":"",
+          "needs_clarify":false,
+          "clarify_question":"",
+          "reason":"boundary_only",
+          "confidence":0.8,
+          "output_contract":{"response_shape":"free","contract_marker":"none"},
+          "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"},
+          "turn_type":"",
+          "target_task_policy":"",
+          "should_interrupt_active_run":false,
+          "state_patch":null,
+          "attachment_processing_required":false,
+          "capability_ref":"fs_basic.read_text_range",
+          "semantic_hint":"file_read",
+          "custom_router_field":{"route":"act"}
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "read README metadata");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+    assert!(value.get("capability_ref").is_none());
+    assert!(value.get("semantic_hint").is_none());
+    assert!(value.get("custom_router_field").is_none());
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
+}
+
+#[test]
 fn normalizer_schema_normalization_does_not_infer_malformed_recipe_array() {
     let raw = r#"{
           "resolved_user_intent":"用户请求读取 README 文件的开头内容，并用通俗易懂的非技术语言进行一句话总结",

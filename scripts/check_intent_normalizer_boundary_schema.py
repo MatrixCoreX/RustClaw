@@ -83,6 +83,16 @@ def scan_schema(schema: dict[str, Any], path: Path) -> list[Finding]:
     rel_path = rel(path)
     findings: list[Finding] = []
 
+    if schema.get("additionalProperties") is not False:
+        findings.append(
+            Finding(
+                rel_path,
+                "additionalProperties",
+                "additional_properties_not_false",
+                "false",
+            )
+        )
+
     top_properties = object_keys(schema.get("properties"))
     top_required = list_values(schema.get("required"))
     for field in sorted(top_properties & FORBIDDEN_TOP_LEVEL_FIELDS):
@@ -123,6 +133,7 @@ def print_report(findings: list[Finding]) -> int:
 def run_self_test() -> int:
     good_schema = {
         "type": "object",
+        "additionalProperties": False,
         "required": ["resolved_user_intent", "output_contract"],
         "properties": {
             "resolved_user_intent": {"type": "string"},
@@ -138,12 +149,14 @@ def run_self_test() -> int:
 
     bad_top_property = {
         "type": "object",
+        "additionalProperties": False,
         "properties": {"decision": {"type": "string"}},
     }
     assert scan_schema(bad_top_property, dummy_path)[0].kind == "top_level_field"
 
     bad_top_required = {
         "type": "object",
+        "additionalProperties": False,
         "required": ["answer_candidate"],
         "properties": {},
     }
@@ -151,6 +164,7 @@ def run_self_test() -> int:
 
     bad_contract_property = {
         "type": "object",
+        "additionalProperties": False,
         "properties": {
             "output_contract": {
                 "type": ["object", "null"],
@@ -162,6 +176,7 @@ def run_self_test() -> int:
 
     bad_contract_required = {
         "type": "object",
+        "additionalProperties": False,
         "properties": {
             "output_contract": {
                 "type": ["object", "null"],
@@ -171,6 +186,13 @@ def run_self_test() -> int:
         },
     }
     assert scan_schema(bad_contract_required, dummy_path)[0].kind == "output_contract_required"
+
+    bad_open_schema = {
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {},
+    }
+    assert scan_schema(bad_open_schema, dummy_path)[0].kind == "additional_properties_not_false"
 
     print("SELF_TEST_OK")
     return 0

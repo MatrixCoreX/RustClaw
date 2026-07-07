@@ -34,6 +34,7 @@ pub(super) fn normalize_plain_intent_normalizer_text_for_schema(raw: &str, req: 
     normalize_intent_normalizer_scalar_types_for_schema(&mut obj);
     normalize_execution_recipe_for_schema(&mut obj, req);
     normalize_output_contract_for_schema(&mut obj);
+    retain_intent_normalizer_top_level_schema_fields(&mut obj);
     serde_json::to_string(&Value::Object(obj)).unwrap_or_else(|_| raw.to_string())
 }
 
@@ -183,6 +184,34 @@ pub(super) fn normalize_intent_normalizer_top_level_for_schema(
     obj.entry("attachment_processing_required".to_string())
         .or_insert(Value::Bool(false));
     normalize_bool_field_with_default(obj, "attachment_processing_required", false);
+}
+
+pub(super) fn retain_intent_normalizer_top_level_schema_fields(
+    obj: &mut serde_json::Map<String, Value>,
+) {
+    obj.retain(|key, _| {
+        matches!(
+            key.as_str(),
+            "resolved_user_intent"
+                | "resume_behavior"
+                | "schedule_kind"
+                | "schedule_intent"
+                | "wants_file_delivery"
+                | "should_refresh_long_term_memory"
+                | "agent_display_name_hint"
+                | "needs_clarify"
+                | "clarify_question"
+                | "reason"
+                | "confidence"
+                | "output_contract"
+                | "execution_recipe"
+                | "turn_type"
+                | "target_task_policy"
+                | "should_interrupt_active_run"
+                | "state_patch"
+                | "attachment_processing_required"
+        )
+    });
 }
 
 fn normalize_schedule_kind_for_schema(obj: &mut serde_json::Map<String, Value>) {
