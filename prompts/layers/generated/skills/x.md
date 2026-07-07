@@ -39,6 +39,9 @@
 - Conflicting flags are invalid (`send=true` with `dry_run=true`).
 - Publishing requires `use_xurl=true` (or `X_USE_XURL=true`) because non-`xurl` publish mode is not implemented.
 - Unsupported extra fields should be rejected by planner/contract.
+- All responses include machine-readable `extra` when the request is parsed.
+- Success `extra` contains `status`, `action`, `source_skill`, `outcome`, `dry_run`, `send`, `published`, text length fields, and sanitized config-presence booleans.
+- Error `extra` contains stable `error_kind` values such as `invalid_input`, `text_too_long`, `publish_disabled`, `xurl_spawn_failed`, `xurl_failed`, `xurl_timeout`, `xurl_non_json_response`, `xurl_api_errors`, and `xurl_missing_id`.
 
 ## Request/Response Examples (from interface)
 ### Example 1
@@ -48,7 +51,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"x skill dry_run=1, preview post: Daily market note","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"x skill dry_run=1, preview post: Daily market note","extra":{"status":"ok","action":"post","source_skill":"x","outcome":"dry_run","dry_run":true,"send":false,"published":false,"text_char_count":17,"max_text_chars":280,"use_xurl":true,"require_explicit_send":true,"xurl_configured":{"bin":true,"app":false,"auth":false,"username":false}},"error_text":null}
 ```
 
 ### Example 2
@@ -58,7 +61,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-2","status":"ok","text":"x post success via xurl: id=1234567890 text=Daily market note","error_text":null}
+{"request_id":"demo-2","status":"ok","text":"x post success via xurl: id=1234567890 text=Daily market note","extra":{"status":"ok","action":"post","source_skill":"x","outcome":"published","dry_run":false,"send":true,"published":true,"text_char_count":17,"max_text_chars":280,"use_xurl":true,"require_explicit_send":true,"xurl_configured":{"bin":true,"app":false,"auth":false,"username":false},"post_id":"1234567890","posted_text_char_count":17},"error_text":null}
 ```
 
 ### Example 3
@@ -68,7 +71,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-3","status":"error","text":"","error_text":"x skill args are invalid: send=true conflicts with dry_run=true"}
+{"request_id":"demo-3","status":"error","text":"","extra":{"status":"error","action":"post","source_skill":"x","error_kind":"invalid_input"},"error_text":"x skill args are invalid: send=true conflicts with dry_run=true"}
 ```
 
 ## Output Contract
