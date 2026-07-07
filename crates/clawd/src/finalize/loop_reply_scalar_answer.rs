@@ -2,7 +2,7 @@ pub(super) fn scalar_answer_from_json(value: &serde_json::Value) -> Option<Strin
     if let Some(answer) = value.get("extra").and_then(scalar_answer_from_json) {
         return Some(answer);
     }
-    for key in ["value_text", "value", "count", "total"] {
+    for key in ["value_text", "value", "count", "total", "schema_version"] {
         let Some(child) = value.get(key) else {
             continue;
         };
