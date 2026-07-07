@@ -96,7 +96,7 @@ fn plan_step_round_trips_call_capability() {
 
 #[test]
 fn route_result_gate_kind_uses_ask_mode() {
-    let route = route_result_with_mode(crate::AskMode::direct_answer());
+    let route = route_result_with_mode(crate::AskMode::respond_trace());
 
     assert_eq!(route.gate_kind(), crate::RouteGateKind::Chat);
     assert!(route.is_chat_gate());
@@ -105,7 +105,7 @@ fn route_result_gate_kind_uses_ask_mode() {
 
 #[test]
 fn route_result_set_execute_gate_updates_structured_trace_label() {
-    let mut route = route_result_with_mode(crate::AskMode::direct_answer());
+    let mut route = route_result_with_mode(crate::AskMode::respond_trace());
 
     route.set_execute_gate();
 

@@ -10,7 +10,7 @@ fn constructed_missing_stat_path_plan_rewrites_to_exact_find_entries() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Strict,
     );
@@ -107,7 +107,7 @@ fn file_paths_missing_stat_path_rewrites_to_selector_find_entries() {
     state.skill_rt.workspace_root = root.path.clone();
     let missing = plan_dir.join("definitely_missing_20260511.md");
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Strict,
     );
@@ -258,7 +258,7 @@ fn split_dir_and_basename_stat_paths_rewrites_to_auto_locator_file() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Strict,
     );
@@ -435,7 +435,7 @@ fn content_evidence_synthesize_only_plan_reads_structural_file_targets_first() {
     fs::write(&second, "second file\nbeta\n").expect("write second file");
 
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -515,7 +515,7 @@ fn content_evidence_partial_multi_file_read_appends_missing_structural_targets()
     let mut state = test_state();
     state.skill_rt.workspace_root = temp.path.clone();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -592,7 +592,7 @@ fn content_evidence_current_auto_locator_does_not_append_previous_anchor_target(
     let mut state = test_state();
     state.skill_rt.workspace_root = temp.path.clone();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -671,7 +671,7 @@ fn content_evidence_current_auto_locator_does_not_append_previous_anchor_target(
 #[test]
 fn existence_multi_file_stat_paths_are_repaired_from_structural_targets() {
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Free,
     );
@@ -943,7 +943,7 @@ fn recent_scalar_equality_pair_paths_skip_content_read_deterministic_fallback() 
 #[test]
 fn recent_scalar_equality_pair_paths_uses_compare_paths_plan() {
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1008,7 +1008,7 @@ reqwest = { version = "0.12" }
     let cargo_path = root.path.join("Cargo.toml").display().to_string();
     let readme_path = root.path.join("README.md").display().to_string();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1104,7 +1104,7 @@ version = "0.1.7"
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1185,7 +1185,7 @@ version = "0.1.0"
         .display()
         .to_string();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Scalar,
     );

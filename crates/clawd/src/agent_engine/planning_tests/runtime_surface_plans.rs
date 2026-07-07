@@ -128,7 +128,7 @@ fn find_tool_call<'a>(actions: &'a [AgentAction], name: &str) -> &'a Value {
 fn hook_permission_surface_returns_pre_tool_use_machine_projection() {
     let state = test_state_with_enabled_skills(&["config_basic"]);
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
@@ -229,7 +229,7 @@ fn hook_permission_surface_collects_fields_and_valid_for_config_validation_contr
 fn clawcli_resume_surface_uses_planner_supplied_resume_help_call() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.route_reason = "surface=clawcli subcommand=resume".to_string();
@@ -294,7 +294,7 @@ fn subagent_review_boundary_surface_uses_readonly_machine_envelope() {
     fs::write(plan_dir.join("current_runtime_plan.md"), "# Current Plan\n")
         .expect("write plan file");
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -402,7 +402,7 @@ fn subagent_review_boundary_surface_resolves_current_plan_when_route_requested_c
     fs::write(plan_dir.join("current_runtime_plan.md"), "# Current Plan\n")
         .expect("write plan file");
     let mut route = base_route_result();
-    route.ask_mode = AskMode::clarify();
+    route.ask_mode = AskMode::clarify_trace();
     route.needs_clarify = true;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;

@@ -385,7 +385,7 @@ fn directory_entry_groups_auto_locator_uses_fs_basic_list_dir() {
     fs::write(root.path.join("README.md"), "hello").expect("write readme");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Strict,
     );
@@ -656,7 +656,7 @@ fn directory_tree_auto_locator_deterministic_plan_uses_system_basic_tree_summary
     fs::write(root.path.join("archive").join("README.txt"), "archive").expect("write readme");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -800,7 +800,7 @@ fn directory_purpose_auto_locator_lists_directory_and_reads_text_candidates() {
     fs::write(root.path.join("docs").join("image.png"), "not text").expect("write image");
     let docs_path = root.path.join("docs").display().to_string();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -964,7 +964,7 @@ fn directory_purpose_extension_locator_uses_recursive_find_entries_not_tree_summ
     fs::write(root.path.join("configs/config.toml"), "[skills]\n").expect("write config");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Free,
     );
@@ -1597,7 +1597,7 @@ fn workspace_default_evidence_requires_content_evidence_contract() {
 #[test]
 fn workspace_summary_default_text_evidence_uses_contract_without_execute_gate() {
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );

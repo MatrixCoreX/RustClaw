@@ -121,7 +121,7 @@ fn agent_loop_default_context_demotes_post_route_clarify_to_loop_context() {
 #[test]
 fn agent_loop_decides_respond_without_normalizer_direct_answer() {
     let mut route = base_route();
-    route.set_ask_mode(crate::AskMode::direct_answer());
+    route.set_ask_mode(crate::AskMode::respond_trace());
     route.route_reason = "direct_answer_trace_inferred".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),

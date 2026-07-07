@@ -135,7 +135,7 @@ fn next_last_primary_task_output(
 
 #[test]
 fn plain_chat_without_task_turn_does_not_promote_primary_task() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let promoted = next_last_primary_task_prompt(
         None,
         &route_result,
@@ -161,7 +161,7 @@ fn plain_chat_without_task_turn_does_not_promote_primary_task() {
 
 #[test]
 fn standalone_task_request_preserves_existing_primary_task() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::TaskRequest),
         target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
@@ -258,7 +258,7 @@ fn pure_chat_agent_loop_side_answer_preserves_existing_primary_task() {
 
 #[test]
 fn direct_answer_pure_chat_side_answer_preserves_existing_primary_task() {
-    let mut route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let mut route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     route_result.route_reason = "pure_chat_agent_loop_submode".to_string();
     route_result.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
     route_result.output_contract.requires_content_evidence = false;
@@ -309,7 +309,7 @@ fn direct_answer_pure_chat_side_answer_preserves_existing_primary_task() {
 
 #[test]
 fn standalone_new_deliverable_replaces_existing_primary_task() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::TaskRequest),
         target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
@@ -354,7 +354,7 @@ fn standalone_new_deliverable_replaces_existing_primary_task() {
 
 #[test]
 fn standalone_task_request_without_prior_can_start_primary_task() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::TaskRequest),
         target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
@@ -385,7 +385,7 @@ fn standalone_task_request_without_prior_can_start_primary_task() {
 
 #[test]
 fn standalone_freeform_answer_candidate_without_prior_starts_primary_task() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::TaskRequest),
         target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
@@ -423,7 +423,7 @@ fn standalone_freeform_answer_candidate_without_prior_starts_primary_task() {
 
 #[test]
 fn unannotated_direct_chat_substantial_text_starts_primary_task() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let answer = "# Deployment Note\n\n- Use Python 3.10 for deployment.\n- Confirm runtime variables before release.\n- Keep rollback steps available.";
 
     let prompt = super::unannotated_chat_primary_prompt_for_output(
@@ -453,7 +453,7 @@ fn unannotated_direct_chat_substantial_text_starts_primary_task() {
 
 #[test]
 fn unannotated_short_chat_does_not_start_primary_task() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let answer = "RC-CONT-CN-0428-A";
 
     let prompt = super::unannotated_chat_primary_prompt_for_output(
@@ -480,7 +480,7 @@ fn unannotated_short_chat_does_not_start_primary_task() {
 
 #[test]
 fn unannotated_compact_sentence_chat_starts_primary_task() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let answer = "部署前请确保已安装 Python 3.10 或更高版本。";
 
     let prompt = super::unannotated_chat_primary_prompt_for_output(
@@ -510,7 +510,7 @@ fn unannotated_compact_sentence_chat_starts_primary_task() {
 
 #[test]
 fn unannotated_compact_question_chat_does_not_start_primary_task() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let answer = "请问是哪方面的方案？比如功能设计、项目计划、技术选型，还是其他？";
 
     let prompt = super::unannotated_chat_primary_prompt_for_output(
@@ -531,7 +531,7 @@ fn unannotated_compact_question_chat_does_not_start_primary_task() {
 
 #[test]
 fn standalone_freeform_answer_candidate_with_prior_preserves_primary_task() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::TaskRequest),
         target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
@@ -568,7 +568,7 @@ fn standalone_freeform_answer_candidate_with_prior_preserves_primary_task() {
 
 #[test]
 fn standalone_replacement_answer_candidate_replaces_prior_primary_task() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::TaskRequest),
         target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
@@ -612,7 +612,7 @@ fn standalone_replacement_answer_candidate_replaces_prior_primary_task() {
 
 #[test]
 fn active_task_non_success_preserves_prior_primary_output() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::TaskCorrect),
         target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
@@ -670,7 +670,7 @@ fn model_fallback_preserves_primary_state_from_structured_source() {
 
 #[test]
 fn standalone_preference_or_memory_turn_clears_prior_primary_task() {
-    let mut route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let mut route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     route_result.should_refresh_long_term_memory = true;
     route_result.agent_display_name_hint = "巡检爪".to_string();
     let turn_analysis = crate::intent_router::TurnAnalysis {
@@ -710,7 +710,7 @@ fn standalone_preference_or_memory_turn_clears_prior_primary_task() {
 
 #[test]
 fn memory_grounded_comparison_chat_becomes_latest_primary_task() {
-    let mut route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let mut route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     route_result.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let prior_state = ConversationState {
         last_primary_task_prompt: Some(
@@ -761,7 +761,7 @@ fn memory_grounded_comparison_chat_becomes_latest_primary_task() {
 
 #[test]
 fn standalone_answer_candidate_request_without_prior_does_not_start_primary_task() {
-    let mut route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let mut route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::TaskRequest),
@@ -794,7 +794,7 @@ fn standalone_answer_candidate_request_without_prior_does_not_start_primary_task
 
 #[test]
 fn standalone_scalar_chat_request_without_answer_marker_does_not_start_primary_task() {
-    let mut route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let mut route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::TaskRequest),
@@ -870,7 +870,7 @@ fn evidence_backed_standalone_task_replaces_prior_scalar_primary_task() {
 
 #[test]
 fn unannotated_evidence_backed_deliverable_starts_primary_task() {
-    let mut route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let mut route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
 
@@ -902,7 +902,7 @@ fn unannotated_evidence_backed_deliverable_starts_primary_task() {
 
 #[test]
 fn unannotated_structured_listing_replaces_prior_primary_task() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let mut journal = crate::task_journal::TaskJournal::new("list");
     journal
         .step_results
@@ -982,7 +982,7 @@ fn unannotated_scalar_evidence_result_does_not_start_primary_task() {
 
 #[test]
 fn task_append_persists_compact_primary_without_runtime_envelope() {
-    let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     let prior_state = ConversationState {
         last_primary_task_prompt: Some("帮我写个方案".to_string()),
         ..ConversationState::default()
@@ -1148,7 +1148,7 @@ fn alias_only_state_patch_clears_stale_active_pointers() {
             active_observed_facts_task_id: Some("old-observed".to_string()),
         },
     );
-    let route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route = route_result_for_test(crate::AskMode::respond_trace(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
         target_task_policy: None,
@@ -1225,7 +1225,7 @@ fn merge_alias_bindings_prefers_structured_state_patch() {
 
 #[test]
 fn structured_alias_state_patch_suppresses_prompt_alias_heuristics() {
-    let route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route = route_result_for_test(crate::AskMode::respond_trace(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: None,
         target_task_policy: None,
@@ -1298,7 +1298,7 @@ fn alias_surface_match_accepts_user_defined_separator_variants() {
 
 #[test]
 fn memory_turn_with_single_locator_derives_short_alias_suffixes() {
-    let mut route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let mut route = route_result_for_test(crate::AskMode::respond_trace(), false);
     route.should_refresh_long_term_memory = true;
     let merged = super::merge_alias_bindings_for_turn(
         None,
@@ -1316,7 +1316,7 @@ fn memory_turn_with_single_locator_derives_short_alias_suffixes() {
 
 #[test]
 fn preference_memory_turn_with_single_locator_derives_alias_without_refresh_flag() {
-    let route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route = route_result_for_test(crate::AskMode::respond_trace(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
         target_task_policy: None,
@@ -1341,7 +1341,7 @@ fn preference_memory_turn_with_single_locator_derives_alias_without_refresh_flag
 
 #[test]
 fn preference_memory_turn_with_machine_alias_derives_exact_token() {
-    let route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route = route_result_for_test(crate::AskMode::respond_trace(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
         target_task_policy: None,
@@ -1369,7 +1369,7 @@ fn preference_memory_turn_with_machine_alias_derives_exact_token() {
 
 #[test]
 fn compact_alias_memory_turn_with_single_locator_derives_structured_binding() {
-    let route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route = route_result_for_test(crate::AskMode::respond_trace(), false);
     let turn_analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
         target_task_policy: None,
@@ -1394,7 +1394,7 @@ fn compact_alias_memory_turn_with_single_locator_derives_structured_binding() {
 
 #[test]
 fn chat_ack_single_locator_derives_compact_alias_without_memory_turn_classification() {
-    let route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let route = route_result_for_test(crate::AskMode::respond_trace(), false);
     let merged = super::merge_alias_bindings_for_turn(
         None,
         None,
@@ -1425,7 +1425,7 @@ fn planner_execute_single_locator_does_not_create_prompt_alias_binding() {
 
 #[test]
 fn quoted_alias_with_single_locator_binds_without_memory_turn_analysis() {
-    let route = route_result_for_test(crate::AskMode::clarify(), true);
+    let route = route_result_for_test(crate::AskMode::clarify_trace(), true);
     let merged = super::merge_alias_bindings_for_turn(
         None,
         None,
@@ -1550,7 +1550,7 @@ fn state_patch_rejects_non_locator_direct_alias_map() {
 
 #[test]
 fn structural_prompt_alias_binding_uses_quote_and_single_locator() {
-    let mut route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let mut route = route_result_for_test(crate::AskMode::respond_trace(), false);
     route.risk_ceiling = crate::RiskCeiling::Low;
 
     let binding = super::structural_alias_binding_from_prompt(
@@ -1651,7 +1651,7 @@ fn ordered_listing_outcome_refreshes_active_session_pointers_for_status_query() 
 
 #[test]
 fn clarify_task_request_persists_primary_prompt_for_followups() {
-    let mut route_result = route_result_for_test(crate::AskMode::clarify(), true);
+    let mut route_result = route_result_for_test(crate::AskMode::clarify_trace(), true);
     route_result.resolved_intent = "帮我写个方案".to_string();
     route_result.clarify_question = "请补充主题".to_string();
     route_result.route_reason = "clarify".to_string();
@@ -1673,7 +1673,7 @@ fn clarify_task_request_persists_primary_prompt_for_followups() {
 
 #[test]
 fn clarify_task_prompt_without_turn_analysis_is_preserved_when_not_locator_driven() {
-    let mut route_result = route_result_for_test(crate::AskMode::clarify(), true);
+    let mut route_result = route_result_for_test(crate::AskMode::clarify_trace(), true);
     route_result.resolved_intent = "Help me write a proposal".to_string();
     route_result.clarify_question = "What is the topic and audience?".to_string();
     route_result.route_reason = "missing_task_slots".to_string();

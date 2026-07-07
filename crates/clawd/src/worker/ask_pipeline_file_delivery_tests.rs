@@ -564,7 +564,7 @@ fn unresolved_file_delivery_without_current_request_locator_defers_to_loop_evide
         payload_json: "{}".to_string(),
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::clarify();
+    route.ask_mode = crate::AskMode::clarify_trace();
     route.needs_clarify = true;
     route.route_reason =
         "clarify_reason_code:missing_delivery_locator; unresolved_file_delivery_requires_clarify"
@@ -1043,7 +1043,7 @@ fn post_route_defers_active_read_file_delivery_target_to_loop_candidate() {
     }
 
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::clarify();
+    route.ask_mode = crate::AskMode::clarify_trace();
     route.needs_clarify = true;
     route.set_clarify_gate();
     route.resolved_intent =

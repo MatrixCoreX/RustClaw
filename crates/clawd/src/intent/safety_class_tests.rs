@@ -30,14 +30,14 @@ fn base_route(ask_mode: AskMode) -> RouteResult {
 
 #[test]
 fn chat_route_is_low_risk() {
-    let route = base_route(crate::AskMode::direct_answer());
+    let route = base_route(crate::AskMode::respond_trace());
     let out = classify_route_risk_ceiling(&route, None);
     assert_eq!(out.risk_ceiling, RiskCeiling::Low);
 }
 
 #[test]
 fn current_repo_code_change_is_medium_risk() {
-    let route = base_route(crate::AskMode::direct_answer());
+    let route = base_route(crate::AskMode::respond_trace());
     let recipe = ExecutionRecipeSpec {
         kind: ExecutionRecipeKind::OpsClosedLoop,
         profile: ExecutionRecipeProfile::CodeChange,
@@ -83,7 +83,7 @@ fn generated_file_delivery_route_is_high_risk() {
 
 #[test]
 fn generated_file_path_report_route_is_high_risk() {
-    let mut route = base_route(crate::AskMode::direct_answer());
+    let mut route = base_route(crate::AskMode::respond_trace());
     route.route_reason = "generated_file_path_report".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -139,8 +139,8 @@ fn read_only_locator_route_is_low_risk() {
 
 #[test]
 fn resume_execution_shortcut_is_still_execute_risk() {
-    let mut route = base_route(crate::AskMode::direct_answer());
-    route.ask_mode = AskMode::direct_answer().with_resume_overrides(false, true);
+    let mut route = base_route(crate::AskMode::respond_trace());
+    route.ask_mode = AskMode::respond_trace().with_resume_overrides(false, true);
     let out = classify_route_risk_ceiling(&route, None);
     assert_eq!(out.risk_ceiling, RiskCeiling::Medium);
     assert_eq!(out.reason, "action_route_without_recipe");

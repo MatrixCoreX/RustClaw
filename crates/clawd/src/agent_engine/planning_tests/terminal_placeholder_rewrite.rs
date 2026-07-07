@@ -69,7 +69,7 @@ fn normalizer_drops_pre_observation_synthesize_when_concrete_respond_exists() {
     let state = test_state();
     let loop_state = LoopState::new(2);
     let route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         false,
         OutputResponseShape::Free,
     );

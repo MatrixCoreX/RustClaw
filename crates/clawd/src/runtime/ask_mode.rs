@@ -42,14 +42,14 @@ pub(crate) enum ActFinalizeStyle {
 
 impl AskMode {
     #[cfg(test)]
-    pub(crate) fn direct_answer() -> Self {
+    pub(crate) fn respond_trace() -> Self {
         AskMode::Respond {
             entry: RespondEntryStrategy::RespondTrace,
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn clarify() -> Self {
+    pub(crate) fn clarify_trace() -> Self {
         AskMode::Respond {
             entry: RespondEntryStrategy::ClarifyTrace,
         }

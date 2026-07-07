@@ -846,7 +846,7 @@ planner_kind = "tool"
     let mut state = test_state_with_enabled_skills(&["config_basic", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Free,
     );

@@ -170,7 +170,7 @@ fn bare_topic_model_supplied_locator_allows_reused_structured_anchor() {
 fn bare_topic_model_supplied_locator_keeps_existing_clarify() {
     let mut route = executable_filename_route();
     route.needs_clarify = true;
-    route.ask_mode = crate::AskMode::clarify();
+    route.ask_mode = crate::AskMode::clarify_trace();
     route.resolved_intent = "View logs from /workspace/logs".to_string();
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/workspace/logs".to_string();

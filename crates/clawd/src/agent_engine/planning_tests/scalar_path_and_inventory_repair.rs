@@ -725,7 +725,7 @@ fn scalar_path_current_workspace_preserves_planner_workspace_contract_action() {
     state.skill_rt.workspace_root = root.path.clone();
     let workspace_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -969,7 +969,7 @@ fn file_facts_auto_locator_builds_stat_paths_synthesis_plan() {
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Free,
     );
@@ -1028,7 +1028,7 @@ fn file_facts_auto_locator_accepts_single_file_metadata_mislabeled_as_quantity_c
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1061,7 +1061,7 @@ fn file_facts_auto_locator_uses_route_locator_hint_without_auto_locator_path() {
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1087,7 +1087,7 @@ fn file_facts_auto_locator_accepts_single_directory_metadata_quantity_comparison
     fs::create_dir_all(&target).expect("create target dir");
     let target_path = target.display().to_string();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1292,7 +1292,7 @@ fn quantity_compare_pair_locator_preserves_planner_compare_paths_action() {
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );

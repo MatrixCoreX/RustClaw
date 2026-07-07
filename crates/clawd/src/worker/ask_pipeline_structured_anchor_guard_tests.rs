@@ -54,7 +54,7 @@ fn listed_entry_snapshot() -> crate::conversation_state::ActiveSessionSnapshot {
 fn structured_anchor_route_with_derived_candidate_requires_evidence() {
     let snapshot = listed_entry_snapshot();
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     route.resolved_intent = concat!(
         "User wants path and type for the observed entry hello.sh.\n",
         "answer_candidate: {\"path\":\"/tmp/hello.sh\",\"type\":\"file\"}"
@@ -84,7 +84,7 @@ fn structured_anchor_route_with_derived_candidate_requires_evidence() {
 fn structured_anchor_route_with_exact_observed_candidate_requires_evidence() {
     let snapshot = listed_entry_snapshot();
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     route.resolved_intent =
         "User wants the observed entry name.\nanswer_candidate: hello.sh".to_string();
     route.output_contract = crate::IntentOutputContract::default();
@@ -121,7 +121,7 @@ fn structured_anchor_route_with_state_patch_stays_chat() {
         active_observed_facts: None,
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     route.resolved_intent = "state_patch ack\nanswer_candidate: state_update_ack".to_string();
     route.output_contract = crate::IntentOutputContract::default();
     let turn_analysis = crate::intent_router::TurnAnalysis {
@@ -175,7 +175,7 @@ fn structured_anchor_route_with_resolved_target_basename_stays_chat() {
         }),
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     route.resolved_intent = "answer_candidate: clawd-dev.log".to_string();
     route.output_contract = crate::IntentOutputContract::default();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -218,7 +218,7 @@ fn structured_anchor_route_with_prose_basename_requires_evidence() {
         }),
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     route.resolved_intent = "User only wants the file basename clawd-dev.log".to_string();
     route.output_contract = crate::IntentOutputContract::default();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -252,7 +252,7 @@ fn structured_anchor_route_with_recent_execution_token_candidate_requires_eviden
         active_observed_facts: None,
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     route.resolved_intent = concat!(
         "Compare the two most recent observed excerpts and return the selected filename.\n",
         "answer_candidate: README.md"
@@ -298,7 +298,7 @@ fn structured_anchor_route_with_existing_context_synthesis_candidate_requires_ev
         active_observed_facts: None,
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     route.resolved_intent = concat!(
         "Summarize the previously displayed README opening.\n",
         "answer_candidate: This README describes stable local fixture files for regression tests."
@@ -338,7 +338,7 @@ fn inline_json_followup_does_not_bind_to_workspace_evidence() {
         active_observed_facts: None,
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     route.resolved_intent = concat!(
         "Sort the provided JSON array by score and render a table.\n",
         "answer_candidate: | name | score |"
@@ -384,7 +384,7 @@ fn active_text_mutation_with_structured_anchor_stays_chat() {
         attachment_processing_required: false,
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     route.resolved_intent = "Clarify the current request without reading files.".to_string();
     route.output_contract = crate::IntentOutputContract::default();
 
