@@ -327,6 +327,119 @@ fn route_result_uses_machine_execution_signal_not_legacy_normalizer_hint() {
 }
 
 #[test]
+fn route_result_does_not_bind_task_control_from_async_contract_field_names() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        task_id: "task-async-contract-fields".to_string(),
+        user_id: 91,
+        chat_id: 202,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"dry-run async contract"}).to_string(),
+    };
+    let decision = super::RouteDecision {
+        resolved_user_intent:
+            "runtime_async_start_contract adapter_kind=local_process_poll checkpoint_id poll_ref cancel_ref"
+                .to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason:
+            "required boundary fields adapter_kind checkpoint_id poll_ref cancel_ref".to_string(),
+        confidence: Some(0.95),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::RawCommandOutput,
+            locator_hint: String::new(),
+            ..IntentOutputContract::default()
+        },
+    };
+    let out = super::normalizer_output_from_fallback(
+        "dry-run async contract",
+        "test_fallback",
+        decision,
+        None,
+    );
+
+    let route = super::route_result_from_normalizer(&state, &task, &out);
+
+    assert!(!route
+        .route_reason
+        .contains("task_lifecycle_machine_fields_bound_to_task_control"));
+    assert!(!route
+        .route_reason
+        .contains("capability_ref=task_control.list"));
+    assert_ne!(
+        route
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .as_deref(),
+        Some("task_lifecycle.*")
+    );
+}
+
+#[test]
+fn route_result_binds_task_control_from_machine_capability_ref() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        task_id: "task-control-capability-ref".to_string(),
+        user_id: 91,
+        chat_id: 202,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"inspect task lifecycle"}).to_string(),
+    };
+    let decision = super::RouteDecision {
+        resolved_user_intent: "capability_ref=task_control.list".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "capability_ref=task_control.list".to_string(),
+        confidence: Some(0.95),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract::default(),
+    };
+    let out = super::normalizer_output_from_fallback(
+        "inspect task lifecycle",
+        "test_fallback",
+        decision,
+        None,
+    );
+
+    let route = super::route_result_from_normalizer(&state, &task, &out);
+
+    assert!(route
+        .route_reason
+        .contains("task_lifecycle_machine_fields_bound_to_task_control"));
+    assert_eq!(
+        route
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .as_deref(),
+        Some("task_lifecycle.*")
+    );
+}
+
+#[test]
 fn route_result_ignores_legacy_planner_hint_without_machine_execution_signal() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = crate::ClaimedTask {

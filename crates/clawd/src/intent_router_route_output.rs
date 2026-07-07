@@ -146,39 +146,20 @@ fn route_targets_task_lifecycle_query(
     {
         return true;
     }
-    let fields = [
-        task_lifecycle_machine_field_count(&normalizer_out.resolved_user_intent),
-        task_lifecycle_machine_field_count(route_reason),
-    ]
-    .into_iter()
-    .sum::<usize>();
-    fields >= 2
+    route_has_task_lifecycle_machine_token(&normalizer_out.resolved_user_intent)
+        || route_has_task_lifecycle_machine_token(route_reason)
 }
 
-fn task_lifecycle_machine_field_count(text: &str) -> usize {
-    let mut fields = std::collections::BTreeSet::new();
-    for token in text
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.')))
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-    {
-        match token {
-            "task_lifecycle.can_poll" | "can_poll" => {
-                fields.insert("can_poll");
-            }
-            "task_lifecycle.can_cancel" | "can_cancel" => {
-                fields.insert("can_cancel");
-            }
-            "task_lifecycle.checkpoint_id" | "checkpoint_id" => {
-                fields.insert("checkpoint_id");
-            }
-            "task_lifecycle.next_check_after" | "next_check_after" => {
-                fields.insert("next_check_after");
-            }
-            _ => {}
-        }
-    }
-    fields.len()
+fn route_has_task_lifecycle_machine_token(text: &str) -> bool {
+    text.split_whitespace()
+        .map(|token| token.trim_matches(|ch: char| matches!(ch, ';' | ',' | '"' | '\'')))
+        .any(|token| {
+            matches!(
+                token,
+                "capability_ref=task_control" | "structured_field_selector=task_lifecycle.*"
+            ) || token.starts_with("capability_ref=task_control.")
+                || token.starts_with("structured_field_selector=task_lifecycle.")
+        })
 }
 
 fn demote_output_contract_semantic_to_route_marker(
