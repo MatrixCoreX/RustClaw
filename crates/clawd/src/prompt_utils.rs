@@ -560,6 +560,33 @@ fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value,
             if map.remove("decision").is_some() {
                 normalized = true;
             }
+            let allowed_top_level_keys = [
+                "boundary_envelope",
+                "resolved_user_intent",
+                "resume_behavior",
+                "schedule_kind",
+                "wants_file_delivery",
+                "should_refresh_long_term_memory",
+                "agent_display_name_hint",
+                "needs_clarify",
+                "clarify_question",
+                "reason",
+                "confidence",
+                "schedule_intent",
+                "output_contract",
+                "execution_recipe",
+                "turn_type",
+                "target_task_policy",
+                "should_interrupt_active_run",
+                "state_patch",
+                "attachment_processing_required",
+            ];
+            for key in map.keys().cloned().collect::<Vec<_>>() {
+                if !allowed_top_level_keys.contains(&key.as_str()) {
+                    map.remove(&key);
+                    normalized = true;
+                }
+            }
             let mut execution_recipe_locator_hint: Option<Value> = None;
             let mut execution_recipe_self_extension: Option<Value> = None;
             if let Some(Value::Object(execution_recipe)) = map.get_mut("execution_recipe") {
