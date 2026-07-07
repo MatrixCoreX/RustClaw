@@ -447,11 +447,7 @@ fn free_quantity_compare_plan_appends_synthesize_for_compare_paths() {
             "right_path": "README.zh-CN.md",
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     route.route_reason = "quantity_comparison_requires_model_language_synthesis".to_string();
     route.resolved_intent =

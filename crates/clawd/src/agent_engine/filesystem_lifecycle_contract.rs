@@ -11,7 +11,7 @@ pub(crate) fn route_can_upgrade_scratch_filesystem_lifecycle(route: &RouteResult
         && !route.output_contract.delivery_required
         && route.output_contract.requires_content_evidence
         && matches!(
-            route.output_contract.semantic_kind,
+            route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::CommandOutputSummary
                 | crate::OutputSemanticKind::ExecutionFailedStep
         )
@@ -157,6 +157,7 @@ pub(crate) fn scratch_filesystem_cleanup_recovery_action_allowed(
         return false;
     }
     scratch_lifecycle_progress_has_write_in_root(state, loop_state, &root)
+        || scratch_lifecycle_progress_has_archive_pack_in_root(state, loop_state, &root)
 }
 
 pub(crate) fn scratch_filesystem_lifecycle_action_allowed(
@@ -201,10 +202,15 @@ pub(crate) fn enrich_scratch_filesystem_cleanup_runtime_args(
         return false;
     }
     let contract_allows = loop_state.output_contract.as_ref().is_some_and(|contract| {
-        contract.semantic_kind == crate::OutputSemanticKind::FilesystemMutationResult
+        contract.semantic_kind_is(crate::OutputSemanticKind::FilesystemMutationResult)
     });
     let recovery_allows =
-        scratch_lifecycle_progress_has_write_in_root(state, loop_state, root.as_str());
+        scratch_lifecycle_progress_has_write_in_root(state, loop_state, root.as_str())
+            || scratch_lifecycle_progress_has_archive_pack_in_root(
+                state,
+                loop_state,
+                root.as_str(),
+            );
     if !contract_allows && !recovery_allows {
         return false;
     }
@@ -330,6 +336,33 @@ fn scratch_lifecycle_progress_has_write_in_root(
                 return false;
             }
             let Some(path) = extra.get("path").and_then(Value::as_str) else {
+                return false;
+            };
+            scratch_root_for_path(&state.skill_rt.workspace_root, path).as_deref() == Some(root)
+        })
+}
+
+fn scratch_lifecycle_progress_has_archive_pack_in_root(
+    state: &AppState,
+    loop_state: &LoopState,
+    root: &str,
+) -> bool {
+    loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.is_ok() && step.skill == "archive_basic")
+        .filter_map(|step| step.output.as_deref())
+        .filter_map(step_output_extra)
+        .any(|extra| {
+            let action = extra
+                .get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
+            if action != "pack" {
+                return false;
+            }
+            let Some(path) = extra.get("archive").and_then(Value::as_str) else {
                 return false;
             };
             scratch_root_for_path(&state.skill_rt.workspace_root, path).as_deref() == Some(root)

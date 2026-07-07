@@ -122,7 +122,7 @@ pub(super) fn append_synthesize_answer_for_structured_scalar_compare(
     }
     let scalar_units = structured_scalar_observation_units(&actions);
     let has_scalar_text_evidence = structured_scalar_plus_text_evidence(&actions);
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::RecentScalarEqualityCheck
+    if route.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
         && scalar_units >= 2
         && !has_scalar_text_evidence
     {
@@ -176,7 +176,7 @@ pub(super) fn rewrite_split_dir_basename_stat_paths_to_auto_locator_file(
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
         || !matches!(
-            route.output_contract.semantic_kind,
+            route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::ExistenceWithPath
                 | crate::OutputSemanticKind::ScalarPathOnly
                 | crate::OutputSemanticKind::FilePaths
@@ -396,7 +396,7 @@ pub(super) fn file_paths_missing_stat_path_selector_search_repair(
     raw_path: &str,
     user_text: &str,
 ) -> Option<(String, String, Option<String>)> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths) {
         return None;
     }
     let raw_path = raw_path.trim();
@@ -1038,7 +1038,7 @@ pub(super) fn replace_directory_compare_search_plan(
     if route.needs_clarify
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
     {
         return actions;
     }

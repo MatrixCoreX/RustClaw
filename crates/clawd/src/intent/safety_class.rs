@@ -55,13 +55,12 @@ pub(crate) fn classify_route_risk_ceiling(
         };
     }
 
-    if matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::GeneratedFileDelivery
-            | crate::OutputSemanticKind::GeneratedFilePathReport
-    ) && (route_result.output_contract.delivery_required
-        || route_result.output_contract.semantic_kind
-            == crate::OutputSemanticKind::GeneratedFilePathReport)
+    let generated_file_delivery_route =
+        route_result.has_route_reason_machine_marker("generated_file_delivery");
+    let generated_file_path_report_route =
+        route_result.has_route_reason_machine_marker("generated_file_path_report");
+    if (generated_file_delivery_route || generated_file_path_report_route)
+        && (route_result.output_contract.delivery_required || generated_file_path_report_route)
     {
         return SafetyClassDecision {
             risk_ceiling: RiskCeiling::High,
@@ -69,7 +68,7 @@ pub(crate) fn classify_route_risk_ceiling(
         };
     }
 
-    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ConfigMutation {
+    if route_result.has_route_reason_machine_marker("config_mutation") {
         return SafetyClassDecision {
             risk_ceiling: RiskCeiling::High,
             reason: "config_mutation_route",

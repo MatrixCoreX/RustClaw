@@ -23,20 +23,19 @@ pub(super) fn synthesize_route_allows_direct_fallback(
     if route.ask_mode.is_plain_act()
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && route.output_contract_is_unclassified()
     {
         return true;
     }
-    if matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::FilePaths
-            | crate::OutputSemanticKind::ConfigValidation
-    ) {
+    if route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::FileNames,
+        crate::OutputSemanticKind::DirectoryNames,
+        crate::OutputSemanticKind::FilePaths,
+        crate::OutputSemanticKind::ConfigValidation,
+    ]) {
         return true;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+    if route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
         && route.output_contract.response_shape == crate::OutputResponseShape::Strict
     {
         return false;
@@ -46,7 +45,7 @@ pub(super) fn synthesize_route_allows_direct_fallback(
         crate::OutputResponseShape::Scalar
             | crate::OutputResponseShape::Strict
             | crate::OutputResponseShape::FileToken
-    ) || route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+    ) || route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
 }
 
 pub(super) fn synthesize_route_prefers_model_language_observed_status(
@@ -55,11 +54,10 @@ pub(super) fn synthesize_route_prefers_model_language_observed_status(
     agent_run_context
         .and_then(|context| context.route_result.as_ref())
         .is_some_and(|route| {
-            matches!(
-                route.output_contract.semantic_kind,
-                crate::OutputSemanticKind::CommandOutputSummary
-                    | crate::OutputSemanticKind::ExecutionFailedStep
-            ) && route.output_contract.requires_content_evidence
+            route.output_contract_marker_is_any(&[
+                crate::OutputSemanticKind::CommandOutputSummary,
+                crate::OutputSemanticKind::ExecutionFailedStep,
+            ]) && route.output_contract.requires_content_evidence
                 && !route.output_contract.delivery_required
         })
 }
@@ -98,7 +96,7 @@ fn synthesize_direct_fallback_blocked_by_multi_count_quantity_comparison(
     agent_run_context
         .and_then(|context| context.route_result.as_ref())
         .is_some_and(|route| {
-            route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+            route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
                 && quantity_comparison_has_multiple_count_observations(loop_state)
         })
 }
@@ -250,7 +248,7 @@ pub(super) fn filesystem_mutation_lifecycle_structured_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     let route = agent_run_context.and_then(|context| context.route_result.as_ref())?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilesystemMutationResult {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult) {
         return None;
     }
 
@@ -363,7 +361,7 @@ pub(super) fn kb_filesystem_mutation_structured_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     let route = agent_run_context.and_then(|context| context.route_result.as_ref())?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilesystemMutationResult {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult) {
         return None;
     }
 
@@ -605,7 +603,7 @@ fn synthesize_strict_raw_tail_read_direct_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     let route = agent_run_context.and_then(|context| context.route_result.as_ref())?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
         || route.output_contract.response_shape != crate::OutputResponseShape::Strict
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
@@ -757,14 +755,12 @@ pub(super) fn synthesize_direct_fallback_would_passthrough_multiline_read_range(
     {
         return false;
     }
-    let semantic_blocks_direct_passthrough = matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::None
-            | crate::OutputSemanticKind::ContentExcerptSummary
-            | crate::OutputSemanticKind::ContentExcerptWithSummary
-    ) || (route.output_contract.semantic_kind
-        == crate::OutputSemanticKind::RawCommandOutput
-        && latest_round_plan_requests_synthesis(loop_state));
+    let semantic_blocks_direct_passthrough = route.output_contract_is_unclassified()
+        || route
+            .effective_output_contract_semantic_kind()
+            .is_content_excerpt_summary()
+        || (route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+            && latest_round_plan_requests_synthesis(loop_state));
     if !semantic_blocks_direct_passthrough {
         return false;
     }
@@ -790,21 +786,32 @@ fn latest_round_plan_requests_synthesis(loop_state: &LoopState) -> bool {
 
 fn multiline_read_range_content_line_count(output: &str) -> Option<usize> {
     let value = serde_json::from_str::<Value>(output.trim()).ok()?;
-    let action = value.get("action").and_then(Value::as_str)?;
-    if !matches!(action, "read_range" | "read_text_range") {
-        return None;
+    multiline_read_range_content_line_count_from_value(&value)
+}
+
+fn multiline_read_range_content_line_count_from_value(value: &Value) -> Option<usize> {
+    if value
+        .get("action")
+        .and_then(Value::as_str)
+        .is_some_and(|action| matches!(action, "read_range" | "read_text_range"))
+    {
+        if let Some(text) = value
+            .get("content")
+            .or_else(|| value.get("excerpt"))
+            .and_then(Value::as_str)
+        {
+            return Some(
+                text.lines()
+                    .map(strip_markdown_read_line_prefix)
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .count(),
+            );
+        }
     }
-    let text = value
-        .get("content")
-        .or_else(|| value.get("excerpt"))
-        .and_then(Value::as_str)?;
-    Some(
-        text.lines()
-            .map(strip_markdown_read_line_prefix)
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .count(),
-    )
+    value
+        .get("extra")
+        .and_then(multiline_read_range_content_line_count_from_value)
 }
 
 pub(super) fn deterministic_scalar_markdown_heading_answer(
@@ -814,15 +821,14 @@ pub(super) fn deterministic_scalar_markdown_heading_answer(
     let route = agent_run_context?.route_result.as_ref()?;
     if route.output_contract.response_shape != OutputResponseShape::Scalar
         || route.output_contract.delivery_required
-        || matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::FileNames
-                | crate::OutputSemanticKind::DirectoryNames
-                | crate::OutputSemanticKind::FilePaths
-                | crate::OutputSemanticKind::DirectoryEntryGroups
-                | crate::OutputSemanticKind::ScalarCount
-                | crate::OutputSemanticKind::RawCommandOutput
-        )
+        || route.output_contract_marker_is_any(&[
+            crate::OutputSemanticKind::FileNames,
+            crate::OutputSemanticKind::DirectoryNames,
+            crate::OutputSemanticKind::FilePaths,
+            crate::OutputSemanticKind::DirectoryEntryGroups,
+            crate::OutputSemanticKind::ScalarCount,
+            crate::OutputSemanticKind::RawCommandOutput,
+        ])
     {
         return None;
     }

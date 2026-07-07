@@ -1,10 +1,10 @@
 use std::future::Future;
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::{
-    AppState, AskReply, ClaimedTask, SelfExtensionMode, SelfExtensionTrigger,
-    runtime::state::reload_skill_views, worker::task_runtime_channel,
+    runtime::state::reload_skill_views, worker::task_runtime_channel, AppState, AskReply,
+    ClaimedTask, SelfExtensionMode, SelfExtensionTrigger,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

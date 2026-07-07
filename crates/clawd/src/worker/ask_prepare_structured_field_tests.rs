@@ -245,7 +245,7 @@ fn scalar_field_selector_repairs_document_heading_contract_to_field_value_contra
 }
 
 #[test]
-fn single_locator_field_selector_does_not_promote_to_scalar_pair_contract() {
+fn single_locator_field_selector_does_not_bind_to_scalar_pair_contract() {
     let mut route = crate::RouteResult {
         ask_mode: crate::AskMode::planner_execute_plain(),
         resolved_intent: "Read one structured field value".to_string(),
@@ -297,7 +297,9 @@ fn single_path_field_selector_repairs_misclassified_equality_contract_to_scalar_
         ask_mode: crate::AskMode::planner_execute_plain(),
         resolved_intent: "Read the selected TOML field value only".to_string(),
         needs_clarify: false,
-        route_reason: "structured_field_selector_requires_scalar_value".to_string(),
+        route_reason:
+            "structured_field_selector_requires_scalar_value; recent_scalar_equality_check"
+                .to_string(),
         route_confidence: Some(0.9),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: crate::RiskCeiling::Low,
@@ -480,7 +482,7 @@ fn structured_field_target_repair_moves_dotted_field_locator_to_structured_file(
 }
 
 #[test]
-fn structured_field_with_text_target_promotes_to_recent_scalar_contract() {
+fn structured_field_with_text_target_refines_to_recent_scalar_contract() {
     let root = TempDirGuard::new("structured_field_text_pair");
     fs::write(
         root.path.join("Cargo.toml"),
@@ -541,7 +543,7 @@ version = "0.1.8"
     repair_scalar_field_value_contract_for_locator_reply(&mut route, prompt);
 
     assert_eq!(
-        route.output_contract.semantic_kind,
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::RecentScalarEqualityCheck
     );
     assert_eq!(
@@ -567,7 +569,7 @@ fn command_summary_structured_field_target_repair_preserves_summary_contract() {
             "Summarize local observations with README existence, config field, cwd, and clock."
                 .to_string(),
         needs_clarify: false,
-        route_reason: "normalizer_semantic=command_output_summary".to_string(),
+        route_reason: "command_output_summary".to_string(),
         route_confidence: Some(0.93),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: crate::RiskCeiling::Low,
@@ -600,7 +602,7 @@ fn command_summary_structured_field_target_repair_preserves_summary_contract() {
     repair_scalar_field_value_contract_for_locator_reply(&mut route, &prompt);
 
     assert_eq!(
-        route.output_contract.semantic_kind,
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::CommandOutputSummary
     );
     assert_eq!(
@@ -642,8 +644,8 @@ fn multi_locator_structured_field_preserves_summary_contract() {
                 .to_string(),
         needs_clarify: false,
         route_reason: concat!(
-            "compound local observation summary semantic_kind=command_output_summary ",
-            "command_result_synthesis with structured_field_selector=llm.selected_vendor; ",
+            "compound_local_observation_summary; command_output_summary; ",
+            "command_result_synthesis; structured_field_selector=llm.selected_vendor; ",
             "structured_field_target_from_prompt_repair"
         )
         .to_string(),
@@ -681,7 +683,7 @@ fn multi_locator_structured_field_preserves_summary_contract() {
     repair_scalar_field_value_contract_for_locator_reply(&mut route, &prompt);
 
     assert_eq!(
-        route.output_contract.semantic_kind,
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::CommandOutputSummary
     );
     assert_eq!(
@@ -695,6 +697,65 @@ fn multi_locator_structured_field_preserves_summary_contract() {
         .route_reason
         .contains("scalar_field_value_contract_repair"));
     assert!(!route
+        .route_reason
+        .contains("scalar_field_pair_contract_repair"));
+}
+
+#[test]
+fn multi_locator_summary_contract_requires_exact_summary_marker() {
+    let root = TempDirGuard::new("structured_field_summary_exact_marker");
+    let readme = root.path.join("README.md");
+    let config = root.path.join("config.toml");
+    fs::write(&readme, "# RustClaw\n").expect("write readme");
+    fs::write(&config, "[llm]\nselected_vendor = \"minimax\"\n").expect("write config");
+
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "Combine file existence and config field observations.".to_string(),
+        needs_clarify: false,
+        route_reason: concat!(
+            "compound local observation summary command_output_summary_extra ",
+            "command_result_synthesis_extra; structured_field_target_from_prompt_repair"
+        )
+        .to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: config.display().to_string(),
+            self_extension: crate::SelfExtensionContract {
+                structured_field_selector: Some("llm.selected_vendor".to_string()),
+                ..crate::SelfExtensionContract::default()
+            },
+        },
+    };
+    let prompt = format!(
+        "Check whether {} exists; read llm.selected_vendor from {}.",
+        readme.display(),
+        config.display()
+    );
+
+    repair_scalar_field_value_contract_for_locator_reply(&mut route, &prompt);
+
+    assert_ne!(
+        route.effective_output_contract_semantic_kind(),
+        crate::OutputSemanticKind::CommandOutputSummary
+    );
+    assert!(route
         .route_reason
         .contains("scalar_field_pair_contract_repair"));
 }

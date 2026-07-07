@@ -805,11 +805,7 @@ fn content_evidence_route_repairs_synthesize_only_plan_before_any_observation() 
             content: "{{last_output}}".to_string(),
         },
     ];
-    let route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
 
     assert!(should_force_plan_repair(
         Some(&route),
@@ -832,11 +828,7 @@ fn content_evidence_route_repairs_locator_only_observation_plan() {
             "pattern": "crates/clawd/src/prompt_utils.rs",
         }),
     }];
-    let route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
 
     assert!(should_force_plan_repair(
         Some(&route),
@@ -869,11 +861,7 @@ fn content_evidence_route_accepts_structured_listing_terminal_plan() {
             content: "{{last_output}}".to_string(),
         },
     ];
-    let route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
 
     assert!(!should_force_plan_repair(
         Some(&route),
@@ -961,11 +949,7 @@ fn existence_route_accepts_observation_only_stat_paths_even_when_content_evidenc
             "include_missing": true
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
 
     assert!(!should_force_plan_repair(
@@ -1068,11 +1052,7 @@ fn content_evidence_route_accepts_scoped_grep_observation_plan() {
             "query": "run_cmd",
         }),
     }];
-    let route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
 
     assert!(!should_force_plan_repair(
         Some(&route),
@@ -1162,11 +1142,7 @@ fn workspace_synthesis_respond_only_plan_gets_default_evidence_actions() {
 #[test]
 fn workspace_synthesis_plan_adds_missing_text_evidence_and_synthesizes_all_steps() {
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     let actions = vec![

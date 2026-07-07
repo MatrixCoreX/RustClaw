@@ -8,14 +8,13 @@ use claw_core::config::{AgentConfig, ToolsConfig};
 use claw_core::skill_registry::SkillsRegistry;
 
 use super::{
-    LoopState, PlanningPromptClass, action_supports_structured_direct_observed_finalize,
-    action_targets_config_edit, actions_use_ad_hoc_command_without_route_preferred_skill,
-    apply_scalar_count_filter_hint, broaden_default_read_range_for_structured_text,
-    build_lightweight_skill_playbooks_text, build_lightweight_skill_quick_index_text,
-    build_lightweight_tool_spec, can_fallback_to_initial_plan_after_repair_failure,
-    classify_planning_prompt_class, compact_lightweight_incremental_goal_context,
-    compact_skill_playbook_from_prompt, contract_scoped_lightweight_planner_skill_scope,
-    contract_scoped_planner_skill_scope,
+    action_supports_structured_direct_observed_finalize, action_targets_config_edit,
+    actions_use_ad_hoc_command_without_route_preferred_skill, apply_scalar_count_filter_hint,
+    broaden_default_read_range_for_structured_text, build_lightweight_skill_playbooks_text,
+    build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
+    can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
+    compact_lightweight_incremental_goal_context, compact_skill_playbook_from_prompt,
+    contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
     directory_purpose_representative_read_actions_after_find_result,
     enforce_output_contract_tool_args, ensure_content_excerpt_summary_has_bounded_content,
     ensure_required_contract_block_present, ensure_workspace_synthesis_has_default_text_evidence,
@@ -67,18 +66,19 @@ use super::{
     strip_terminal_discussion_for_observed_finalize,
     strip_terminal_discussion_for_scalar_path_observation,
     strip_terminal_placeholder_respond_for_exact_listing_contract,
-    strip_unresolved_template_reads_after_inventory_dir, structured_field_selectors,
+    strip_unresolved_template_reads_after_inventory_dir, structured_field_selectors, LoopState,
+    PlanningPromptClass,
 };
 use crate::agent_engine::{
     CLAWD_CONTINUE_ON_ERROR_ARG, CLAWD_LITERAL_COMMAND_ARG, CLAWD_RUNTIME_ASYNC_JOB_START_ARG,
 };
 use crate::{
-    AgentAction, AgentRuntimeConfig, AppState, AskMode, ClaimedTask, DEFAULT_AGENT_ID,
-    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, PlanKind, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
-    SkillViewsSnapshot, ToolsPolicy,
+    AgentAction, AgentRuntimeConfig, AppState, AskMode, ClaimedTask, IntentOutputContract,
+    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, PlanKind,
+    ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind, SkillViewsSnapshot, ToolsPolicy,
+    DEFAULT_AGENT_ID,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[test]
 fn planner_notes_record_repair_reason_codes() {

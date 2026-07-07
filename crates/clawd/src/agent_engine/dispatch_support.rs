@@ -21,9 +21,9 @@ use dispatch_synthesis::{
     filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
     package_docker_probe_structured_answer, route_resolved_intent,
     step_has_observable_synthesis_fact, synthesize_answer_allows_direct_fallback,
-    synthesize_evidence_policy_direct_observed_fallback_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
-    synthesize_direct_observed_fallback_answer, synthesize_failure_observed_facts,
+    synthesize_direct_observed_fallback_answer,
+    synthesize_evidence_policy_direct_observed_fallback_answer, synthesize_failure_observed_facts,
     synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
     synthesize_route_prefers_model_language_observed_status, synthesize_user_language_source,
 };
@@ -1410,7 +1410,7 @@ pub(super) async fn handle_synthesize_answer_action(
             if agent_run_context
                 .and_then(|context| context.route_result.as_ref())
                 .is_none_or(|route| {
-                    route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigMutation
+                    !route.output_contract_marker_is(crate::OutputSemanticKind::ConfigMutation)
                 })
             {
                 if let Some((answer, _summary)) =

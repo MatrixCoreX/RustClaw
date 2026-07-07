@@ -1,6 +1,6 @@
 use super::{
-    AgentAction, AskMode, IntentOutputContract, PlanStep, ResumeBehavior, RiskCeiling, RouteResult,
-    ScheduleKind, plan_step_from_agent_action,
+    plan_step_from_agent_action, AgentAction, AskMode, IntentOutputContract, PlanStep,
+    ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
 };
 use serde_json::json;
 
@@ -104,13 +104,13 @@ fn route_result_gate_kind_uses_ask_mode() {
 }
 
 #[test]
-fn route_result_set_execute_gate_updates_legacy_trace_label() {
+fn route_result_set_execute_gate_updates_structured_trace_label() {
     let mut route = route_result_with_mode(crate::AskMode::direct_answer());
 
     route.set_execute_gate();
 
     assert_eq!(route.gate_kind(), crate::RouteGateKind::Execute);
-    assert_eq!(route.route_trace_label_for_log(), "Act");
+    assert_eq!(route.route_trace_label_for_log(), "act_plain_finalizer");
     assert!(route.is_execute_gate());
 }
 
@@ -121,7 +121,7 @@ fn route_result_exposes_chat_wrapped_planner_mode_as_structured_state() {
     assert!(route.is_execute_gate());
     assert!(route.uses_chat_finalizer());
     assert!(route.uses_pure_chat_agent_loop_submode());
-    assert_eq!(route.route_trace_label_for_log(), "ChatAct");
+    assert_eq!(route.route_trace_label_for_log(), "act_chat_finalizer");
 }
 
 #[test]
@@ -132,4 +132,59 @@ fn route_result_legacy_pure_chat_marker_is_exact_machine_token_fallback() {
 
     assert!(route.has_route_reason_machine_marker("pure_chat_agent_loop_submode"));
     assert!(route.uses_pure_chat_agent_loop_submode());
+}
+
+#[test]
+fn route_result_output_contract_marker_methods_accept_route_reason_tokens() {
+    let mut route = route_result_with_mode(crate::AskMode::planner_execute_plain());
+    route.route_reason = "contract:file_paths; contract:service_status".to_string();
+
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    );
+    assert!(route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths));
+    assert!(route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::DirectoryNames,
+        crate::OutputSemanticKind::ServiceStatus,
+    ]));
+    assert!(route.has_any_output_contract_marker());
+    assert!(!route.output_contract_is_unclassified());
+}
+
+#[test]
+fn route_result_effective_output_contract_uses_route_reason_marker() {
+    let mut route = route_result_with_mode(crate::AskMode::planner_execute_plain());
+    route.route_reason = "contract:workspace_project_summary".to_string();
+
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    );
+    assert_eq!(
+        route.effective_output_contract_semantic_kind(),
+        crate::OutputSemanticKind::WorkspaceProjectSummary
+    );
+    assert_eq!(
+        route.effective_output_contract().semantic_kind,
+        crate::OutputSemanticKind::WorkspaceProjectSummary
+    );
+    assert!(!route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths));
+    assert!(route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary));
+}
+
+#[test]
+fn route_result_explicit_contract_marker_overrides_legacy_raw_semantic() {
+    let mut route = route_result_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.route_reason = "contract:workspace_project_summary".to_string();
+
+    assert_eq!(
+        route.effective_output_contract_semantic_kind(),
+        crate::OutputSemanticKind::WorkspaceProjectSummary
+    );
+    assert_eq!(
+        route.effective_output_contract().semantic_kind,
+        crate::OutputSemanticKind::WorkspaceProjectSummary
+    );
 }

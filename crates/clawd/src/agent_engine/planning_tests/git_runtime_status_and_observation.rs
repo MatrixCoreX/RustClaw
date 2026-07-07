@@ -116,11 +116,7 @@ fn git_basic_branch_alias_scalar_route_normalizes_to_current_branch() {
 
 #[test]
 fn git_basic_branch_alias_non_scalar_route_normalizes_to_branch() {
-    let route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     let actions = vec![AgentAction::CallSkill {
         skill: "git_basic".to_string(),
         args: serde_json::json!({ "action": "branches" }),

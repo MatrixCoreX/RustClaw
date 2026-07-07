@@ -166,9 +166,9 @@ fn command_payload_path_becomes_observable_locator_contract() {
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
+    assert!(
+        value.get("decision").is_none(),
+        "legacy normalizer decision must not survive schema normalization"
     );
     assert_eq!(
         value
@@ -240,9 +240,9 @@ fn package_manager_skill_recipe_repairs_to_detection_contract() {
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|value| value.as_str()),
-        Some("planner_execute")
+    assert!(
+        value.get("decision").is_none(),
+        "legacy normalizer decision must not survive schema normalization"
     );
     assert_eq!(
         value
@@ -372,9 +372,9 @@ fn port_probe_tool_recipe_repairs_to_service_status_contract() {
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|value| value.as_str()),
-        Some("planner_execute")
+    assert!(
+        value.get("decision").is_none(),
+        "legacy normalizer decision must not survive schema normalization"
     );
     assert_eq!(
         value
@@ -418,9 +418,9 @@ fn structured_read_recipe_with_explicit_locator_repairs_content_contract() {
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value.get("decision").and_then(|value| value.as_str()),
-        Some("planner_execute")
+    assert!(
+        value.get("decision").is_none(),
+        "legacy normalizer decision must not survive schema normalization"
     );
     assert_eq!(
         value

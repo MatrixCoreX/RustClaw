@@ -24,10 +24,8 @@ pub(crate) use channels::{
 };
 pub(super) use locator::{
     has_concrete_locator_hint, has_explicit_path_or_url_locator_hint,
-    has_multiple_distinct_explicit_local_path_locators,
-    semantic_kind_can_bind_workspace_child_locator, try_resolve_implicit_locator_path,
-    try_resolve_workspace_child_locator_from_text,
-    workspace_child_resolution_is_directory_scope_with_child_filename, LocatorAutoResolution,
+    has_multiple_distinct_explicit_local_path_locators, try_resolve_implicit_locator_path,
+    try_resolve_workspace_child_locator_from_text, LocatorAutoResolution,
 };
 pub(super) use run_skill_finalize::finalize_run_skill_result;
 pub(crate) use runtime_support::spawn_long_term_summary_refresh;
@@ -411,16 +409,9 @@ pub(crate) async fn process_ask_task(
         task,
         payload,
         &prompt,
-        &prepared_flow.recent_execution_context,
         &prepared_flow.resolved_prompt_for_execution,
         &prepared_flow.prompt_with_memory_for_execution,
-        &prepared_flow.chat_prompt_context,
         &prepared_flow.route_result,
-        prepared_flow.agent_mode,
-        &prepared_flow.clarify_reason,
-        prepared_flow.clarify_reason_kind,
-        prepared_flow.clarify_fallback_source,
-        &prepared_flow.fuzzy_locator_suggestions,
         &prepared_flow.ask_mode,
         prepared_flow.should_route_schedule_direct,
         agent_run_context,

@@ -53,7 +53,7 @@ fn single_file_delivery_rejects_token_mixed_with_prose() {
 
 #[test]
 fn recent_artifacts_judgment_skips_verifier_when_content_paths_are_grounded() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    let mut route = route_with_mode(crate::AskMode::planner_execute_with_chat_finalizer());
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentArtifactsJudgment;
     route.output_contract.requires_content_evidence = true;
@@ -150,7 +150,7 @@ fn recent_artifacts_judgment_skips_verifier_when_content_paths_are_grounded() {
 
 #[test]
 fn recent_artifacts_judgment_uses_truncated_read_range_path_tokens() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    let mut route = route_with_mode(crate::AskMode::planner_execute_with_chat_finalizer());
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentArtifactsJudgment;
     route.output_contract.requires_content_evidence = true;
@@ -1057,7 +1057,7 @@ fn archive_unpack_capability_ref_summary_is_grounded_without_semantic_kind() {
 
 #[test]
 fn structured_keys_answer_accepts_array_identity_values() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    let mut route = route_with_mode(crate::AskMode::planner_execute_with_chat_finalizer());
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
@@ -1087,7 +1087,7 @@ fn structured_keys_answer_accepts_array_identity_values() {
 
 #[test]
 fn structured_keys_answer_uses_observed_action_when_semantic_label_missing() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    let mut route = route_with_mode(crate::AskMode::planner_execute_with_chat_finalizer());
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -1117,7 +1117,7 @@ fn structured_keys_answer_uses_observed_action_when_semantic_label_missing() {
 
 #[test]
 fn markdown_heading_answer_grounded_in_read_range_skips_llm_verifier() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    let mut route = route_with_mode(crate::AskMode::planner_execute_with_chat_finalizer());
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;

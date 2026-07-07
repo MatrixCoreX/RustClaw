@@ -1732,11 +1732,7 @@ fn explicit_path_like_config_field_read_is_preserved_when_user_mentions_field() 
 #[test]
 fn rustclaw_config_section_header_field_reads_rewrite_to_guard_config() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
@@ -1787,11 +1783,7 @@ fn rustclaw_config_section_header_field_reads_rewrite_to_guard_config() {
 #[test]
 fn config_risk_assessment_rewrites_key_listing_to_guard_config() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -1830,11 +1822,7 @@ fn config_risk_assessment_rewrites_key_listing_to_guard_config() {
 #[test]
 fn config_risk_assessment_rewrites_file_head_read_to_guard_config() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -1912,11 +1900,7 @@ fn config_risk_assessment_rewrites_config_edit_guard_to_preferred_config_basic_g
 #[test]
 fn rustclaw_main_config_content_excerpt_broad_read_rewrites_to_guard_config() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;

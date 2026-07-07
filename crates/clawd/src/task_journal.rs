@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[path = "task_journal_decision_envelope.rs"]
 mod decision_envelope;
@@ -23,8 +23,8 @@ use task_journal_event_stream::task_event_stream_json;
 use task_journal_evidence_collect::*;
 use task_journal_evidence_coverage::*;
 pub(crate) use task_journal_evidence_coverage::{
-    TaskJournalEvidenceCoverage, evidence_coverage_for_route, failure_attribution_for_error_text,
-    step_reads_text_content,
+    evidence_coverage_for_route, failure_attribution_for_error_text, step_reads_text_content,
+    TaskJournalEvidenceCoverage,
 };
 use task_journal_evidence_registry::*;
 pub(crate) use task_journal_evidence_registry::{

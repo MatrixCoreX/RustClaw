@@ -506,8 +506,7 @@ fn raw_command_output_keeps_user_named_new_file_write_path_plan() {
     let mut state = test_state_with_registry();
     state.skill_rt.workspace_root = root.path.clone();
     let file_path = root.path.join("pwd_line_abs.txt");
-    let request =
-        "Run pwd, write one short line based on it into pwd_line_abs.txt, and reply with the absolute saved file path only.";
+    let request = "Run pwd, write one short line based on it into pwd_line_abs.txt, and reply with the absolute saved file path only.";
     let mut route = route_result(
         crate::AskMode::planner_execute_plain(),
         true,

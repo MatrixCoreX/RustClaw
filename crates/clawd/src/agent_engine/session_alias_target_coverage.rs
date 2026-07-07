@@ -139,7 +139,7 @@ pub(super) fn scalar_count_plan_uses_listing_instead_of_structured_count(
     if loop_state.has_tool_or_skill_output
         || route_result.needs_clarify
         || route_result.output_contract.delivery_required
-        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarCount
+        || !route_result.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
     {
         return false;
     }
@@ -623,7 +623,7 @@ pub(super) fn plain_act_filesystem_text_read_only_plan_requires_repair(
         || !route.is_execute_gate()
         || !route.ask_mode.is_plain_act()
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || !route.output_contract_is_unclassified()
         || matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::FileToken
@@ -687,7 +687,7 @@ pub(super) fn scalar_path_auto_locator_observation_plan(
     if route.needs_clarify
         || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
         || !matches!(
-            route.output_contract.semantic_kind,
+            route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::ScalarPathOnly | crate::OutputSemanticKind::FileBasename
         )
     {
@@ -748,7 +748,7 @@ pub(super) fn scalar_content_auto_locator_observation_plan(
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
         )
         || matches!(
-            route.output_contract.semantic_kind,
+            route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::RawCommandOutput
                 | crate::OutputSemanticKind::ScalarPathOnly
                 | crate::OutputSemanticKind::ExistenceWithPath
@@ -813,29 +813,24 @@ pub(super) fn file_facts_auto_locator_observation_plan(
     auto_locator_path: Option<&str>,
 ) -> Option<Vec<AgentAction>> {
     let route = route_result?;
+    let quantity_comparison =
+        route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison);
     if route.needs_clarify
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
-        || !matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None | crate::OutputSemanticKind::QuantityComparison
-        )
+        || !(route.output_contract_is_unclassified() || quantity_comparison)
         || (!route_expects_terminal_user_answer(route)
-            && !(route.output_contract.semantic_kind
-                == crate::OutputSemanticKind::QuantityComparison
+            && !(quantity_comparison
                 && route.output_contract.response_shape == crate::OutputResponseShape::Scalar))
         || route.output_contract.response_shape == crate::OutputResponseShape::FileToken
         || (matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Scalar
-        ) && route.output_contract.semantic_kind
-            != crate::OutputSemanticKind::QuantityComparison)
+        ) && !quantity_comparison)
     {
         return None;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
-        && crate::evidence_policy::target_locators_for_route(route).len() > 1
-    {
+    if quantity_comparison && crate::evidence_policy::target_locators_for_route(route).len() > 1 {
         return None;
     }
     let path = auto_locator_path
@@ -846,13 +841,11 @@ pub(super) fn file_facts_auto_locator_observation_plan(
             (!hint.is_empty()).then_some(hint)
         })?;
     let path_ref = Path::new(path);
-    let quantity_metadata_target = route.output_contract.semantic_kind
-        == crate::OutputSemanticKind::QuantityComparison
-        && path_ref.exists();
+    let quantity_metadata_target = quantity_comparison && path_ref.exists();
     if !(path_ref.is_file() || quantity_metadata_target) || is_supported_archive_path(path) {
         return None;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+    if quantity_comparison
         && matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Free | crate::OutputResponseShape::Strict
@@ -898,9 +891,7 @@ pub(super) fn file_facts_auto_locator_observation_plan(
     }
     let targets = vec![path.to_string()];
     let mut actions = vec![fs_basic_stat_paths_action_for_explicit_targets(&targets)];
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
-        && path_ref.is_dir()
-    {
+    if quantity_comparison && path_ref.is_dir() {
         let recursive_count = !matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Scalar
@@ -967,7 +958,7 @@ pub(super) fn generic_directory_auto_locator_observation_plan(
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
         )
         || !matches!(
-            route.output_contract.semantic_kind,
+            route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::None
                 | crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames
@@ -990,17 +981,17 @@ pub(super) fn generic_directory_auto_locator_observation_plan(
         "path": path,
         "names_only": false,
         "max_entries": 1000,
-        "sort_by": if route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryEntryGroups {
+        "sort_by": if route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryEntryGroups) {
             "mtime_desc"
         } else {
             "size_desc"
         },
     });
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::FileNames
-        || route.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths
+    if route.output_contract_marker_is(crate::OutputSemanticKind::FileNames)
+        || route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths)
     {
         args["files_only"] = Value::Bool(true);
-    } else if route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryNames {
+    } else if route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryNames) {
         args["dirs_only"] = Value::Bool(true);
     }
 

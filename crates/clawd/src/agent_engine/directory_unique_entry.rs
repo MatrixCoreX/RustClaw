@@ -264,13 +264,14 @@ pub(super) fn contract_allows_log_analyze_for_path(route: &RouteResult, path: &s
         "path": path,
         "max_matches": 50,
     });
-    crate::evidence_policy::capability_ref_action_policy_for_route(
+    if let Some(policy) = crate::evidence_policy::capability_ref_action_policy_for_route(
         Some(route),
         "log_analyze",
         &args,
-    )
-    .map(|policy| policy.is_allowed())
-    .unwrap_or(true)
+    ) {
+        return policy.is_allowed();
+    }
+    crate::evidence_policy::capability_ref_action_refs_for_route(route, false).is_empty()
 }
 
 #[cfg(test)]

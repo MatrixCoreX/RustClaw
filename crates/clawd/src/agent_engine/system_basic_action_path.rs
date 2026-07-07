@@ -252,6 +252,13 @@ pub(super) fn rewrite_file_paths_grep_text_to_find_entries(
     {
         return false;
     }
+    if file_paths_contract_executable_action_allowed(&AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: Value::Object(obj.clone()),
+    }) == Some(true)
+    {
+        return false;
+    }
     let Some(query) = obj
         .get("query")
         .or_else(|| obj.get("keyword"))

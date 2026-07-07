@@ -126,35 +126,20 @@ pub(crate) fn try_resolve_implicit_locator_path(
         &state.skill_rt.default_locator_search_dir,
         context_hint,
     );
-    try_resolve_implicit_locator_path_in_roots(
+    if let Some(resolved) = try_resolve_implicit_locator_path_in_roots(
         &roots,
         &keywords,
         &filename_tokens,
         state.skill_rt.locator_scan_max_depth,
         state.skill_rt.locator_scan_max_files,
-    )
-}
-
-pub(crate) fn semantic_kind_can_bind_workspace_child_locator(
-    kind: crate::OutputSemanticKind,
-) -> bool {
-    matches!(
-        kind,
-        crate::OutputSemanticKind::HiddenEntriesCheck
-            | crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::DirectoryEntryGroups
-            | crate::OutputSemanticKind::FilePaths
-            | crate::OutputSemanticKind::DirectoryPurposeSummary
-            | crate::OutputSemanticKind::ContentExcerptSummary
-            | crate::OutputSemanticKind::ContentExcerptWithSummary
-            | crate::OutputSemanticKind::QuantityComparison
-            | crate::OutputSemanticKind::RecentArtifactsJudgment
-            | crate::OutputSemanticKind::ScalarCount
-            | crate::OutputSemanticKind::ExistenceWithPath
-            | crate::OutputSemanticKind::ExistenceWithPathSummary
-            | crate::OutputSemanticKind::ArchiveList
-            | crate::OutputSemanticKind::ArchiveRead
+    ) {
+        return Some(resolved);
+    }
+    try_resolve_deep_database_filename_token_in_roots(
+        &roots,
+        &filename_tokens,
+        state.skill_rt.locator_scan_max_depth,
+        state.skill_rt.locator_scan_max_files,
     )
 }
 
@@ -191,25 +176,6 @@ pub(crate) fn try_resolve_workspace_child_locator_from_text(
         return None;
     }
     Some(path)
-}
-
-pub(crate) fn workspace_child_resolution_is_directory_scope_with_child_filename(
-    workspace_root: &Path,
-    text: &str,
-    resolved_path: &str,
-) -> bool {
-    let path = PathBuf::from(resolved_path);
-    let normalized_path = normalize_workspace_child_candidate(&path);
-    if !normalized_path.is_dir() {
-        return false;
-    }
-    let normalized_root = normalize_workspace_child_candidate(workspace_root);
-    if !normalized_path.starts_with(normalized_root) {
-        return false;
-    }
-    let filename_tokens = extract_filename_like_tokens(text);
-    !filename_tokens.is_empty()
-        && directory_contains_filename_token(&normalized_path, &filename_tokens)
 }
 
 fn normalize_workspace_child_candidate(path: &Path) -> PathBuf {
@@ -473,6 +439,127 @@ fn try_resolve_implicit_locator_path_in_roots(
         }
     }
     None
+}
+
+fn try_resolve_deep_database_filename_token_in_roots(
+    roots: &[PathBuf],
+    filename_tokens: &[String],
+    max_depth: usize,
+    max_files: usize,
+) -> Option<LocatorAutoResolution> {
+    let database_tokens = filename_tokens
+        .iter()
+        .filter(|token| looks_like_database_filename_token(token))
+        .collect::<Vec<_>>();
+    if database_tokens.len() != 1 {
+        return None;
+    }
+    let token = database_tokens[0];
+    let scan_depth = max_depth.max(6).min(16);
+    let entry_budget = deep_database_filename_scan_entry_budget(max_files);
+    let mut matches = Vec::new();
+    for root in roots {
+        for rendered in
+            collect_deep_database_filename_matches(root, token, scan_depth, entry_budget)
+        {
+            if !matches.iter().any(|existing| existing == &rendered) {
+                matches.push(rendered);
+            }
+        }
+    }
+    matches.sort();
+    matches.dedup();
+    if matches.len() == 1 {
+        return Some(LocatorAutoResolution::Direct(
+            matches.into_iter().next().unwrap_or_default(),
+        ));
+    }
+    if matches.len() > 1 {
+        return Some(LocatorAutoResolution::Fuzzy(
+            matches.into_iter().take(3).collect(),
+        ));
+    }
+    None
+}
+
+fn looks_like_database_filename_token(token: &str) -> bool {
+    if !looks_like_filename_locator(token) {
+        return false;
+    }
+    let lowered = token.to_ascii_lowercase();
+    lowered.ends_with(".db") || lowered.ends_with(".sqlite") || lowered.ends_with(".sqlite3")
+}
+
+fn deep_database_filename_scan_entry_budget(max_files: usize) -> usize {
+    max_files.max(5_000).saturating_mul(4).min(50_000)
+}
+
+fn collect_deep_database_filename_matches(
+    root: &Path,
+    token: &str,
+    max_depth: usize,
+    max_entries: usize,
+) -> Vec<String> {
+    if !root.is_dir() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut seen_entries = 0usize;
+    let mut queue = VecDeque::from([(root.to_path_buf(), 0usize)]);
+    while let Some((dir, depth)) = queue.pop_front() {
+        let mut entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>(),
+            Err(_) => continue,
+        };
+        entries.sort();
+        let mut child_dirs = Vec::new();
+        for path in entries {
+            seen_entries += 1;
+            if seen_entries > max_entries.max(1) {
+                return out;
+            }
+            let meta = match std::fs::symlink_metadata(&path) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let file_type = meta.file_type();
+            if file_type.is_dir() {
+                if depth < max_depth && !skip_deep_database_filename_scan_dir(&path) {
+                    child_dirs.push((path, depth + 1));
+                }
+                continue;
+            }
+            if !(file_type.is_file() || (file_type.is_symlink() && path.is_file())) {
+                continue;
+            }
+            if !path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case(token))
+            {
+                continue;
+            }
+            let canonical = path.canonicalize().unwrap_or(path);
+            let rendered = canonical.display().to_string();
+            if !out.iter().any(|existing| existing == &rendered) {
+                out.push(rendered);
+            }
+        }
+        for child in child_dirs {
+            queue.push_back(child);
+        }
+    }
+    out
+}
+
+fn skip_deep_database_filename_scan_dir(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    matches!(name, ".git" | "node_modules" | "target")
 }
 
 fn prefer_direct_child_filename_match(

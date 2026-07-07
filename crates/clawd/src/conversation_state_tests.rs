@@ -828,7 +828,7 @@ fn standalone_scalar_chat_request_without_answer_marker_does_not_start_primary_t
 #[test]
 fn evidence_backed_standalone_task_replaces_prior_scalar_primary_task() {
     let mut route_result =
-        route_result_for_test(crate::AskMode::planner_execute_chat_wrapped(), false);
+        route_result_for_test(crate::AskMode::planner_execute_with_chat_finalizer(), false);
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let turn_analysis = crate::intent_router::TurnAnalysis {
@@ -957,7 +957,7 @@ fn unannotated_structured_listing_replaces_prior_primary_task() {
 #[test]
 fn unannotated_scalar_evidence_result_does_not_start_primary_task() {
     let mut route_result =
-        route_result_for_test(crate::AskMode::planner_execute_chat_wrapped(), false);
+        route_result_for_test(crate::AskMode::planner_execute_with_chat_finalizer(), false);
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;

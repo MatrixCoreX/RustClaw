@@ -241,10 +241,8 @@ pub(super) fn file_delivery_contract_requires_file_token(route: &RouteResult) ->
 
 pub(super) fn file_delivery_contract_is_token_only(route: &RouteResult) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::FileToken
-        && matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None | crate::OutputSemanticKind::GeneratedFileDelivery
-        )
+        && (route.output_contract_is_unclassified()
+            || route.output_contract_marker_is(crate::OutputSemanticKind::GeneratedFileDelivery))
 }
 
 pub(super) fn generated_file_write_action_path(
@@ -463,7 +461,7 @@ pub(super) fn route_is_existing_file_content_delivery(
     {
         return false;
     }
-    match route.output_contract.semantic_kind {
+    match route.effective_output_contract_semantic_kind() {
         crate::OutputSemanticKind::GeneratedFileDelivery => {
             if route.output_contract.response_shape != crate::OutputResponseShape::FileToken {
                 return false;
@@ -557,12 +555,94 @@ pub(super) fn scalar_count_locator_path(
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || !scalar_count_contract_allows_count_shape(route)
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarCount
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
         || route_requests_hidden_entries_count(route)
     {
         return None;
     }
     route_directory_locator_path(route, auto_locator_path)
+}
+
+fn scalar_count_active_listing_path(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+) -> Option<String> {
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !scalar_count_contract_allows_count_shape(route)
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
+        || route_requests_hidden_entries_count(route)
+        || route.output_contract.locator_kind != crate::OutputLocatorKind::None
+        || !route.output_contract.locator_hint.trim().is_empty()
+        || ![
+            "active_listing_target_required",
+            "target_locator_required",
+            "missing_target_locator",
+        ]
+        .iter()
+        .any(|marker| route_reason_has_structural_marker(route, marker))
+    {
+        return None;
+    }
+    let Some(raw) = loop_state.output_vars.get("active_listing_bound_targets") else {
+        return None;
+    };
+    let Ok(values) = serde_json::from_str::<Vec<String>>(raw) else {
+        return None;
+    };
+    let mut targets = values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    targets.sort();
+    targets.dedup();
+    (targets.len() == 1).then(|| targets.remove(0))
+}
+
+fn scalar_count_current_workspace_scope_path(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+) -> Option<String> {
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !scalar_count_contract_allows_count_shape(route)
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
+        || route_requests_hidden_entries_count(route)
+        || !route.output_contract.locator_hint.trim().is_empty()
+        || !matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::CurrentWorkspace | crate::OutputLocatorKind::None
+        )
+        || !(route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+            || route_reason_has_structural_marker(
+                route,
+                "current_workspace_scope_from_current_request",
+            ))
+    {
+        return None;
+    }
+    let Some(raw) = loop_state
+        .output_vars
+        .get("current_workspace_scalar_count_targets")
+    else {
+        return None;
+    };
+    let Ok(values) = serde_json::from_str::<Vec<String>>(raw) else {
+        return None;
+    };
+    let mut targets = values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    targets.sort();
+    targets.dedup();
+    (targets.len() == 1).then(|| targets.remove(0))
 }
 
 pub(super) fn scalar_count_contract_allows_count_shape(route: &RouteResult) -> bool {
@@ -593,6 +673,8 @@ pub(super) fn replace_scalar_count_plan_with_count_inventory(
         return actions;
     }
     let Some(path) = scalar_count_explicit_count_path_from_actions(&actions)
+        .or_else(|| scalar_count_active_listing_path(route_result, loop_state))
+        .or_else(|| scalar_count_current_workspace_scope_path(route_result, loop_state))
         .or_else(|| scalar_count_locator_path(route_result, auto_locator_path))
     else {
         return actions;

@@ -354,10 +354,7 @@ fn output_contract_unknown_semantic_was_ignored(
     after_contract: Option<&serde_json::Map<String, Value>>,
 ) -> bool {
     let before_text = before_contract
-        .and_then(|obj| {
-            obj.get("contract_marker")
-                .and_then(scalar_json_value_text)
-        })
+        .and_then(|obj| obj.get("contract_marker").and_then(scalar_json_value_text))
         .unwrap_or_default();
     if before_text.trim().is_empty()
         || schema_text_is_neutral_none(&before_text)

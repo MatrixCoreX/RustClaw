@@ -672,7 +672,64 @@ fn route_capability_ref_action_refs(route: &RouteResult, preferred_only: bool) -
             }
         }
     }
+    if action_refs.is_empty() && !preferred_only {
+        for route_ref in &route_refs {
+            if let Some(action_ref) = fallback_action_ref_for_capability_ref(route_ref) {
+                action_refs.insert(action_ref);
+            }
+        }
+    }
     action_refs.into_iter().collect()
+}
+
+fn fallback_action_ref_for_capability_ref(route_ref: &str) -> Option<ActionRef> {
+    let (namespace, action) = route_ref.split_once('.')?;
+    let skill = fallback_skill_for_capability_namespace(namespace)?;
+    let action = fallback_action_for_capability_action(skill, action);
+    ActionRef::parse(&format!("{skill}.{action}"))
+}
+
+fn fallback_skill_for_capability_namespace(namespace: &str) -> Option<&'static str> {
+    match normalize_action_token(namespace).replace('-', "_").as_str() {
+        "archive" => Some("archive_basic"),
+        "config" | "config_basic" => Some("config_basic"),
+        "config_edit" => Some("config_edit"),
+        "database" | "db" | "sqlite" => Some("db_basic"),
+        "docker" => Some("docker_basic"),
+        "document" | "doc" => Some("doc_parse"),
+        "file" | "filesystem" | "fs" | "fs_basic" => Some("fs_basic"),
+        "kb" => Some("kb"),
+        "package" | "package_manager" => Some("package_manager"),
+        "process" => Some("process_basic"),
+        "service" | "service_control" => Some("service_control"),
+        "system" | "system_basic" => Some("system_basic"),
+        "task" | "task_control" => Some("task_control"),
+        "weather" => Some("weather"),
+        "web" | "web_search" => Some("web_search_extract"),
+        _ => None,
+    }
+}
+
+fn fallback_action_for_capability_action(skill: &str, action: &str) -> String {
+    let action = normalize_action_token(action).replace('-', "_");
+    match (skill, action.as_str()) {
+        ("db_basic", action) if machine_action_has_any_segment(action, &["query"]) => {
+            "sqlite_query".to_string()
+        }
+        ("doc_parse", action) if machine_action_has_any_segment(action, &["parse"]) => {
+            "parse_doc".to_string()
+        }
+        ("fs_basic", action) if machine_action_has_any_segment(action, &["list"]) => {
+            "list_dir".to_string()
+        }
+        ("fs_basic", action) if machine_action_has_any_segment(action, &["read"]) => {
+            "read_text_range".to_string()
+        }
+        ("package_manager", action) if machine_action_has_any_segment(action, &["detect"]) => {
+            "detect_manager".to_string()
+        }
+        _ => action,
+    }
 }
 
 #[cfg(test)]
@@ -850,6 +907,19 @@ pub(crate) fn capability_ref_action_policy_for_route(
     None
 }
 
+pub(crate) fn capability_ref_replacement_action_policy_for_route(
+    route: Option<&RouteResult>,
+    normalized_skill: &str,
+    args: &Value,
+) -> Option<ContractActionPolicy> {
+    let route = route?;
+    if !route_has_capability_refs(route) {
+        return None;
+    }
+    route_capability_ref_action_policy(route, normalized_skill, args)
+        .or_else(|| route_capability_ref_replacement_policy(route, normalized_skill, args))
+}
+
 #[cfg(test)]
 pub(crate) fn action_policy_for_route(
     route: Option<&RouteResult>,
@@ -865,20 +935,26 @@ fn route_capability_ref_action_policy(
     args: &Value,
 ) -> Option<ContractActionPolicy> {
     let action = route_capability_policy_action_ref(normalized_skill, args)?;
-    let decision = if route_capability_ref_allows_action(route, normalized_skill, args) {
+    let action_allowed = route_capability_ref_allows_action(route, normalized_skill, args);
+    if !action_allowed && !route_capability_ref_repairable_evidence_action(route, &action.effective)
+    {
+        return None;
+    }
+    let decision = if action_allowed {
         ActionPolicyDecision::Allowed
     } else {
         ActionPolicyDecision::RejectedNotAllowed
     };
-    let mut preferred_actions = route_capability_ref_action_refs(route, true)
+    let mut preferred_actions = route_capability_ref_action_refs(route, false)
         .into_iter()
         .map(|action_ref| action_ref.as_key())
         .collect::<Vec<_>>();
-    if preferred_actions.is_empty() {
-        preferred_actions = route_capability_ref_action_refs(route, false)
-            .into_iter()
-            .map(|action_ref| action_ref.as_key())
-            .collect();
+    let action_key = action.effective.as_key();
+    if !preferred_actions
+        .iter()
+        .any(|preferred| preferred == &action_key)
+    {
+        preferred_actions.push(action_key.clone());
     }
     let final_answer_shape_kind =
         final_answer_shape_for_route_capability_ref(route).unwrap_or(FinalAnswerShape::Free);
@@ -904,6 +980,58 @@ fn route_capability_ref_action_policy(
     })
 }
 
+fn route_capability_ref_replacement_policy(
+    route: &RouteResult,
+    normalized_skill: &str,
+    args: &Value,
+) -> Option<ContractActionPolicy> {
+    let action = route_capability_policy_action_ref(normalized_skill, args)?;
+    let preferred_actions = route_capability_ref_action_refs(route, false)
+        .into_iter()
+        .map(|action_ref| action_ref.as_key())
+        .collect::<Vec<_>>();
+    if preferred_actions.is_empty() {
+        return None;
+    }
+    let final_answer_shape_kind =
+        final_answer_shape_for_route_capability_ref(route).unwrap_or(FinalAnswerShape::Free);
+    Some(ContractActionPolicy {
+        decision: ActionPolicyDecision::RejectedNotAllowed,
+        action_key: action.effective.as_key(),
+        original_action_ref: action.original.as_key(),
+        replacement_action_ref: action.replacement_action_ref(),
+        contract_repair_source: action.repair_source.to_string(),
+        preferred_replacement_reason_code: action.replacement_reason_code.map(str::to_string),
+        contract_match: "capability_ref".to_string(),
+        required_evidence: crate::evidence_policy::required_evidence_fields_for_route(route),
+        preferred_actions,
+        final_answer_shape_kind,
+        final_answer_shape: final_answer_shape_kind.as_str().to_string(),
+        evidence_expression: EvidenceExpression::default(),
+        policy_mode: "observe".to_string(),
+        evidence_scope: "conversation".to_string(),
+        freshness: "conversation".to_string(),
+        artifact_kind: "text".to_string(),
+        channel_visibility: "user_visible".to_string(),
+        evidence_profile: "capability_ref".to_string(),
+    })
+}
+
+fn route_capability_ref_repairable_evidence_action(
+    route: &RouteResult,
+    action: &ActionRef,
+) -> bool {
+    let Some(action_name) = action.action.as_deref() else {
+        return false;
+    };
+    if action.skill != "fs_basic" || action_name != "read_text_range" {
+        return false;
+    }
+    route_capability_ref_action_refs(route, false)
+        .iter()
+        .any(|preferred| preferred.skill == "doc_parse")
+}
+
 fn route_capability_ref_allows_action(
     route: &RouteResult,
     normalized_skill: &str,
@@ -924,6 +1052,7 @@ fn route_capability_ref_allows_action(
 
 fn route_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRef) -> bool {
     route_registry_capability_ref_allows_action_ref(route, action)
+        || route_generic_capability_ref_allows_action_ref(route, action)
 }
 
 fn route_registry_capability_ref_allows_action_ref(
@@ -949,6 +1078,82 @@ fn route_registry_capability_ref_allows_action_ref(
                 .iter()
                 .any(|capability| capability == &mapping.name)
     })
+}
+
+fn route_generic_capability_ref_allows_action_ref(route: &RouteResult, action: &ActionRef) -> bool {
+    crate::machine_capability_ref::route_capability_ref_tokens(route)
+        .iter()
+        .any(|route_ref| generic_capability_ref_allows_action_ref(route_ref, action))
+}
+
+fn generic_capability_ref_allows_action_ref(route_ref: &str, action: &ActionRef) -> bool {
+    let Some((namespace, capability_action)) = route_ref.split_once('.') else {
+        return false;
+    };
+    capability_namespace_matches_action_skill(namespace, &action.skill)
+        && action.action.as_deref().is_some_and(|action_name| {
+            capability_action_matches_skill_action(capability_action, action_name)
+        })
+}
+
+fn capability_namespace_matches_action_skill(namespace: &str, skill: &str) -> bool {
+    let namespace = normalize_action_token(namespace).replace('-', "_");
+    let skill = normalize_action_token(skill).replace('-', "_");
+    match skill.as_str() {
+        "archive_basic" => matches!(namespace.as_str(), "archive"),
+        "config_basic" | "config_edit" => {
+            matches!(
+                namespace.as_str(),
+                "config" | "config_basic" | "config_edit"
+            )
+        }
+        "db_basic" => matches!(namespace.as_str(), "database" | "db" | "sqlite"),
+        "docker_basic" => matches!(namespace.as_str(), "docker"),
+        "doc_parse" => matches!(namespace.as_str(), "document" | "doc" | "doc_parse"),
+        "fs_basic" => matches!(
+            namespace.as_str(),
+            "file" | "filesystem" | "fs" | "fs_basic"
+        ),
+        "kb" => matches!(namespace.as_str(), "kb"),
+        "package_manager" => matches!(namespace.as_str(), "package" | "package_manager"),
+        "process_basic" => matches!(namespace.as_str(), "process"),
+        "service_control" => matches!(namespace.as_str(), "service" | "service_control"),
+        "system_basic" => matches!(namespace.as_str(), "system" | "system_basic"),
+        "task_control" => matches!(namespace.as_str(), "task" | "task_control"),
+        "weather" => matches!(namespace.as_str(), "weather"),
+        "web_search_extract" => matches!(namespace.as_str(), "web" | "web_search"),
+        _ => namespace == skill,
+    }
+}
+
+fn capability_action_matches_skill_action(capability_action: &str, skill_action: &str) -> bool {
+    let capability_action = normalize_action_token(capability_action).replace('-', "_");
+    let skill_action = normalize_action_token(skill_action).replace('-', "_");
+    if capability_action == skill_action {
+        return true;
+    }
+    let capability_segments = action_segments(&capability_action);
+    let skill_segments = action_segments(&skill_action);
+    capability_segments.iter().any(|capability_segment| {
+        skill_segments
+            .iter()
+            .any(|skill_segment| capability_segment == skill_segment)
+    })
+}
+
+fn action_segments(action: &str) -> Vec<&str> {
+    action
+        .split(|ch| matches!(ch, '.' | '_' | '-'))
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .collect()
+}
+
+fn machine_action_has_any_segment(action: &str, needles: &[&str]) -> bool {
+    let segments = action_segments(action);
+    segments
+        .iter()
+        .any(|segment| needles.iter().any(|needle| segment == needle))
 }
 
 #[cfg(test)]

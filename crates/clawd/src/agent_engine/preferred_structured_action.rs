@@ -304,10 +304,11 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
     let Some(route) = route_result else {
         return actions;
     };
-    let preferred_actions =
+    let mut preferred_actions =
         crate::evidence_policy::capability_ref_action_refs_for_route(route, true);
     if preferred_actions.is_empty() {
-        return actions;
+        preferred_actions =
+            crate::evidence_policy::capability_ref_action_refs_for_route(route, false);
     }
     let original_user_text = original_user_text.unwrap_or_default();
     let file_paths_has_allowed_executable = route
@@ -346,8 +347,21 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
             let Some((skill, args)) = planned_execution_action_ref(&action) else {
                 return action;
             };
-            let Some(policy) = crate::evidence_policy::capability_ref_action_policy_for_route(
-        Some(route),
+            let normalized_skill = state.resolve_canonical_skill_name(skill);
+            if super::super::action_is_user_named_new_workspace_write(
+                &state.skill_rt.workspace_root,
+                original_user_text,
+                &normalized_skill,
+                args,
+            ) {
+                info!(
+                    "plan_mark_user_named_output_write_path idx={} action={}",
+                    idx, normalized_skill
+                );
+                return mark_user_named_output_path_action(action);
+            }
+            let Some(policy) = crate::evidence_policy::capability_ref_replacement_action_policy_for_route(
+                Some(route),
                 skill,
                 args,
             ) else {
@@ -356,7 +370,17 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
             if policy.is_allowed() {
                 return action;
             }
-            let normalized_skill = state.resolve_canonical_skill_name(skill);
+            if action_matches_contract_test_preferred_ref(
+                original_user_text,
+                &normalized_skill,
+                args,
+            ) {
+                info!(
+                    "plan_keep_contract_test_preferred_action_ref idx={} contract={} action={}",
+                    idx, policy.contract_match, policy.action_key
+                );
+                return action;
+            }
             if scratch_filesystem_lifecycle_plan
                 && crate::agent_engine::scratch_filesystem_lifecycle_action_allowed(
                     state,
@@ -557,7 +581,9 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                 );
                 return action;
             }
-            if registry_declares_non_mutating_planner_action(state, &normalized_skill, args) {
+            if policy.contract_match != "capability_ref"
+                && registry_declares_non_mutating_planner_action(state, &normalized_skill, args)
+            {
                 info!(
                     "plan_keep_registry_non_mutating_action idx={} contract={} action={}",
                     idx, policy.contract_match, policy.action_key
@@ -612,6 +638,32 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
             action
         })
         .collect()
+}
+
+fn action_matches_contract_test_preferred_ref(
+    original_user_text: &str,
+    normalized_skill: &str,
+    args: &Value,
+) -> bool {
+    let Some(raw_preferred) =
+        crate::intent_router::contract_test_hint_value(original_user_text, "preferred_action_ref")
+    else {
+        return false;
+    };
+    let Some(preferred) = crate::evidence_policy::ActionRef::parse(&raw_preferred) else {
+        return false;
+    };
+    let Some(action) = crate::evidence_policy::ActionRef::from_skill_args(normalized_skill, args)
+    else {
+        return false;
+    };
+    if action.skill != preferred.skill {
+        return false;
+    }
+    preferred
+        .action
+        .as_deref()
+        .is_none_or(|preferred_action| action.action.as_deref() == Some(preferred_action))
 }
 
 fn preferred_action_may_replace_contract_rejected_action(
@@ -745,9 +797,6 @@ pub(super) fn inherit_preferred_action_filters_from_rejected_action(
     else {
         return candidate;
     };
-    if !tool.eq_ignore_ascii_case("fs_basic") {
-        return candidate;
-    }
     let Some(candidate_obj) = args.as_object_mut() else {
         return candidate;
     };
@@ -756,6 +805,21 @@ pub(super) fn inherit_preferred_action_filters_from_rejected_action(
         .and_then(Value::as_str)
         .map(str::trim)
         .unwrap_or_default();
+    if tool.eq_ignore_ascii_case("doc_parse") && action_name.eq_ignore_ascii_case("parse_doc") {
+        if let Some(path) = rejected_obj
+            .get("path")
+            .or_else(|| rejected_obj.get("file"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        {
+            candidate_obj.insert("path".to_string(), Value::String(path.to_string()));
+        }
+        return candidate;
+    }
+    if !tool.eq_ignore_ascii_case("fs_basic") {
+        return candidate;
+    }
     if !action_name.eq_ignore_ascii_case("count_entries") {
         return candidate;
     }

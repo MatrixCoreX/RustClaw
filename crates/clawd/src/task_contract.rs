@@ -356,8 +356,8 @@ fn target_object_for_capability_ref(route: &RouteResult) -> Option<TaskTargetObj
         "package" | "package_manager" | "module" | "system" | "system_basic" => {
             TaskTargetObject::System
         }
-        "browser" | "http" | "image_vision" | "rss" | "stock" | "crypto" | "weather" | "web"
-        | "x" => TaskTargetObject::Web,
+        "browser" | "http" | "image_vision" | "rss" | "social" | "stock" | "crypto" | "weather"
+        | "web" | "x" => TaskTargetObject::Web,
         _ => TaskTargetObject::Unknown,
     })
 }

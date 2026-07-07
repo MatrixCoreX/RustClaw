@@ -95,7 +95,7 @@ pub(super) fn rewrite_observed_terminal_synthesis_concrete_respond(
         return actions;
     }
     if route_result.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::RecentScalarEqualityCheck
+        route.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
     }) {
         let mut rewritten = actions;
         rewritten[last_idx] = AgentAction::Respond {
@@ -114,8 +114,7 @@ pub(super) fn rewrite_observed_terminal_synthesis_concrete_respond(
     }
     let content_excerpt_contract = route_result.is_some_and(|route| {
         route
-            .output_contract
-            .semantic_kind
+            .effective_output_contract_semantic_kind()
             .is_content_excerpt_summary()
     });
     if content_excerpt_contract {
@@ -297,7 +296,7 @@ pub(super) fn generated_file_path_report_respond_matches_planned_write(
     let Some(route) = route_result else {
         return false;
     };
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::GeneratedFilePathReport
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::GeneratedFilePathReport)
         || route.output_contract.delivery_required
         || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
         || !field_token_looks_like_locator(respond_content)
@@ -398,11 +397,9 @@ pub(super) fn content_excerpt_summary_target_path(
     if route.needs_clarify
         || route.output_contract.delivery_required
         || !(route
-            .output_contract
-            .semantic_kind
+            .effective_output_contract_semantic_kind()
             .is_content_excerpt_summary()
-            || route.output_contract.semantic_kind
-                == crate::OutputSemanticKind::ExcerptKindJudgment)
+            || route.output_contract_marker_is(crate::OutputSemanticKind::ExcerptKindJudgment))
     {
         return None;
     }
@@ -521,17 +518,18 @@ pub(super) fn rewrite_terminal_synthesis_placeholder_respond(
 
 pub(super) fn route_requires_observed_synthesis_for_mixed_placeholder(route: &RouteResult) -> bool {
     route.output_contract.requires_content_evidence
-        && matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::RecentArtifactsJudgment
-                | crate::OutputSemanticKind::DirectoryPurposeSummary
-                | crate::OutputSemanticKind::ContentExcerptSummary
-                | crate::OutputSemanticKind::ContentExcerptWithSummary
-                | crate::OutputSemanticKind::ExcerptKindJudgment
-                | crate::OutputSemanticKind::WorkspaceProjectSummary
-                | crate::OutputSemanticKind::SqliteDatabaseKindJudgment
-                | crate::OutputSemanticKind::ServiceStatus
-        )
+        && [
+            crate::OutputSemanticKind::RecentArtifactsJudgment,
+            crate::OutputSemanticKind::DirectoryPurposeSummary,
+            crate::OutputSemanticKind::ContentExcerptSummary,
+            crate::OutputSemanticKind::ContentExcerptWithSummary,
+            crate::OutputSemanticKind::ExcerptKindJudgment,
+            crate::OutputSemanticKind::WorkspaceProjectSummary,
+            crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+            crate::OutputSemanticKind::ServiceStatus,
+        ]
+        .iter()
+        .any(|kind| route.output_contract_marker_is(*kind))
 }
 
 pub(super) fn rewrite_mixed_placeholder_observed_synthesis_respond(
@@ -731,7 +729,7 @@ pub(super) fn restore_terminal_mixed_last_output_respond(
 ) -> Vec<AgentAction> {
     if !route_result.is_some_and(|route| {
         route.output_contract.response_shape == crate::OutputResponseShape::Strict
-            && route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+            && route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
     }) {
         return actions;
     }
@@ -894,18 +892,17 @@ pub(super) fn route_requires_terminal_observation_synthesis(
         || route.output_contract.exact_sentence_count.is_some()
     {
         return matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-                | crate::OutputSemanticKind::RawCommandOutput
+            route.effective_output_contract_semantic_kind(),
+            crate::OutputSemanticKind::RawCommandOutput
                 | crate::OutputSemanticKind::CommandOutputSummary
                 | crate::OutputSemanticKind::DirectoryPurposeSummary
                 | crate::OutputSemanticKind::ContentExcerptSummary
                 | crate::OutputSemanticKind::ContentExcerptWithSummary
                 | crate::OutputSemanticKind::WorkspaceProjectSummary
-        );
+        ) || route.output_contract_is_unclassified();
     }
     matches!(
-        route.output_contract.semantic_kind,
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::CommandOutputSummary
             | crate::OutputSemanticKind::DirectoryPurposeSummary
             | crate::OutputSemanticKind::ContentExcerptSummary
@@ -983,12 +980,14 @@ pub(super) fn strip_terminal_placeholder_respond_for_exact_listing_contract(
     let Some(route) = route_result else {
         return actions;
     };
-    if !matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::FilePaths
-    ) {
+    if ![
+        crate::OutputSemanticKind::FileNames,
+        crate::OutputSemanticKind::DirectoryNames,
+        crate::OutputSemanticKind::FilePaths,
+    ]
+    .iter()
+    .any(|kind| route.output_contract_marker_is(*kind))
+    {
         return actions;
     }
     if !actions.iter().any(|action| {

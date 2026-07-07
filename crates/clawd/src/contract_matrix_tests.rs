@@ -1407,10 +1407,7 @@ fn workspace_contract_matrix_loads_and_has_shape() {
         photo.migration_status,
         "transitional_capability_owned_evidence_pending"
     );
-    assert_eq!(
-        photo.migration_owner,
-        "photo_organize.planner_capabilities"
-    );
+    assert_eq!(photo.migration_owner, "photo_organize.planner_capabilities");
 }
 
 #[test]

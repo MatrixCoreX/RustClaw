@@ -153,11 +153,7 @@ fn raw_command_output_preserves_fs_basic_grep_text_plan() {
 #[test]
 fn structured_tool_output_placeholder_is_synthesized_before_respond() {
     let loop_state = LoopState::new(1);
-    let route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -426,36 +422,24 @@ fn command_output_summary_keeps_scratch_filesystem_lifecycle_mutation_plan() {
         actions,
     );
 
-    assert!(
-        normalized
-            .iter()
-            .any(|action| planned_call_is(action, "fs_basic", "make_dir"))
-    );
-    assert!(
-        normalized
-            .iter()
-            .any(|action| planned_call_is(action, "fs_basic", "write_text"))
-    );
-    assert!(
-        normalized
-            .iter()
-            .any(|action| planned_call_is(action, "fs_basic", "append_text"))
-    );
-    assert!(
-        normalized
-            .iter()
-            .any(|action| planned_call_is(action, "fs_basic", "read_text_range"))
-    );
-    assert!(
-        normalized
-            .iter()
-            .any(|action| planned_call_is(action, "fs_basic", "remove_path"))
-    );
-    assert!(
-        !normalized
-            .iter()
-            .any(|action| planned_call_is(action, "process_basic", "ps"))
-    );
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "make_dir")));
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "write_text")));
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "append_text")));
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "read_text_range")));
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "remove_path")));
+    assert!(!normalized
+        .iter()
+        .any(|action| planned_call_is(action, "process_basic", "ps")));
 }
 
 #[test]
@@ -581,16 +565,12 @@ fn command_output_summary_keeps_scratch_cleanup_recovery_after_prior_write() {
         actions,
     );
 
-    assert!(
-        normalized
-            .iter()
-            .any(|action| planned_call_is(action, "fs_basic", "remove_path"))
-    );
-    assert!(
-        !normalized
-            .iter()
-            .any(|action| planned_call_is(action, "git_basic", "status"))
-    );
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "remove_path")));
+    assert!(!normalized
+        .iter()
+        .any(|action| planned_call_is(action, "git_basic", "status")));
     let steps = vec![crate::PlanStep {
         step_id: "step_3".to_string(),
         action_type: "call_tool".to_string(),
@@ -684,11 +664,9 @@ fn command_output_summary_keeps_archive_pack_cleanup_recovery() {
         actions,
     );
 
-    assert!(
-        normalized
-            .iter()
-            .any(|action| planned_call_is(action, "fs_basic", "remove_path"))
-    );
+    assert!(normalized
+        .iter()
+        .any(|action| planned_call_is(action, "fs_basic", "remove_path")));
     let steps = vec![crate::PlanStep {
         step_id: "step_2".to_string(),
         action_type: "call_tool".to_string(),
@@ -734,11 +712,7 @@ fn command_output_summary_keeps_archive_pack_cleanup_recovery() {
 #[test]
 fn command_output_summary_keeps_registry_non_mutating_config_preview_actions() {
     let state = test_state_with_registry();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     let actions = vec![
@@ -870,11 +844,7 @@ fn unavailable_skill_plan_forces_repair() {
 fn preferred_registry_skill_route_forces_repair_but_can_fallback_to_safe_run_cmd() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.resolved_intent = "capability_ref=system.runtime_status".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -912,11 +882,7 @@ fn preferred_registry_skill_route_forces_repair_but_can_fallback_to_safe_run_cmd
 fn preferred_registry_skill_route_does_not_fallback_to_mutating_run_cmd() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.resolved_intent = "capability_ref=system.runtime_status".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -941,11 +907,7 @@ fn preferred_registry_skill_route_does_not_fallback_to_mutating_run_cmd() {
 fn preferred_registry_skill_route_does_not_force_repair_from_structured_tool() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.resolved_intent = "capability_ref=system.runtime_status".to_string();
     let actions = vec![AgentAction::CallTool {
@@ -977,11 +939,7 @@ fn log_content_summary_route_forces_repair_from_generic_fs_read() {
     let log_path = temp.path.join("app.log");
     fs::write(&log_path, "INFO ok\nWARN cache miss\n").expect("write fixture log");
     let log_path = log_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = log_path.clone();
@@ -1057,11 +1015,7 @@ fn fs_basic_directory_names_route_forces_repair_from_run_cmd() {
 fn explicit_literal_run_cmd_marker_skips_preferred_skill_repair() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableListing;
     route.resolved_intent = "capability_ref=database.list_tables".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -1139,11 +1093,7 @@ fn explicit_literal_existing_run_cmd_is_marked_before_repair_checks() {
     let mut state = test_state_with_registry();
     state.policy.command_intent.execute_prefixes = vec!["执行命令 ".to_string()];
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableListing;
     route.output_contract.locator_hint = "data/db-basic-contract.sqlite".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -1263,11 +1213,7 @@ fn file_paths_route_marks_missing_target_repairable() {
 fn raw_command_output_route_does_not_force_preferred_skill_repair() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
@@ -1352,11 +1298,7 @@ fn lightweight_act_route_keeps_observation_only_plan_without_repair() {
             "n": 4
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.resolved_intent = "读取 /tmp/device_local/logs/model_io.log 最后 4 行".to_string();
     route.output_contract.locator_hint = "/tmp/device_local/logs/model_io.log".to_string();
     assert!(!should_force_plan_repair(
@@ -1404,11 +1346,7 @@ fn lightweight_route_rejects_unavailable_followup_skill() {
 #[test]
 fn clarify_followup_tail_request_does_not_rewrite_single_read_file_from_text() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.resolved_intent = "Continue the previous request that was waiting for clarification: 看看那个模型日志最后 5 行\nUser now provides the missing target or content: scripts/nl_tests/fixtures/device_local/logs/model_io.log".to_string();
     let actions = vec![
         AgentAction::CallSkill {
@@ -1441,11 +1379,7 @@ fn clarify_followup_tail_request_does_not_rewrite_single_read_file_from_text() {
 #[test]
 fn non_range_single_read_keeps_read_file_plan() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.resolved_intent =
         "看看 scripts/nl_tests/fixtures/device_local/logs/model_io.log".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -1482,11 +1416,7 @@ fn single_target_read_file_prefers_auto_locator_file_over_stale_existing_path() 
     let stale_path = stale.display().to_string();
     let current_path = current.display().to_string();
 
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.resolved_intent = format!("读取 {} 的内容", current_path);
     route.output_contract.locator_hint = current_path.clone();
 
@@ -1527,11 +1457,7 @@ fn single_target_read_range_prefers_auto_locator_file_over_stale_existing_path()
     let stale_path = stale.display().to_string();
     let current_path = current.display().to_string();
 
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.resolved_intent = format!("查看 {} 最后 2 行", current_path);
     route.output_contract.locator_hint = current_path.clone();
 
@@ -1736,11 +1662,7 @@ fn single_target_fs_basic_read_text_range_prefers_auto_locator_file_over_stale_e
     let stale_path = stale.display().to_string();
     let current_path = current.display().to_string();
 
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.resolved_intent = format!("读取 {} 最后 1 行", current_path);
     route.output_contract.locator_hint = current_path.clone();
 

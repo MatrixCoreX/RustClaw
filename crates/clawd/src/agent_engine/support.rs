@@ -43,43 +43,6 @@ impl LoopBudgetProfile {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SemanticRouteAuthority {
-    Legacy,
-    Shadow,
-    AgentLoopCanary,
-    AgentLoopDefault,
-}
-
-impl SemanticRouteAuthority {
-    pub(super) fn as_str(self) -> &'static str {
-        match self {
-            Self::Legacy => "legacy",
-            Self::Shadow => "shadow",
-            Self::AgentLoopCanary => "agent_loop_canary",
-            Self::AgentLoopDefault => "agent_loop_default",
-        }
-    }
-
-    fn from_token(token: &str) -> Option<Self> {
-        match token.trim() {
-            "legacy" => Some(Self::Legacy),
-            "shadow" => Some(Self::Shadow),
-            "agent_loop_canary" => Some(Self::AgentLoopCanary),
-            "agent_loop_default" => Some(Self::AgentLoopDefault),
-            _ => None,
-        }
-    }
-
-    fn records_agent_decides_attribution(self) -> bool {
-        !matches!(self, Self::Legacy)
-    }
-
-    pub(super) fn uses_agent_loop_authority(self) -> bool {
-        matches!(self, Self::AgentLoopCanary | Self::AgentLoopDefault)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RegistryIdempotencyGuardScope {
     Off,
     SelectedAgentLoop,
@@ -126,8 +89,6 @@ pub(super) struct AgentLoopGuardPolicy {
     pub(super) multi_round_enabled: bool,
     pub(super) answer_verifier_retry_limit: usize,
     pub(super) answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope,
-    pub(super) semantic_route_authority: SemanticRouteAuthority,
-    pub(super) agent_loop_canary_bucket: String,
     pub(super) registry_idempotency_guard_scope: RegistryIdempotencyGuardScope,
     pub(super) structured_evidence_required_for_selected_contracts: bool,
     pub(super) fast_read: LoopRecipeOverrides,
@@ -137,37 +98,6 @@ pub(super) struct AgentLoopGuardPolicy {
 }
 
 impl AgentLoopGuardPolicy {
-    pub(super) fn effective_semantic_route_authority(&self) -> SemanticRouteAuthority {
-        self.semantic_route_authority
-    }
-
-    pub(super) fn records_agent_decides_attribution(&self) -> bool {
-        self.effective_semantic_route_authority()
-            .records_agent_decides_attribution()
-    }
-
-    pub(super) fn uses_agent_loop_semantic_authority(&self) -> bool {
-        self.effective_semantic_route_authority()
-            .uses_agent_loop_authority()
-    }
-
-    pub(super) fn selected_migration_class_for_eligible(
-        &self,
-        eligible_migration_class: &'static str,
-    ) -> &'static str {
-        if eligible_migration_class == "none" {
-            return "none";
-        }
-        if self.effective_semantic_route_authority() == SemanticRouteAuthority::AgentLoopDefault {
-            return eligible_migration_class;
-        }
-        if self.agent_loop_canary_bucket == eligible_migration_class {
-            eligible_migration_class
-        } else {
-            "none"
-        }
-    }
-
     pub(super) fn enabled_rollout_switches(&self) -> Vec<&'static str> {
         let mut switches = Vec::new();
         match self.effective_answer_verifier_required_evidence_scope() {
@@ -176,9 +106,6 @@ impl AgentLoopGuardPolicy {
             | AnswerVerifierRequiredEvidenceScope::All => {
                 switches.push("answer_verifier_enforce_required_scope")
             }
-        }
-        if self.effective_semantic_route_authority() != SemanticRouteAuthority::Legacy {
-            switches.push("semantic_route_authority");
         }
         match self.effective_registry_idempotency_guard_scope() {
             RegistryIdempotencyGuardScope::Off => {}
@@ -232,14 +159,13 @@ impl AgentLoopGuardPolicy {
     }
 
     fn selected_agent_loop_route(&self, route: &crate::RouteResult) -> bool {
-        if !self.uses_agent_loop_semantic_authority()
-            || route.risk_ceiling == crate::RiskCeiling::High
+        if route.risk_ceiling == crate::RiskCeiling::High
             || route.schedule_kind != crate::ScheduleKind::None
         {
             return false;
         }
         let eligible = super::migration_class::agent_decides_eligible_migration_class(route);
-        self.selected_migration_class_for_eligible(eligible) != "none"
+        eligible != "none"
     }
 
     pub(super) fn budget_profile_for_context(
@@ -276,8 +202,10 @@ impl AgentLoopGuardPolicy {
         if matches!(
             target_object,
             crate::evidence_policy::EvidenceTargetObject::Directory
-        ) && matches!(operation, crate::evidence_policy::EvidenceOperation::Summarize)
-        {
+        ) && matches!(
+            operation,
+            crate::evidence_policy::EvidenceOperation::Summarize
+        ) {
             return LoopBudgetProfile::MultiStepWorkspace;
         }
         if required_evidence_fields.len() >= 2
@@ -426,54 +354,6 @@ fn parse_bool_from_toml(root: &TomlValue, path: &[&str], fallback: bool) -> bool
     cursor.as_bool().unwrap_or(fallback)
 }
 
-fn parse_agent_loop_canary_bucket(root: &TomlValue) -> String {
-    const ALLOWED: &[&str] = &[
-        "none",
-        "bound_path_summary",
-        "structured_field_read",
-        "exact_path_list",
-        "recent_artifacts_judgment",
-        "scalar_count",
-        "low_risk_status_observation",
-        "low_risk_config_read",
-        "low_risk_log_observation",
-        "low_risk_workspace_question",
-        "low_risk_tool_discovery",
-        "low_risk_single_file_delivery",
-    ];
-    let mut cursor = root;
-    for key in ["agent", "loop_guard", "agent_loop_canary_bucket"] {
-        let Some(next) = cursor.get(key) else {
-            return "none".to_string();
-        };
-        cursor = next;
-    }
-    let value = cursor.as_str().unwrap_or("none").trim();
-    if ALLOWED.contains(&value) {
-        value.to_string()
-    } else {
-        "none".to_string()
-    }
-}
-
-fn default_semantic_route_authority() -> SemanticRouteAuthority {
-    SemanticRouteAuthority::AgentLoopDefault
-}
-
-fn parse_semantic_route_authority(root: &TomlValue) -> SemanticRouteAuthority {
-    let mut cursor = root;
-    for key in ["agent", "loop_guard", "semantic_route_authority"] {
-        let Some(next) = cursor.get(key) else {
-            return default_semantic_route_authority();
-        };
-        cursor = next;
-    }
-    cursor
-        .as_str()
-        .and_then(SemanticRouteAuthority::from_token)
-        .unwrap_or(SemanticRouteAuthority::Legacy)
-}
-
 fn parse_answer_verifier_required_evidence_scope(
     root: &TomlValue,
 ) -> Option<AnswerVerifierRequiredEvidenceScope> {
@@ -540,7 +420,6 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
         .ok()
         .and_then(|raw| toml::from_str::<TomlValue>(&raw).ok())
         .unwrap_or(TomlValue::Table(Default::default()));
-    let semantic_route_authority = parse_semantic_route_authority(&parsed);
     let answer_verifier_enforce_required_scope =
         parse_answer_verifier_required_evidence_scope(&parsed)
             .unwrap_or(AnswerVerifierRequiredEvidenceScope::Off);
@@ -584,8 +463,6 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
             2,
         ),
         answer_verifier_enforce_required_scope,
-        semantic_route_authority,
-        agent_loop_canary_bucket: parse_agent_loop_canary_bucket(&parsed),
         registry_idempotency_guard_scope,
         structured_evidence_required_for_selected_contracts: parse_bool_from_toml(
             &parsed,
@@ -1538,7 +1415,7 @@ fn literal_execution_failed_step_run_cmd_uses_args_fingerprint(
         return false;
     }
     route_result.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::ExecutionFailedStep
+        route.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep)
     })
 }
 

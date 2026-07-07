@@ -22,7 +22,7 @@ pub(super) fn action_supports_direct_observed_finalize(
                     .map(str::to_ascii_lowercase)
                     .unwrap_or_default();
                 return route_result.is_some_and(|route| {
-                    route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+                    route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
                         && matches!(action_name.as_str(), "ps" | "port_list")
                         && !route_allows_model_language_terminal_respond(Some(route))
                 });
@@ -76,7 +76,7 @@ pub(super) fn action_supports_read_range_direct_observed_finalize(
         || (canonical == "system_basic" && action == Some("read_range"));
     if !is_read_range
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || !route.output_contract_is_unclassified()
         || matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar
@@ -93,19 +93,18 @@ pub(super) fn action_supports_structured_direct_observed_finalize(
     args: &Value,
 ) -> bool {
     if route_result.is_some_and(|route| {
-        !matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-                | crate::OutputSemanticKind::StructuredKeys
-                | crate::OutputSemanticKind::DirectoryEntryGroups
-                | crate::OutputSemanticKind::FileNames
-                | crate::OutputSemanticKind::DirectoryNames
-                | crate::OutputSemanticKind::FilePaths
-                | crate::OutputSemanticKind::QuantityComparison
-                | crate::OutputSemanticKind::ContentPresenceCheck
-                | crate::OutputSemanticKind::ConfigValidation
-                | crate::OutputSemanticKind::ConfigRiskAssessment
-        )
+        !(route.output_contract_is_unclassified()
+            || route.output_contract_marker_is_any(&[
+                crate::OutputSemanticKind::StructuredKeys,
+                crate::OutputSemanticKind::DirectoryEntryGroups,
+                crate::OutputSemanticKind::FileNames,
+                crate::OutputSemanticKind::DirectoryNames,
+                crate::OutputSemanticKind::FilePaths,
+                crate::OutputSemanticKind::QuantityComparison,
+                crate::OutputSemanticKind::ContentPresenceCheck,
+                crate::OutputSemanticKind::ConfigValidation,
+                crate::OutputSemanticKind::ConfigRiskAssessment,
+            ]))
     }) {
         return false;
     }
@@ -125,19 +124,17 @@ pub(super) fn action_supports_structured_direct_observed_finalize(
             Some("list_keys") => {
                 !one_sentence
                     && route_result.is_none_or(|route| {
-                        !matches!(
-                            route.output_contract.semantic_kind,
-                            crate::OutputSemanticKind::FileNames
-                        ) || args
-                            .get("path")
-                            .and_then(Value::as_str)
-                            .map(str::trim)
-                            .filter(|path| !path.is_empty())
-                            .or_else(|| {
-                                let hint = route.output_contract.locator_hint.trim();
-                                (!hint.is_empty()).then_some(hint)
-                            })
-                            .is_some_and(path_has_structured_document_extension)
+                        !route.output_contract_marker_is(crate::OutputSemanticKind::FileNames)
+                            || args
+                                .get("path")
+                                .and_then(Value::as_str)
+                                .map(str::trim)
+                                .filter(|path| !path.is_empty())
+                                .or_else(|| {
+                                    let hint = route.output_contract.locator_hint.trim();
+                                    (!hint.is_empty()).then_some(hint)
+                                })
+                                .is_some_and(path_has_structured_document_extension)
                     })
             }
             Some("validate") => !one_sentence,
@@ -152,55 +149,46 @@ pub(super) fn action_supports_structured_direct_observed_finalize(
             Some("structured_keys") => {
                 !one_sentence
                     && route_result.is_none_or(|route| {
-                        !matches!(
-                            route.output_contract.semantic_kind,
-                            crate::OutputSemanticKind::FileNames
-                        ) || args
-                            .get("path")
-                            .and_then(Value::as_str)
-                            .map(str::trim)
-                            .filter(|path| !path.is_empty())
-                            .or_else(|| {
-                                let hint = route.output_contract.locator_hint.trim();
-                                (!hint.is_empty()).then_some(hint)
-                            })
-                            .is_some_and(path_has_structured_document_extension)
+                        !route.output_contract_marker_is(crate::OutputSemanticKind::FileNames)
+                            || args
+                                .get("path")
+                                .and_then(Value::as_str)
+                                .map(str::trim)
+                                .filter(|path| !path.is_empty())
+                                .or_else(|| {
+                                    let hint = route.output_contract.locator_hint.trim();
+                                    (!hint.is_empty()).then_some(hint)
+                                })
+                                .is_some_and(path_has_structured_document_extension)
                     })
             }
-            Some("tree_summary") => route_result.is_some_and(|route| {
-                matches!(
-                    route.output_contract.semantic_kind,
-                    crate::OutputSemanticKind::None
-                )
-            }),
+            Some("tree_summary") => {
+                route_result.is_some_and(|route| route.output_contract_is_unclassified())
+            }
             Some("dir_compare") => route_result.is_some_and(|route| {
-                matches!(
-                    route.output_contract.semantic_kind,
-                    crate::OutputSemanticKind::None | crate::OutputSemanticKind::QuantityComparison
-                )
+                route.output_contract_is_unclassified()
+                    || route
+                        .output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
             }),
             _ => false,
         },
         "fs_basic" => match action {
             Some("grep_text") => route_result.is_some_and(|route| {
-                route.output_contract.semantic_kind
-                    == crate::OutputSemanticKind::ContentPresenceCheck
+                route.output_contract_marker_is(crate::OutputSemanticKind::ContentPresenceCheck)
             }),
             Some("find_entries") => route_result.is_some_and(|route| {
-                matches!(
-                    route.output_contract.semantic_kind,
-                    crate::OutputSemanticKind::FileNames
-                        | crate::OutputSemanticKind::DirectoryNames
-                        | crate::OutputSemanticKind::FilePaths
-                )
+                route.output_contract_marker_is_any(&[
+                    crate::OutputSemanticKind::FileNames,
+                    crate::OutputSemanticKind::DirectoryNames,
+                    crate::OutputSemanticKind::FilePaths,
+                ])
             }),
             Some("list_dir") => route_result.is_some_and(|route| {
-                matches!(
-                    route.output_contract.semantic_kind,
-                    crate::OutputSemanticKind::FileNames
-                        | crate::OutputSemanticKind::DirectoryNames
-                        | crate::OutputSemanticKind::DirectoryEntryGroups
-                )
+                route.output_contract_marker_is_any(&[
+                    crate::OutputSemanticKind::FileNames,
+                    crate::OutputSemanticKind::DirectoryNames,
+                    crate::OutputSemanticKind::DirectoryEntryGroups,
+                ])
             }),
             _ => false,
         },
@@ -266,23 +254,22 @@ pub(super) fn route_uses_runtime_owned_observed_finalizer(route_result: &RouteRe
     {
         return true;
     }
-    matches!(
-        route_result.output_contract.semantic_kind,
-        crate::OutputSemanticKind::RawCommandOutput
-            | crate::OutputSemanticKind::HiddenEntriesCheck
-            | crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::FilePaths
-            | crate::OutputSemanticKind::ContentPresenceCheck
-            | crate::OutputSemanticKind::ServiceStatus
-            | crate::OutputSemanticKind::ScalarPathOnly
-            | crate::OutputSemanticKind::ExistenceWithPath
-            | crate::OutputSemanticKind::RecentScalarEqualityCheck
-            | crate::OutputSemanticKind::RecentArtifactsJudgment
-            | crate::OutputSemanticKind::GitCommitSubject
-            | crate::OutputSemanticKind::GitRepositoryState
-            | crate::OutputSemanticKind::StructuredKeys
-    ) || crate::machine_capability_ref::route_has_capability_namespace(
+    route_result.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::RawCommandOutput,
+        crate::OutputSemanticKind::HiddenEntriesCheck,
+        crate::OutputSemanticKind::FileNames,
+        crate::OutputSemanticKind::DirectoryNames,
+        crate::OutputSemanticKind::FilePaths,
+        crate::OutputSemanticKind::ContentPresenceCheck,
+        crate::OutputSemanticKind::ServiceStatus,
+        crate::OutputSemanticKind::ScalarPathOnly,
+        crate::OutputSemanticKind::ExistenceWithPath,
+        crate::OutputSemanticKind::RecentScalarEqualityCheck,
+        crate::OutputSemanticKind::RecentArtifactsJudgment,
+        crate::OutputSemanticKind::GitCommitSubject,
+        crate::OutputSemanticKind::GitRepositoryState,
+        crate::OutputSemanticKind::StructuredKeys,
+    ]) || crate::machine_capability_ref::route_has_capability_namespace(
         route_result,
         &["archive", "docker"],
     )
@@ -355,7 +342,7 @@ pub(super) fn recent_artifacts_judgment_needs_selected_content_reads(
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::RecentArtifactsJudgment
+    route.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
         && route.output_contract.requires_content_evidence
         && !has_workspace_text_content_evidence(loop_state, actions)
         && actions.iter().any(action_provides_name_listing_evidence)
@@ -478,8 +465,7 @@ pub(super) fn strip_terminal_discussion_for_observed_finalize(
         && has_executable_observation_or_action(&actions)
         && has_discussion_followup_action(&actions)
         && route_result.is_some_and(|route| {
-            route.output_contract.semantic_kind
-                == crate::OutputSemanticKind::RecentScalarEqualityCheck
+            route.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
         })
     {
         let mut stripped = actions.clone();
@@ -545,7 +531,7 @@ pub(super) fn strip_terminal_discussion_for_scalar_path_observation(
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarPathOnly
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
         || !has_tool_or_skill_observation(&actions)
         || !has_discussion_followup_action(&actions)
     {
@@ -578,10 +564,10 @@ pub(super) fn strip_terminal_discussion_for_direct_skill_passthrough(
     {
         return actions;
     }
-    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths {
+    if route_result.output_contract_marker_is(crate::OutputSemanticKind::FilePaths) {
         return actions;
     }
-    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+    if route_result.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
         && route_result.output_contract.requires_content_evidence
         && actions
             .iter()
@@ -589,7 +575,7 @@ pub(super) fn strip_terminal_discussion_for_direct_skill_passthrough(
     {
         return actions;
     }
-    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+    if route_result.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
         && route_allows_model_language_terminal_respond(Some(route_result))
         && actions
             .iter()
@@ -1035,11 +1021,11 @@ fn route_allows_pure_chat_submode_terminal_respond(
     actions: &[AgentAction],
 ) -> bool {
     let chat_wrapped_text_loop = route_result.ask_mode.finalize_chat_wrapped();
-    let pure_chat_submode = route_result.is_planner_execute_chat_wrapped()
+    let pure_chat_submode = route_result.uses_chat_finalizer()
         || route_reason_has_structural_marker(route_result, "pure_chat_agent_loop_submode");
     if !(pure_chat_submode || chat_wrapped_text_loop)
         || route_result.needs_clarify
-        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || !route_result.output_contract_is_unclassified()
         || route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
@@ -1058,7 +1044,7 @@ fn route_allows_context_only_terminal_respond(
     route_result: &RouteResult,
     actions: &[AgentAction],
 ) -> bool {
-    if route_result.output_contract.semantic_kind != crate::OutputSemanticKind::ToolDiscovery
+    if !route_result.output_contract_marker_is(crate::OutputSemanticKind::ToolDiscovery)
         || route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || route_result.wants_file_delivery

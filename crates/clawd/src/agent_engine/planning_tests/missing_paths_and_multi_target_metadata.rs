@@ -688,13 +688,13 @@ fn existence_multi_file_stat_paths_are_repaired_from_structural_targets() {
     }];
 
     let normalized = super::super::normalize_planned_actions(
-            &test_state(),
-            Some(&route),
-            &LoopState::new(2),
-            "检查 README.md, README.zh-CN.md, Cargo.toml, and no_such_file_20260513.txt 是否存在，并用表格返回结果。",
-            None,
-            actions,
-        );
+        &test_state(),
+        Some(&route),
+        &LoopState::new(2),
+        "检查 README.md, README.zh-CN.md, Cargo.toml, and no_such_file_20260513.txt 是否存在，并用表格返回结果。",
+        None,
+        actions,
+    );
 
     assert_eq!(normalized.len(), 1);
     assert!(matches!(
@@ -876,13 +876,13 @@ fn recent_scalar_equality_preserves_content_extract_plan_for_explicit_files() {
         },
     ];
     let normalized = super::super::normalize_planned_actions(
-            &test_state(),
-            Some(&route),
-            &LoopState::new(2),
-            "Read workspace package version from Cargo.toml and compare it with the version mentioned in README.md",
-            None,
-            actions,
-        );
+        &test_state(),
+        Some(&route),
+        &LoopState::new(2),
+        "Read workspace package version from Cargo.toml and compare it with the version mentioned in README.md",
+        None,
+        actions,
+    );
 
     assert!(!normalized.iter().any(|action| matches!(
         action,
@@ -1378,8 +1378,7 @@ reqwest = { version = "0.12" }
     let cargo_auto = cargo.display().to_string();
     let planner_user_text = format!(
         "{}\n\n[AUTO_LOCATOR]\nResolved concrete path from default locator directory: {}\nUse this path as the target unless user explicitly overrides it.\n",
-        route.resolved_intent,
-        cargo_auto
+        route.resolved_intent, cargo_auto
     );
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;

@@ -300,14 +300,12 @@ fn scalar_path_directory_locator_search_requires_scalar_path_contract() {
     route.output_contract.locator_hint = root_path.clone();
     route.output_contract.delivery_required = false;
 
-    assert!(
-        scalar_path_directory_locator_search_observation_plan(
-            Some(&route),
-            Some(&root_path),
-            &format!("Inside {root_path}, find abcd and return only the path"),
-        )
-        .is_none()
-    );
+    assert!(scalar_path_directory_locator_search_observation_plan(
+        Some(&route),
+        Some(&root_path),
+        &format!("Inside {root_path}, find abcd and return only the path"),
+    )
+    .is_none());
 }
 
 #[test]
@@ -856,12 +854,10 @@ fn directory_purpose_auto_locator_lists_directory_and_reads_text_candidates() {
     );
 
     let read_args = expect_planned_call(&normalized[1], "fs_basic", "read_text_range");
-    assert!(
-        read_args
-            .get("path")
-            .and_then(Value::as_str)
-            .is_some_and(|path| path.ends_with("README.txt"))
-    );
+    assert!(read_args
+        .get("path")
+        .and_then(Value::as_str)
+        .is_some_and(|path| path.ends_with("README.txt")));
     assert!(matches!(
         normalized.get(1),
         Some(AgentAction::CallTool { .. })
@@ -1056,12 +1052,10 @@ fn directory_purpose_extension_locator_uses_recursive_find_entries_not_tree_summ
         Some("size_desc")
     );
     let read_args = expect_planned_call(&normalized[1], "fs_basic", "read_text_range");
-    assert!(
-        read_args
-            .get("path")
-            .and_then(Value::as_str)
-            .is_some_and(|path| path.ends_with("Cargo.toml"))
-    );
+    assert!(read_args
+        .get("path")
+        .and_then(Value::as_str)
+        .is_some_and(|path| path.ends_with("Cargo.toml")));
     assert!(matches!(
         normalized.get(3),
         Some(AgentAction::SynthesizeAnswer { evidence_refs })
@@ -1178,16 +1172,12 @@ fn directory_purpose_extension_from_resolved_intent_uses_recursive_find_entries(
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert!(
-        read_paths
-            .iter()
-            .any(|path| path.ends_with("intent_normalizer.schema.json"))
-    );
-    assert!(
-        read_paths
-            .iter()
-            .any(|path| path.ends_with("nested/contract_repair.schema.json"))
-    );
+    assert!(read_paths
+        .iter()
+        .any(|path| path.ends_with("intent_normalizer.schema.json")));
+    assert!(read_paths
+        .iter()
+        .any(|path| path.ends_with("nested/contract_repair.schema.json")));
 }
 
 #[test]
@@ -1355,18 +1345,16 @@ fn directory_purpose_reads_representative_found_files_from_wrapped_extra() {
     assert_eq!(actions.len(), 4);
     let first = actions.get(0).expect("first action");
     let args = expect_planned_call(first, "fs_basic", "read_text_range");
-    assert!(
-        args.get("path")
-            .and_then(Value::as_str)
-            .is_some_and(|path| path.ends_with("intent_normalizer.schema.json"))
-    );
+    assert!(args
+        .get("path")
+        .and_then(Value::as_str)
+        .is_some_and(|path| path.ends_with("intent_normalizer.schema.json")));
     let second = actions.get(1).expect("second action");
     let args = expect_planned_call(second, "fs_basic", "read_text_range");
-    assert!(
-        args.get("path")
-            .and_then(Value::as_str)
-            .is_some_and(|path| path.ends_with("contract_repair_judge.schema.json"))
-    );
+    assert!(args
+        .get("path")
+        .and_then(Value::as_str)
+        .is_some_and(|path| path.ends_with("contract_repair_judge.schema.json")));
     assert!(matches!(
         actions.get(2),
         Some(AgentAction::SynthesizeAnswer { evidence_refs })

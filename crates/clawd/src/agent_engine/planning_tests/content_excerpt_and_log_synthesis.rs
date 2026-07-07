@@ -1605,8 +1605,8 @@ fn scalar_content_auto_locator_ignores_memory_field_when_current_request_names_b
     let current_request =
         "读取 scripts/nl_tests/fixtures/device_local/package.json 的 name 字段，只输出值。";
     let goal = format!(
-            "### PLANNER_MEMORY_CONTEXT\nfixture fact: scripts.build='echo build'\n\n### CURRENT_REQUEST\n{current_request}"
-        );
+        "### PLANNER_MEMORY_CONTEXT\nfixture fact: scripts.build='echo build'\n\n### CURRENT_REQUEST\n{current_request}"
+    );
 
     let read_args = assert_planner_supplied_tool_call_preserved(
         &state,

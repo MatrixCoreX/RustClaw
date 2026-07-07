@@ -122,6 +122,42 @@ fn replace_resolved_intent_structural_value(
         .join("\n")
 }
 
+fn replace_known_locator_token(resolved_intent: &str, old_value: &str, new_value: &str) -> String {
+    let old_value = old_value.trim();
+    if old_value.is_empty() {
+        return resolved_intent.to_string();
+    }
+    let mut out = String::with_capacity(resolved_intent.len());
+    let mut cursor = 0usize;
+    for (idx, _) in resolved_intent.match_indices(old_value) {
+        let end = idx + old_value.len();
+        if !locator_token_boundary(resolved_intent, idx, end) {
+            continue;
+        }
+        out.push_str(&resolved_intent[cursor..idx]);
+        out.push_str(new_value);
+        cursor = end;
+    }
+    if cursor == 0 {
+        return resolved_intent.to_string();
+    }
+    out.push_str(&resolved_intent[cursor..]);
+    out
+}
+
+fn locator_token_boundary(text: &str, start: usize, end: usize) -> bool {
+    let before = text[..start].chars().next_back();
+    let after = text[end..].chars().next();
+    locator_boundary_char(before) && locator_boundary_char(after)
+}
+
+fn locator_boundary_char(ch: Option<char>) -> bool {
+    match ch {
+        None => true,
+        Some(ch) => !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | '\\')),
+    }
+}
+
 fn active_delivery_target_line(target: &str) -> String {
     let mut line =
         String::with_capacity(ACTIVE_DELIVERY_CONTENT_TARGET_KEY.len() + ": ".len() + target.len());
@@ -374,13 +410,14 @@ pub(super) fn bind_content_read_to_active_delivery_target(
     route_result.output_contract.locator_hint = target.clone();
     if !previous_hint.is_empty()
         && !text_has_structural_value(&route_result.resolved_intent, &target)
-        && text_has_structural_value(&route_result.resolved_intent, &previous_hint)
     {
         route_result.resolved_intent = replace_resolved_intent_structural_value(
             &route_result.resolved_intent,
             &previous_hint,
             &target,
         );
+        route_result.resolved_intent =
+            replace_known_locator_token(&route_result.resolved_intent, &previous_hint, &target);
     }
     append_active_delivery_resolved_target(route_result, &target);
     if !previous_hint.is_empty() {

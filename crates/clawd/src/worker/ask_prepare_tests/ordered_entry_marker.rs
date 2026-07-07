@@ -85,20 +85,16 @@ fn ordered_entry_binding_uses_exact_machine_markers_and_target_lines() {
     ));
 
     assert_eq!(route.output_contract.locator_hint, target);
-    assert!(
-        route
-            .route_reason
-            .split(';')
-            .map(str::trim)
-            .any(|part| part == "ordered_entry_reference_bound_from_active_frame")
-    );
-    assert!(
-        route
-            .resolved_intent
-            .lines()
-            .map(str::trim)
-            .any(|line| line == format!("ordered_entry_target: {target}"))
-    );
+    assert!(route
+        .route_reason
+        .split(';')
+        .map(str::trim)
+        .any(|part| part == "ordered_entry_reference_bound_from_active_frame"));
+    assert!(route
+        .resolved_intent
+        .lines()
+        .map(str::trim)
+        .any(|line| line == format!("ordered_entry_target: {target}")));
     assert_eq!(
         route
             .resolved_intent
