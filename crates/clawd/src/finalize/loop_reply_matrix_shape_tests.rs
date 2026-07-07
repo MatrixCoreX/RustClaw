@@ -603,6 +603,33 @@ fn matrix_grouped_name_list_shape_reads_wrapped_inventory_extra() {
 }
 
 #[test]
+fn grouped_name_list_renderer_uses_capability_shape_without_semantic_kind() {
+    let mut route = free_route_result();
+    route.route_reason = "capability_ref=filesystem.list_entries".to_string();
+    route.resolved_intent = "capability_ref=filesystem.list_entries".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = "workspace".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","counts":{"dirs":1,"files":2,"total":3},"names_by_kind":{"files":["Cargo.toml","README.md"],"dirs":["crates"],"other":[]},"path":"workspace"}}"#,
+    ));
+
+    assert!(super::super::directory_entry_groups_prefers_observed_groups(&route, &loop_state));
+    let (answer, summary) =
+        super::super::matrix_grouped_name_list_observed_answer(&route, &loop_state)
+            .expect("capability-owned grouped-name answer");
+
+    assert_eq!(answer, "dirs:\n- crates\nfiles:\n- Cargo.toml\n- README.md");
+    assert_eq!(summary.format_ok, Some(true));
+    assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
 fn matrix_grouped_name_list_ignores_inventory_json_hidden_in_visible_text() {
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;

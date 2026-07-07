@@ -623,10 +623,7 @@ pub(super) fn matrix_grouped_name_list_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if crate::evidence_policy::final_answer_shape_for_route(route)
-        != Some(crate::evidence_policy::FinalAnswerShape::GroupedNameList)
-        || !route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryEntryGroups)
-    {
+    if !crate::finalize::route_prefers_grouped_name_list_output(route) {
         return None;
     }
     let mut dirs = BTreeMap::<String, String>::new();

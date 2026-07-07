@@ -75,6 +75,11 @@ pub(crate) fn route_matches_service_control_machine_summary(route: &crate::Route
         )
 }
 
+pub(crate) fn route_prefers_grouped_name_list_output(route: &crate::RouteResult) -> bool {
+    crate::evidence_policy::final_answer_shape_for_route(route)
+        == Some(crate::evidence_policy::FinalAnswerShape::GroupedNameList)
+}
+
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX: &str = "**执行过程**";
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX_EN: &str = "**Execution**";
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX_JA: &str = "**実行過程**";
