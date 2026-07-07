@@ -2323,7 +2323,8 @@ def scan_current_workspace_scope_boundary_marker() -> list[Finding]:
     findings: list[Finding] = []
     required_tokens = [
         '"task_shape": "scalar_count"',
-        '"contract_marker": route.effective_output_contract_semantic_kind().as_str()',
+        '"final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str)',
+        '"final_answer_shape_class": final_answer_shape.map(|shape| shape.class().as_str())',
     ]
     for token in required_tokens:
         if token in body:
@@ -2332,7 +2333,7 @@ def scan_current_workspace_scope_boundary_marker() -> list[Finding]:
             Finding(
                 rel_path,
                 1,
-                "current_workspace_scope_marker_missing",
+                "current_workspace_scope_answer_shape_missing",
                 f"missing required boundary token: {token}",
             )
         )
@@ -2370,13 +2371,22 @@ def scan_lightweight_tool_spec_contract_marker() -> list[Finding]:
     fn_end = text.find("\nconst LIGHTWEIGHT_SKILL_PLAYBOOK_MAX_CHARS", fn_start)
     body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
     findings: list[Finding] = []
-    if "contract_marker={}" not in body:
+    if "final_answer_shape={}" not in body or "final_answer_shape_class={}" not in body:
         findings.append(
             Finding(
                 rel_path,
                 1,
-                "lightweight_tool_spec_contract_marker_missing",
-                "lightweight tool spec should expose contract_marker, not legacy semantic_kind",
+                "lightweight_tool_spec_answer_shape_missing",
+                "lightweight tool spec should expose final_answer_shape/final_answer_shape_class",
+            )
+        )
+    if "contract_marker={}" in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "lightweight_tool_spec_contract_marker_returned",
+                "lightweight tool spec must not expose legacy contract_marker",
             )
         )
     if "semantic_kind={}" in body:
@@ -2465,13 +2475,22 @@ def scan_answer_verifier_output_contract_prompt_marker() -> list[Finding]:
     fn_end = text.find("\nfn verifier_contract_matrix_prompt_trace", fn_start)
     body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
     findings: list[Finding] = []
-    if '"contract_marker": route_result.effective_output_contract_semantic_kind().as_str()' not in body:
+    if '"final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str)' not in body:
         findings.append(
             Finding(
                 rel_path,
                 1,
-                "answer_verifier_contract_marker_missing",
-                "answer verifier output contract prompt should expose contract_marker",
+                "answer_verifier_final_answer_shape_missing",
+                "answer verifier output contract prompt should expose final_answer_shape",
+            )
+        )
+    if '"contract_marker": route_result.effective_output_contract_semantic_kind().as_str()' in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "answer_verifier_contract_marker_returned",
+                "answer verifier output contract prompt must not expose legacy contract_marker",
             )
         )
     if '"semantic_kind": route_result.effective_output_contract_semantic_kind().as_str()' in body:
@@ -2490,13 +2509,22 @@ def scan_verifier_contract_missing_detail_marker() -> list[Finding]:
     rel_path = rel(VERIFIER_FILE)
     text = VERIFIER_FILE.read_text(encoding="utf-8")
     findings: list[Finding] = []
-    if "error_code=evidence_policy_entry_missing contract_marker=" not in text:
+    if "error_code=evidence_policy_entry_missing final_answer_shape=missing" not in text:
         findings.append(
             Finding(
                 rel_path,
                 1,
-                "verifier_contract_marker_detail_missing",
-                "evidence-policy missing verifier detail should emit machine fields with contract_marker",
+                "verifier_final_answer_shape_detail_missing",
+                "evidence-policy missing verifier detail should emit final_answer_shape machine fields",
+            )
+        )
+    if "error_code=evidence_policy_entry_missing contract_marker=" in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "verifier_contract_marker_detail_returned",
+                "evidence-policy missing verifier detail must not emit legacy contract_marker",
             )
         )
     if "no contract matrix entry matched semantic kind" in text:
@@ -2527,13 +2555,22 @@ def scan_route_guard_record_contract_marker() -> list[Finding]:
     fn_end = text.find("\nfn ", fn_start + 1)
     body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
     findings: list[Finding] = []
-    if "contract_marker={}" not in body:
+    if "final_answer_shape={}" not in body or "final_answer_shape_class={}" not in body:
         findings.append(
             Finding(
                 rel_path,
                 1,
-                "route_guard_record_contract_marker_missing",
-                "route guard record should log contract_marker, not legacy semantic_kind",
+                "route_guard_record_final_answer_shape_missing",
+                "route guard record should log final_answer_shape/final_answer_shape_class",
+            )
+        )
+    if "contract_marker={}" in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "route_guard_record_contract_marker_field",
+                "route guard record must not expose legacy contract_marker field name",
             )
         )
     if "semantic_kind={}" in body:
@@ -2552,13 +2589,22 @@ def scan_loop_control_output_contract_marker_key() -> list[Finding]:
     rel_path = rel(LOOP_CONTROL_FILE)
     text = LOOP_CONTROL_FILE.read_text(encoding="utf-8")
     findings: list[Finding] = []
-    if '"agent_loop.effective_output_contract_marker"' not in text:
+    if '"agent_loop.final_answer_shape"' not in text or '"agent_loop.final_answer_shape_class"' not in text:
         findings.append(
             Finding(
                 rel_path,
                 1,
-                "loop_control_contract_marker_key_missing",
-                "loop output vars should expose effective_output_contract_marker",
+                "loop_control_final_answer_shape_key_missing",
+                "loop output vars should expose final_answer_shape/final_answer_shape_class",
+            )
+        )
+    if '"agent_loop.effective_output_contract_marker"' in text:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "loop_control_contract_marker_key_returned",
+                "loop output vars must not expose legacy effective_output_contract_marker key",
             )
         )
     if '"agent_loop.effective_output_contract_semantic_kind"' in text:
@@ -2669,13 +2715,22 @@ def scan_observed_output_contract_marker_payload() -> list[Finding]:
     fn_end = text.find("\nfn observed_answer_fallback_prompt_logical_path", fn_start)
     body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
     findings: list[Finding] = []
-    if '"contract_marker": route.effective_output_contract_semantic_kind().as_str()' not in body:
+    if '"final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str)' not in body:
         findings.append(
             Finding(
                 rel_path,
                 1,
-                "observed_contract_marker_missing",
-                "observed fallback contract JSON should expose contract_marker",
+                "observed_contract_final_answer_shape_missing",
+                "observed fallback contract JSON should expose final_answer_shape",
+            )
+        )
+    if '"contract_marker": route.effective_output_contract_semantic_kind().as_str()' in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "observed_contract_marker_returned",
+                "observed fallback contract JSON must not expose legacy contract_marker",
             )
         )
     if '"semantic_kind": route.effective_output_contract_semantic_kind().as_str()' in body:
@@ -2871,13 +2926,22 @@ def scan_task_journal_step_contract_marker() -> list[Finding]:
     fn_end = text.find("\nfn ", fn_start + 1)
     body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
     findings: list[Finding] = []
-    if '"contract_marker": contract.get("contract_marker").and_then(Value::as_str)' not in body:
+    if '"final_answer_shape": contract.get("final_answer_shape").and_then(Value::as_str)' not in body:
         findings.append(
             Finding(
                 rel_path,
                 1,
-                "task_journal_step_contract_marker_missing",
-                "task journal step contract trace should expose contract_marker",
+                "task_journal_step_final_answer_shape_missing",
+                "task journal step contract trace should expose final_answer_shape",
+            )
+        )
+    if '"contract_marker": contract.get("contract_marker").and_then(Value::as_str)' in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "task_journal_step_contract_marker_returned",
+                "task journal step contract trace must not expose legacy contract_marker",
             )
         )
     if '"semantic_kind": contract.get("semantic_kind").and_then(Value::as_str)' in body:
@@ -2908,13 +2972,22 @@ def scan_schedule_preview_contract_marker() -> list[Finding]:
     fn_end = text.find("\npub(crate) async fn try_handle_schedule_request", fn_start)
     body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
     findings: list[Finding] = []
-    if '"contract_marker": "schedule_intent_preview"' not in body:
+    if '"final_answer_shape": crate::evidence_policy::FinalAnswerShape::ValidationVerdict.as_str()' not in body:
         findings.append(
             Finding(
                 rel_path,
                 1,
-                "schedule_preview_contract_marker_missing",
-                "schedule preview response should expose contract_marker",
+                "schedule_preview_final_answer_shape_missing",
+                "schedule preview response should expose final_answer_shape",
+            )
+        )
+    if '"contract_marker": "schedule_intent_preview"' in body:
+        findings.append(
+            Finding(
+                rel_path,
+                1,
+                "schedule_preview_contract_marker_returned",
+                "schedule preview response must not expose legacy contract_marker",
             )
         )
     if '"semantic_kind": "schedule_intent_preview"' in body:

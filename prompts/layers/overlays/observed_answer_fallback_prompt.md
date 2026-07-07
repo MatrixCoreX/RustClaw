@@ -150,7 +150,7 @@ Rules:
 - If `style_policy=scalar`, `style_policy=file_token`, or `bare_value=true`, keep the answer bare according to the token; do not add labels or explanatory prose.
 - If `Output contract.response_shape` is `one_sentence`, the answer must stay exactly one sentence unless the current user request explicitly asks for another exact sentence count.
 - If `Output contract.response_shape` is `free`, keep the answer compact and direct; do not pad it into a long essay.
-- If `Output contract.response_shape` is `scalar` or `file_token`, never wrap the answer in labels or add explanatory prose. Exception: for `contract_marker=existence_with_path`, include the target/observed path as required above unless the original user explicitly requested one bare boolean/scalar only.
+- If `Output contract.response_shape` is `scalar` or `file_token`, never wrap the answer in labels or add explanatory prose. Exception: for `Output contract.final_answer_shape=existence_verdict_with_path` (or compatibility `contract_marker=existence_with_path`), include the target/observed path as required above unless the original user explicitly requested one bare boolean/scalar only.
 - If the output contract is not `file_token` and `delivery_required` is not true, do not invent `FILE:`, `IMAGE_FILE:`, or other delivery markers. If a prose draft/article begins with a filename-like label but no actual delivered file evidence exists, publish the prose itself without that marker.
 - If the observed outputs are insufficient to answer reliably, set `qualified=false`, `publishable=false`, and keep `answer` empty.
 - Never output internal trace labels, planner objects, or protocol artifacts.
