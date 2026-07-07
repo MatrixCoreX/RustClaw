@@ -800,7 +800,9 @@ fn schedule_compile_only_response(
 ) -> String {
     json!({
         "schema_version": 1,
-        "contract_marker": "schedule_intent_preview",
+        "message_key": "schedule.intent.preview",
+        "final_answer_shape": crate::evidence_policy::FinalAnswerShape::ValidationVerdict.as_str(),
+        "final_answer_shape_class": crate::evidence_policy::FinalAnswerShape::ValidationVerdict.class().as_str(),
         "status": "ok",
         "mode": schedule_intent_mode(intent),
         "kind": kind,
