@@ -23,6 +23,7 @@ const TEXT_PATH_DELIMS: &[char] = &[
     ' ', '\n', '\t', ',', ';', '，', '；', '。', '(', ')', '[', ']', '{', '}',
 ];
 const PHOTO_CHILD_DIR_HINTS: &[&str] = &["DCIM", "Photos", "Pictures", "照片", "相机", "Camera"];
+const SKILL_NAME: &str = "photo_organize";
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -267,7 +268,7 @@ fn main() -> anyhow::Result<()> {
                         status: "error".to_string(),
                         text: String::new(),
                         buttons: None,
-                        extra: None,
+                        extra: Some(error_extra("execution_failed")),
                         error_text: Some(err),
                     },
                 }
@@ -277,7 +278,7 @@ fn main() -> anyhow::Result<()> {
                 status: "error".to_string(),
                 text: String::new(),
                 buttons: None,
-                extra: None,
+                extra: Some(error_extra("invalid_input")),
                 error_text: Some(tr_with(
                     &load_catalog(
                         &workspace_root,
@@ -299,6 +300,17 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn error_extra(error_kind: &str) -> Value {
+    json!({
+        "schema_version": 1,
+        "source_skill": SKILL_NAME,
+        "status": "error",
+        "error_kind": error_kind,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "retryable": false,
+    })
 }
 
 fn load_root_config(workspace_root: &Path) -> RootConfig {

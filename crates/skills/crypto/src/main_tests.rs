@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn crypto_error_extra_wraps_existing_details() {
+    let extra = crypto_error_extra_with_details(
+        "credential_not_bound",
+        Some(json!({
+            "exchange": "binance",
+            "message_key": "crypto.err.credential_not_bound",
+            "status_code": "credential_not_bound"
+        })),
+    );
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "credential_not_bound");
+    assert_eq!(extra["message_key"], "skill.crypto.credential_not_bound");
+    assert_eq!(extra["retryable"], false);
+    assert_eq!(extra["exchange"], "binance");
+    assert_eq!(extra["status_code"], "credential_not_bound");
+}
+
+#[test]
 fn normalize_symbol_ok() {
     assert_eq!(normalize_symbol("btc/usdt"), "BTCUSDT");
     assert_eq!(normalize_symbol("eth-usd"), "ETHUSD");

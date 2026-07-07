@@ -8,6 +8,8 @@ mod response_contract;
 
 use response_contract::*;
 
+const SKILL_NAME: &str = "task_control";
+
 #[cfg(test)]
 #[path = "main_tests.rs"]
 mod tests;
@@ -107,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
                         status: "error".to_string(),
                         text: String::new(),
                         error_text: Some(err),
-                        extra: None,
+                        extra: Some(error_extra("execution_failed")),
                     },
                 },
                 Err(err) => Resp {
@@ -115,7 +117,7 @@ async fn main() -> anyhow::Result<()> {
                     status: "error".to_string(),
                     text: String::new(),
                     error_text: Some(err),
-                    extra: None,
+                    extra: Some(error_extra("invalid_input")),
                 },
             },
             Err(err) => Resp {
@@ -123,13 +125,24 @@ async fn main() -> anyhow::Result<()> {
                 status: "error".to_string(),
                 text: String::new(),
                 error_text: Some(format!("invalid input: {err}")),
-                extra: None,
+                extra: Some(error_extra("invalid_input")),
             },
         };
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
         stdout.flush()?;
     }
     Ok(())
+}
+
+fn error_extra(error_kind: &str) -> Value {
+    json!({
+        "schema_version": 1,
+        "source_skill": SKILL_NAME,
+        "status": "error",
+        "error_kind": error_kind,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "retryable": false,
+    })
 }
 
 fn parse_input(args: &Value) -> Result<SkillInput, String> {
