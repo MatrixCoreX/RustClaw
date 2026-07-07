@@ -44,6 +44,26 @@ fn normalize_planned_actions_resolves_action_ref_call_capability_before_policy_g
 }
 
 #[test]
+fn normalize_planned_actions_resolves_schedule_create_capability() {
+    let state = test_state_with_registry();
+    let actions = vec![AgentAction::CallCapability {
+        capability: "schedule.create".to_string(),
+        args: json!({
+            "text": "remind me every day at 08:00 to check the release queue",
+        }),
+    }];
+
+    let normalized = normalize_planned_actions(&state, None, &LoopState::new(1), "", None, actions);
+
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "schedule", "create");
+    assert_eq!(
+        args.get("text").and_then(Value::as_str),
+        Some("remind me every day at 08:00 to check the release queue")
+    );
+}
+
+#[test]
 fn normalize_planned_actions_keeps_sqlite_query_on_db_basic_despite_literal_sql() {
     let state = test_state_with_registry();
     let mut route = base_route_result();

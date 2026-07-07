@@ -747,6 +747,24 @@ fn builtin_success_extra(workspace_root: &Path, skill_name: &str, args: &Value) 
                 "recursive": obj.get("recursive").and_then(Value::as_bool).unwrap_or(false),
             }))
         }
+        "schedule" => {
+            let action = obj.get("action").and_then(Value::as_str)?.trim();
+            if action.is_empty() {
+                return None;
+            }
+            Some(json!({
+                "schema_version": 1,
+                "source": "builtin_success_extra",
+                "action": action,
+                "message_key": "schedule.workflow.completed",
+                "status": "ok",
+                "mode": obj.get("mode").cloned().unwrap_or(Value::Null),
+                "dry_run": obj.get("dry_run").cloned().unwrap_or(Value::Bool(false)),
+                "preview_only": obj.get("preview_only").cloned().unwrap_or(Value::Bool(false)),
+                "target_job_id": obj.get("target_job_id").cloned().unwrap_or(Value::Null),
+                "intent": obj.get("intent").cloned().unwrap_or(Value::Null),
+            }))
+        }
         _ => None,
     }
 }
