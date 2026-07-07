@@ -35,6 +35,7 @@ pub(super) fn route_structured_clarify_context(
             None
         }
     })?;
+    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route);
     Some(
         [
             format!("clarify_case: {clarify_case}"),
@@ -47,8 +48,10 @@ pub(super) fn route_structured_clarify_context(
                 route.output_contract.response_shape.as_str()
             ),
             format!(
-                "contract_marker: {}",
-                route.effective_output_contract_semantic_kind().as_str()
+                "final_answer_shape: {}",
+                final_answer_shape
+                    .map(crate::evidence_policy::FinalAnswerShape::as_str)
+                    .unwrap_or("none")
             ),
             format!(
                 "requires_content_evidence: {}",
@@ -61,6 +64,21 @@ pub(super) fn route_structured_clarify_context(
         ]
         .join("\n"),
     )
+}
+
+pub(super) fn route_output_contract_machine_json(
+    route: &crate::RouteResult,
+) -> serde_json::Value {
+    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route);
+    serde_json::json!({
+        "response_shape": route.output_contract.response_shape.as_str(),
+        "final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str),
+        "final_answer_shape_class": final_answer_shape.map(|shape| shape.class().as_str()),
+        "contract_marker": route.effective_output_contract_semantic_kind().as_str(),
+        "locator_kind": route.output_contract.locator_kind.as_str(),
+        "delivery_required": route.output_contract.delivery_required,
+        "requires_content_evidence": route.output_contract.requires_content_evidence
+    })
 }
 
 pub(super) fn route_clarify_reason_code(route_reason: &str) -> Option<&'static str> {

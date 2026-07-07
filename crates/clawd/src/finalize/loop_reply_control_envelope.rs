@@ -4,6 +4,7 @@ use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::ClaimedTask;
 
 use super::log_deterministic_delivery_record;
+use super::route_helpers::route_output_contract_machine_json;
 
 pub(super) fn attach_requested_control_machine_envelope(
     task: &ClaimedTask,
@@ -38,7 +39,6 @@ pub(super) fn attach_requested_control_machine_envelope(
     {
         return false;
     }
-    let route = ctx.route_result.as_ref();
     let envelope = json!({
         "output_format": "machine_json",
         "owner_layer": "agent_loop_control",
@@ -48,13 +48,7 @@ pub(super) fn attach_requested_control_machine_envelope(
         } else {
             Value::Object(projected)
         },
-        "output_contract": route.map(|route| json!({
-            "response_shape": route.output_contract.response_shape.as_str(),
-            "contract_marker": route.effective_output_contract_semantic_kind().as_str(),
-            "locator_kind": route.output_contract.locator_kind.as_str(),
-            "delivery_required": route.output_contract.delivery_required,
-            "requires_content_evidence": route.output_contract.requires_content_evidence
-        }))
+        "output_contract": ctx.route_result.as_ref().map(route_output_contract_machine_json)
     })
     .to_string();
     delivery_messages.push(envelope.clone());

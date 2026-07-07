@@ -3,7 +3,7 @@ use crate::ClaimedTask;
 use serde_json::Value;
 
 use super::log_deterministic_delivery_record;
-use super::route_helpers::route_clarify_reason_code;
+use super::route_helpers::{route_clarify_reason_code, route_output_contract_machine_json};
 
 pub(super) fn attach_route_clarify_machine_envelope(
     task: &ClaimedTask,
@@ -71,13 +71,7 @@ pub(super) fn attach_route_clarify_machine_envelope(
             "field_path": &field_path,
             "locator_kind": &locator_kind
         },
-        "output_contract": {
-            "response_shape": route.output_contract.response_shape.as_str(),
-            "contract_marker": route.effective_output_contract_semantic_kind().as_str(),
-            "locator_kind": route.output_contract.locator_kind.as_str(),
-            "requires_content_evidence": route.output_contract.requires_content_evidence,
-            "delivery_required": route.output_contract.delivery_required
-        }
+        "output_contract": route_output_contract_machine_json(route)
     })
     .to_string();
     delivery_messages.push(envelope);
