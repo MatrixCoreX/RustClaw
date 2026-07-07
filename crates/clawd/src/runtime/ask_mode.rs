@@ -10,18 +10,18 @@ use super::types::RouteGateKind;
 /// Runtime ask mode after first-layer convergence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AskMode {
-    /// 对用户输出文本的入口（不调技能）。
-    ClarifyOrChat { entry: ChatEntryStrategy },
+    /// User-facing response entry for resume discussion and trace-only tests.
+    Respond { entry: RespondEntryStrategy },
     /// 调技能 / agent loop 的入口。
     Act { finalize: ActFinalizeStyle },
 }
 
-/// Entry strategy for user-facing text paths.
+/// Entry strategy for user-facing response paths.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ChatEntryStrategy {
-    /// Chat/direct-answer compatibility trace.
+pub(crate) enum RespondEntryStrategy {
+    /// Respond compatibility trace.
     #[cfg(test)]
-    DirectAnswerTrace,
+    RespondTrace,
     /// Clarification compatibility trace.
     #[cfg(test)]
     ClarifyTrace,
@@ -43,15 +43,15 @@ pub(crate) enum ActFinalizeStyle {
 impl AskMode {
     #[cfg(test)]
     pub(crate) fn direct_answer() -> Self {
-        AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::DirectAnswerTrace,
+        AskMode::Respond {
+            entry: RespondEntryStrategy::RespondTrace,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn clarify() -> Self {
-        AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::ClarifyTrace,
+        AskMode::Respond {
+            entry: RespondEntryStrategy::ClarifyTrace,
         }
     }
 
@@ -90,8 +90,8 @@ impl AskMode {
             };
         }
         if direct_resume_discussion {
-            return AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::ResumeFollowupDiscussion,
+            return AskMode::Respond {
+                entry: RespondEntryStrategy::ResumeFollowupDiscussion,
             };
         }
         self
@@ -101,15 +101,15 @@ impl AskMode {
     pub(crate) fn route_trace_label_for_log(&self) -> &'static str {
         match self {
             #[cfg(test)]
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::DirectAnswerTrace,
+            AskMode::Respond {
+                entry: RespondEntryStrategy::RespondTrace,
             } => "respond",
             #[cfg(test)]
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::ClarifyTrace,
+            AskMode::Respond {
+                entry: RespondEntryStrategy::ClarifyTrace,
             } => "clarify",
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::ResumeFollowupDiscussion,
+            AskMode::Respond {
+                entry: RespondEntryStrategy::ResumeFollowupDiscussion,
             } => "respond_resume_discussion",
             AskMode::Act {
                 finalize: ActFinalizeStyle::Plain,
@@ -126,14 +126,14 @@ impl AskMode {
     pub(crate) fn route_trace_decision_for_journal(&self) -> AskRouteTraceDecision {
         match self {
             #[cfg(test)]
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::ClarifyTrace,
+            AskMode::Respond {
+                entry: RespondEntryStrategy::ClarifyTrace,
             } => AskRouteTraceDecision::Clarify,
             #[cfg(test)]
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::DirectAnswerTrace,
+            AskMode::Respond {
+                entry: RespondEntryStrategy::RespondTrace,
             } => AskRouteTraceDecision::Respond,
-            AskMode::ClarifyOrChat { .. } => AskRouteTraceDecision::Respond,
+            AskMode::Respond { .. } => AskRouteTraceDecision::Respond,
             AskMode::Act { .. } => AskRouteTraceDecision::Act,
         }
     }
@@ -141,14 +141,14 @@ impl AskMode {
     pub(crate) fn gate_kind(&self) -> RouteGateKind {
         match self {
             #[cfg(test)]
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::ClarifyTrace,
+            AskMode::Respond {
+                entry: RespondEntryStrategy::ClarifyTrace,
             } => RouteGateKind::Clarify,
             #[cfg(test)]
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::DirectAnswerTrace,
+            AskMode::Respond {
+                entry: RespondEntryStrategy::RespondTrace,
             } => RouteGateKind::Chat,
-            AskMode::ClarifyOrChat { .. } => RouteGateKind::Chat,
+            AskMode::Respond { .. } => RouteGateKind::Chat,
             AskMode::Act { .. } => RouteGateKind::Execute,
         }
     }
@@ -183,8 +183,8 @@ impl AskMode {
         {
             matches!(
                 self,
-                AskMode::ClarifyOrChat {
-                    entry: ChatEntryStrategy::ClarifyTrace,
+                AskMode::Respond {
+                    entry: RespondEntryStrategy::ClarifyTrace,
                 }
             )
         }
@@ -199,8 +199,8 @@ impl AskMode {
     pub(crate) fn is_direct_answer_trace(&self) -> bool {
         matches!(
             self,
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::DirectAnswerTrace,
+            AskMode::Respond {
+                entry: RespondEntryStrategy::RespondTrace,
             }
         )
     }
@@ -208,8 +208,8 @@ impl AskMode {
     pub(crate) fn is_resume_discussion(&self) -> bool {
         matches!(
             self,
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::ResumeFollowupDiscussion,
+            AskMode::Respond {
+                entry: RespondEntryStrategy::ResumeFollowupDiscussion,
             }
         )
     }
@@ -235,7 +235,7 @@ impl AskMode {
     pub(crate) fn act_finalize_style(&self) -> Option<ActFinalizeStyle> {
         match self {
             AskMode::Act { finalize } => Some(*finalize),
-            AskMode::ClarifyOrChat { .. } => None,
+            AskMode::Respond { .. } => None,
         }
     }
 
@@ -243,16 +243,16 @@ impl AskMode {
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
             #[cfg(test)]
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::DirectAnswerTrace,
-            } => "clarify_or_chat:direct_answer_trace",
+            AskMode::Respond {
+                entry: RespondEntryStrategy::RespondTrace,
+            } => "respond:trace",
             #[cfg(test)]
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::ClarifyTrace,
-            } => "clarify_or_chat:clarify_trace",
-            AskMode::ClarifyOrChat {
-                entry: ChatEntryStrategy::ResumeFollowupDiscussion,
-            } => "clarify_or_chat:resume_followup_discussion",
+            AskMode::Respond {
+                entry: RespondEntryStrategy::ClarifyTrace,
+            } => "respond:clarify_trace",
+            AskMode::Respond {
+                entry: RespondEntryStrategy::ResumeFollowupDiscussion,
+            } => "respond:resume_followup_discussion",
             AskMode::Act {
                 finalize: ActFinalizeStyle::Plain,
             } => "act:plain",
