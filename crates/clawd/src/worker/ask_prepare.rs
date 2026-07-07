@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tracing::info;
 
-use crate::{AppState, schedule_service};
+use crate::{schedule_service, AppState};
 
 #[path = "ask_prepare_field_contract.rs"]
 mod field_contract;
@@ -1216,7 +1216,7 @@ fn active_clarify_locator_reply_fast_path_route(
         return None;
     }
     let mut route_result = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: hit.resolved_intent.clone(),
         needs_clarify: false,
         clarify_question: String::new(),
