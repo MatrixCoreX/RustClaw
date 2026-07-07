@@ -256,20 +256,28 @@ pub(super) fn agent_loop_decision_envelope_json(
 
 pub(super) fn output_contract_ref_for_route(route: &crate::RouteResult) -> String {
     let contract = route.effective_output_contract();
+    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route);
     format!(
         concat!(
-            "contract_marker:",
+            "final_answer_shape=",
             "{}",
-            "|shape:",
+            "|final_answer_shape_class=",
             "{}",
-            "|locator:",
+            "|shape=",
             "{}",
-            "|delivery:",
+            "|locator=",
             "{}",
-            "|content_evidence:",
+            "|delivery=",
+            "{}",
+            "|content_evidence=",
             "{}"
         ),
-        contract.semantic_kind.as_str(),
+        final_answer_shape
+            .map(crate::evidence_policy::FinalAnswerShape::as_str)
+            .unwrap_or("none"),
+        final_answer_shape
+            .map(|shape| shape.class().as_str())
+            .unwrap_or("none"),
         contract.response_shape.as_str(),
         contract.locator_kind.as_str(),
         contract.delivery_intent.as_str(),

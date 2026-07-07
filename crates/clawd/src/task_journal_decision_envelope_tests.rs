@@ -128,14 +128,15 @@ fn trace_json_includes_round_decision_envelope() {
 }
 
 #[test]
-fn output_contract_ref_for_route_uses_effective_contract_marker() {
+fn output_contract_ref_for_route_uses_evidence_policy_shape() {
     let mut route = route_for_round_envelope();
     route.route_reason = "contract:workspace_project_summary".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
 
     let output_contract_ref = super::decision_envelope::output_contract_ref_for_route(&route);
 
-    assert!(output_contract_ref.contains("contract_marker:workspace_project_summary"));
+    assert!(output_contract_ref.contains("final_answer_shape=project_summary_grounded_in_files"));
+    assert!(output_contract_ref.contains("final_answer_shape_class=grounded_summary"));
 }
 
 #[test]
