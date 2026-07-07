@@ -396,6 +396,18 @@ fn name_list_renderer_uses_directory_capability_without_semantic_kind() {
 }
 
 #[test]
+fn name_list_capability_requires_observed_projection_without_semantic_kind() {
+    let mut route = free_route_result();
+    route.route_reason = "capability_ref=filesystem.list_directory_names".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+
+    assert!(super::super::route_requires_observed_output_projection(
+        &route
+    ));
+}
+
+#[test]
 fn matrix_archive_member_list_filters_file_entries_from_structured_kinds() {
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;

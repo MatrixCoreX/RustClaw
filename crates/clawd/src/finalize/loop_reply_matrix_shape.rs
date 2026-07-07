@@ -68,6 +68,9 @@ pub(super) fn route_requires_observed_output_projection(route: &crate::RouteResu
     if crate::finalize::route_matches_service_status_output_contract(route) {
         return true;
     }
+    if route_requests_name_list(route) {
+        return true;
+    }
     matches!(
         route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::DirectoryNames | crate::OutputSemanticKind::QuantityComparison
