@@ -78,7 +78,11 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
     else {
         return false;
     };
-    if service_status_selector_only_summary(agent_run_context, &answer) {
+    let answer_is_service_status_selector =
+        service_status_selector_only_summary(agent_run_context, &answer);
+    let current_is_service_status_selector =
+        service_status_selector_only_summary(agent_run_context, &current);
+    if answer_is_service_status_selector || current_is_service_status_selector {
         if let Some(restored) =
             latest_publishable_service_status_terminal_delivery(loop_state, agent_run_context)
         {
@@ -105,14 +109,20 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
             });
             log_deterministic_delivery_record(
                 &task.task_id,
-                "requested_machine_kv_summary_service_status_terminal_delivery",
+                if answer_is_service_status_selector {
+                    "requested_machine_kv_summary_service_status_terminal_delivery"
+                } else {
+                    "requested_machine_kv_summary_service_status_current_selector_terminal_delivery"
+                },
                 "restored",
                 agent_run_context,
                 loop_state.executed_step_results.len(),
             );
             return true;
         }
-        return false;
+        if answer_is_service_status_selector {
+            return false;
+        }
     }
     if should_restore_config_guard_payload(agent_run_context, &answer) {
         if let Some(payload) = latest_config_guard_machine_payload(loop_state, delivery_messages) {
@@ -303,7 +313,7 @@ fn service_status_one_sentence_delivery_should_be_preserved(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
+    if !route_is_service_status_contract(route)
         || route.output_contract.response_shape != crate::OutputResponseShape::OneSentence
     {
         return false;
@@ -324,7 +334,7 @@ fn current_delivery_satisfies_service_status_selector(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus) {
+    if !route_is_service_status_contract(route) {
         return false;
     }
     let Some(selector) = route
@@ -576,7 +586,7 @@ fn service_status_selector_only_summary(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus) {
+    if !route_is_service_status_contract(route) {
         return false;
     }
     let Some(selector) = route
@@ -597,7 +607,7 @@ fn latest_publishable_service_status_terminal_delivery(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus) {
+    if !route_is_service_status_contract(route) {
         return None;
     }
     loop_state
@@ -625,6 +635,14 @@ fn latest_publishable_service_status_terminal_delivery(
                     publishable_service_status_terminal_delivery(route, candidate)
                 })
         })
+}
+
+fn route_is_service_status_contract(route: &crate::RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
+        || crate::machine_capability_ref::route_has_capability_namespace(
+            route,
+            &["system", "service", "service_control", "health"],
+        )
 }
 
 fn publishable_service_status_terminal_delivery(
