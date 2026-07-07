@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn response_extra_preserves_transform_payload() {
+    let payload = json!({
+        "status": "ok",
+        "result": [{"name": "alpha"}],
+        "stats": {"input_count": 1, "output_count": 1}
+    });
+
+    let extra = transform_response_extra(&payload);
+
+    assert_eq!(
+        extra.pointer("/result/0/name").and_then(Value::as_str),
+        Some("alpha")
+    );
+    assert_eq!(
+        extra.pointer("/stats/output_count").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        extra.get("action").and_then(Value::as_str),
+        Some("transform_data")
+    );
+    assert_eq!(
+        extra.get("source_skill").and_then(Value::as_str),
+        Some("transform")
+    );
+}
+
+#[test]
 fn csv_text_can_render_markdown_table() {
     let out = handle_transform(&json!({
         "args": {
