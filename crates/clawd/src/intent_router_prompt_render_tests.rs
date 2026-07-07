@@ -28,16 +28,17 @@ fn compact_normalizer_prompt_pins_boundary_schema() {
     assert!(prompt.contains("Compact boundary normalizer"));
     assert!(prompt.contains("This stage extracts boundaries only"));
     assert!(prompt.contains("agent loop owns ordinary respond / clarify / act"));
-    assert!(prompt.contains("Always include boundary schema keys"));
+    assert!(prompt.contains("Prefer the compact boundary envelope"));
+    assert!(prompt.contains("Runtime fills missing compatibility schema slots"));
     assert!(!prompt.contains("resolved_user_intent, answer_candidate"));
     assert!(prompt.contains("Do not emit legacy decision fields"));
     assert!(prompt.contains("Do not emit answer_candidate"));
     assert!(prompt.contains("Boundary extraction scope"));
     assert!(prompt.contains("Do not classify ordinary capability families"));
     assert!(prompt.contains("let the planner/resolver choose from CAPABILITIES"));
-    assert!(prompt.contains("Set contract_marker=\"none\" in normalizer output"));
-    assert!(prompt.contains("Never create or select feature contract markers"));
-    assert!(prompt.contains("Allowed output_contract keys only"));
+    assert!(prompt.contains("If emitted, keep contract_marker=\"none\""));
+    assert!(prompt.contains("never create or select feature contract markers"));
+    assert!(prompt.contains("If output_contract is emitted, allowed keys only"));
     assert!(
         prompt.contains("Allowed response_shape: free, one_sentence, strict, scalar, file_token")
     );
@@ -48,6 +49,7 @@ fn compact_normalizer_prompt_pins_boundary_schema() {
     assert!(prompt.contains("BOUNDARY_ONLY no ordinary capability-family routing"));
     assert!(prompt.contains("REQUEST: list current toml files and briefly explain them"));
 
+    assert!(!prompt.contains("Always include boundary schema keys"));
     assert!(!prompt.contains("capability_ref=weather.current"));
     assert!(!prompt.contains("capability_ref=web.search_results"));
     assert!(!prompt.contains("capability_ref=image_vision"));
@@ -300,7 +302,9 @@ fn compact_normalizer_prompt_tail_preserves_runtime_context_near_request() {
     );
     let compact_tail = crate::providers::utf8_safe_suffix(&prompt, 1700);
 
-    assert!(prompt.contains("output_contract is a compatibility evidence/delivery envelope"));
+    assert!(
+        prompt.contains("output_contract is an optional compatibility evidence/delivery envelope")
+    );
     assert!(compact_tail.contains("LOCAL_EXEC"));
     assert!(compact_tail.contains("let the loop act"));
     assert!(compact_tail.contains("RUNTIME:"));

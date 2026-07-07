@@ -18,12 +18,12 @@ Architecture boundary:
 - Do not choose a skill, tool, capability family, or final answer strategy from natural-language semantics in this layer.
 - If a machine `capability_ref=<registry.capability>` token is already present in context, preserve it as context for the planner. Do not invent a capability ref from natural-language wording here.
 
-Compatibility fields:
-- Always emit boundary schema keys: `boundary_envelope`, `resolved_user_intent`, `resume_behavior`, `schedule_kind`, `schedule_intent`, `wants_file_delivery`, `should_refresh_long_term_memory`, `agent_display_name_hint`, `needs_clarify`, `clarify_question`, `reason`, `confidence`, `output_contract`, `execution_recipe`, `turn_type`, `target_task_policy`, `should_interrupt_active_run`, `state_patch`, `attachment_processing_required`.
+Primary output:
+- Prefer the compact `boundary_envelope`. Runtime fills missing compatibility schema slots with neutral defaults, so emit extra compatibility fields only when they carry explicit boundary facts.
 - `boundary_envelope` is machine-only. Include `schema_version=1`, `raw_chars`, optional `language_hint`, `schedule_intent`, `attachment_refs`, `explicit_locators`, `active_task_reference`, `session_binding`, and `safety_budget_hint`; never put raw user text, answer text, or route decisions inside it.
 - Do not emit legacy `decision`; runtime derives any route trace from machine boundary fields. Do not put ordinary semantic decisions here.
-- `output_contract` is a compatibility evidence/delivery envelope, not a capability router.
-- Set `output_contract.contract_marker="none"` in normalizer output. Do not emit legacy semantic-route field names.
+- `output_contract` is an optional compatibility evidence/delivery envelope, not a capability router.
+- If `output_contract` is emitted, keep `contract_marker="none"` unless an existing machine context already provided a compatibility marker. Do not emit legacy semantic-route field names.
 - Never create or select feature-specific semantic kinds to make one NL case pass.
 
 Execution signals:
@@ -53,8 +53,8 @@ State patch discipline:
 - Do not put localized prose in machine fields.
 
 Schema discipline:
-- `output_contract` must be a JSON object, never a string.
-- Allowed `output_contract` keys: `response_shape`, `exact_sentence_count`, `requires_content_evidence`, `delivery_required`, `locator_kind`, `delivery_intent`, `contract_marker`, `locator_hint`, `scalar_count_filter`, `list_selector`, `self_extension`. Do not emit extra legacy route fields.
+- If emitted, `output_contract` must be a JSON object, never a string.
+- Allowed `output_contract` keys when present: `response_shape`, `exact_sentence_count`, `requires_content_evidence`, `delivery_required`, `locator_kind`, `delivery_intent`, `contract_marker`, `locator_hint`, `scalar_count_filter`, `list_selector`, `self_extension`. Do not emit extra legacy route fields.
 - Allowed `response_shape`: `free`, `one_sentence`, `strict`, `scalar`, `file_token`.
 - Allowed `locator_kind`: `none`, `path`, `current_workspace`, `url`, `filename`.
 - Allowed `delivery_intent`: `none`, `file_single`, `directory_lookup`, `directory_batch_files`.

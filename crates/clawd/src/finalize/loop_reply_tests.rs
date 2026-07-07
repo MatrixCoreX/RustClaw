@@ -1288,7 +1288,9 @@ async fn finalize_loop_reply_attaches_requested_control_machine_envelope() {
             .and_then(serde_json::Value::as_str),
         Some("fs_basic")
     );
-    assert!(envelope.pointer("/output_contract/contract_marker").is_none());
+    assert!(envelope
+        .pointer("/output_contract/contract_marker")
+        .is_none());
     assert!(envelope
         .pointer("/output_contract/final_answer_shape")
         .and_then(serde_json::Value::as_str)

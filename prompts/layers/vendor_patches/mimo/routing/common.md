@@ -9,11 +9,12 @@ Routing authority:
 - The planner/agent loop owns ordinary `respond`, `clarify`, `act`, capability choice, argument completion, confirmation, background wait, done state, and final wording.
 - Do not choose a skill, tool, or capability family from natural-language wording in this normalizer.
 - Do not invent `capability_ref=<...>` from a user phrase.
-- For ordinary registry-owned capabilities, set `output_contract.contract_marker="none"` and let the planner/resolver select the capability.
+- For ordinary registry-owned capabilities, leave capability choice to the planner/resolver. If a compatibility `output_contract` is emitted, keep `contract_marker="none"` unless an existing machine context already provided a compatibility marker.
 - Do not emit legacy `decision`; runtime derives any route trace from machine boundary fields. It is not routing authority.
 - Do not emit `answer_candidate` or any user-visible answer prose; final wording belongs to the planner loop and finalizer.
 
 Boundary fields this layer may extract:
+- Prefer the compact `boundary_envelope`. Runtime fills missing compatibility schema slots with neutral defaults, so emit extra compatibility fields only when they carry explicit boundary facts.
 - Explicit locators: path, filename, URL, current-workspace scope, delivery target, attachment/media presence.
 - Schedule metadata, active-task/session bindings, approval choices, safety/budget hints, and final output-shape constraints.
 - Exact machine selectors such as slice mode/count, structured field path, selector target kind, selector limit, selector sort, delivery intent, and async job metadata.
