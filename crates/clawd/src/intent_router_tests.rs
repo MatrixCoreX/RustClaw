@@ -697,6 +697,18 @@ fn intent_normalizer_schema_drift() {
         !required.iter().any(|value| value.as_str() == Some("decision")),
         "legacy normalizer `decision` must stay optional; ordinary semantics belong to the agent loop"
     );
+    assert!(
+        required
+            .iter()
+            .any(|value| value.as_str() == Some("boundary_envelope")),
+        "boundary_envelope must be the required live normalizer output"
+    );
+    assert!(
+        !required
+            .iter()
+            .any(|value| value.as_str() == Some("output_contract")),
+        "output_contract is a compatibility slot filled by runtime defaults and must not be required"
+    );
     for field in STRUCT_FIELDS {
         assert!(
             properties.contains_key(*field),

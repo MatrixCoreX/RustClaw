@@ -33,6 +33,17 @@ FORBIDDEN_TOP_LEVEL_FIELDS: frozenset[str] = frozenset(
     }
 )
 
+FORBIDDEN_TOP_LEVEL_REQUIRED_FIELDS: frozenset[str] = frozenset(
+    {
+        "output_contract",
+        "execution_recipe",
+        "resume_behavior",
+        "schedule_kind",
+        "wants_file_delivery",
+        "attachment_processing_required",
+    }
+)
+
 FORBIDDEN_OUTPUT_CONTRACT_FIELDS: frozenset[str] = frozenset(
     {
         "semantic_kind",
@@ -95,10 +106,23 @@ def scan_schema(schema: dict[str, Any], path: Path) -> list[Finding]:
 
     top_properties = object_keys(schema.get("properties"))
     top_required = list_values(schema.get("required"))
+    if "boundary_envelope" not in top_required:
+        findings.append(
+            Finding(
+                rel_path,
+                "required",
+                "boundary_envelope_not_required",
+                "boundary_envelope",
+            )
+        )
     for field in sorted(top_properties & FORBIDDEN_TOP_LEVEL_FIELDS):
         findings.append(Finding(rel_path, "properties", "top_level_field", field))
     for field in sorted(top_required & FORBIDDEN_TOP_LEVEL_FIELDS):
         findings.append(Finding(rel_path, "required", "top_level_required", field))
+    for field in sorted(top_required & FORBIDDEN_TOP_LEVEL_REQUIRED_FIELDS):
+        findings.append(
+            Finding(rel_path, "required", "compat_field_required", field)
+        )
 
     output_contract = schema.get("properties", {}).get("output_contract", {})
     output_properties = object_keys(output_contract.get("properties"))
@@ -134,8 +158,9 @@ def run_self_test() -> int:
     good_schema = {
         "type": "object",
         "additionalProperties": False,
-        "required": ["resolved_user_intent", "output_contract"],
+        "required": ["boundary_envelope", "resolved_user_intent"],
         "properties": {
+            "boundary_envelope": {"type": "object"},
             "resolved_user_intent": {"type": "string"},
             "needs_clarify": {"type": "boolean"},
             "output_contract": {
@@ -150,6 +175,7 @@ def run_self_test() -> int:
     bad_top_property = {
         "type": "object",
         "additionalProperties": False,
+        "required": ["boundary_envelope"],
         "properties": {"decision": {"type": "string"}},
     }
     assert scan_schema(bad_top_property, dummy_path)[0].kind == "top_level_field"
@@ -157,15 +183,36 @@ def run_self_test() -> int:
     bad_top_required = {
         "type": "object",
         "additionalProperties": False,
-        "required": ["answer_candidate"],
-        "properties": {},
+        "required": ["boundary_envelope", "answer_candidate"],
+        "properties": {"boundary_envelope": {"type": "object"}},
     }
     assert scan_schema(bad_top_required, dummy_path)[0].kind == "top_level_required"
+
+    bad_missing_boundary_required = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["resolved_user_intent"],
+        "properties": {"boundary_envelope": {"type": "object"}},
+    }
+    assert (
+        scan_schema(bad_missing_boundary_required, dummy_path)[0].kind
+        == "boundary_envelope_not_required"
+    )
+
+    bad_required_compat = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["boundary_envelope", "output_contract"],
+        "properties": {"boundary_envelope": {"type": "object"}},
+    }
+    assert scan_schema(bad_required_compat, dummy_path)[0].kind == "compat_field_required"
 
     bad_contract_property = {
         "type": "object",
         "additionalProperties": False,
+        "required": ["boundary_envelope"],
         "properties": {
+            "boundary_envelope": {"type": "object"},
             "output_contract": {
                 "type": ["object", "null"],
                 "properties": {"semantic_kind": {"type": "string"}},
@@ -177,7 +224,9 @@ def run_self_test() -> int:
     bad_contract_required = {
         "type": "object",
         "additionalProperties": False,
+        "required": ["boundary_envelope"],
         "properties": {
+            "boundary_envelope": {"type": "object"},
             "output_contract": {
                 "type": ["object", "null"],
                 "required": ["answer_kind"],
@@ -190,7 +239,8 @@ def run_self_test() -> int:
     bad_open_schema = {
         "type": "object",
         "additionalProperties": True,
-        "properties": {},
+        "required": ["boundary_envelope"],
+        "properties": {"boundary_envelope": {"type": "object"}},
     }
     assert scan_schema(bad_open_schema, dummy_path)[0].kind == "additional_properties_not_false"
 

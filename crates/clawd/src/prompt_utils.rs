@@ -587,6 +587,23 @@ fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value,
                     normalized = true;
                 }
             }
+            if !matches!(map.get("boundary_envelope"), Some(Value::Object(_))) {
+                map.insert(
+                    "boundary_envelope".to_string(),
+                    json!({
+                        "schema_version": crate::intent_router::BOUNDARY_ENVELOPE_SCHEMA_VERSION,
+                        "raw_chars": 0,
+                        "language_hint": null,
+                        "schedule_intent": null,
+                        "attachment_refs": [],
+                        "explicit_locators": [],
+                        "active_task_reference": null,
+                        "session_binding": null,
+                        "safety_budget_hint": null,
+                    }),
+                );
+                normalized = true;
+            }
             let mut execution_recipe_locator_hint: Option<Value> = None;
             let mut execution_recipe_self_extension: Option<Value> = None;
             if let Some(Value::Object(execution_recipe)) = map.get_mut("execution_recipe") {
