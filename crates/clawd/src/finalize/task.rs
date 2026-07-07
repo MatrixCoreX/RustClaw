@@ -539,9 +539,7 @@ fn should_reinsert_execution_summaries_for_delivery(
 }
 
 fn route_requests_config_validation(route_result: &crate::RouteResult) -> bool {
-    route_result.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
-        || crate::evidence_policy::final_answer_shape_for_route(route_result)
-            == Some(crate::evidence_policy::FinalAnswerShape::ValidationVerdict)
+    crate::finalize::route_matches_validation_verdict_output_contract(route_result)
 }
 
 fn drop_execution_summaries_when_delivery_is_scalar(
