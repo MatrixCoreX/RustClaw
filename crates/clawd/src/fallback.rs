@@ -141,7 +141,7 @@ impl UserResponseContract {
         original_user_request: &str,
         resolved_user_intent: &str,
         response_shape: &str,
-        contract_marker: &str,
+        _contract_marker: &str,
         verifier_reason_code: &str,
         verifier_reason: &str,
         language_hint: &str,
@@ -157,9 +157,6 @@ impl UserResponseContract {
         }
         if !response_shape.trim().is_empty() {
             observed_facts.push(format!("expected_response_shape: {response_shape}"));
-        }
-        if !contract_marker.trim().is_empty() {
-            observed_facts.push(format!("expected_contract_marker={contract_marker}"));
         }
         Self {
             kind: UserResponseKind::SchemaInvalid,
