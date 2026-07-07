@@ -1,6 +1,21 @@
 use super::*;
 
 #[test]
+fn error_extra_exposes_machine_contract() {
+    let extra = error_extra("execution_failed");
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(
+        extra["message_key"],
+        "skill.install_module.execution_failed"
+    );
+    assert_eq!(extra["retryable"], false);
+}
+
+#[test]
 fn dry_run_python_module_returns_structured_plan_without_installing() {
     let (text, extra) = install_modules(serde_json::json!({
         "modules": ["requests"],
