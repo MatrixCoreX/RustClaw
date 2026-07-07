@@ -490,7 +490,7 @@ impl RouteResult {
 
     #[cfg(test)]
     pub(crate) fn set_clarify_gate(&mut self) {
-        self.set_ask_mode(AskMode::clarify());
+        self.set_ask_mode(AskMode::clarify_trace());
     }
 
     pub(crate) fn set_execute_gate(&mut self) {

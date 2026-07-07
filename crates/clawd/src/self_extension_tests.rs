@@ -52,7 +52,7 @@ fn localized_plan_reply_mentions_disabled_package_install() {
 #[test]
 fn self_extension_gating_requires_enabled_runtime_and_non_none_mode() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::direct_answer(),
+        ask_mode: crate::AskMode::respond_trace(),
         resolved_intent: "do it with a temporary script".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -86,7 +86,7 @@ fn self_extension_gating_requires_enabled_runtime_and_non_none_mode() {
 #[test]
 fn capability_gap_trigger_requires_auto_flag() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::direct_answer(),
+        ask_mode: crate::AskMode::respond_trace(),
         resolved_intent: "handle this by extending the system".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -576,7 +576,7 @@ fn permanent_extension_runtime_enable_runs_full_chain_and_reloads() {
 #[test]
 fn effective_request_prefers_resolved_intent() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::direct_answer(),
+        ask_mode: crate::AskMode::respond_trace(),
         resolved_intent: "Use a temporary script instead of built-in skills.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

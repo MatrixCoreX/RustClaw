@@ -1336,7 +1336,7 @@ fn route_contract_budget_does_not_depend_on_legacy_route_trace() {
         OutputSemanticKind::CommandOutputSummary,
         OutputLocatorKind::None,
     );
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
 
     assert_eq!(
         AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route)),

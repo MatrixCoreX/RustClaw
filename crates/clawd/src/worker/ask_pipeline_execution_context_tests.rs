@@ -40,7 +40,7 @@ fn route_reason_has_marker(route_result: &crate::RouteResult, marker: &str) -> b
 #[test]
 fn untrusted_multiline_answer_candidate_is_removed_from_execution_context() {
     let mut route = base_route(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         "Draft release note\nanswer_candidate: Login module update\nOAuth details\n60% faster",
     );
     let mut resolved =
@@ -74,7 +74,7 @@ fn untrusted_multiline_answer_candidate_is_removed_from_execution_context() {
 #[test]
 fn compact_machine_literal_answer_candidate_is_removed_from_execution_context() {
     let mut route = base_route(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         "Draft runtime note\nanswer_candidate: Use Python 3.11 for this runtime.",
     );
     let mut resolved =
@@ -102,7 +102,7 @@ fn compact_machine_literal_answer_candidate_is_removed_from_execution_context() 
 #[test]
 fn pure_direct_chat_freeform_rewrite_uses_current_user_request() {
     let mut route = base_route(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         "Draft a release note for project RustClaw.",
     );
     let mut resolved = route.resolved_intent.clone();
@@ -128,7 +128,7 @@ fn pure_direct_chat_freeform_rewrite_uses_current_user_request() {
 #[test]
 fn standalone_task_request_freeform_rewrite_uses_current_user_request() {
     let mut route = base_route(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         "Create a project-specific test plan after inspecting workspace evidence.",
     );
     let mut resolved = route.resolved_intent.clone();
@@ -160,7 +160,7 @@ fn standalone_task_request_freeform_rewrite_uses_current_user_request() {
 #[test]
 fn standalone_task_request_freeform_rewrite_preserves_active_anchor_context() {
     let mut route = base_route(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         "Read the second active ordered entry.",
     );
     let anchor = "\n\n### ACTIVE_EXECUTION_ANCHOR\nfollowup_bound_target: /tmp/logs\nfollowup_ordered_entries: 1:a.log | 2:b.log";
@@ -199,7 +199,7 @@ fn standalone_task_request_freeform_rewrite_preserves_active_anchor_context() {
 #[test]
 fn active_task_correction_keeps_resolved_context_rewrite() {
     let mut route = base_route(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         "Current task:\nold draft\nNew user instruction:\nmake it shorter",
     );
     let original_resolved = route.resolved_intent.clone();

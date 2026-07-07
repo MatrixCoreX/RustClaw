@@ -482,7 +482,7 @@ fn quantity_comparison_single_directory_count_observation_is_nonrecursive() {
     fs::write(root.path.join("nested/deep.txt"), "deep").expect("write deep");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1128,7 +1128,7 @@ fn quantity_compare_rewrites_directory_name_searches_to_dir_compare() {
     state.skill_rt.locator_scan_max_files = 5000;
 
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1190,7 +1190,7 @@ fn quantity_compare_directory_pair_exposes_resolved_dir_compare_targets() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );

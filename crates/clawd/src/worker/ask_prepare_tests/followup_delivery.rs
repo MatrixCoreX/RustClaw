@@ -476,7 +476,7 @@ fn structurally_resolved_file_delivery_defers_recent_read_target_to_loop() {
 #[test]
 fn clarified_structural_file_delivery_defers_recent_read_target_to_loop() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify(),
+        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "deliver active bound target".to_string(),
         needs_clarify: true,
         route_reason: "active_anchor_file_delivery_requires_structured_reference".to_string(),
@@ -538,7 +538,7 @@ fn clarified_structural_file_delivery_defers_recent_read_target_to_loop() {
 #[test]
 fn ambiguous_deictic_file_delivery_does_not_bind_stale_read_target() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify(),
+        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "deliver unresolved selected file".to_string(),
         needs_clarify: true,
         route_reason: "normalizer marked file delivery target as ambiguous".to_string(),
@@ -612,7 +612,7 @@ fn ambiguous_deictic_file_delivery_does_not_bind_stale_read_target() {
 #[test]
 fn directory_selection_clarify_marker_blocks_stale_read_target_rebind() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify(),
+        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "deliver one selected file from a directory".to_string(),
         needs_clarify: true,
         route_reason: concat!(

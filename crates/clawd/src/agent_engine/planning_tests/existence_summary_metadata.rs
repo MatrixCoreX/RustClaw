@@ -14,7 +14,7 @@ fn existence_summary_explicit_file_targets_allow_metadata_and_content_evidence()
     let left = "docs/service_notes.md";
     let right = "docs/release_checklist.md";
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Strict,
     );

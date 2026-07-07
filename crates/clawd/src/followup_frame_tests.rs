@@ -970,7 +970,7 @@ fn empty_generic_outcome_preserves_prior_structured_frame() {
     };
     persist_frame(&state, &task, &prior_frame).expect("seed prior frame");
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::direct_answer(),
+        ask_mode: crate::AskMode::respond_trace(),
         resolved_intent: "plain acknowledgement".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1130,7 +1130,7 @@ fn scalar_answer_matching_prior_ordered_entry_persists_selected_index() {
     persist_frame(&state, &task, &prior_frame).expect("persist prior frame");
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::direct_answer(),
+        ask_mode: crate::AskMode::respond_trace(),
         resolved_intent: "select an observed ordered entry".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1209,7 +1209,7 @@ fn scalar_answer_matching_prior_read_candidate_list_keeps_selection_for_next_pos
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
     let selected = format!("{root}/my_abcd.txt");
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::direct_answer(),
+        ask_mode: crate::AskMode::respond_trace(),
         resolved_intent: "select an observed ordered path entry".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1425,7 +1425,7 @@ fn clarify_outcome_clears_active_followup_frame() {
     };
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::clarify(),
+        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "看一下那个 README 开头，然后一句话总结".to_string(),
         needs_clarify: true,
         clarify_question: "请提供具体文件路径".to_string(),

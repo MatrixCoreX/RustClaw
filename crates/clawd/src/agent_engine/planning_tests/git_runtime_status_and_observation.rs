@@ -266,7 +266,7 @@ fn literal_git_status_run_cmd_is_preserved() {
 fn git_repository_state_remote_request_plans_git_remote_action() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Strict,
     );
@@ -307,7 +307,7 @@ fn git_repository_state_contract_without_machine_token_defers_to_planner() {
 fn git_repository_state_status_capability_ref_plans_git_status_action() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -363,7 +363,7 @@ fn recent_scalar_current_workspace_plans_git_branch_without_nl_matching() {
     let state = test_state_with_enabled_skills(&["git_basic", "run_cmd"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Strict,
     );
@@ -521,7 +521,7 @@ fn runtime_status_scalar_patch_does_not_depend_on_route_trace() {
     let state = test_state_with_enabled_skills(&["system_basic"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Scalar,
     );

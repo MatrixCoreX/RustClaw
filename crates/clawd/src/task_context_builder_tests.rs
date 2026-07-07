@@ -534,7 +534,7 @@ fn open_or_unanchored_routes_do_not_force_light_memory_budget() {
 #[test]
 fn session_anchored_direct_answer_trace_keeps_full_memory_budget_for_recall() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     let anchored_snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: None,
@@ -590,7 +590,7 @@ fn session_anchored_clarify_delivery_act_prefers_light_memory_budget() {
 #[test]
 fn ordinary_direct_answer_trace_without_state_anchor_keeps_full_memory_budget() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: None,
@@ -748,7 +748,7 @@ fn base_route_result() -> crate::RouteResult {
 #[test]
 fn standalone_direct_answer_without_turn_analysis_disables_stable_facts_memory() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
 
     assert!(current_request_only_memory_context(&route, None, false));
     assert_eq!(
@@ -764,7 +764,7 @@ fn standalone_direct_answer_without_turn_analysis_disables_stable_facts_memory()
 #[test]
 fn explicit_preference_or_memory_turn_keeps_default_memory_policy() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     let analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
         target_task_policy: None,
@@ -791,7 +791,7 @@ fn explicit_preference_or_memory_turn_keeps_default_memory_policy() {
 #[test]
 fn active_task_scope_update_uses_active_task_context_only_for_chat_memory() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     let analysis = crate::intent_router::TurnAnalysis {
         turn_type: Some(crate::intent_router::TurnType::TaskScopeUpdate),
         target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),

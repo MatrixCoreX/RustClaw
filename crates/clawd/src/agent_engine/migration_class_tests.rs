@@ -171,7 +171,7 @@ fn eligibility_maps_legacy_classes_to_general_buckets() {
 #[test]
 fn eligibility_uses_contract_not_legacy_route_trace() {
     let mut listing = route_result(OutputResponseShape::Strict, OutputSemanticKind::FileNames);
-    listing.ask_mode = AskMode::direct_answer();
+    listing.ask_mode = AskMode::respond_trace();
 
     let eligibility = agent_loop_eligibility(&listing);
 

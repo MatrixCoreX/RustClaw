@@ -571,7 +571,7 @@ fn execution_evidence_prompt_includes_compact_numeric_evidence() {
 
 #[test]
 fn direct_answer_route_skips_answer_verifier() {
-    let route = route_with_mode(crate::AskMode::direct_answer());
+    let route = route_with_mode(crate::AskMode::respond_trace());
     let journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "hello");
     assert!(!should_verify_answer(&route, &journal, "hi"));
 }
@@ -726,7 +726,7 @@ fn non_tool_discovery_contract_marker_still_uses_answer_verifier() {
 
 #[test]
 fn output_contract_marker_verification_does_not_depend_on_route_trace() {
-    let mut route = route_with_mode(crate::AskMode::direct_answer());
+    let mut route = route_with_mode(crate::AskMode::respond_trace());
     route.route_reason = "content_excerpt_summary".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.requires_content_evidence = false;
@@ -777,7 +777,7 @@ fn local_missing_evidence_gap_reports_required_fields() {
 
 #[test]
 fn local_missing_evidence_gap_uses_contract_not_route_trace() {
-    let mut route = route_with_mode(crate::AskMode::direct_answer());
+    let mut route = route_with_mode(crate::AskMode::respond_trace());
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     let mut journal =

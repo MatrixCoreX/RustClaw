@@ -36,7 +36,7 @@ fn make_temp_root(label: &str) -> std::path::PathBuf {
 #[test]
 fn ordered_entry_binding_uses_contract_without_execute_gate() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::direct_answer(),
+        ask_mode: crate::AskMode::respond_trace(),
         resolved_intent: "Read the selected ordered entry.".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -88,7 +88,7 @@ fn ordered_entry_binding_uses_contract_without_execute_gate() {
         None,
     ));
 
-    assert_eq!(route.ask_mode, crate::AskMode::direct_answer());
+    assert_eq!(route.ask_mode, crate::AskMode::respond_trace());
     assert_eq!(
         route.output_contract.locator_kind,
         crate::OutputLocatorKind::Path
@@ -795,7 +795,7 @@ fn active_clarify_does_not_guess_ambiguous_nested_filename_reply() {
 #[test]
 fn active_clarify_run_control_prompt_blocks_unrelated_alias_selection() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::direct_answer(),
+        ask_mode: crate::AskMode::respond_trace(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1112,7 +1112,7 @@ fn clarify_locator_reply_keeps_current_file_delivery_over_weak_prior_shape() {
 #[test]
 fn clarify_locator_reply_binds_bare_path_back_to_loop() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify(),
+        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "scripts/nl_tests/fixtures/device_local/logs/model_io.log".to_string(),
         needs_clarify: true,
         route_reason: "bare_path_no_verb".to_string(),
@@ -1384,7 +1384,7 @@ fn clarify_structured_payload_reply_is_not_rewritten_as_locator() {
 #[test]
 fn clarify_structured_payload_reply_binds_direct_route_for_loop() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::direct_answer(),
+        ask_mode: crate::AskMode::respond_trace(),
         resolved_intent: "Inline payload can be answered directly".to_string(),
         needs_clarify: false,
         route_reason: "executionless_finalize_trace_plain".to_string(),
@@ -1613,7 +1613,7 @@ fn scalar_field_pair_contract_repair_uses_recent_scalar_equality_contract() {
 #[test]
 fn clarify_locator_reply_preserves_prior_file_delivery_contract() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify(),
+        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "README.md".to_string(),
         needs_clarify: true,
         route_reason: "bare_path_no_verb".to_string(),
@@ -1756,7 +1756,7 @@ fn clarify_locator_reply_injects_locator_into_existing_execute_route() {
 #[test]
 fn clarify_locator_reply_does_not_bind_stale_prior_request() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify(),
+        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "/tmp/a.log".to_string(),
         needs_clarify: true,
         route_reason: "bare_path_no_verb".to_string(),
@@ -1801,7 +1801,7 @@ fn clarify_locator_reply_does_not_bind_stale_prior_request() {
 
     bind_active_clarify_locator_reply_for_loop(&mut route, &resolution, &snapshot);
 
-    assert_eq!(route.ask_mode, crate::AskMode::clarify());
+    assert_eq!(route.ask_mode, crate::AskMode::clarify_trace());
     assert!(route.needs_clarify);
 }
 

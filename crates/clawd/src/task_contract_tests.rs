@@ -49,7 +49,7 @@ fn file_path_search_contract_is_list_with_candidate_evidence() {
 #[test]
 fn missing_locator_contract_prefers_clarify_policy() {
     let mut route = route_with_contract(
-        AskMode::clarify(),
+        AskMode::clarify_trace(),
         IntentOutputContract {
             locator_kind: OutputLocatorKind::Path,
             requires_content_evidence: true,
@@ -133,7 +133,7 @@ fn existence_contract_requires_structural_path_evidence() {
 #[test]
 fn unclassified_evidence_contract_operation_does_not_depend_on_route_trace() {
     let route = route_with_contract(
-        AskMode::direct_answer(),
+        AskMode::respond_trace(),
         IntentOutputContract {
             locator_kind: OutputLocatorKind::Path,
             locator_hint: "README.md".to_string(),

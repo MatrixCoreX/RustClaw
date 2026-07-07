@@ -216,7 +216,7 @@ fn implicit_workspace_file_locator_without_model_locator_requires_clarify() {
 #[test]
 fn path_scoped_locator_guard_defers_direct_answer_trace_to_prompt_targets() {
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::direct_answer();
+    route.ask_mode = crate::AskMode::respond_trace();
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint.clear();
     route.output_contract.requires_content_evidence = true;

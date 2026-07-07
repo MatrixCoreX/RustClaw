@@ -1,8 +1,8 @@
 use super::*;
 
 #[test]
-fn direct_answer_maps_to_respond_trace() {
-    let m = AskMode::direct_answer();
+fn respond_trace_maps_to_respond_trace_entry() {
+    let m = AskMode::respond_trace();
     assert_eq!(
         m,
         AskMode::Respond {
@@ -15,8 +15,8 @@ fn direct_answer_maps_to_respond_trace() {
 }
 
 #[test]
-fn clarify_maps_to_clarify_trace() {
-    let m = AskMode::clarify();
+fn clarify_trace_maps_to_clarify_trace_entry() {
+    let m = AskMode::clarify_trace();
     assert_eq!(
         m,
         AskMode::Respond {
@@ -31,14 +31,14 @@ fn clarify_maps_to_clarify_trace() {
 
 #[test]
 fn resume_discussion_override_keeps_chat_label() {
-    let m = AskMode::direct_answer().with_resume_overrides(true, false);
+    let m = AskMode::respond_trace().with_resume_overrides(true, false);
     assert!(m.is_resume_discussion());
     assert_eq!(m.route_trace_label_for_log(), "respond_resume_discussion");
 }
 
 #[test]
 fn resume_execution_override_wins_over_discussion() {
-    let m = AskMode::direct_answer().with_resume_overrides(true, true);
+    let m = AskMode::respond_trace().with_resume_overrides(true, true);
     assert!(m.resume_execution());
     assert!(m.is_execute_gate());
     assert_eq!(m.route_trace_label_for_log(), "act_resume_continue");
@@ -75,13 +75,13 @@ fn act_with_chat_finalizer_maps_to_chat_wrapped() {
 #[test]
 fn named_constructors_are_explicit() {
     assert_eq!(
-        AskMode::direct_answer(),
+        AskMode::respond_trace(),
         AskMode::Respond {
             entry: RespondEntryStrategy::RespondTrace
         }
     );
     assert_eq!(
-        AskMode::clarify(),
+        AskMode::clarify_trace(),
         AskMode::Respond {
             entry: RespondEntryStrategy::ClarifyTrace
         }
@@ -102,7 +102,7 @@ fn named_constructors_are_explicit() {
 
 #[test]
 fn resume_overrides_layer_on_top_of_normalized_mode() {
-    let base = AskMode::direct_answer();
+    let base = AskMode::respond_trace();
     assert_eq!(
         base.clone().with_resume_overrides(false, false),
         AskMode::Respond {
@@ -126,10 +126,13 @@ fn resume_overrides_layer_on_top_of_normalized_mode() {
 #[test]
 fn route_trace_labels_match_log_names() {
     assert_eq!(
-        AskMode::direct_answer().route_trace_label_for_log(),
+        AskMode::respond_trace().route_trace_label_for_log(),
         "respond"
     );
-    assert_eq!(AskMode::clarify().route_trace_label_for_log(), "clarify");
+    assert_eq!(
+        AskMode::clarify_trace().route_trace_label_for_log(),
+        "clarify"
+    );
     assert_eq!(
         AskMode::act_plain().route_trace_label_for_log(),
         "act_plain_finalizer"
@@ -142,16 +145,16 @@ fn route_trace_labels_match_log_names() {
 
 #[test]
 fn as_str_uses_stable_ids() {
-    assert_eq!(AskMode::direct_answer().as_str(), "respond:trace");
-    assert_eq!(AskMode::clarify().as_str(), "respond:clarify_trace");
+    assert_eq!(AskMode::respond_trace().as_str(), "respond:trace");
+    assert_eq!(AskMode::clarify_trace().as_str(), "respond:clarify_trace");
     assert_eq!(AskMode::act_plain().as_str(), "act:plain");
     assert_eq!(
         AskMode::act_with_chat_finalizer().as_str(),
         "act:chat_wrapped"
     );
-    let rd = AskMode::direct_answer().with_resume_overrides(true, false);
+    let rd = AskMode::respond_trace().with_resume_overrides(true, false);
     assert_eq!(rd.as_str(), "respond:resume_followup_discussion");
-    let re = AskMode::direct_answer().with_resume_overrides(false, true);
+    let re = AskMode::respond_trace().with_resume_overrides(false, true);
     assert_eq!(re.as_str(), "act:resume_continue");
 }
 
@@ -159,8 +162,8 @@ fn as_str_uses_stable_ids() {
 fn is_plain_act_only_for_plain_finalize() {
     assert!(AskMode::act_plain().is_plain_act());
     assert!(!AskMode::act_with_chat_finalizer().is_plain_act());
-    assert!(!AskMode::direct_answer().is_plain_act());
-    assert!(!AskMode::clarify().is_plain_act());
+    assert!(!AskMode::respond_trace().is_plain_act());
+    assert!(!AskMode::clarify_trace().is_plain_act());
     let resume = AskMode::act_plain().with_resume_overrides(false, true);
     assert!(!resume.is_plain_act(), "ResumeContinue must not be plain");
     assert!(resume.is_execute_gate());
@@ -169,12 +172,12 @@ fn is_plain_act_only_for_plain_finalize() {
 #[test]
 fn helpers_are_disjoint_for_each_variant() {
     let cases = [
-        AskMode::direct_answer(),
-        AskMode::clarify(),
+        AskMode::respond_trace(),
+        AskMode::clarify_trace(),
         AskMode::act_plain(),
         AskMode::act_with_chat_finalizer(),
-        AskMode::direct_answer().with_resume_overrides(true, false),
-        AskMode::direct_answer().with_resume_overrides(false, true),
+        AskMode::respond_trace().with_resume_overrides(true, false),
+        AskMode::respond_trace().with_resume_overrides(false, true),
     ];
     for m in &cases {
         let mut hits = 0;
@@ -196,8 +199,8 @@ fn helpers_are_disjoint_for_each_variant() {
 
 #[test]
 fn gate_kind_maps_to_three_gates() {
-    assert_eq!(AskMode::direct_answer().gate_kind(), RouteGateKind::Chat);
-    assert_eq!(AskMode::clarify().gate_kind(), RouteGateKind::Clarify);
+    assert_eq!(AskMode::respond_trace().gate_kind(), RouteGateKind::Chat);
+    assert_eq!(AskMode::clarify_trace().gate_kind(), RouteGateKind::Clarify);
     assert_eq!(AskMode::act_plain().gate_kind(), RouteGateKind::Execute);
     assert_eq!(
         AskMode::act_with_chat_finalizer().gate_kind(),
@@ -208,11 +211,11 @@ fn gate_kind_maps_to_three_gates() {
 #[test]
 fn route_trace_decision_for_journal_maps_to_three_decisions() {
     assert_eq!(
-        AskMode::direct_answer().route_trace_decision_for_journal(),
+        AskMode::respond_trace().route_trace_decision_for_journal(),
         AskRouteTraceDecision::Respond
     );
     assert_eq!(
-        AskMode::clarify().route_trace_decision_for_journal(),
+        AskMode::clarify_trace().route_trace_decision_for_journal(),
         AskRouteTraceDecision::Clarify
     );
     assert_eq!(
@@ -228,13 +231,13 @@ fn route_trace_decision_for_journal_maps_to_three_decisions() {
 #[test]
 fn resume_shortcuts_keep_expected_gate_kinds() {
     assert_eq!(
-        AskMode::direct_answer()
+        AskMode::respond_trace()
             .with_resume_overrides(true, false)
             .gate_kind(),
         RouteGateKind::Chat
     );
     assert_eq!(
-        AskMode::direct_answer()
+        AskMode::respond_trace()
             .with_resume_overrides(false, true)
             .gate_kind(),
         RouteGateKind::Execute

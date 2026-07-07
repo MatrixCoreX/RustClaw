@@ -1530,7 +1530,7 @@ fn journal_missing_file_search_evidence_detects_not_found_probe() {
 
 #[test]
 fn answer_route_result_overrides_initial_chat_when_execution_trace_exists() {
-    let initial = route_result(crate::AskMode::direct_answer());
+    let initial = route_result(crate::AskMode::respond_trace());
     let answer_route = route_result(crate::AskMode::act_with_chat_finalizer());
     let mut answer_journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     answer_journal.record_plan_result(&crate::PlanResult {
@@ -1552,7 +1552,7 @@ fn answer_route_result_overrides_initial_chat_when_execution_trace_exists() {
 
 #[test]
 fn answer_route_result_does_not_override_chat_without_execution_trace() {
-    let initial = route_result(crate::AskMode::direct_answer());
+    let initial = route_result(crate::AskMode::respond_trace());
     let answer_route = route_result(crate::AskMode::act_with_chat_finalizer());
     let answer_journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
 
@@ -1565,8 +1565,8 @@ fn answer_route_result_does_not_override_chat_without_execution_trace() {
 
 #[test]
 fn answer_route_result_overrides_initial_chat_for_clarify_journal() {
-    let initial = route_result(crate::AskMode::direct_answer());
-    let mut answer_route = route_result(crate::AskMode::clarify());
+    let initial = route_result(crate::AskMode::respond_trace());
+    let mut answer_route = route_result(crate::AskMode::clarify_trace());
     answer_route.needs_clarify = true;
     answer_route.clarify_question = "Which file should I send?".to_string();
     answer_route.wants_file_delivery = true;

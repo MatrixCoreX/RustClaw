@@ -39,7 +39,7 @@ fn session_alias_delivery_rewrites_stale_stat_path_to_route_locator() {
 #[test]
 fn active_bound_target_rewrites_matching_basename_without_route_prebind_marker() {
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Strict,
     );
@@ -785,7 +785,7 @@ fn content_evidence_route_repairs_respond_only_plan_even_in_chat_mode() {
     }];
     assert!(should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::direct_answer(),
+            crate::AskMode::respond_trace(),
             true,
             OutputResponseShape::Free,
         )),

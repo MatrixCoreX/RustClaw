@@ -242,7 +242,7 @@ fn scalar_count_state_patch_filter_exposes_structured_dir_count_hint() {
     fs::write(root.path.join("a.txt"), "a").expect("write file");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Scalar,
     );

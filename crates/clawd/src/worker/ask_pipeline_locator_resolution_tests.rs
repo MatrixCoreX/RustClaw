@@ -76,7 +76,7 @@ fn auto_locator_skips_non_path_locators() {
 #[test]
 fn auto_locator_skips_clarify_routes() {
     let mut route = route_with_locator(crate::OutputLocatorKind::Path);
-    route.ask_mode = crate::AskMode::clarify();
+    route.ask_mode = crate::AskMode::clarify_trace();
     route.resolved_intent = "读一下那个 README 开头，然后一句话总结".to_string();
     route.needs_clarify = true;
     route.route_reason = "normalizer requested clarification before execution".to_string();
@@ -88,7 +88,7 @@ fn auto_locator_skips_clarify_routes() {
 #[test]
 fn auto_locator_skips_stateful_ordered_entry_clarify_routes() {
     let mut route = route_with_locator(crate::OutputLocatorKind::Filename);
-    route.ask_mode = crate::AskMode::clarify();
+    route.ask_mode = crate::AskMode::clarify_trace();
     route.resolved_intent = "看第二个".to_string();
     route.needs_clarify = true;
     route.route_reason =
@@ -102,7 +102,7 @@ fn auto_locator_skips_stateful_ordered_entry_clarify_routes() {
 #[test]
 fn auto_locator_skips_clarify_with_unbound_workspace_scope() {
     let mut route = route_with_locator(crate::OutputLocatorKind::CurrentWorkspace);
-    route.ask_mode = crate::AskMode::clarify();
+    route.ask_mode = crate::AskMode::clarify_trace();
     route.resolved_intent = "检查当前目录".to_string();
     route.needs_clarify = true;
     route.output_contract.requires_content_evidence = true;

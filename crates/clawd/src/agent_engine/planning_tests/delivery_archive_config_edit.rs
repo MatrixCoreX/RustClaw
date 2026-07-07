@@ -1145,7 +1145,7 @@ fn requested_config_edit_plan_is_preserved_by_structural_anchors() {
 fn direct_answer_config_contract_preserves_config_edit_plan() {
     let state = test_state_with_enabled_skills(&["config_edit"]);
     let mut route = route_result(
-        crate::AskMode::direct_answer(),
+        crate::AskMode::respond_trace(),
         true,
         OutputResponseShape::Strict,
     );

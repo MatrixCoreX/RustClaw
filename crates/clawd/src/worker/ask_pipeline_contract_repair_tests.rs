@@ -149,7 +149,7 @@ fn registry_capability_observation_keeps_spurious_delivery_as_evidence() {
 
 fn filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::direct_answer(),
+        ask_mode: crate::AskMode::respond_trace(),
         resolved_intent: "read README and summarize".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
