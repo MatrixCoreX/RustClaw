@@ -196,10 +196,10 @@ fn handle(req: Request) -> Response {
         Ok(text) => Response {
             request_id: req.request_id,
             status: "ok".to_string(),
+            extra: browser_web_success_extra(&text),
             text,
             error_text: None,
             buttons: None,
-            extra: None,
         },
         Err(err) => Response {
             request_id: req.request_id,
@@ -210,6 +210,16 @@ fn handle(req: Request) -> Response {
             extra: None,
         },
     }
+}
+
+fn browser_web_success_extra(text: &str) -> Option<Value> {
+    let mut value: Value = serde_json::from_str(text).ok()?;
+    if let Some(object) = value.as_object_mut() {
+        object
+            .entry("source_skill".to_string())
+            .or_insert_with(|| json!("browser_web"));
+    }
+    Some(value)
 }
 
 fn parse_open_extract_args(
