@@ -1025,7 +1025,6 @@ fn step_contract_trace_json(
         .and_then(|action_ref| crate::evidence_policy::action_trace_for_route(route, action_ref));
     Some(json!({
         "contract_match": contract.get("contract_match").and_then(Value::as_str),
-        "contract_marker": contract.get("contract_marker").and_then(Value::as_str),
         "policy_mode": contract.get("policy_mode").and_then(Value::as_str),
         "required_evidence": contract.get("required_evidence").cloned(),
         "evidence_expression": contract.get("evidence_expression").cloned(),
