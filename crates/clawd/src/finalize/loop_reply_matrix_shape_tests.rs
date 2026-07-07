@@ -352,6 +352,50 @@ fn matrix_strict_list_shape_builds_directory_names_from_inventory_dirs() {
 }
 
 #[test]
+fn name_list_renderer_uses_file_capability_without_semantic_kind() {
+    let mut route = free_route_result();
+    route.route_reason = "capability_ref=filesystem.list_file_names".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","entries":[{"kind":"file","name":"README.md","path":"workspace/README.md"},{"kind":"dir","name":"crates","path":"workspace/crates"}],"names_by_kind":{"dirs":["crates"],"files":["README.md"],"other":[]},"path":"workspace"}"#,
+    ));
+
+    let (answer, summary) = super::super::matrix_strict_list_observed_answer(&route, &loop_state)
+        .expect("capability-owned file name list");
+
+    assert_eq!(answer, "README.md");
+    assert_eq!(summary.format_ok, Some(true));
+    assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
+fn name_list_renderer_uses_directory_capability_without_semantic_kind() {
+    let mut route = free_route_result();
+    route.route_reason = "capability_ref=filesystem.list_directory_names".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","entries":[{"kind":"file","name":"README.md","path":"workspace/README.md"},{"kind":"dir","name":"crates","path":"workspace/crates"},{"kind":"directory","name":"docs","path":"workspace/docs"}],"names_by_kind":{"dirs":["crates","docs"],"files":["README.md"],"other":[]},"path":"workspace"}"#,
+    ));
+
+    let (answer, summary) = super::super::matrix_strict_list_observed_answer(&route, &loop_state)
+        .expect("capability-owned directory name list");
+
+    assert_eq!(answer, "crates\ndocs");
+    assert_eq!(summary.format_ok, Some(true));
+    assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
 fn matrix_archive_member_list_filters_file_entries_from_structured_kinds() {
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;
