@@ -22,12 +22,7 @@ fn assert_current_workspace_scope_boundary(prompt: &str, root: &std::path::Path)
         scope.get("task_shape").and_then(serde_json::Value::as_str),
         Some("scalar_count")
     );
-    assert_eq!(
-        scope
-            .get("contract_marker")
-            .and_then(serde_json::Value::as_str),
-        Some("scalar_count")
-    );
+    assert!(scope.get("contract_marker").is_none());
     assert_eq!(
         scope
             .get("final_answer_shape")

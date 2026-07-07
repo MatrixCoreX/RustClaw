@@ -598,7 +598,6 @@ fn current_workspace_scope_observation(
         "task_shape": "scalar_count",
         "final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str),
         "final_answer_shape_class": final_answer_shape.map(|shape| shape.class().as_str()),
-        "contract_marker": route.effective_output_contract_semantic_kind().as_str(),
         "response_shape": route.output_contract.response_shape.as_str(),
     }))
 }
