@@ -56,7 +56,7 @@ fn constructed_missing_stat_path_plan_rewrites_without_specific_semantic_kind() 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -160,7 +160,7 @@ fn constructed_directory_stat_path_plan_rewrites_to_find_entries_for_child_selec
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -208,7 +208,7 @@ fn constructed_directory_absolute_stat_path_rewrites_to_find_entries_for_child_s
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -301,7 +301,7 @@ fn constructed_missing_stat_path_plan_preserves_explicit_full_path_check() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -332,7 +332,7 @@ fn constructed_missing_stat_path_plan_preserves_explicit_full_path_check() {
 #[test]
 fn structured_scalar_compare_replaces_single_file_read_with_explicit_multi_file_path_facts() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -379,7 +379,7 @@ fn structured_scalar_compare_replaces_single_file_read_with_explicit_multi_file_
 #[test]
 fn structured_task_contract_targets_drive_multi_file_metadata_plan() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -715,7 +715,7 @@ fn existence_multi_file_stat_paths_are_repaired_from_structural_targets() {
 #[test]
 fn explicit_multi_file_metadata_plan_is_not_duplicated_when_targets_are_covered() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -748,7 +748,7 @@ fn explicit_multi_file_metadata_plan_is_not_duplicated_when_targets_are_covered(
 #[test]
 fn normalization_order_schema_aliases_before_multi_target_coverage() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -800,7 +800,7 @@ fn normalization_order_schema_aliases_before_multi_target_coverage() {
 #[test]
 fn multi_file_modified_time_compare_uses_metadata_not_whole_file_reads() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -845,7 +845,7 @@ fn multi_file_modified_time_compare_uses_metadata_not_whole_file_reads() {
 #[test]
 fn recent_scalar_equality_preserves_content_extract_plan_for_explicit_files() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -915,7 +915,7 @@ fn recent_scalar_equality_preserves_content_extract_plan_for_explicit_files() {
 fn recent_scalar_equality_pair_paths_skip_content_read_deterministic_fallback() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1075,7 +1075,7 @@ reqwest = { version = "0.12" }
 #[test]
 fn recent_scalar_contract_overrides_literal_command_guard_for_deterministic_plan() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1288,7 +1288,7 @@ reqwest = { version = "0.12" }
         payload_json: json!({ "text": prompt }).to_string(),
     };
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1363,7 +1363,7 @@ reqwest = { version = "0.12" }
         payload_json: json!({ "text": prompt }).to_string(),
     };
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );

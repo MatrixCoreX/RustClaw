@@ -52,7 +52,7 @@ fn current_repo_code_change_is_medium_risk() {
 
 #[test]
 fn system_ops_is_high_risk() {
-    let route = base_route(crate::AskMode::planner_execute_plain());
+    let route = base_route(crate::AskMode::act_plain());
     let recipe = ExecutionRecipeSpec {
         kind: ExecutionRecipeKind::OpsClosedLoop,
         profile: ExecutionRecipeProfile::OpsService,
@@ -67,7 +67,7 @@ fn system_ops_is_high_risk() {
 
 #[test]
 fn generated_file_delivery_route_is_high_risk() {
-    let mut route = base_route(crate::AskMode::planner_execute_plain());
+    let mut route = base_route(crate::AskMode::act_plain());
     route.route_reason = "generated_file_delivery".to_string();
     route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
@@ -101,7 +101,7 @@ fn generated_file_path_report_route_is_high_risk() {
 
 #[test]
 fn config_mutation_route_is_high_risk_even_with_locator_evidence() {
-    let mut route = base_route(crate::AskMode::planner_execute_plain());
+    let mut route = base_route(crate::AskMode::act_plain());
     route.route_reason = "config_mutation".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
@@ -115,7 +115,7 @@ fn config_mutation_route_is_high_risk_even_with_locator_evidence() {
 
 #[test]
 fn self_extension_is_high_risk() {
-    let mut route = base_route(crate::AskMode::planner_execute_plain());
+    let mut route = base_route(crate::AskMode::act_plain());
     route.output_contract.self_extension = SelfExtensionContract {
         mode: SelfExtensionMode::PermanentExtension,
         trigger: SelfExtensionTrigger::ExplicitUserRequest,
@@ -130,7 +130,7 @@ fn self_extension_is_high_risk() {
 
 #[test]
 fn read_only_locator_route_is_low_risk() {
-    let mut route = base_route(crate::AskMode::planner_execute_plain());
+    let mut route = base_route(crate::AskMode::act_plain());
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
     let out = classify_route_risk_ceiling(&route, None);

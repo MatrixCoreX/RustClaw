@@ -1255,7 +1255,7 @@ fn route_with_contract(
     locator_kind: OutputLocatorKind,
 ) -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "test".to_string(),
         needs_clarify: false,
         route_reason: String::new(),

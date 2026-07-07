@@ -116,7 +116,7 @@ fn route_result_set_execute_gate_updates_structured_trace_label() {
 
 #[test]
 fn route_result_exposes_chat_wrapped_planner_mode_as_structured_state() {
-    let route = route_result_with_mode(crate::AskMode::planner_execute_with_chat_finalizer());
+    let route = route_result_with_mode(crate::AskMode::act_with_chat_finalizer());
 
     assert!(route.is_execute_gate());
     assert!(route.uses_chat_finalizer());
@@ -126,7 +126,7 @@ fn route_result_exposes_chat_wrapped_planner_mode_as_structured_state() {
 
 #[test]
 fn route_result_legacy_pure_chat_marker_is_exact_machine_token_fallback() {
-    let mut route = route_result_with_mode(crate::AskMode::planner_execute_plain());
+    let mut route = route_result_with_mode(crate::AskMode::act_plain());
 
     route.route_reason = "some_reason; mode:pure_chat_agent_loop_submode".to_string();
 
@@ -136,7 +136,7 @@ fn route_result_legacy_pure_chat_marker_is_exact_machine_token_fallback() {
 
 #[test]
 fn route_result_output_contract_marker_methods_accept_route_reason_tokens() {
-    let mut route = route_result_with_mode(crate::AskMode::planner_execute_plain());
+    let mut route = route_result_with_mode(crate::AskMode::act_plain());
     route.route_reason = "contract:file_paths; contract:service_status".to_string();
 
     assert_eq!(
@@ -154,7 +154,7 @@ fn route_result_output_contract_marker_methods_accept_route_reason_tokens() {
 
 #[test]
 fn route_result_effective_output_contract_uses_route_reason_marker() {
-    let mut route = route_result_with_mode(crate::AskMode::planner_execute_plain());
+    let mut route = route_result_with_mode(crate::AskMode::act_plain());
     route.route_reason = "contract:workspace_project_summary".to_string();
 
     assert_eq!(
@@ -175,7 +175,7 @@ fn route_result_effective_output_contract_uses_route_reason_marker() {
 
 #[test]
 fn route_result_explicit_contract_marker_overrides_legacy_raw_semantic() {
-    let mut route = route_result_with_mode(crate::AskMode::planner_execute_plain());
+    let mut route = route_result_with_mode(crate::AskMode::act_plain());
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
     route.route_reason = "contract:workspace_project_summary".to_string();
 

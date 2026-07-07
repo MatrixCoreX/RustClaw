@@ -1552,7 +1552,7 @@ fn preferred_route_allows_more_specific_structured_tool_action() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1845,7 +1845,7 @@ fn doc_parse_unsupported_transform_action_normalizes_to_parse_doc() {
 fn archive_auto_locator_plans_list_instead_of_text_read() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = "Inspect the archive contents without unpacking it.".to_string();
     route.route_reason = "capability_ref=archive.list".to_string();
     route.output_contract.requires_content_evidence = true;
@@ -1891,7 +1891,7 @@ fn archive_auto_locator_plans_list_instead_of_text_read() {
 fn archive_read_contract_plans_direct_member_read() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "Read member notes.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"
             .to_string();
@@ -1937,7 +1937,7 @@ fn archive_read_contract_ignores_non_archive_auto_locator() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = format!("Read notes.txt from {archive}");
     route.route_reason = "capability_ref=archive.read".to_string();
     route.output_contract.requires_content_evidence = true;

@@ -101,15 +101,6 @@ fn named_constructors_are_explicit() {
 }
 
 #[test]
-fn legacy_planner_execute_constructors_delegate_to_act_constructors() {
-    assert_eq!(AskMode::act_plain(), AskMode::act_plain());
-    assert_eq!(
-        AskMode::act_with_chat_finalizer(),
-        AskMode::act_with_chat_finalizer()
-    );
-}
-
-#[test]
 fn resume_overrides_layer_on_top_of_normalized_mode() {
     let base = AskMode::direct_answer();
     assert_eq!(

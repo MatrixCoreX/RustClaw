@@ -62,20 +62,10 @@ impl AskMode {
     }
 
     #[cfg(test)]
-    pub(crate) fn planner_execute_plain() -> Self {
-        Self::act_plain()
-    }
-
-    #[cfg(test)]
     pub(crate) fn act_with_chat_finalizer() -> Self {
         AskMode::Act {
             finalize: ActFinalizeStyle::ChatWrapped,
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn planner_execute_with_chat_finalizer() -> Self {
-        Self::act_with_chat_finalizer()
     }
 
     /// Apply resume flags on top of an already-normalized mode.

@@ -2,7 +2,7 @@ use super::*;
 
 fn route_result() -> crate::RouteResult {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "test".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

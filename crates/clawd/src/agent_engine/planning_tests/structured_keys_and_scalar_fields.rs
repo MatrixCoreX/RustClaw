@@ -7,7 +7,7 @@ fn structured_keys_contract_preserves_planner_list_keys_action() {
     fs::write(&config_path, "alpha = 1\n[beta]\nvalue = 2\n").expect("write config");
     let config_path = config_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -53,7 +53,7 @@ fn structured_keys_plan_ignores_background_field_selectors() {
     .expect("write config");
     let config_path = config_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -100,7 +100,7 @@ fn structured_keys_planner_action_preserves_nested_field_path() {
     .expect("write package json");
     let config_path = config_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -158,7 +158,7 @@ planner_kind = "tool"
     .expect("write skills registry");
     let config_path = config_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -210,7 +210,7 @@ selected_vendor = "minimax"
     .expect("write config");
     let config_path = config_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -254,7 +254,7 @@ fn structured_keys_retry_after_validation_uses_list_keys_plan() {
     fs::write(&config_path, "alpha = 1\n[beta]\nvalue = 2\n").expect("write config");
     let config_path = config_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -319,7 +319,7 @@ fn structured_keys_contract_rewrites_multi_field_value_read_to_list_keys() {
     .expect("write config");
     let config_path = config_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -371,7 +371,7 @@ fn structured_keys_contract_keeps_explicit_structured_field_read() {
     fs::write(&config_path, "[package]\nname = \"clawd\"\n").expect("write config");
     let config_path = config_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -433,7 +433,7 @@ fn strict_structured_keys_contract_rewrites_background_field_read_to_list_keys()
     fs::write(&config_path, "alpha = 1\n[skills]\nvalue = true\n").expect("write config");
     let config_path = config_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -486,7 +486,7 @@ fn generic_scalar_structured_file_plan_rewrites_to_read_field_without_repair_mar
         .expect("write ui package");
     let package_path = package_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -538,7 +538,7 @@ fn structured_scalar_file_plan_uses_contract_field_selector_without_nl_mapping()
     fs::write(&package_path, r#"{"name":"rustclaw","private":true}"#).expect("write package");
     let package_path = package_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -592,7 +592,7 @@ fn structured_scalar_file_plan_uses_resolved_machine_selector_after_clarify() {
     fs::write(&package_path, r#"{"name":"rustclaw","private":true}"#).expect("write package");
     let package_path = package_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -649,7 +649,7 @@ fn generic_scalar_structured_field_read_stays_bound_to_auto_locator() {
     let package_path = package_path.display().to_string();
     let ui_package_path = ui_package_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -698,7 +698,7 @@ fn file_names_route_accepts_structured_key_listing_for_structured_document() {
     .expect("write package");
     let package_path = package_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -735,11 +735,7 @@ fn file_names_route_accepts_structured_key_listing_for_structured_document() {
 
 #[test]
 fn plain_act_read_range_plan_uses_direct_observed_finalizer_without_synthesis() {
-    let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/tmp/service_notes.md".to_string();
@@ -775,7 +771,7 @@ fn plain_act_read_range_plan_uses_direct_observed_finalizer_without_synthesis() 
 #[test]
 fn chat_wrapped_read_range_plan_adds_synthesis_terminal_answer() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -823,7 +819,7 @@ fn chat_wrapped_read_range_plan_adds_synthesis_terminal_answer() {
 #[test]
 fn registry_does_not_prefer_config_basic_from_structured_keys_marker_only() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -840,7 +836,7 @@ fn registry_does_not_prefer_config_basic_from_structured_keys_marker_only() {
 #[test]
 fn registry_prefers_config_basic_from_capability_ref_without_semantic_kind() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -856,7 +852,7 @@ fn registry_prefers_config_basic_from_capability_ref_without_semantic_kind() {
 #[test]
 fn registry_prefers_archive_basic_from_capability_ref_without_semantic_kind() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -874,7 +870,7 @@ fn explicit_configured_command_request_rewrites_semantic_substitute_to_run_cmd()
     let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -939,7 +935,7 @@ fn explicit_command_rewrite_preserves_bounded_configured_execute_prefix() {
     let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
     let route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -976,7 +972,7 @@ fn structured_directory_contract_keeps_safe_listing_for_explicit_command_request
     let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
     state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1050,7 +1046,7 @@ fn explicit_command_rewrite_preserves_configured_standalone_command_before_freef
     state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1090,7 +1086,7 @@ fn explicit_command_rewrite_corrects_narrative_run_cmd_arg_to_code_span_command(
     state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1137,7 +1133,7 @@ fn scalar_path_contract_keeps_safe_path_observation_for_standalone_command() {
     state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1170,11 +1166,7 @@ fn scalar_path_contract_keeps_safe_path_observation_for_standalone_command() {
 #[test]
 fn multi_structured_scalar_observations_append_terminal_synthesis() {
     let state = test_state_with_enabled_skills(&["config_basic"]);
-    let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     let loop_state = LoopState::new(1);
     let actions = vec![
@@ -1222,7 +1214,7 @@ fn scalar_path_route_treats_fs_search_query_as_name_pattern_when_action_missing(
     let root = TempDirGuard::new("fs_search_name_contract");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1264,7 +1256,7 @@ fn file_paths_route_preserves_grep_text_query_as_content_query() {
     let root = TempDirGuard::new("fs_search_grep_contract");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1415,7 +1407,7 @@ fn system_basic_check_exists_target_alias_keeps_batch_shape() {
 #[test]
 fn missing_read_range_path_uses_route_locator_hint() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );

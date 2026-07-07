@@ -545,7 +545,7 @@ fn active_clarify_resolves_unique_nested_filename_reply() {
 #[test]
 fn active_clarify_locator_reply_preserves_existence_contract() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Read the provided file target.".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -860,7 +860,7 @@ fn active_clarify_run_control_prompt_blocks_unrelated_alias_selection() {
 #[test]
 fn runtime_resume_binding_is_disabled_when_normalizer_rejects_resume() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "list current workspace".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -893,7 +893,7 @@ fn runtime_resume_binding_is_disabled_when_normalizer_rejects_resume() {
 #[test]
 fn locator_reply_runtime_intent_preserves_prior_operation_for_executable_route() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Read the TOML configuration file at the given path".to_string(),
         needs_clarify: false,
         route_reason: "normalizer_path_locator".to_string(),
@@ -948,7 +948,7 @@ fn locator_reply_runtime_intent_preserves_prior_operation_for_executable_route()
 #[test]
 fn clarify_locator_reply_preserves_prior_content_excerpt_contract() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "读取文件最后 10 行并发送内容".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -1034,7 +1034,7 @@ fn clarify_locator_reply_preserves_prior_content_excerpt_contract() {
 #[test]
 fn clarify_locator_reply_keeps_current_file_delivery_over_weak_prior_shape() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Deliver the existing file as a file token".to_string(),
         needs_clarify: false,
         route_reason: "llm_semantic_contract_repair".to_string(),
@@ -1204,7 +1204,7 @@ fn clarify_locator_reply_binds_bare_path_back_to_loop() {
 #[test]
 fn clarify_archive_locator_reply_restores_unpack_contract() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "Read archive content".to_string(),
         needs_clarify: false,
         route_reason: "User supplied missing archive path".to_string(),
@@ -1295,7 +1295,7 @@ fn clarify_archive_locator_reply_restores_unpack_contract() {
 #[test]
 fn clarify_structured_payload_reply_is_not_rewritten_as_locator() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "Transform inline structured data into a table".to_string(),
         needs_clarify: false,
         route_reason: "Inline structured data transform".to_string(),
@@ -1468,7 +1468,7 @@ fn clarify_structured_payload_reply_binds_direct_route_for_loop() {
 #[test]
 fn scalar_field_value_contract_repair_clears_structured_keys_semantic_kind() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Extract only the field value from a structured file".to_string(),
         needs_clarify: false,
         route_reason: "llm_semantic_contract_repair:contract_valid_minor_repair_fields_only"
@@ -1513,7 +1513,7 @@ fn scalar_field_value_contract_repair_clears_structured_keys_semantic_kind() {
 #[test]
 fn scalar_field_value_contract_repair_overrides_locator_reply_existence_contract() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Continue field extraction after the user supplied a file path"
             .to_string(),
         needs_clarify: false,
@@ -1564,7 +1564,7 @@ fn scalar_field_value_contract_repair_overrides_locator_reply_existence_contract
 #[test]
 fn scalar_field_pair_contract_repair_uses_recent_scalar_equality_contract() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Extract two structured field values and compare them".to_string(),
         needs_clarify: false,
         route_reason:
@@ -1682,7 +1682,7 @@ fn clarify_locator_reply_preserves_prior_file_delivery_contract() {
 #[test]
 fn clarify_locator_reply_injects_locator_into_existing_execute_route() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "read and deliver config file".to_string(),
         needs_clarify: false,
         route_reason: "semantic_contract_requires_evidence".to_string(),
@@ -1808,7 +1808,7 @@ fn clarify_locator_reply_does_not_bind_stale_prior_request() {
 #[test]
 fn clarify_locator_reply_drops_untrusted_current_semantic_when_prior_only_shape() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Continue the prior task using scripts".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -1884,7 +1884,7 @@ fn clarify_locator_reply_drops_untrusted_current_semantic_when_prior_only_shape(
 #[test]
 fn clarify_locator_reply_preserves_prior_scalar_path_contract_without_delivery() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "在目录 fixtures/stem_unique 中查找 abcd".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
