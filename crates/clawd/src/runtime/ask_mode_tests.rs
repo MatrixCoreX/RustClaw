@@ -5,8 +5,8 @@ fn direct_answer_maps_to_direct_answer_trace() {
     let m = AskMode::direct_answer();
     assert_eq!(
         m,
-        AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::DirectAnswerTrace
+        AskMode::Respond {
+            entry: RespondEntryStrategy::RespondTrace
         }
     );
     assert!(m.is_chat_gate());
@@ -19,8 +19,8 @@ fn clarify_maps_to_clarify_trace() {
     let m = AskMode::clarify();
     assert_eq!(
         m,
-        AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::ClarifyTrace
+        AskMode::Respond {
+            entry: RespondEntryStrategy::ClarifyTrace
         }
     );
     assert!(m.is_clarify_gate());
@@ -76,14 +76,14 @@ fn act_with_chat_finalizer_maps_to_chat_wrapped() {
 fn named_constructors_are_explicit() {
     assert_eq!(
         AskMode::direct_answer(),
-        AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::DirectAnswerTrace
+        AskMode::Respond {
+            entry: RespondEntryStrategy::RespondTrace
         }
     );
     assert_eq!(
         AskMode::clarify(),
-        AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::ClarifyTrace
+        AskMode::Respond {
+            entry: RespondEntryStrategy::ClarifyTrace
         }
     );
     assert_eq!(
@@ -114,14 +114,14 @@ fn resume_overrides_layer_on_top_of_normalized_mode() {
     let base = AskMode::direct_answer();
     assert_eq!(
         base.clone().with_resume_overrides(false, false),
-        AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::DirectAnswerTrace
+        AskMode::Respond {
+            entry: RespondEntryStrategy::RespondTrace
         }
     );
     assert_eq!(
         base.clone().with_resume_overrides(true, false),
-        AskMode::ClarifyOrChat {
-            entry: ChatEntryStrategy::ResumeFollowupDiscussion
+        AskMode::Respond {
+            entry: RespondEntryStrategy::ResumeFollowupDiscussion
         }
     );
     assert_eq!(
@@ -151,18 +151,15 @@ fn route_trace_labels_match_log_names() {
 
 #[test]
 fn as_str_uses_stable_ids() {
-    assert_eq!(
-        AskMode::direct_answer().as_str(),
-        "clarify_or_chat:direct_answer_trace"
-    );
-    assert_eq!(AskMode::clarify().as_str(), "clarify_or_chat:clarify_trace");
+    assert_eq!(AskMode::direct_answer().as_str(), "respond:trace");
+    assert_eq!(AskMode::clarify().as_str(), "respond:clarify_trace");
     assert_eq!(AskMode::act_plain().as_str(), "act:plain");
     assert_eq!(
         AskMode::act_with_chat_finalizer().as_str(),
         "act:chat_wrapped"
     );
     let rd = AskMode::direct_answer().with_resume_overrides(true, false);
-    assert_eq!(rd.as_str(), "clarify_or_chat:resume_followup_discussion");
+    assert_eq!(rd.as_str(), "respond:resume_followup_discussion");
     let re = AskMode::direct_answer().with_resume_overrides(false, true);
     assert_eq!(re.as_str(), "act:resume_continue");
 }
