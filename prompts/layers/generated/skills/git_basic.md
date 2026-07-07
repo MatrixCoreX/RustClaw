@@ -67,11 +67,13 @@ Action selection notes:
     - `rev_parse`: `revision`.
     - `branch`: `branch_count`, `current_branch` when available.
     - `remote`: `remote_count`.
+    - `show_file_at_rev`: `source`, `source_kind`, `target`, `revision`, `path`, `content_excerpt`, `content_line_count`, `content_bytes`.
   - Top-level action-specific arrays/objects:
     - `changed_files`: array of changed paths for `status` / `changed_files`.
     - `commits`: array of `{sha, subject}` for `log`; `subjects` is a compact string array.
     - `branches`: array of `{name, current}` for `branch`.
     - `remotes`: array of `{name, url, direction}` for `remote`.
+    - `show_file_at_rev`: stable `source="git_show_file_at_rev"` and `source_kind="git_revision_file"` so revision-bound content requests can be attributed to Git evidence before filesystem fallback.
 - Sensitive fields: diffs and file-at-revision output can contain source or secrets. Provider-facing traces should prefer file lists, stats, excerpts, or hashes unless content was requested; raw `diff`, `show`, and `show_file_at_rev` output remains conservative.
 - Error responses include readable `error_text`; top-level `error_kind` should be used when available.
 

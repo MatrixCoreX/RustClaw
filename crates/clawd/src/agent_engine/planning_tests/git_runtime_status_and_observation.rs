@@ -133,6 +133,47 @@ fn git_basic_branch_alias_non_scalar_route_normalizes_to_branch() {
 }
 
 #[test]
+fn git_basic_show_head_path_target_normalizes_to_show_file_at_rev() {
+    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let actions = vec![AgentAction::CallSkill {
+        skill: "git_basic".to_string(),
+        args: serde_json::json!({ "action": "show", "target": "HEAD:README.md" }),
+    }];
+
+    let normalized = normalize_git_basic_schema_aliases(Some(&route), actions);
+
+    assert!(matches!(
+        &normalized[0],
+        AgentAction::CallSkill { skill, args }
+            if skill == "git_basic"
+                && args.get("action").and_then(Value::as_str) == Some("show_file_at_rev")
+                && args.get("target").and_then(Value::as_str) == Some("HEAD")
+                && args.get("path").and_then(Value::as_str) == Some("README.md")
+    ));
+}
+
+#[test]
+fn git_show_file_at_rev_capability_rewrites_fs_read_to_git_basic() {
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    route.route_reason = "capability_ref=git.show_file_at_rev".to_string();
+    let actions = vec![AgentAction::CallSkill {
+        skill: "fs_basic".to_string(),
+        args: serde_json::json!({ "action": "read_text_range", "path": "README.md" }),
+    }];
+
+    let normalized = rewrite_git_show_file_at_rev_capability_fs_reads(Some(&route), actions);
+
+    assert!(matches!(
+        &normalized[0],
+        AgentAction::CallSkill { skill, args }
+            if skill == "git_basic"
+                && args.get("action").and_then(Value::as_str) == Some("show_file_at_rev")
+                && args.get("target").and_then(Value::as_str) == Some("HEAD")
+                && args.get("path").and_then(Value::as_str) == Some("README.md")
+    ));
+}
+
+#[test]
 fn git_repository_state_remote_request_plans_git_remote_action() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(

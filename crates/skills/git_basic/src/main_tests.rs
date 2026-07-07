@@ -48,6 +48,7 @@ fn status_success_extra_exposes_structured_git_state() {
         0,
         "## main\n M Cargo.toml\n?? tmp/note.txt\n",
         "exit=0\n## main\n M Cargo.toml\n?? tmp/note.txt\n",
+        None,
     );
 
     assert_eq!(
@@ -90,6 +91,7 @@ fn current_branch_and_changed_files_extra_are_structured() {
         0,
         "main\n",
         "exit=0\nmain\n",
+        None,
     );
     assert_eq!(
         branch
@@ -105,6 +107,7 @@ fn current_branch_and_changed_files_extra_are_structured() {
         0,
         "Cargo.toml\nsrc/main.rs\n",
         "exit=0\nCargo.toml\nsrc/main.rs\n",
+        None,
     );
     assert_eq!(
         changed
@@ -119,6 +122,59 @@ fn current_branch_and_changed_files_extra_are_structured() {
             .and_then(|items| items.first())
             .and_then(|value| value.as_str()),
         Some("Cargo.toml")
+    );
+}
+
+#[test]
+fn show_file_at_rev_success_extra_exposes_source_and_content_fields() {
+    let mut input_meta = serde_json::Map::new();
+    input_meta.insert("target".to_string(), serde_json::json!("HEAD"));
+    input_meta.insert("revision".to_string(), serde_json::json!("HEAD"));
+    input_meta.insert("path".to_string(), serde_json::json!("README.md"));
+    input_meta.insert(
+        "source".to_string(),
+        serde_json::json!("git_show_file_at_rev"),
+    );
+    input_meta.insert(
+        "source_kind".to_string(),
+        serde_json::json!("git_revision_file"),
+    );
+
+    let extra = git_success_extra(
+        "show_file_at_rev",
+        "show_file_at_rev",
+        "show",
+        0,
+        "# RustClaw\n\ncontent",
+        "exit=0\n# RustClaw\n\ncontent",
+        Some(&input_meta),
+    );
+
+    assert_eq!(
+        extra.get("source").and_then(|value| value.as_str()),
+        Some("git_show_file_at_rev")
+    );
+    assert_eq!(
+        extra.get("path").and_then(|value| value.as_str()),
+        Some("README.md")
+    );
+    assert_eq!(
+        extra
+            .pointer("/field_value/revision")
+            .and_then(|value| value.as_str()),
+        Some("HEAD")
+    );
+    assert_eq!(
+        extra
+            .pointer("/field_value/content_excerpt")
+            .and_then(|value| value.as_str()),
+        Some("# RustClaw")
+    );
+    assert_eq!(
+        extra
+            .pointer("/field_value/content_line_count")
+            .and_then(|value| value.as_u64()),
+        Some(3)
     );
 }
 

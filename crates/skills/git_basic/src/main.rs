@@ -203,6 +203,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         .unwrap_or(20)
         .min(100);
 
+    let mut input_meta = Map::new();
     let (subcmd, mut extra): (&str, Vec<String>) = match action.as_str() {
         "status" => (
             "status",
@@ -223,6 +224,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         "changed_files" => ("diff", vec!["--name-only".to_string(), "HEAD".to_string()]),
         "show" => {
             let target = obj.get("target").and_then(|v| v.as_str()).unwrap_or("HEAD");
+            input_meta.insert("target".to_string(), json!(target));
             ("show", vec!["--stat".to_string(), target.to_string()])
         }
         "show_file_at_rev" => {
@@ -231,6 +233,11 @@ fn execute(args: Value) -> Result<(String, Value), String> {
             if path.is_empty() {
                 return Err("show_file_at_rev requires path".to_string());
             }
+            input_meta.insert("target".to_string(), json!(target));
+            input_meta.insert("revision".to_string(), json!(target));
+            input_meta.insert("path".to_string(), json!(path));
+            input_meta.insert("source".to_string(), json!("git_show_file_at_rev"));
+            input_meta.insert("source_kind".to_string(), json!("git_revision_file"));
             ("show", vec![format!("{}:{}", target, path)])
         }
         "rev_parse" => ("rev-parse", vec!["HEAD".to_string()]),
@@ -287,6 +294,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
             exit_code,
             &text,
             &output,
+            Some(&input_meta),
         );
         Ok((output.clone(), extra))
     } else {
@@ -301,6 +309,7 @@ fn git_success_extra(
     exit_code: i32,
     command_text: &str,
     output: &str,
+    input_meta: Option<&Map<String, Value>>,
 ) -> Value {
     let mut root = Map::new();
     root.insert("schema_version".to_string(), json!(1));
@@ -312,6 +321,12 @@ fn git_success_extra(
     let mut field_value = Map::new();
     field_value.insert("exit_code".to_string(), json!(exit_code));
     field_value.insert("action".to_string(), json!(action));
+    if let Some(input_meta) = input_meta {
+        for (key, value) in input_meta {
+            root.insert(key.clone(), value.clone());
+            field_value.insert(key.clone(), value.clone());
+        }
+    }
 
     match action {
         "status" => append_git_status_extra(command_text, &mut root, &mut field_value),
@@ -321,6 +336,9 @@ fn git_success_extra(
         "rev_parse" => append_rev_parse_extra(command_text, &mut root, &mut field_value),
         "branch" => append_branch_list_extra(command_text, &mut root, &mut field_value),
         "remote" => append_remote_list_extra(command_text, &mut root, &mut field_value),
+        "show_file_at_rev" => {
+            append_show_file_at_rev_extra(command_text, &mut root, &mut field_value)
+        }
         _ => {}
     }
 
@@ -586,6 +604,37 @@ fn append_remote_list_extra(
     root.insert("remotes".to_string(), json!(remotes));
     root.insert("remote_count".to_string(), json!(remotes.len()));
     field_value.insert("remote_count".to_string(), json!(remotes.len()));
+}
+
+fn append_show_file_at_rev_extra(
+    text: &str,
+    root: &mut Map<String, Value>,
+    field_value: &mut Map<String, Value>,
+) {
+    let content = text.trim_end_matches(['\r', '\n']);
+    let content_excerpt = bounded_single_line_excerpt(content, 240);
+    root.insert("content_excerpt".to_string(), json!(content_excerpt));
+    root.insert(
+        "content_line_count".to_string(),
+        json!(content.lines().count()),
+    );
+    root.insert("content_bytes".to_string(), json!(content.len()));
+    field_value.insert("content_excerpt".to_string(), json!(content_excerpt));
+    field_value.insert(
+        "content_line_count".to_string(),
+        json!(content.lines().count()),
+    );
+    field_value.insert("content_bytes".to_string(), json!(content.len()));
+}
+
+fn bounded_single_line_excerpt(text: &str, limit: usize) -> String {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+        .chars()
+        .take(limit)
+        .collect()
 }
 
 fn parse_remote_list(text: &str) -> Vec<Value> {
