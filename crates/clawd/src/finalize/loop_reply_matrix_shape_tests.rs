@@ -228,6 +228,55 @@ fn matrix_file_paths_inventory_uses_paths_and_applies_selector_limit() {
 }
 
 #[test]
+fn matrix_path_list_inventory_uses_capability_shape_without_semantic_kind() {
+    let state = test_state();
+    let task = claimed_task("task-fs-path-list-inventory-capability-shape");
+    let mut route = free_route_result();
+    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route
+        .output_contract
+        .self_extension
+        .list_selector
+        .target_kind = crate::OutputScalarCountTargetKind::File;
+    route.output_contract.self_extension.list_selector.limit = Some(2);
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","path":"workspace","entries":[{"kind":"file","name":"alpha.md","path":"workspace/alpha.md"},{"kind":"dir","name":"docs","path":"workspace/docs"},{"kind":"file","name":"beta.md","path":"workspace/beta.md"}],"names_by_kind":{"dirs":["docs"],"files":["alpha.md","beta.md"],"other":[]}}"#,
+    ));
+    let mut delivery = vec!["found entries".to_string()];
+    let mut finalizer_summary = None;
+
+    assert!(
+        super::super::replace_delivery_with_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "find entries",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        )
+    );
+
+    assert_eq!(delivery, vec!["workspace/alpha.md\nworkspace/beta.md"]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("workspace/alpha.md\nworkspace/beta.md")
+    );
+    assert!(finalizer_summary.is_some());
+}
+
+#[test]
 fn matrix_filesystem_find_entries_capability_ref_builds_path_list_without_semantic_kind() {
     let state = test_state();
     let task = claimed_task("task-fs-find-capability-ref-path-list");
