@@ -1,4 +1,7 @@
-use super::{analyze_log_file, candidate_priority, log_level_from_line, sanitize_match_line};
+use super::{
+    analyze_log_file, candidate_priority, execute, log_level_from_line, sanitize_match_line,
+};
+use serde_json::json;
 use std::path::Path;
 
 #[test]
@@ -100,6 +103,48 @@ fn analysis_keeps_recovery_lines_visible_even_when_info_level() {
         .recent_recovery_lines
         .iter()
         .any(|line| line.contains("provider retry succeeded")));
+    let _ = std::fs::remove_file(path);
+    let _ = std::fs::remove_dir(dir);
+}
+
+#[test]
+fn execute_returns_structured_extra_alongside_legacy_text_json() {
+    let dir = std::env::temp_dir().join(format!(
+        "rustclaw-log-analyze-extra-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let path = dir.join("app.log");
+    std::fs::write(
+        &path,
+        "2026-04-01 10:08:44 ERROR provider timeout while fetching external metadata\n",
+    )
+    .expect("write log");
+
+    let (text, extra) = execute(json!({
+        "path": path.to_string_lossy(),
+        "keywords": ["error", "timeout"],
+        "max_matches": 5
+    }))
+    .expect("execute log analyze");
+
+    let text_value: serde_json::Value = serde_json::from_str(&text).expect("text json");
+    assert_eq!(text_value, extra);
+    assert_eq!(
+        extra.get("action").and_then(|value| value.as_str()),
+        Some("analyze_log")
+    );
+    assert_eq!(
+        extra.get("total_lines").and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        extra
+            .pointer("/keyword_counts/error")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+
     let _ = std::fs::remove_file(path);
     let _ = std::fs::remove_dir(dir);
 }
