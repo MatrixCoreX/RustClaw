@@ -1250,15 +1250,17 @@ fn observed_contract_json(agent_run_context: Option<&AgentRunContext>) -> String
     };
     let direct_observation_passthrough_allowed =
         !route_disallows_direct_observation_passthrough(route);
+    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route);
     serde_json::json!({
         "response_shape": route.output_contract.response_shape.as_str(),
+        "final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str),
+        "final_answer_shape_class": final_answer_shape.map(|shape| shape.class().as_str()),
         "exact_sentence_count": route.output_contract.exact_sentence_count,
         "requires_content_evidence": route.output_contract.requires_content_evidence,
         "delivery_required": route.output_contract.delivery_required,
         "direct_observation_passthrough_allowed": direct_observation_passthrough_allowed,
         "locator_kind": route.output_contract.locator_kind.as_str(),
         "delivery_intent": route.output_contract.delivery_intent.as_str(),
-        "contract_marker": route.effective_output_contract_semantic_kind().as_str(),
         "locator_hint": route.output_contract.locator_hint,
         "needs_clarify": route.needs_clarify,
     })
