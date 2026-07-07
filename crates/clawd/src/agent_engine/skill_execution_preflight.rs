@@ -157,6 +157,14 @@ pub(super) fn evidence_policy_action_policy_error(
     ) {
         return None;
     }
+    if let Some(err) = run_cmd_dry_run_policy_error(
+        state,
+        loop_state.route_policy_context.as_ref(),
+        normalized_skill,
+        classification_args,
+    ) {
+        return Some(err);
+    }
     if let Some(err) =
         run_cmd_async_start_policy_error(state, normalized_skill, classification_args)
     {
@@ -351,6 +359,56 @@ fn run_cmd_async_start_policy_error(
             ),
         })),
     ))
+}
+
+fn run_cmd_dry_run_policy_error(
+    state: &AppState,
+    route: Option<&crate::RouteResult>,
+    normalized_skill: &str,
+    classification_args: &Value,
+) -> Option<String> {
+    if !normalized_skill.eq_ignore_ascii_case("run_cmd")
+        || !run_cmd_dry_run_requested(route, classification_args)
+        || classification_args
+            .get("command")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+    {
+        return None;
+    }
+    Some(crate::skills::structured_skill_error_from_parts(
+        normalized_skill,
+        "contract_action_rejected",
+        "run_cmd_dry_run_requires_preview_contract",
+        None,
+        Some(json!({
+            "reason_code": "run_cmd_dry_run_requires_preview_contract",
+            "message_key": "clawd.contract.run_cmd_dry_run_requires_preview_contract",
+            "failure_attribution": crate::evidence_policy::FailureAttribution::ModelError.as_str(),
+            "decision": crate::policy_decision::PolicyDecision::Deny.as_token(),
+            "action": "run_cmd",
+            "dry_run": true,
+            "required_contract": "pending_async_job_contract_preview",
+            "forbidden_effect": "local_process_start",
+            "permission_decision": preflight_permission_decision(
+                state,
+                normalized_skill,
+                classification_args,
+                "run_cmd_dry_run_requires_preview_contract",
+                "run_cmd_dry_run_preflight",
+            ),
+        })),
+    ))
+}
+
+fn run_cmd_dry_run_requested(
+    route: Option<&crate::RouteResult>,
+    classification_args: &Value,
+) -> bool {
+    classification_args.get("dry_run").and_then(Value::as_bool) == Some(true)
+        || route.is_some_and(crate::async_job_contract::route_requests_async_dry_run_contract)
 }
 
 fn positive_bounded_i64_arg(args: &Value, key: &str, min: i64, max: i64) -> bool {

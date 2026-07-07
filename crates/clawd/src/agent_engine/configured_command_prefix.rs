@@ -1408,7 +1408,7 @@ fn ensure_run_cmd_async_start_for_runtime_async_job_contract(
     let Some(route) = route_result else {
         return actions;
     };
-    if !route_requests_runtime_async_job_contract(route) {
+    if !crate::async_job_contract::route_requests_runtime_async_job_contract(route) {
         return actions;
     }
     let mut changed = false;
@@ -1494,27 +1494,6 @@ fn run_cmd_command_claims_runtime_async_metadata(command: &str) -> bool {
     ]
     .iter()
     .any(|token| command.contains(token))
-}
-
-fn route_requests_runtime_async_job_contract(route: &RouteResult) -> bool {
-    [
-        route.route_reason.as_str(),
-        route.resolved_intent.as_str(),
-        route.output_contract.locator_hint.as_str(),
-    ]
-    .into_iter()
-    .map(str::to_ascii_lowercase)
-    .any(|text| {
-        [
-            "async_job_protocol",
-            "pending_async_job",
-            "poll_async_job",
-            "required_job_fields=",
-            "checkpoint_states=",
-        ]
-        .iter()
-        .any(|token| text.contains(token))
-    })
 }
 
 fn rewrite_backend_identity_metadata_respond_to_runtime_identity(
