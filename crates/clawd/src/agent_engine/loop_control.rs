@@ -1006,10 +1006,18 @@ async fn run_agent_round(
     }
     if let Some(output_contract) = prepared_round.effective_output_contract.as_ref() {
         loop_state.output_contract = Some(output_contract.clone());
-        loop_state.output_vars.insert(
-            "agent_loop.effective_output_contract_marker".to_string(),
-            output_contract.semantic_kind.as_str().to_string(),
-        );
+        if let Some(final_answer_shape) =
+            crate::evidence_policy::final_answer_shape_for_output_contract(output_contract)
+        {
+            loop_state.output_vars.insert(
+                "agent_loop.final_answer_shape".to_string(),
+                final_answer_shape.as_str().to_string(),
+            );
+            loop_state.output_vars.insert(
+                "agent_loop.final_answer_shape_class".to_string(),
+                final_answer_shape.class().as_str().to_string(),
+            );
+        }
     }
     let _budget_profile =
         AgentLoopGuardPolicy::budget_profile_for_context(loop_state.execution_recipe, route_result);
