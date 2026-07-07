@@ -16,6 +16,7 @@ const MAX_DATA_CHARS: usize = 12_000;
 const MIN_DATA_CHARS: usize = 10;
 const SHORT_SUMMARY_MAX: usize = 4;
 const ARTICLE_SUMMARY_MAX: usize = 7;
+const SKILL_NAME: &str = "invest_copy";
 
 static PERSONAS_TOML: &str = include_str!("../personas.toml");
 
@@ -79,13 +80,12 @@ fn main() -> anyhow::Result<()> {
         }
         let resp = match serde_json::from_str::<SkillReqLine>(trimmed) {
             Ok(r) => handle_request(r, &lookup, &registry.personas),
-            Err(e) => SkillResp {
-                request_id: "unknown".to_string(),
-                status: "error",
-                text: String::new(),
-                extra: None,
-                error_text: Some(format!("invalid request JSON: {e}")),
-            },
+            Err(e) => error_resp(
+                "unknown",
+                "invalid_input",
+                format!("invalid request JSON: {e}"),
+                Some(json!({ "source": "request_json" })),
+            ),
         };
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
         stdout.flush()?;
@@ -124,17 +124,49 @@ fn handle_request(
     match action.as_str() {
         "list_investors" => list_investors(rid, personas, args),
         "draft" => draft(rid, args, lookup, personas),
-        _ => SkillResp {
-            request_id: rid,
-            status: "error",
-            text: String::new(),
-            extra: None,
-            error_text: Some(format!(
-                "不支持 action `{}`，请使用 draft 或 list_investors",
-                action
-            )),
-        },
+        _ => error_resp(
+            rid,
+            "unsupported_action",
+            format!("不支持 action `{}`，请使用 draft 或 list_investors", action),
+            Some(json!({ "action": action })),
+        ),
     }
+}
+
+fn error_resp(
+    request_id: impl Into<String>,
+    error_kind: &str,
+    error_text: impl Into<String>,
+    details: Option<Value>,
+) -> SkillResp {
+    SkillResp {
+        request_id: request_id.into(),
+        status: "error",
+        text: String::new(),
+        extra: Some(error_extra_with_details(error_kind, details)),
+        error_text: Some(error_text.into()),
+    }
+}
+
+fn error_extra_with_details(error_kind: &str, details: Option<Value>) -> Value {
+    let mut extra = json!({
+        "schema_version": 1,
+        "source_skill": SKILL_NAME,
+        "status": "error",
+        "error_kind": error_kind,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "retryable": false,
+    });
+    if let Some(details) = details {
+        if let (Some(base), Some(details_obj)) = (extra.as_object_mut(), details.as_object()) {
+            for (key, value) in details_obj {
+                base.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        } else if let Some(base) = extra.as_object_mut() {
+            base.insert("details".to_string(), details);
+        }
+    }
+    extra
 }
 
 fn is_en(locale: Option<&str>) -> bool {
@@ -217,70 +249,63 @@ fn draft(
         .to_string();
 
     if person_raw.is_empty() {
-        return SkillResp {
+        return error_resp(
             request_id,
-            status: "error",
-            text: String::new(),
-            extra: None,
-            error_text: Some("缺少必选参数 args.person（人物 slug 或别名）".to_string()),
-        };
+            "missing_person",
+            "缺少必选参数 args.person（人物 slug 或别名）",
+            None,
+        );
     }
 
     let pdata = match data_raw {
         Some(s) if s.chars().count() >= MIN_DATA_CHARS => s,
         Some(s) => {
-            return SkillResp {
+            return error_resp(
                 request_id,
-                status: "error",
-                text: String::new(),
-                extra: None,
-                error_text: Some(format!(
+                "data_too_short",
+                format!(
                     "args.data/material 有效长度过短（当前 {} 字，至少需要 {} 字）",
                     s.chars().count(),
                     MIN_DATA_CHARS
-                )),
-            };
+                ),
+                Some(json!({
+                    "current_chars": s.chars().count(),
+                    "min_chars": MIN_DATA_CHARS,
+                })),
+            );
         }
         None => {
-            return SkillResp {
+            return error_resp(
                 request_id,
-                status: "error",
-                text: String::new(),
-                extra: None,
-                error_text: Some(
-                    "缺少必选参数 args.data（或通过 material/user_data 传入同一正文）".to_string(),
-                ),
-            };
+                "missing_data",
+                "缺少必选参数 args.data（或通过 material/user_data 传入同一正文）",
+                None,
+            );
         }
     };
 
     if forbidden_peddlers(pdata, brief) {
-        return SkillResp {
+        return error_resp(
             request_id,
-            status: "error",
-            text: String::new(),
-            extra: None,
-            error_text: Some(
-                "材料或侧重点表述包含易被误解为喊单/保本保收益的内容；请改写为学习与信息梳理语境后再试"
-                    .to_string(),
-            ),
-        };
+            "compliance_sensitive_input",
+            "材料或侧重点表述包含易被误解为喊单/保本保收益的内容；请改写为学习与信息梳理语境后再试",
+            None,
+        );
     }
 
     let nk = norm_key(&person_raw);
     let persona_idx = match lookup.get(&nk) {
         Some(i) => *i,
         None => {
-            return SkillResp {
+            return error_resp(
                 request_id,
-                status: "error",
-                text: String::new(),
-                extra: None,
-                error_text: Some(format!(
+                "unknown_person",
+                format!(
                     "未知人物 `{}`，请先使用 action=list_investors 查看可用 slug/别名",
                     person_raw
-                )),
-            };
+                ),
+                Some(json!({ "person": person_raw })),
+            );
         }
     };
 
@@ -353,27 +378,22 @@ fn draft(
     let generated = match llm_client::chat_completion_default(&system, &user) {
         Ok(t) => t,
         Err(e) => {
-            return SkillResp {
+            return error_resp(
                 request_id,
-                status: "error",
-                text: String::new(),
-                extra: None,
-                error_text: Some(format!("调用默认 LLM 失败：{e}")),
-            };
+                "llm_failed",
+                format!("调用默认 LLM 失败：{e}"),
+                None,
+            );
         }
     };
 
     if forbidden_peddlers(&generated.text, "") {
-        return SkillResp {
+        return error_resp(
             request_id,
-            status: "error",
-            text: String::new(),
-            extra: None,
-            error_text: Some(
-                "模型生成内容触发了合规敏感词校验；请调整材料措辞后重试，或使用 use_heuristic=true"
-                    .to_string(),
-            ),
-        };
+            "compliance_sensitive_output",
+            "模型生成内容触发了合规敏感词校验；请调整材料措辞后重试，或使用 use_heuristic=true",
+            None,
+        );
     }
 
     let header_zh = "【以下内容使用系统当前配置的 OpenAI 兼容大模型生成，仅供信息与投教阅读；不构成投资建议，亦不暗示公众人物背书】\n\n";
