@@ -82,6 +82,13 @@ pub(crate) fn route_prefers_grouped_name_list_output(route: &crate::RouteResult)
         == Some(crate::evidence_policy::FinalAnswerShape::GroupedNameList)
 }
 
+pub(crate) fn route_matches_single_path_output_contract(route: &crate::RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
+        || crate::evidence_policy::final_answer_shape_for_route(route).is_some_and(|shape| {
+            shape.class() == crate::evidence_policy::FinalAnswerShapeClass::SinglePath
+        })
+}
+
 pub(crate) fn route_matches_validation_verdict_output_contract(route: &crate::RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ConfigValidation)
         || crate::evidence_policy::final_answer_shape_for_route(route)
@@ -632,5 +639,23 @@ mod tests {
         let route = route_with_capability_ref("system.runtime_status");
 
         assert!(!super::route_matches_service_status_output_contract(&route));
+    }
+
+    #[test]
+    fn single_path_output_contract_matches_legacy_single_path_shape() {
+        let mut route = route_with_capability_ref("system.runtime_status");
+        route.route_reason.clear();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+
+        assert!(super::route_matches_single_path_output_contract(&route));
+    }
+
+    #[test]
+    fn single_path_output_contract_does_not_match_status_shape() {
+        let route = route_with_capability_ref("system.health_check");
+
+        assert!(!super::route_matches_single_path_output_contract(&route));
     }
 }
