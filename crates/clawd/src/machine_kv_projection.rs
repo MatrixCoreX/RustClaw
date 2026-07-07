@@ -400,11 +400,13 @@ fn valid_single_machine_marker(value: &str) -> bool {
             | "photo_count"
             | "names"
             | "paths"
+            | "changed_files"
             | "manager"
             | "available"
             | "valid"
             | "branch"
             | "remotes"
+            | "remote_names"
             | "hash"
             | "port"
             | "title"
@@ -713,7 +715,7 @@ fn machine_array_json_value_as_surface(value: &serde_json::Value) -> Option<Stri
     let serde_json::Value::Array(items) = value else {
         return None;
     };
-    if items.is_empty() || items.len() > 16 {
+    if items.len() > 16 {
         return None;
     }
     let mut values = Vec::new();

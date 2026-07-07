@@ -228,6 +228,7 @@ pub(super) fn normalize_action_schema_aliases(
     let actions = normalize_system_basic_schema_aliases(actions);
     let actions =
         rewrite_readonly_runtime_status_run_cmd_to_system_basic(state, route_result, actions);
+    let actions = rewrite_readonly_git_run_cmd_to_git_basic(state, route_result, actions);
     let actions = normalize_git_basic_schema_aliases(route_result, actions);
     let actions = rewrite_git_show_file_at_rev_capability_fs_reads(route_result, actions);
     let actions = fill_missing_read_range_path_from_route_locator(route_result, actions);

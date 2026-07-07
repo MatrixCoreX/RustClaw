@@ -704,6 +704,60 @@ fn requested_machine_kv_summary_replaces_partial_machine_delivery_for_required_f
 }
 
 #[test]
+fn requested_machine_kv_summary_projects_git_status_fields_from_user_request() {
+    let task = claimed_task("task-git-status-machine-kv-user-request");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "git_basic",
+        r#"{"extra":{"action":"status","branch":"main","changed_count":0,"field_value":{"branch":"main","changed_count":0,"paths":[],"worktree_state":"clean"},"paths":[],"worktree_state":"clean"},"text":"exit=0\n## main...origin/main\n"}"#,
+    ));
+    let current = "状态检查已完成，但还需要重新整理字段。";
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = Some(current.to_string());
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "只返回 branch、worktree_state、changed_count 三个字段。",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec!["branch=main worktree_state=clean changed_count=0"]
+    );
+}
+
+#[test]
+fn requested_machine_kv_summary_projects_empty_git_paths() {
+    let task = claimed_task("task-git-status-empty-paths");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "git_basic",
+        r#"{"extra":{"action":"status","changed_count":0,"field_value":{"changed_count":0,"paths":[]},"paths":[]},"text":"exit=0\n## main...origin/main\n"}"#,
+    ));
+    let mut delivery_messages = vec!["exit=0 command=git status --porcelain".to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "只返回 changed_count 和 paths。",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![r#"changed_count=0 paths=[]"#]);
+}
+
+#[test]
 fn requested_machine_kv_summary_replaces_conflicting_machine_values_for_required_field() {
     let task = claimed_task("task-machine-kv-strict-conflicting-values");
     let mut loop_state = crate::agent_engine::LoopState::new(1);

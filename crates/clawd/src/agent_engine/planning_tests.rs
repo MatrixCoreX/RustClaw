@@ -46,7 +46,7 @@ use super::{
     rewrite_git_show_file_at_rev_capability_fs_reads,
     rewrite_observed_terminal_synthesis_concrete_respond,
     rewrite_pre_observation_concrete_respond_to_placeholder,
-    rewrite_process_ps_run_cmd_to_process_basic,
+    rewrite_process_ps_run_cmd_to_process_basic, rewrite_readonly_git_run_cmd_to_git_basic,
     rewrite_readonly_runtime_status_run_cmd_to_system_basic,
     rewrite_rustclaw_config_risk_assessment_to_guard, rewrite_rustclaw_config_validation_to_guard,
     rewrite_service_status_plan_to_service_control,

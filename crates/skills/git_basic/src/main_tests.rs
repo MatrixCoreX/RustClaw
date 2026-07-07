@@ -80,6 +80,21 @@ fn status_success_extra_exposes_structured_git_state() {
             .map(Vec::len),
         Some(2)
     );
+    assert_eq!(
+        extra
+            .get("paths")
+            .and_then(|value| value.as_array())
+            .map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(
+        extra
+            .pointer("/field_value/paths")
+            .and_then(|value| value.as_array())
+            .and_then(|items| items.first())
+            .and_then(|value| value.as_str()),
+        Some("Cargo.toml")
+    );
 }
 
 #[test]
@@ -122,6 +137,50 @@ fn current_branch_and_changed_files_extra_are_structured() {
             .and_then(|items| items.first())
             .and_then(|value| value.as_str()),
         Some("Cargo.toml")
+    );
+    assert_eq!(
+        changed
+            .pointer("/field_value/paths")
+            .and_then(|value| value.as_array())
+            .and_then(|items| items.get(1))
+            .and_then(|value| value.as_str()),
+        Some("src/main.rs")
+    );
+}
+
+#[test]
+fn remote_extra_exposes_scalar_machine_fields_for_delivery() {
+    let extra = git_success_extra(
+        "remote",
+        "remote",
+        "remote",
+        0,
+        "origin\tgit@example.com:repo.git (fetch)\norigin\tgit@example.com:repo.git (push)\nbackup\tssh://example/backup.git (fetch)\n",
+        "exit=0\norigin\tgit@example.com:repo.git (fetch)\norigin\tgit@example.com:repo.git (push)\nbackup\tssh://example/backup.git (fetch)\n",
+        None,
+    );
+
+    assert_eq!(
+        extra
+            .pointer("/field_value/remotes")
+            .and_then(|value| value.as_array())
+            .map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(
+        extra
+            .pointer("/field_value/remotes")
+            .and_then(|value| value.as_array())
+            .and_then(|items| items.first())
+            .and_then(|value| value.as_str()),
+        Some("origin")
+    );
+    assert_eq!(
+        extra
+            .get("remote_urls")
+            .and_then(|value| value.as_array())
+            .map(Vec::len),
+        Some(2)
     );
 }
 
