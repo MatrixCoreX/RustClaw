@@ -61,9 +61,11 @@ pub(crate) fn should_attempt_observed_fallback(
 
 pub(crate) fn route_matches_service_status_output_contract(route: &crate::RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
+        || crate::evidence_policy::final_answer_shape_for_route(route)
+            == Some(crate::evidence_policy::FinalAnswerShape::StatusWithSource)
         || crate::machine_capability_ref::route_has_capability_namespace(
             route,
-            &["system", "service", "service_control", "health"],
+            &["service", "service_control", "health"],
         )
 }
 
@@ -592,4 +594,43 @@ pub(crate) fn observed_read_path_matches_request(
         return true;
     };
     paths_equivalent_for_scope(workspace_root, &expected_path, actual_path)
+}
+
+#[cfg(test)]
+mod tests {
+    fn route_with_capability_ref(capability_ref: &str) -> crate::RouteResult {
+        crate::RouteResult {
+            ask_mode: crate::AskMode::Act {
+                finalize: crate::ActFinalizeStyle::Plain,
+            },
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: format!("capability_ref={capability_ref}"),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        }
+    }
+
+    #[test]
+    fn service_status_output_contract_uses_status_shape_for_system_health_check() {
+        let route = route_with_capability_ref("system.health_check");
+
+        assert!(super::route_matches_service_status_output_contract(&route));
+    }
+
+    #[test]
+    fn service_status_output_contract_does_not_match_generic_system_namespace() {
+        let route = route_with_capability_ref("system.runtime_status");
+
+        assert!(!super::route_matches_service_status_output_contract(&route));
+    }
 }
