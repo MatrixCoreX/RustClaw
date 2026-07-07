@@ -43,6 +43,7 @@ use super::{
     rewrite_config_mutation_to_config_edit_closed_loop,
     rewrite_config_validation_read_plan_to_validate,
     rewrite_docker_readonly_run_cmd_to_docker_basic, rewrite_extract_field_alias_args,
+    rewrite_git_show_file_at_rev_capability_fs_reads,
     rewrite_observed_terminal_synthesis_concrete_respond,
     rewrite_pre_observation_concrete_respond_to_placeholder,
     rewrite_process_ps_run_cmd_to_process_basic,

@@ -406,7 +406,7 @@ planner_capabilities = [
   { name = "git.show", action = "show", effect = "observe", optional = ["path", "repo", "target"], risk_level = "medium", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "git.show_file_at_rev", action = "show_file_at_rev", effect = "observe", required = ["path"], optional = ["repo", "target"], risk_level = "medium", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
 ]
-input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, repo = { type = "string" }, ref = { type = "string" }, args = { type = "array", items = { type = "string" } } } }
+input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, repo = { type = "string" }, target = { type = "string" }, ref = { type = "string" }, args = { type = "array", items = { type = "string" } } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]

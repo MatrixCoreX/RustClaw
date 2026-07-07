@@ -229,6 +229,7 @@ pub(super) fn normalize_action_schema_aliases(
     let actions =
         rewrite_readonly_runtime_status_run_cmd_to_system_basic(state, route_result, actions);
     let actions = normalize_git_basic_schema_aliases(route_result, actions);
+    let actions = rewrite_git_show_file_at_rev_capability_fs_reads(route_result, actions);
     let actions = fill_missing_read_range_path_from_route_locator(route_result, actions);
     let actions = rewrite_filtered_list_dir_to_inventory_dir(state, route_result, actions);
     let actions = inject_structural_extension_filter_for_directory_inventory(

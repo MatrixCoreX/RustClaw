@@ -564,6 +564,14 @@ pub(super) fn normalize_git_basic_args(
         .to_ascii_lowercase()
         .replace('-', "_");
 
+    if normalize_git_show_file_at_rev_args(obj, &action_name) {
+        info!(
+            "plan_normalize_git_basic_action_alias action={} normalized=show_file_at_rev",
+            action_name
+        );
+        return args;
+    }
+
     let normalized = match action_name.as_str() {
         "branches" | "list_branches" | "all_branches" => {
             if route_result.is_some_and(|route| {
@@ -591,6 +599,66 @@ pub(super) fn normalize_git_basic_args(
     args
 }
 
+fn normalize_git_show_file_at_rev_args(
+    obj: &mut serde_json::Map<String, Value>,
+    action_name: &str,
+) -> bool {
+    if !matches!(
+        action_name,
+        "show" | "show_file" | "show_file_at_rev" | "show_file_at_revision"
+    ) {
+        return false;
+    }
+    if !obj.contains_key("target") {
+        if let Some(revision) = obj
+            .get("ref")
+            .or_else(|| obj.get("revision"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            obj.insert("target".to_string(), Value::String(revision.to_string()));
+        }
+    }
+    if obj
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some()
+    {
+        obj.insert(
+            "action".to_string(),
+            Value::String("show_file_at_rev".to_string()),
+        );
+        return true;
+    }
+    let Some(target) = obj
+        .get("target")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+    else {
+        return false;
+    };
+    let Some((revision, path)) = target.split_once(':') else {
+        return false;
+    };
+    let revision = revision.trim().to_string();
+    let path = path.trim().to_string();
+    if revision.is_empty() || path.is_empty() {
+        return false;
+    }
+    obj.insert(
+        "action".to_string(),
+        Value::String("show_file_at_rev".to_string()),
+    );
+    obj.insert("target".to_string(), Value::String(revision));
+    obj.insert("path".to_string(), Value::String(path));
+    true
+}
+
 pub(super) fn normalize_git_basic_schema_aliases(
     route_result: Option<&RouteResult>,
     actions: Vec<AgentAction>,
@@ -607,6 +675,93 @@ pub(super) fn normalize_git_basic_schema_aliases(
             other => other,
         })
         .collect()
+}
+
+pub(super) fn rewrite_git_show_file_at_rev_capability_fs_reads(
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if !crate::machine_capability_ref::route_has_capability_action_name(
+        route,
+        &["git"],
+        &["show_file_at_rev"],
+    ) {
+        return actions;
+    }
+    actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallSkill { skill, args }
+                if matches!(skill.as_str(), "fs_basic" | "system_basic") =>
+            {
+                if let Some(args) = git_show_file_at_rev_args_from_fs_read(&args) {
+                    AgentAction::CallSkill {
+                        skill: "git_basic".to_string(),
+                        args,
+                    }
+                } else {
+                    AgentAction::CallSkill { skill, args }
+                }
+            }
+            AgentAction::CallTool { tool, args }
+                if matches!(tool.as_str(), "fs_basic" | "system_basic") =>
+            {
+                if let Some(args) = git_show_file_at_rev_args_from_fs_read(&args) {
+                    AgentAction::CallSkill {
+                        skill: "git_basic".to_string(),
+                        args,
+                    }
+                } else {
+                    AgentAction::CallTool { tool, args }
+                }
+            }
+            other => other,
+        })
+        .collect()
+}
+
+fn git_show_file_at_rev_args_from_fs_read(args: &Value) -> Option<Value> {
+    let Some(obj) = args.as_object() else {
+        return None;
+    };
+    let action = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if !matches!(action, "read_range" | "read_text_range") {
+        return None;
+    }
+    let Some(path) = first_path_arg(obj) else {
+        return None;
+    };
+    let target = obj
+        .get("target")
+        .or_else(|| obj.get("ref"))
+        .or_else(|| obj.get("revision"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("HEAD");
+    Some(serde_json::json!({
+        "action": "show_file_at_rev",
+        "target": target,
+        "path": path,
+    }))
+}
+
+fn first_path_arg(obj: &serde_json::Map<String, Value>) -> Option<String> {
+    obj.get("path")
+        .or_else(|| obj.get("resolved_path"))
+        .or_else(|| obj.get("file"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| string_list_from_value(obj.get("paths")).into_iter().next())
 }
 
 pub(super) fn structured_scalar_read_action_for_target(
