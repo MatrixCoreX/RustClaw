@@ -1,6 +1,8 @@
 use crate::{agent_engine::LoopState, AppState};
 
-use super::{evidence_policy_checked_direct_candidate, normalized_success_body_for_direct_answer};
+use super::{
+    evidence_policy_checked_direct_candidate, normalized_success_body_for_observed_output,
+};
 
 pub(crate) fn transform_skill_formatted_output_candidate(body: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
@@ -103,7 +105,7 @@ pub(crate) fn direct_answer_from_referenced_observation_i18n(
         .as_deref()
         .map(str::trim)
         .filter(|body| !body.is_empty())?;
-    let body = normalized_success_body_for_direct_answer(body);
+    let body = normalized_success_body_for_observed_output(body);
     let answer = match step.skill.as_str() {
         "transform" => transform_skill_formatted_output_candidate(&body),
         _ => None,
