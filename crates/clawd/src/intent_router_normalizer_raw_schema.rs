@@ -5,7 +5,8 @@ use super::{
     normalize_execution_recipe_for_schema, normalize_intent_normalizer_scalar_types_for_schema,
     normalize_intent_normalizer_top_level_for_schema, normalize_output_contract_for_schema,
     normalize_plain_intent_normalizer_text_for_schema, normalize_schema_token,
-    parse_top_level_json_object_preserving_meaningful_duplicates, ContractRepairReport,
+    parse_top_level_json_object_preserving_meaningful_duplicates,
+    retain_intent_normalizer_top_level_schema_fields, ContractRepairReport,
 };
 
 #[cfg(test)]
@@ -110,6 +111,7 @@ pub(super) fn normalize_intent_normalizer_raw_for_schema_with_report(
         }
     }
     normalize_output_contract_for_schema(obj);
+    retain_intent_normalizer_top_level_schema_fields(obj);
     let report = contract_repair_report_from_before_after(&before, &value);
     (
         serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string()),

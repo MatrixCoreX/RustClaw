@@ -113,6 +113,7 @@ use normalizer_schema_core::{
     normalize_intent_normalizer_scalar_types_for_schema,
     normalize_intent_normalizer_top_level_for_schema, normalize_optional_string_field,
     normalize_plain_intent_normalizer_text_for_schema,
+    retain_intent_normalizer_top_level_schema_fields,
 };
 
 #[path = "intent_router_normalizer_raw_schema.rs"]
