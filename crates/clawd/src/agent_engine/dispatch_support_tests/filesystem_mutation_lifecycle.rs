@@ -46,11 +46,12 @@ fn filesystem_mutation_lifecycle_structured_answer_combines_all_steps() {
         .expect("filesystem lifecycle answer");
     let value: serde_json::Value = serde_json::from_str(&answer).expect("json answer");
 
+    assert!(value.pointer("/contract_marker").is_none());
     assert_eq!(
         value
-            .pointer("/contract_marker")
+            .pointer("/final_answer_shape")
             .and_then(serde_json::Value::as_str),
-        Some("filesystem_mutation_result")
+        Some("lifecycle_result")
     );
     assert_eq!(
         value
