@@ -422,6 +422,7 @@ fn route_supports_matrix_strict_list_observed_answer(route: &crate::RouteResult)
     route_requests_archive_list(route)
         || route_requests_name_list(route)
         || route_requests_filesystem_path_list(route)
+        || route_requests_key_list_or_summary(route)
         || matches!(
             route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::FileNames
@@ -441,6 +442,11 @@ fn route_requests_name_list(route: &crate::RouteResult) -> bool {
 fn route_requests_filesystem_path_list(route: &crate::RouteResult) -> bool {
     crate::evidence_policy::final_answer_shape_for_route(route)
         == Some(crate::evidence_policy::FinalAnswerShape::PathList)
+}
+
+fn route_requests_key_list_or_summary(route: &crate::RouteResult) -> bool {
+    crate::evidence_policy::final_answer_shape_for_route(route)
+        == Some(crate::evidence_policy::FinalAnswerShape::KeyListOrKeySummary)
 }
 
 fn matrix_list_selector_limit(route: &crate::RouteResult) -> Option<usize> {
