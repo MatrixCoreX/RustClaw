@@ -37,7 +37,7 @@ impl Drop for TempDirGuard {
 
 fn scalar_count_route(root_path: &str) -> RouteResult {
     RouteResult {
-        ask_mode: AskMode::planner_execute_plain(),
+        ask_mode: AskMode::act_plain(),
         resolved_intent: "count directories".to_string(),
         needs_clarify: false,
         route_reason: String::new(),

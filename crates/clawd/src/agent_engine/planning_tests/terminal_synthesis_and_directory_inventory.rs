@@ -18,7 +18,7 @@ version = "0.1.7"
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -89,7 +89,7 @@ version = "0.1.7"
 #[test]
 fn structured_scalar_compare_accepts_compare_paths_for_file_metadata() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -141,7 +141,7 @@ fn observation_only_terminal_answer_appends_synthesis_for_builtin_observation() 
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         false,
         OutputResponseShape::Free,
     );
@@ -180,7 +180,7 @@ fn observation_only_terminal_answer_keeps_config_basic_scalar_finalizer() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -215,7 +215,7 @@ fn content_evidence_doc_parse_observation_appends_synthesis() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -279,7 +279,7 @@ fn terminal_synthesize_answer_appends_delivery_respond() {
 #[test]
 fn existing_observed_context_synthesis_allows_terminal_judgment_respond() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         false,
         OutputResponseShape::OneSentence,
     );
@@ -301,7 +301,7 @@ fn existing_observed_context_synthesis_allows_terminal_judgment_respond() {
 #[test]
 fn existing_observed_context_synthesis_still_requires_explicit_content_evidence() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -325,7 +325,7 @@ fn observed_terminal_synthesis_replaces_concrete_respond_with_placeholder() {
     let mut loop_state = LoopState::new(3);
     loop_state.has_tool_or_skill_output = true;
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -359,7 +359,7 @@ fn observed_terminal_synthesis_keeps_service_status_concrete_respond() {
     let mut loop_state = LoopState::new(3);
     loop_state.has_tool_or_skill_output = true;
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -414,7 +414,7 @@ fn observed_terminal_synthesis_keeps_structurally_grounded_concrete_respond() {
         finished_at: 0,
     });
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -463,7 +463,7 @@ fn observed_terminal_synthesis_keeps_identifier_grounded_summary_respond() {
         finished_at: 0,
     });
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -520,7 +520,7 @@ fn observed_terminal_synthesis_drops_redundant_synthesis_for_fs_basic_interface_
         finished_at: 0,
     });
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -558,7 +558,7 @@ fn observation_only_terminal_answer_keeps_file_names_runtime_finalizer() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         false,
         OutputResponseShape::Free,
     );
@@ -588,11 +588,7 @@ fn general_directory_inventory_clears_file_only_filter() {
             "names_only": true
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
 
     let normalized = super::super::normalize_planned_actions(
@@ -622,7 +618,7 @@ fn directory_lookup_inventory_clears_file_only_even_with_file_names_semantic() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -656,7 +652,7 @@ fn file_names_directory_inventory_preserves_file_only_filter() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -743,7 +739,7 @@ fn file_names_auto_locator_does_not_inherit_extension_from_history_text() {
     fs::write(root.path.join("act_plan.log"), "log").expect("write plan");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -793,7 +789,7 @@ fn file_names_auto_locator_does_not_use_stale_resolved_intent_selector() {
     fs::write(root.path.join("beta.log"), "beta").expect("write beta");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -841,7 +837,7 @@ fn file_names_auto_locator_preserves_size_ranked_metadata() {
     fs::write(root.path.join("small.log"), "s").expect("write small");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -894,7 +890,7 @@ fn file_names_auto_locator_does_not_promote_negated_size_marker_over_name_sort()
     fs::write(root.path.join("alpha.py"), "a").expect("write alpha");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -946,7 +942,7 @@ fn file_names_auto_locator_does_not_promote_size_marker_when_name_sort_is_explic
     fs::write(root.path.join("alpha.py"), "a").expect("write alpha");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -996,7 +992,7 @@ fn directory_purpose_auto_locator_preserves_file_selector_for_selected_entry_jud
     }
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1055,7 +1051,7 @@ fn file_names_auto_locator_uses_structured_list_selector_without_reason_token() 
     fs::write(root.path.join("small.log"), "s").expect("write small");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1114,7 +1110,7 @@ fn file_names_auto_locator_preserves_recent_modified_file_selector() {
     fs::write(root.path.join("newer.txt"), "new").expect("write newer");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1174,7 +1170,7 @@ fn file_names_auto_locator_preserves_structured_mtime_sort_selector_without_reas
     fs::write(root.path.join("a.log"), "a").expect("write a");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1232,7 +1228,7 @@ fn file_names_auto_locator_preserves_metadata_sort_with_machine_hint() {
     fs::write(root.path.join("a.log"), "a").expect("write a");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1293,7 +1289,7 @@ fn file_names_contract_enforces_file_only_after_find_entries_inventory_rewrite()
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1332,7 +1328,7 @@ fn strict_unclassified_directory_inventory_forces_metadata_for_fs_basic() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1364,7 +1360,7 @@ fn strict_unclassified_system_inventory_forces_metadata_before_fs_rewrite() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1397,7 +1393,7 @@ fn directory_names_contract_enforces_dirs_only_inventory() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1429,7 +1425,7 @@ fn directory_names_contract_does_not_invent_dirs_only_without_structured_filter(
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1460,7 +1456,7 @@ fn directory_names_contract_rewrites_filtered_list_dir_to_inventory() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1523,7 +1519,7 @@ fn file_paths_contract_rewrites_extension_inventory_to_fs_basic() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1571,7 +1567,7 @@ fn file_paths_contract_rewrites_unfiltered_list_dir_with_extension_token_to_find
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );

@@ -10,7 +10,7 @@ fn synthesize_direct_fallback_blocks_multiline_raw_read_range_when_plan_requests
         r#"{"action":"read_range","mode":"tail","excerpt":"1|WARN cache miss ratio above baseline\n2|ERROR provider timeout\n3|INFO provider retry succeeded","path":"/tmp/app.log"}"#,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "tail a log slice and provide a takeaway".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -84,7 +84,7 @@ fn synthesize_direct_fallback_blocks_multiline_read_range_for_scalar_extraction(
         r##"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|Operators should check the app log first when requests fail, then verify the config file and database tables.","path":"/tmp/service_notes.md"}"##,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "extract one scalar from a markdown file".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -130,7 +130,7 @@ fn synthesize_direct_fallback_blocks_nested_extra_multiline_read_range() {
         r##"{"extra":{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|Operators should check the app log first when requests fail, then verify the config file and database tables.","path":"/tmp/service_notes.md"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|# Service Notes\\n2|\\n3|Operators should check the app log first when requests fail, then verify the config file and database tables.\",\"path\":\"/tmp/service_notes.md\"}"}"##,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "summarize a markdown document from observed content".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

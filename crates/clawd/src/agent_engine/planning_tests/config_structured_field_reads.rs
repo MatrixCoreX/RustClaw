@@ -4,11 +4,7 @@ use crate::agent_engine::planning::preferred_structured_action_for_contract_hint
 #[test]
 fn rustclaw_main_config_content_excerpt_direct_guard_prefers_config_basic_guard() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -41,11 +37,7 @@ fn rustclaw_main_config_content_excerpt_direct_guard_prefers_config_basic_guard(
 #[test]
 fn rustclaw_main_config_content_excerpt_tail_read_stays_bounded_read() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -78,7 +70,7 @@ fn rustclaw_main_config_content_excerpt_tail_read_stays_bounded_read() {
 fn schema_alias_normalization_uses_contract_field_selector_not_resolved_intent() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -116,11 +108,7 @@ fn schema_alias_normalization_uses_contract_field_selector_not_resolved_intent()
 #[test]
 fn config_risk_assessment_rewrites_registry_head_read_to_guard_config() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -170,7 +158,7 @@ fn scalar_structured_field_contract_rewrites_broad_read_to_read_field() {
     let state = test_state();
     let root_cargo = root_cargo.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -221,7 +209,7 @@ fn unresolved_locator_marker_preserves_terminal_respond_plan() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -277,7 +265,7 @@ fn scalar_structured_field_contract_infers_single_field_from_structural_candidat
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -334,7 +322,7 @@ fn scalar_structured_field_contract_rewrites_key_listing_to_read_field() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -381,7 +369,7 @@ fn scalar_structured_keys_repair_marker_rewrites_key_listing_to_read_field() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -437,7 +425,7 @@ db_path = "data/test_contract.sqlite"
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -506,7 +494,7 @@ fn structured_multi_field_rewrite_ignores_background_filename_tokens() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -568,7 +556,7 @@ db_path = "data/test_contract.sqlite"
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -627,7 +615,7 @@ planner_kind = "tool"
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -684,7 +672,7 @@ planner_kind = "tool"
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -736,7 +724,7 @@ planner_kind = "tool"
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -795,7 +783,7 @@ planner_kind = "tool"
     let mut state = test_state_with_enabled_skills(&["config_basic", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );

@@ -5,7 +5,7 @@ use super::{
 
 fn base_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "inspect workspace".to_string(),
         needs_clarify: false,
         route_reason: "test_route".to_string(),
@@ -42,7 +42,7 @@ fn prepared_flow_with_context() -> PreparedAskFlow {
         prompt_with_memory_for_execution: "memory + resolved execution prompt".to_string(),
         recent_execution_context: "recent execution facts".to_string(),
         session_alias_bindings: Vec::new(),
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         fuzzy_locator_suggestions: vec!["README.md".to_string()],
         should_route_schedule_direct: false,
     }

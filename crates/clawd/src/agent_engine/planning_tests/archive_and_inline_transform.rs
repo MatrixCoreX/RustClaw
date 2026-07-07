@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 fn archive_read_capability_ref_allows_planner_supplied_member_args() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = "capability_ref=archive.read".to_string();
     route.route_reason = "capability_ref=archive.read".to_string();
     route.output_contract.requires_content_evidence = true;
@@ -32,7 +32,7 @@ fn archive_read_capability_ref_allows_planner_supplied_member_args() {
 fn archive_read_capability_ref_uses_policy_not_archive_read_semantic_kind() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = "capability_ref=archive.read".to_string();
     route.route_reason = "capability_ref=archive.read".to_string();
     route.output_contract.requires_content_evidence = true;
@@ -59,7 +59,7 @@ fn archive_read_capability_ref_uses_policy_not_archive_read_semantic_kind() {
 fn archive_read_semantic_kind_without_capability_ref_does_not_expose_action_refs() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
@@ -77,7 +77,7 @@ fn archive_read_semantic_kind_without_capability_ref_does_not_expose_action_refs
 fn archive_read_structural_member_target_waits_for_planner_capability_ref() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         format!("Read the notes.txt content from archive {archive} and output only it");
     route.output_contract.requires_content_evidence = true;
@@ -105,7 +105,7 @@ fn archive_database_aggregate_capability_refs_allow_structured_observation_actio
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let db_path = "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "capability_ref=archive.list capability_ref=archive.read capability_ref=database.list_tables"
             .to_string();
@@ -152,7 +152,7 @@ fn archive_database_aggregate_without_capability_refs_does_not_expose_action_ref
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let db_path = "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "llm_failed_existing_path_observation_fallback; explicit_existing_path_observation"
             .to_string();
@@ -464,7 +464,7 @@ fn planning_prompt_class_uses_lightweight_execution_for_pwd_only_route() {
 #[test]
 fn planning_prompt_class_uses_lightweight_execution_for_content_evidence_reads() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.route_reason = "llm_contract:generic_filename_read_range".to_string();
     route.resolved_intent = "先读一下 README.md 前 4 行".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
@@ -501,7 +501,7 @@ fn planning_prompt_class_uses_lightweight_for_concrete_path_content_excerpt() {
 #[test]
 fn planning_prompt_class_keeps_open_for_unbounded_chat_wrapped_but_light_for_later_rounds() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = "比较这两个文件大小，然后一句话总结".to_string();
     assert_eq!(
         classify_planning_prompt_class(Some(&route), &route.resolved_intent, &LoopState::default())
@@ -530,7 +530,7 @@ fn planning_prompt_class_uses_lightweight_for_bounded_observation_summary_later_
     route.resolved_intent =
         "Run pwd, inspect clawd process and listening ports, then summarize observed results."
             .to_string();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -548,7 +548,7 @@ fn planning_prompt_class_uses_lightweight_for_bounded_observation_summary_later_
 #[test]
 fn planning_prompt_class_keeps_open_planning_for_current_workspace_drafting() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "Write a short RustClaw setup note for the current workspace project".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
@@ -791,7 +791,7 @@ fn extract_field_rewrites_bare_manifest_to_shallow_candidate_with_field() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -851,7 +851,7 @@ name = "clawd"
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -928,7 +928,7 @@ name = "clawd"
     let mut state = test_state_with_enabled_skills(&["system_basic", "config_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1024,7 +1024,7 @@ reqwest = { version = "0.12" }
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1076,7 +1076,7 @@ version = "0.1.7"
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1120,7 +1120,7 @@ fn active_clarify_scalar_field_followup_rewrites_text_read_to_read_field() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1171,7 +1171,7 @@ fn active_clarify_scalar_candidate_respond_rewrites_to_read_field_evidence() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1216,7 +1216,7 @@ fn active_clarify_scalar_candidate_respond_keeps_ambiguous_value() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );

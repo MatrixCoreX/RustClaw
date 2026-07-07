@@ -827,8 +827,7 @@ fn standalone_scalar_chat_request_without_answer_marker_does_not_start_primary_t
 
 #[test]
 fn evidence_backed_standalone_task_replaces_prior_scalar_primary_task() {
-    let mut route_result =
-        route_result_for_test(crate::AskMode::planner_execute_with_chat_finalizer(), false);
+    let mut route_result = route_result_for_test(crate::AskMode::act_with_chat_finalizer(), false);
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let turn_analysis = crate::intent_router::TurnAnalysis {
@@ -956,8 +955,7 @@ fn unannotated_structured_listing_replaces_prior_primary_task() {
 
 #[test]
 fn unannotated_scalar_evidence_result_does_not_start_primary_task() {
-    let mut route_result =
-        route_result_for_test(crate::AskMode::planner_execute_with_chat_finalizer(), false);
+    let mut route_result = route_result_for_test(crate::AskMode::act_with_chat_finalizer(), false);
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
@@ -1413,7 +1411,7 @@ fn chat_ack_single_locator_derives_compact_alias_without_memory_turn_classificat
 
 #[test]
 fn planner_execute_single_locator_does_not_create_prompt_alias_binding() {
-    let route = route_result_for_test(crate::AskMode::planner_execute_plain(), false);
+    let route = route_result_for_test(crate::AskMode::act_plain(), false);
     let merged = super::merge_alias_bindings_for_turn(
         None,
         None,

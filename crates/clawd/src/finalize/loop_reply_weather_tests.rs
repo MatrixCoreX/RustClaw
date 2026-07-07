@@ -5,7 +5,7 @@ async fn finalize_loop_reply_projects_weather_structured_fields() {
     let state = test_state();
     let task = claimed_task("task-weather-query-fields");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::None;

@@ -24,7 +24,7 @@ fn route_with_contract(ask_mode: AskMode, output_contract: IntentOutputContract)
 #[test]
 fn file_path_search_contract_is_list_with_candidate_evidence() {
     let route = route_with_contract(
-        AskMode::planner_execute_plain(),
+        AskMode::act_plain(),
         IntentOutputContract {
             response_shape: OutputResponseShape::Strict,
             requires_content_evidence: true,
@@ -68,7 +68,7 @@ fn missing_locator_contract_prefers_clarify_policy() {
 #[test]
 fn evidence_policy_contract_includes_structured_workspace_target() {
     let route = route_with_contract(
-        AskMode::planner_execute_plain(),
+        AskMode::act_plain(),
         IntentOutputContract {
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
@@ -89,7 +89,7 @@ fn evidence_policy_contract_includes_structured_workspace_target() {
 #[test]
 fn directory_purpose_summary_uses_listing_candidates_as_required_evidence() {
     let route = route_with_contract(
-        AskMode::planner_execute_with_chat_finalizer(),
+        AskMode::act_with_chat_finalizer(),
         IntentOutputContract {
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
@@ -109,7 +109,7 @@ fn directory_purpose_summary_uses_listing_candidates_as_required_evidence() {
 #[test]
 fn existence_contract_requires_structural_path_evidence() {
     let route = route_with_contract(
-        AskMode::planner_execute_plain(),
+        AskMode::act_plain(),
         IntentOutputContract {
             locator_kind: OutputLocatorKind::Path,
             locator_hint: "README.md".to_string(),
@@ -156,7 +156,7 @@ fn unclassified_evidence_contract_operation_does_not_depend_on_route_trace() {
 #[test]
 fn task_contract_failure_policy_does_not_depend_on_execute_gate_trace() {
     let route = route_with_contract(
-        AskMode::planner_execute_plain(),
+        AskMode::act_plain(),
         IntentOutputContract {
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: false,
@@ -228,7 +228,7 @@ fn task_contract_uses_generic_capability_ref_machine_token_when_semantic_kind_is
         ),
     ] {
         let mut route = route_with_contract(
-            AskMode::planner_execute_plain(),
+            AskMode::act_plain(),
             IntentOutputContract {
                 response_shape: OutputResponseShape::Strict,
                 requires_content_evidence: true,
@@ -283,7 +283,7 @@ fn task_contract_uses_specific_config_archive_capability_ref_evidence() {
         ),
     ] {
         let mut route = route_with_contract(
-            AskMode::planner_execute_plain(),
+            AskMode::act_plain(),
             IntentOutputContract {
                 response_shape: OutputResponseShape::Strict,
                 requires_content_evidence: true,
@@ -305,7 +305,7 @@ fn task_contract_uses_specific_config_archive_capability_ref_evidence() {
 #[test]
 fn task_contract_capability_ref_requires_exact_machine_token() {
     let mut route = route_with_contract(
-        AskMode::planner_execute_plain(),
+        AskMode::act_plain(),
         IntentOutputContract {
             response_shape: OutputResponseShape::Strict,
             requires_content_evidence: true,
@@ -343,7 +343,7 @@ fn task_contract_ignores_normalizer_schema_capability_bridge_without_capability_
         OutputSemanticKind::ArchiveUnpack,
     ] {
         let route = route_with_contract(
-            AskMode::planner_execute_plain(),
+            AskMode::act_plain(),
             IntentOutputContract {
                 response_shape: OutputResponseShape::Strict,
                 requires_content_evidence: true,
@@ -365,7 +365,7 @@ fn task_contract_ignores_normalizer_schema_capability_bridge_without_capability_
 #[test]
 fn task_contract_accepts_new_machine_capability_refs_without_static_whitelist() {
     let mut route = route_with_contract(
-        AskMode::planner_execute_plain(),
+        AskMode::act_plain(),
         IntentOutputContract {
             response_shape: OutputResponseShape::Strict,
             requires_content_evidence: true,
@@ -386,7 +386,7 @@ fn task_contract_accepts_new_machine_capability_refs_without_static_whitelist() 
 #[test]
 fn task_contract_splits_structured_multi_target_locator() {
     let route = route_with_contract(
-        AskMode::planner_execute_plain(),
+        AskMode::act_plain(),
         IntentOutputContract {
             locator_kind: OutputLocatorKind::Filename,
             locator_hint: "README.md | AGENTS.md".to_string(),
@@ -413,7 +413,7 @@ fn task_contract_splits_structured_multi_target_locator() {
 #[test]
 fn task_contract_splits_comma_multi_target_locator() {
     let route = route_with_contract(
-        AskMode::planner_execute_plain(),
+        AskMode::act_plain(),
         IntentOutputContract {
             locator_kind: OutputLocatorKind::Filename,
             locator_hint: "README.md, README.zh-CN.md, Cargo.toml".to_string(),

@@ -34,7 +34,7 @@ fn generic_log_analyze_does_not_steal_directory_with_explicit_log_file_target() 
     fs::write(&log, "INFO boot start\nINFO worker ready\n").expect("write clawd log");
     let logs_path = logs_dir.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -296,7 +296,7 @@ fn explicit_file_target_reads_structured_update_slice_from_goal_context() {
     let mut state = test_state_with_enabled_skills(&["fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -407,7 +407,7 @@ fn excerpt_kind_mixed_field_and_read_plan_preserves_config_field_reads() {
     let readme_path = readme.display().to_string();
     let state = test_state_with_enabled_skills(&["config_basic", "doc_parse", "fs_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -496,7 +496,7 @@ fn content_excerpt_with_doc_parse_capability_ref_rewrites_bounded_read() {
     let readme_path = readme.display().to_string();
     let state = test_state_with_enabled_skills(&["doc_parse", "fs_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -554,7 +554,7 @@ fn workspace_project_summary_keeps_contract_allowed_bounded_read() {
     let readme_path = readme.display().to_string();
     let state = test_state_with_enabled_skills(&["doc_parse", "fs_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -613,7 +613,7 @@ fn generic_single_log_synthesis_rewrites_bounded_read_to_log_analyze() {
     let log_path = log.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -674,7 +674,7 @@ fn generic_single_log_synthesis_preserves_tail_read_range() {
     let log_path = log.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -737,7 +737,7 @@ fn generic_log_directory_auto_locator_uses_log_analyze_plan() {
     let logs_path = logs_dir.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -784,7 +784,7 @@ fn content_excerpt_summary_log_directory_auto_locator_uses_log_analyze_plan() {
     let logs_path = logs_dir.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -827,7 +827,7 @@ fn content_excerpt_summary_single_log_file_without_slice_defers_to_log_analyze_p
     let log_path = log.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -868,7 +868,7 @@ fn content_excerpt_single_doc_file_with_doc_parse_capability_uses_doc_parse_plan
     let readme_path = readme.display().to_string();
     let state = test_state_with_enabled_skills(&["doc_parse", "fs_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -917,7 +917,7 @@ fn content_excerpt_summary_keeps_bounded_log_read_for_synthesis() {
     let log_path = log.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -971,7 +971,7 @@ fn content_excerpt_summary_keeps_bounded_log_read_for_synthesis() {
 fn content_excerpt_contract_rewrites_concrete_respond_after_synthesis() {
     let state = test_state_with_registry();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1018,7 +1018,7 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_fs_basic_for_rep
     .expect("write prompt file");
     let prompt_path = prompt_file.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1069,7 +1069,7 @@ fn excerpt_kind_judgment_resolved_file_path_uses_bounded_read_and_synthesis() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         false,
         OutputResponseShape::OneSentence,
     );
@@ -1116,7 +1116,7 @@ fn content_excerpt_with_summary_does_not_use_head_read_deterministic_plan() {
     fs::write(&log, "line 1\nline 2\nline 3\nline 4\n").expect("write log");
     let log_path = log.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1144,7 +1144,7 @@ fn scalar_content_auto_locator_skips_content_excerpt_with_summary_contract() {
     fs::write(&log, "line 1\nline 2\nline 3\nline 4\n").expect("write log");
     let log_path = log.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1172,11 +1172,7 @@ fn generic_content_evidence_does_not_use_single_file_deterministic_plan() {
     let readme = root.path.join("README.md");
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
     let readme_path = readme.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.delivery_required = false;
@@ -1202,7 +1198,7 @@ fn structured_scalar_compare_does_not_use_single_file_content_deterministic_plan
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
     let readme_path = readme.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1232,7 +1228,7 @@ fn scalar_content_auto_locator_does_not_read_path_only_contract() {
     fs::write(&note, "# Reading Notes\n\nService status is healthy.").expect("write note");
     let note_path = note.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1262,7 +1258,7 @@ fn scalar_content_auto_locator_does_not_read_generated_file_path_report_target()
     fs::write(&image, b"existing media bytes").expect("write existing media");
     let image_path = image.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1292,7 +1288,7 @@ fn scalar_content_auto_locator_does_not_read_existence_contract() {
     fs::write(&note, r#"{"name":"fixture"}"#).expect("write package");
     let note_path = note.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1321,7 +1317,7 @@ fn scalar_content_auto_locator_reads_generic_scalar_content_contract() {
     fs::write(&note, "# Reading Notes\n\nService status is healthy.").expect("write note");
     let note_path = note.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1362,7 +1358,7 @@ fn scalar_content_auto_locator_validates_config_contract() {
     fs::write(&config, "[service]\nname = \"rustclaw\"\n").expect("write config");
     let config_path = config.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1410,7 +1406,7 @@ fn scalar_content_auto_locator_validates_config_capability_ref_without_semantic_
     fs::write(&config, "[service]\nname = \"rustclaw\"\n").expect("write config");
     let config_path = config.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1460,7 +1456,7 @@ fn scalar_content_auto_locator_uses_structured_read_field_for_structured_scalar_
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1528,7 +1524,7 @@ version.workspace = true
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1587,7 +1583,7 @@ fn scalar_content_auto_locator_ignores_memory_field_when_current_request_names_b
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1640,7 +1636,7 @@ fn scalar_path_respond_only_uses_loop_state_auto_locator_observation() {
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1682,7 +1678,7 @@ fn scalar_count_synthesis_only_uses_count_inventory_for_locator_dir() {
     fs::create_dir_all(root.path.join("child")).expect("create child");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1732,7 +1728,7 @@ fn scalar_count_listing_plan_uses_count_inventory_for_locator_dir() {
     fs::create_dir_all(root.path.join("child")).expect("create child");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );

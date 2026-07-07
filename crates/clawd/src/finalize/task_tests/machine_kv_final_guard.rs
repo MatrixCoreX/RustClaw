@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_transform_markdown_table() {
     let prompt = r#"Sort [{"name":"alpha","score":7},{"name":"beta","score":12}] by score and return a markdown table."#;
-    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    let mut route = route_result(crate::AskMode::act_plain());
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -40,7 +40,7 @@ fn requested_machine_kv_summary_final_guard_preserves_transform_markdown_table()
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_transform_json_array() {
     let prompt = r#"Filter records [{"name":"a","ok":true},{"name":"b","ok":false},{"name":"c","ok":true}] where ok=true and return JSON array."#;
-    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    let mut route = route_result(crate::AskMode::act_plain());
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -77,7 +77,7 @@ fn requested_machine_kv_summary_final_guard_preserves_transform_json_array() {
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_web_search_listing() {
     let prompt = "Search the web for Rust async tutorial top_k=3 and return titles only.";
-    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    let mut route = route_result(crate::AskMode::act_plain());
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -113,7 +113,7 @@ fn requested_machine_kv_summary_final_guard_preserves_web_search_listing() {
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_weather_query_fields() {
     let prompt = "查询北京当前天气，只返回 location、temperature、weather_code。";
-    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    let mut route = route_result(crate::AskMode::act_plain());
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -149,7 +149,7 @@ fn requested_machine_kv_summary_final_guard_preserves_weather_query_fields() {
 #[test]
 fn requested_machine_kv_summary_final_guard_preserves_publishable_command_summary() {
     let prompt = "Run pwd, inspect the local port, and answer with the working directory and whether a port is visible.";
-    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    let mut route = route_result(crate::AskMode::act_plain());
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;

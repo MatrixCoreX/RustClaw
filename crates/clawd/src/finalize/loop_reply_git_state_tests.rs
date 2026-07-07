@@ -18,7 +18,7 @@ fn git_status_summary_defers_to_synthesis_instead_of_raw_passthrough() {
     });
 
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.resolved_intent = "检查当前仓库是否有未提交改动，用一句话告诉我".to_string();
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
@@ -65,7 +65,7 @@ fn git_repository_state_one_sentence_defers_direct_structured_answer() {
     });
 
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = "检查当前仓库是否有未提交改动，用一句话告诉我".to_string();
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
@@ -122,7 +122,7 @@ fn git_repository_state_free_summary_defers_direct_structured_answer() {
     });
 
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;

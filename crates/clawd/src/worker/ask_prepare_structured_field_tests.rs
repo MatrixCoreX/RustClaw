@@ -194,7 +194,7 @@ fn active_clarify_package_json_locator_strips_package_selector_prefix() {
 #[test]
 fn scalar_field_selector_repairs_document_heading_contract_to_field_value_contract() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Read a structured file field value".to_string(),
         needs_clarify: false,
         route_reason: "semantic_contract_requires_evidence".to_string(),
@@ -247,7 +247,7 @@ fn scalar_field_selector_repairs_document_heading_contract_to_field_value_contra
 #[test]
 fn single_locator_field_selector_does_not_bind_to_scalar_pair_contract() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Read one structured field value".to_string(),
         needs_clarify: false,
         route_reason: "structured_field_selector_requires_scalar_value".to_string(),
@@ -294,7 +294,7 @@ fn single_locator_field_selector_does_not_bind_to_scalar_pair_contract() {
 #[test]
 fn single_path_field_selector_repairs_misclassified_equality_contract_to_scalar_value() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Read the selected TOML field value only".to_string(),
         needs_clarify: false,
         route_reason:
@@ -355,7 +355,7 @@ fn scalar_field_selector_repairs_parent_selector_to_existing_leaf_value() {
         "[workspace]\n[workspace.dependencies]\ntoml = \"0.8\"\n",
     );
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Read workspace.dependencies.toml from Cargo.toml".to_string(),
         needs_clarify: false,
         route_reason: "structured_field_selector_requires_scalar_value".to_string(),
@@ -412,7 +412,7 @@ fn structured_field_target_repair_moves_dotted_field_locator_to_structured_file(
     )
     .expect("write cargo toml");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "Read workspace.dependencies.toml from ./Cargo.toml and output only the value."
                 .to_string(),
@@ -497,7 +497,7 @@ version = "0.1.8"
     fs::write(root.path.join("README.md"), "version: 0.1.8\n").expect("write readme");
 
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "Read workspace.package.version from Cargo.toml and compare it with README.md"
                 .to_string(),
@@ -564,7 +564,7 @@ fn command_summary_structured_field_target_repair_preserves_summary_contract() {
     fs::write(&config, "[llm]\nselected_vendor = \"minimax\"\n").expect("write config");
 
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "Summarize local observations with README existence, config field, cwd, and clock."
                 .to_string(),
@@ -638,7 +638,7 @@ fn multi_locator_structured_field_preserves_summary_contract() {
     fs::write(&config, "[llm]\nselected_vendor = \"minimax\"\n").expect("write config");
 
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "Combine file existence, config field, working directory, and clock observations."
                 .to_string(),
@@ -710,7 +710,7 @@ fn multi_locator_summary_contract_requires_exact_summary_marker() {
     fs::write(&config, "[llm]\nselected_vendor = \"minimax\"\n").expect("write config");
 
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Combine file existence and config field observations.".to_string(),
         needs_clarify: false,
         route_reason: concat!(
@@ -772,7 +772,7 @@ fn three_target_structured_field_request_preserves_summary_contract() {
     fs::write(&config, "[skills.fs_basic]\nplanner_kind = \"builtin\"\n").expect("write config");
 
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "Collect file existence, directory listing, and one config field into a table."
                 .to_string(),

@@ -592,7 +592,7 @@ fn test_build_safe_skill_args_summary_empty_object() {
 #[test]
 fn turn_analysis_prompt_block_includes_contract_matrix_for_structured_route() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "列出文件名".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
