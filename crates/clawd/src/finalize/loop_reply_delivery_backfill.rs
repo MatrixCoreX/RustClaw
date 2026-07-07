@@ -429,7 +429,7 @@ pub(super) fn backfill_delivery_from_last_outputs(
                 .last_user_visible_respond
                 .as_deref()
                 .is_some_and(|answer| {
-                    crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+                    crate::agent_engine::observed_output::answer_matches_observed_output_passthrough(
                         answer, loop_state,
                     )
                 })
@@ -643,7 +643,7 @@ pub(super) fn replace_raw_observation_delivery_with_synthesis(
         return false;
     };
     let delivery_matches_external_observation =
-        crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+        crate::agent_engine::observed_output::answer_matches_observed_output_passthrough(
             current_delivery,
             loop_state,
         ) || candidate_matches_successful_external_observation(loop_state, current_delivery)
@@ -789,7 +789,7 @@ pub(super) fn delivery_is_raw_read_observation(delivery: &str, loop_state: &Loop
     }
     raw_read_range_output(delivery)
         || read_range_excerpt_like(delivery)
-        || (crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+        || (crate::agent_engine::observed_output::answer_matches_observed_output_passthrough(
             delivery, loop_state,
         ) && loop_state
             .executed_step_results

@@ -79,14 +79,14 @@ pub(super) fn direct_scalar_observed_answer(
         ) {
             state
             .and_then(|state| {
-                crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
+                crate::agent_engine::observed_output::extract_answer_from_observed_output_i18n(
                     loop_state,
                     state,
                     agent_run_context,
                 )
             })
             .or_else(|| {
-                crate::agent_engine::observed_output::extract_direct_answer_from_generic_output(
+                crate::agent_engine::observed_output::extract_answer_from_observed_output(
                     loop_state,
                     agent_run_context,
                 )
@@ -818,7 +818,7 @@ fn planned_terminal_respond_is_grounded_in_observation(
 ) -> bool {
     let candidate = candidate.trim();
     if candidate.is_empty()
-        || crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+        || crate::agent_engine::observed_output::answer_matches_observed_output_passthrough(
             candidate, loop_state,
         )
     {
@@ -1158,14 +1158,14 @@ fn direct_structured_observed_answer_impl(
     }
     let answer = state
         .and_then(|state| {
-            crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
+            crate::agent_engine::observed_output::extract_answer_from_observed_output_i18n(
                 loop_state,
                 state,
                 agent_run_context,
             )
         })
         .or_else(|| {
-            crate::agent_engine::observed_output::extract_direct_answer_from_generic_output(
+            crate::agent_engine::observed_output::extract_answer_from_observed_output(
                 loop_state,
                 agent_run_context,
             )

@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn extract_direct_answer_from_generic_output_impl(
+pub(super) fn extract_answer_from_observed_output_impl(
     state: Option<&AppState>,
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -821,22 +821,22 @@ fn route_requests_browser_page_body(route: &crate::RouteResult) -> bool {
     )
 }
 
-pub(crate) fn extract_direct_answer_from_generic_output(
+pub(crate) fn extract_answer_from_observed_output(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    extract_direct_answer_from_generic_output_impl(None, loop_state, agent_run_context)
+    extract_answer_from_observed_output_impl(None, loop_state, agent_run_context)
 }
 
-pub(crate) fn extract_direct_answer_from_generic_output_i18n(
+pub(crate) fn extract_answer_from_observed_output_i18n(
     loop_state: &LoopState,
     state: &AppState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    extract_direct_answer_from_generic_output_impl(Some(state), loop_state, agent_run_context)
+    extract_answer_from_observed_output_impl(Some(state), loop_state, agent_run_context)
 }
 
-pub(crate) fn answer_is_direct_observation_passthrough(
+pub(crate) fn answer_matches_observed_output_passthrough(
     answer: &str,
     loop_state: &LoopState,
 ) -> bool {
@@ -868,4 +868,29 @@ pub(crate) fn answer_is_direct_observation_passthrough(
                             .any(|line| !line.is_empty() && line == answer)
                 })
         })
+}
+
+#[cfg(test)]
+pub(crate) fn extract_direct_answer_from_generic_output(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    extract_answer_from_observed_output(loop_state, agent_run_context)
+}
+
+#[cfg(test)]
+pub(crate) fn extract_direct_answer_from_generic_output_i18n(
+    loop_state: &LoopState,
+    state: &AppState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    extract_answer_from_observed_output_i18n(loop_state, state, agent_run_context)
+}
+
+#[cfg(test)]
+pub(crate) fn answer_is_direct_observation_passthrough(
+    answer: &str,
+    loop_state: &LoopState,
+) -> bool {
+    answer_matches_observed_output_passthrough(answer, loop_state)
 }

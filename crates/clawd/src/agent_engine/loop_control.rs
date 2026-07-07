@@ -653,7 +653,7 @@ fn observed_answer_contains_required_success_marker(
     loop_state: &LoopState,
     marker: &str,
 ) -> bool {
-    super::observed_output::extract_direct_answer_from_generic_output(loop_state, agent_run_context)
+    super::observed_output::extract_answer_from_observed_output(loop_state, agent_run_context)
         .is_some_and(|answer| text_has_exact_marker_line(&answer, marker))
         || super::observed_output::extract_direct_scalar_from_generic_output(
             loop_state,
@@ -701,11 +701,8 @@ fn should_stop_for_observed_finalize(
     }
     let required_success_marker = requested_success_marker(agent_run_context);
     let has_direct_observed_answer =
-        super::observed_output::extract_direct_answer_from_generic_output(
-            loop_state,
-            agent_run_context,
-        )
-        .is_some();
+        super::observed_output::extract_answer_from_observed_output(loop_state, agent_run_context)
+            .is_some();
     if structured_scalar_equality_observation_can_finalize(route_result, loop_state, actions) {
         return required_success_marker.is_none_or(|marker| {
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
@@ -773,7 +770,7 @@ fn should_stop_for_observed_finalize(
         if super::observed_output::scalar_route_prefers_structured_observed_answer(
             route_result,
             loop_state,
-        ) && super::observed_output::extract_direct_answer_from_generic_output(
+        ) && super::observed_output::extract_answer_from_observed_output(
             loop_state,
             agent_run_context,
         )

@@ -676,7 +676,7 @@ fn delivery_matches_synthesized_content_answer(
     let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
         return false;
     };
-    if crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+    if crate::agent_engine::observed_output::answer_matches_observed_output_passthrough(
         delivery_text,
         loop_state,
     ) {
@@ -731,7 +731,7 @@ fn delivery_matches_grounded_content_answer(
     };
     let delivery_text = delivery_text.trim();
     if delivery_text.is_empty()
-        || crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+        || crate::agent_engine::observed_output::answer_matches_observed_output_passthrough(
             delivery_text,
             loop_state,
         )
@@ -769,7 +769,7 @@ fn delivery_has_synthesized_answer_result(
     let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
         return false;
     };
-    if crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+    if crate::agent_engine::observed_output::answer_matches_observed_output_passthrough(
         delivery_text,
         loop_state,
     ) {

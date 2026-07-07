@@ -128,7 +128,7 @@ pub(super) fn synthesize_direct_observed_fallback_answer(
     ) {
         return None;
     }
-    crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
+    crate::agent_engine::observed_output::extract_answer_from_observed_output_i18n(
         loop_state,
         state,
         agent_run_context,
