@@ -924,7 +924,7 @@ fn direct_scalar_finalize_reports_missing_path_before_extracting_path_field() {
 
     assert!(answer.contains("configs/config_copy"));
     assert!(answer.contains("exists=false"));
-    assert!(answer.contains("contract_marker=scalar_count"));
+    assert!(answer.contains("final_answer_shape=scalar"));
     assert!(answer.contains("count_available=false"));
     assert_ne!(answer.trim(), "configs/config_copy");
     assert_eq!(
