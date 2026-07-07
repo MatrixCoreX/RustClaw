@@ -1224,6 +1224,13 @@ pub(crate) fn stop_signal_failure_attribution(
     }
 }
 
+pub(crate) const ANSWER_VERIFIER_RECOVERED_TERMINAL_STOP_SIGNAL: &str =
+    "answer_verifier_recovered_terminal_answer";
+
+pub(crate) fn is_answer_verifier_recovered_terminal_stop_signal(stop_signal: &str) -> bool {
+    stop_signal == ANSWER_VERIFIER_RECOVERED_TERMINAL_STOP_SIGNAL
+}
+
 fn summarize_verify_result(
     verify_result: &crate::verifier::VerifyResult,
 ) -> TaskJournalVerifySummary {

@@ -58,6 +58,9 @@ pub(super) fn try_recover_filesystem_mutation_success_answer_verifier_gap(
         journal.answer_verifier_summary = None;
         journal.record_final_answer(&answer);
         journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        journal.record_final_stop_signal(
+            crate::task_journal::ANSWER_VERIFIER_RECOVERED_TERMINAL_STOP_SIGNAL,
+        );
     }
     reply.text = answer.clone();
     reply.messages = vec![answer];

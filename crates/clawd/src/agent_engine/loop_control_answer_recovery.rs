@@ -132,6 +132,18 @@ pub(super) fn suppress_answer_verifier_retry_if_user_locator_disambiguation(
     true
 }
 
+fn mark_answer_verifier_recovery_success(
+    journal: &mut crate::task_journal::TaskJournal,
+    answer: &str,
+) {
+    journal.answer_verifier_summary = None;
+    journal.record_final_answer(answer);
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    journal.record_final_stop_signal(
+        crate::task_journal::ANSWER_VERIFIER_RECOVERED_TERMINAL_STOP_SIGNAL,
+    );
+}
+
 fn answer_verifier_gap_requires_user_locator_disambiguation(
     reply: &AskReply,
     route_result: Option<&RouteResult>,
@@ -542,9 +554,7 @@ pub(super) fn try_recover_log_analyze_answer_verifier_gap(
     let answer = deterministic_log_analyze_summary_text(user_text, &findings);
     let messages = vec![answer.clone()];
     if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        mark_answer_verifier_recovery_success(journal, &answer);
     }
     reply.text = answer;
     reply.messages = messages;
@@ -574,9 +584,7 @@ pub(super) fn try_recover_structured_count_answer_verifier_gap(
     let answer = deterministic_structured_count_summary_text(user_text, &finding);
     let messages = vec![answer.clone()];
     if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        mark_answer_verifier_recovery_success(journal, &answer);
     }
     reply.text = answer;
     reply.messages = messages;
@@ -628,9 +636,7 @@ pub(super) fn try_recover_structured_search_answer_verifier_gap(
     let answer = deterministic_structured_search_summary_text(user_text, &finding);
     let messages = vec![answer.clone()];
     if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        mark_answer_verifier_recovery_success(journal, &answer);
     }
     reply.text = answer;
     reply.messages = messages;
@@ -716,9 +722,7 @@ pub(super) fn apply_rss_news_items_answer(reply: &mut AskReply, items: &[RssNews
     let answer = deterministic_rss_news_items_text(items);
     let messages = vec![answer.clone()];
     if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        mark_answer_verifier_recovery_success(journal, &answer);
     }
     reply.text = answer;
     reply.messages = messages;
@@ -784,9 +788,7 @@ pub(super) fn try_recover_document_heading_answer_verifier_gap(
                 Some(&verifier_summary),
             ),
         );
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        mark_answer_verifier_recovery_success(journal, &answer);
     }
     reply.text = answer;
     reply.messages = messages;
@@ -967,9 +969,7 @@ pub(super) fn try_recover_content_excerpt_summary_answer_verifier_gap(
     };
     let messages = vec![answer.clone()];
     if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        mark_answer_verifier_recovery_success(journal, &answer);
     }
     reply.text = answer;
     reply.messages = messages;
@@ -1015,9 +1015,7 @@ pub(super) fn try_recover_latest_synthesis_answer_verifier_gap(
     };
     let answer = candidate.answer;
     if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        mark_answer_verifier_recovery_success(journal, &answer);
     }
     reply.text = answer.clone();
     reply.messages = vec![answer];
@@ -1265,9 +1263,7 @@ pub(super) fn try_recover_structured_scalar_output_format_answer_verifier_gap(
     };
     let answer = answer.clone();
     if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        mark_answer_verifier_recovery_success(journal, &answer);
     }
     reply.text = answer.clone();
     reply.messages = vec![answer];
@@ -1311,9 +1307,7 @@ pub(super) fn try_recover_machine_kv_summary_output_format_answer_verifier_gap(
         return false;
     };
     if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        mark_answer_verifier_recovery_success(journal, &answer);
     }
     reply.text = answer.clone();
     reply.messages = vec![answer];
@@ -1372,9 +1366,7 @@ pub(super) fn try_recover_http_health_answer_verifier_gap(
             )
         });
     if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        mark_answer_verifier_recovery_success(journal, &answer);
     }
     reply.text = answer.clone();
     reply.messages = vec![answer];

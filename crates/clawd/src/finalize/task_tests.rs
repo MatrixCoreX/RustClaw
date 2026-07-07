@@ -22,6 +22,8 @@ use super::{
 
 use serde_json::json;
 
+#[path = "task_tests/answer_verifier_recovery.rs"]
+mod answer_verifier_recovery;
 #[path = "task_tests/config_guard_recovery.rs"]
 mod config_guard_recovery;
 #[path = "task_tests/config_validation_delivery.rs"]

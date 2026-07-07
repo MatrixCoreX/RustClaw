@@ -1190,6 +1190,16 @@ fn should_use_answer_route_result(
     answer_has_execution_trace && answer_route.is_execute_gate() && !initial.is_execute_gate()
 }
 
+fn answer_verifier_recovery_already_terminal(journal: &crate::task_journal::TaskJournal) -> bool {
+    journal.final_status.is_some_and(|status| {
+        matches!(status, crate::task_journal::TaskJournalFinalStatus::Success)
+    }) && journal.answer_verifier_summary.is_none()
+        && journal
+            .final_stop_signal
+            .as_deref()
+            .is_some_and(crate::task_journal::is_answer_verifier_recovered_terminal_stop_signal)
+}
+
 pub(crate) async fn finalize_ask_result(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -1371,7 +1381,11 @@ pub(crate) async fn finalize_ask_result(
             } else {
                 false
             };
-            if !failure_reply && !semantic_clarify && journal.answer_verifier_summary.is_none() {
+            if !failure_reply
+                && !semantic_clarify
+                && journal.answer_verifier_summary.is_none()
+                && !answer_verifier_recovery_already_terminal(&journal)
+            {
                 let answer_verifier = if answer_is_existing_file_delivery_token {
                     None
                 } else {
