@@ -621,6 +621,127 @@ fn requested_machine_kv_summary_uses_state_patch_required_field() {
 }
 
 #[test]
+fn requested_machine_kv_summary_replaces_prose_when_state_patch_requires_machine_fields() {
+    let task = claimed_task("task-machine-kv-strict-state-patch-prose");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "git_basic",
+        r#"{"extra":{"action":"repository_state","branch":"main","remotes":["origin","backup"]}}"#,
+    ));
+    let current = "Current repository state: branch=main, remotes include origin and backup.";
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = Some(current.to_string());
+    let mut finalizer_summary = None;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        turn_analysis: Some(crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: Some(serde_json::json!({
+                "output_format": "machine_summary",
+                "required_machine_fields": ["branch", "remotes"]
+            })),
+            attachment_processing_required: false,
+        }),
+        ..Default::default()
+    };
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return repository machine fields.",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec![r#"branch=main remotes=["origin","backup"]"#]
+    );
+}
+
+#[test]
+fn requested_machine_kv_summary_replaces_partial_machine_delivery_for_required_fields() {
+    let task = claimed_task("task-machine-kv-strict-state-patch-partial");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"write_text","changed_count":2,"paths":["tmp/a.txt","tmp/b.txt"]}}"#,
+    ));
+    let mut delivery_messages = vec!["changed_count=2".to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        turn_analysis: Some(crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: Some(serde_json::json!({
+                "output_format": "machine_summary",
+                "required_machine_fields": ["changed_count", "paths"]
+            })),
+            attachment_processing_required: false,
+        }),
+        ..Default::default()
+    };
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return mutation machine fields.",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec![r#"changed_count=2 paths=["tmp/a.txt","tmp/b.txt"]"#]
+    );
+}
+
+#[test]
+fn requested_machine_kv_summary_replaces_conflicting_machine_values_for_required_field() {
+    let task = claimed_task("task-machine-kv-strict-conflicting-values");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"grep_text","contains_rustclaw":true}}"#,
+    ));
+    let mut delivery_messages = vec!["contains_rustclaw=true contains_rustclaw=false".to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        turn_analysis: Some(crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: Some(serde_json::json!({
+                "output_format": "machine_summary",
+                "required_machine_fields": ["contains_rustclaw"]
+            })),
+            attachment_processing_required: false,
+        }),
+        ..Default::default()
+    };
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return content check machine fields.",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec!["contains_rustclaw=true"]);
+}
+
+#[test]
 fn requested_machine_kv_summary_ignores_context_summary_machine_tokens() {
     let task = claimed_task("task-machine-kv-context-token");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
