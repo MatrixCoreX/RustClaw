@@ -885,7 +885,7 @@ fn delivery_has_planned_content_beyond_observed_answer(delivery: &str, observed:
         .any(|ch| !ch.is_whitespace())
 }
 
-fn should_keep_planned_delivery_over_observed_answer(
+pub(super) fn should_keep_planned_delivery_over_observed_answer(
     route: &crate::RouteResult,
     delivery: &str,
     observed: &str,
@@ -899,7 +899,11 @@ fn should_keep_planned_delivery_over_observed_answer(
     let scalar_model_language_verdict = route.output_contract.response_shape
         == crate::OutputResponseShape::Scalar
         && route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath);
+    if route.output_contract.delivery_required && !scalar_model_language_verdict {
+        return false;
+    }
     if route_allows_model_language_final_answer(route)
+        && (!output_contract_requests_exact_delivery(route) || scalar_model_language_verdict)
         && (!matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
@@ -913,6 +917,14 @@ fn should_keep_planned_delivery_over_observed_answer(
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
     ) {
         return false;
+    }
+    if route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
+        && !output_contract_requests_exact_delivery(route)
+        && planned_delivery_is_publishable_model_language_answer(delivery)
+        && delivery_is_structurally_richer_than_observed_projection(delivery, observed)
+    {
+        return true;
     }
     let planned_delivery_contains_more_than_observed =
         delivery_has_planned_content_beyond_observed_answer(delivery, observed);
@@ -931,6 +943,25 @@ fn should_keep_planned_delivery_over_observed_answer(
             route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::RawCommandOutput
         )
+}
+
+fn delivery_is_structurally_richer_than_observed_projection(
+    delivery: &str,
+    observed: &str,
+) -> bool {
+    let delivery = delivery.trim();
+    let observed = observed.trim();
+    if delivery.is_empty() || observed.is_empty() || delivery == observed {
+        return false;
+    }
+    let delivery_lines = delivery
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .count();
+    let delivery_chars = delivery.chars().count();
+    let observed_chars = observed.chars().count();
+    delivery_lines > 1 && delivery_chars > observed_chars.saturating_add(32)
 }
 
 fn should_keep_publishable_summary_over_raw_command_projection(

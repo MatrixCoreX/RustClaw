@@ -1,6 +1,44 @@
 use super::*;
 
 #[test]
+fn exact_contract_keeps_rich_content_evidence_delivery_over_short_observed_projection() {
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "README.md; scripts/nl_tests/fixtures/device_local/docs; configs/skills_registry.toml"
+            .to_string();
+    let delivery = "以下为本次只读巡检结果：\n\n| 检查项 | 结果 |\n|---|---|\n| README.md 是否存在 | 存在 |\n| docs 文件名 | release_checklist.md、service_notes.md |\n| fs_basic.planner_kind | tool |";
+
+    assert!(
+        super::super::exact_contract::should_keep_planned_delivery_over_observed_answer(
+            &route,
+            delivery,
+            "fs_basic planner_kind"
+        )
+    );
+}
+
+#[test]
+fn exact_contract_does_not_keep_rich_delivery_when_exact_delivery_is_required() {
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.delivery_required = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    let delivery = "result:\n- README.md\n- configs/skills_registry.toml";
+
+    assert!(
+        !super::super::exact_contract::should_keep_planned_delivery_over_observed_answer(
+            &route,
+            delivery,
+            "README.md"
+        )
+    );
+}
+
+#[test]
 fn exact_contract_replaces_incomplete_directory_groups_synthesis_with_observed_groups() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(3);
