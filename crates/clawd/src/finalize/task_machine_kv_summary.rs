@@ -6,6 +6,7 @@ pub(super) fn apply_requested_machine_kv_summary_to_final_answer(
     answer_messages: &mut Vec<String>,
 ) -> bool {
     if route_preserves_generated_file_machine_report(route_result, answer_text, answer_messages) {
+        journal.record_final_answer(answer_text.as_str());
         return false;
     }
     if final_answer_preserves_weather_query_machine_report(
@@ -23,9 +24,20 @@ pub(super) fn apply_requested_machine_kv_summary_to_final_answer(
         answer_text,
         answer_messages,
     ) else {
+        journal.record_final_answer(answer_text.as_str());
         return false;
     };
     if answer_text.trim() == summary {
+        journal.record_final_answer(answer_text.as_str());
+        return false;
+    }
+    if final_answer_preserves_publishable_evidence_summary(
+        route_result,
+        journal,
+        answer_text,
+        answer_messages,
+        &summary,
+    ) {
         journal.record_final_answer(answer_text.as_str());
         return false;
     }
@@ -244,6 +256,124 @@ fn final_answer_has_values_for_requested_marker_summary(
                     .iter()
                     .all(|marker| text_has_value_for_marker(candidate, marker))
             })
+}
+
+fn final_answer_preserves_publishable_evidence_summary(
+    route_result: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    answer_text: &str,
+    answer_messages: &[String],
+    requested_summary: &str,
+) -> bool {
+    let contract = route_result.effective_output_contract();
+    if contract.delivery_required
+        || matches!(
+            contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+        || !route_allows_model_language_delivery(route_result, contract.response_shape)
+        || !journal_has_observed_tool_evidence(journal)
+        || machine_kv_units(requested_summary).is_empty()
+    {
+        return false;
+    }
+    std::iter::once(answer_text)
+        .chain(answer_messages.iter().map(String::as_str))
+        .any(|candidate| candidate_is_publishable_evidence_summary(candidate, requested_summary))
+}
+
+fn journal_has_observed_tool_evidence(journal: &crate::task_journal::TaskJournal) -> bool {
+    journal.step_results.iter().any(|step| {
+        step.status == crate::executor::StepExecutionStatus::Ok
+            && !matches!(step.skill.as_str(), "respond" | "synthesize_answer")
+            && step.output_excerpt.as_deref().is_some_and(|output| {
+                !output.trim().is_empty()
+                    && !crate::finalize::looks_like_planner_artifact(output)
+                    && !crate::finalize::looks_like_internal_trace_artifact(output)
+            })
+    })
+}
+
+fn route_allows_model_language_delivery(
+    route_result: &crate::RouteResult,
+    response_shape: crate::OutputResponseShape,
+) -> bool {
+    crate::evidence_policy::final_answer_shape_for_route(route_result)
+        .is_some_and(|shape| shape.allows_model_language())
+        || matches!(
+            response_shape,
+            crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
+        )
+}
+
+fn candidate_is_publishable_evidence_summary(candidate: &str, requested_summary: &str) -> bool {
+    let candidate = candidate.trim();
+    if candidate.is_empty()
+        || candidate.starts_with('{')
+        || candidate.starts_with('[')
+        || crate::finalize::parse_delivery_token(candidate).is_some()
+        || crate::finalize::looks_like_planner_artifact(candidate)
+        || crate::finalize::looks_like_internal_trace_artifact(candidate)
+        || crate::finalize::is_execution_summary_message(candidate)
+        || text_is_json_object_or_array(candidate)
+        || text_looks_like_raw_command_snapshot(candidate)
+        || text_is_machine_kv_only(candidate)
+    {
+        return false;
+    }
+    let candidate_chars = candidate.chars().count();
+    let summary_chars = requested_summary.trim().chars().count();
+    let nonempty_lines = candidate
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .count();
+    let token_count = candidate.split_whitespace().count();
+    candidate_chars > summary_chars.saturating_add(16)
+        && (nonempty_lines > 1 || token_count >= 6 || candidate_chars >= 48)
+}
+
+fn text_looks_like_raw_command_snapshot(text: &str) -> bool {
+    let text = text.trim();
+    text.starts_with("exit=")
+        && text.contains('\n')
+        && (text.contains("\nCOMMAND ")
+            || text.contains("(LISTEN)")
+            || text.contains("\nLISTEN ")
+            || text.contains("State  Recv-Q")
+            || text.contains("%CPU")
+            || text.contains("PID PPID"))
+}
+
+fn text_is_machine_kv_only(text: &str) -> bool {
+    let mut saw_line = false;
+    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        saw_line = true;
+        let units = machine_kv_units(line);
+        if units.is_empty() || units.join(" ") != line {
+            return false;
+        }
+    }
+    saw_line
+}
+
+fn machine_kv_units(text: &str) -> Vec<String> {
+    text.split_whitespace()
+        .filter_map(|token| {
+            let token = token.trim_matches(|ch: char| {
+                matches!(
+                    ch,
+                    ',' | '.' | ';' | ':' | '(' | ')' | '[' | ']' | '{' | '}'
+                )
+            });
+            let (key, value) = token.split_once('=')?;
+            if valid_machine_marker_key(key) && !value.trim().is_empty() {
+                Some(format!("{}={}", key.trim(), value.trim()))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn bare_machine_markers(text: &str) -> Vec<String> {

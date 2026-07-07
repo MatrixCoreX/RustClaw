@@ -147,21 +147,21 @@ pub(super) fn resume_failure_is_unbound_path_lookup_clarify_result(
     route_result: &crate::RouteResult,
     resume_ctx: &Value,
 ) -> bool {
-    route_result.output_contract.requires_content_evidence
+    let contract = route_result.effective_output_contract();
+    contract.requires_content_evidence
         && !super::route_has_file_delivery_contract(route_result)
         && !resume_context_has_remaining_actions(resume_ctx)
         && !matches!(
-            route_result.output_contract.response_shape,
+            contract.response_shape,
             crate::OutputResponseShape::FileToken
         )
-        && matches!(
-            route_result.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-                | crate::OutputSemanticKind::ScalarPathOnly
-                | crate::OutputSemanticKind::ExistenceWithPath
-                | crate::OutputSemanticKind::ExistenceWithPathSummary
-                | crate::OutputSemanticKind::FilePaths
-        )
+        && (route_result.output_contract_is_unclassified()
+            || route_result.output_contract_marker_is_any(&[
+                crate::OutputSemanticKind::ScalarPathOnly,
+                crate::OutputSemanticKind::ExistenceWithPath,
+                crate::OutputSemanticKind::ExistenceWithPathSummary,
+                crate::OutputSemanticKind::FilePaths,
+            ]))
         && resume_context_failed_step_skill(resume_ctx).as_deref() == Some("fs_search")
         && (resume_context_path_batch_facts_are_missing_only(resume_ctx)
             || resume_context_has_directory_lookup_failure(resume_ctx))
@@ -353,7 +353,7 @@ pub(super) fn resume_failure_is_structured_service_status_result(
     route_result: &crate::RouteResult,
     resume_ctx: &Value,
 ) -> bool {
-    route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+    route_result.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
         && !resume_context_has_remaining_actions(resume_ctx)
         && resume_context_failed_structured_skill_error(resume_ctx)
             .as_ref()
@@ -390,8 +390,7 @@ pub(super) fn resume_failure_execution_failed_step_answer(
     resume_ctx: &Value,
     _prefer_english: bool,
 ) -> Option<String> {
-    if route_result.output_contract.semantic_kind != crate::OutputSemanticKind::ExecutionFailedStep
-    {
+    if !route_result.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep) {
         return None;
     }
     let body = resume_context_body(resume_ctx);

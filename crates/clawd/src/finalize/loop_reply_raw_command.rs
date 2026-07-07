@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::agent_engine::{AgentRunContext, LoopState};
-use crate::AppState;
+use crate::{AppState, ClaimedTask};
 
 use super::{plan_step_for_execution, raw_command_arg_from_plan_step};
 
@@ -85,7 +85,7 @@ pub(super) fn direct_raw_command_output_projection(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
         || route.output_contract.delivery_required
         || matches!(
             route.output_contract.response_shape,
@@ -116,6 +116,39 @@ pub(super) fn direct_raw_command_output_projection(
             ));
         }
         return None;
+    }
+    let requested_machine_fields = requested_raw_command_machine_fields(route);
+    if !requested_machine_fields.is_empty() {
+        let all_run_cmd_outputs = successful_run_cmd_outputs(loop_state);
+        let mut used_evidence_ids_count = outputs.len();
+        let mut answer = requested_raw_command_machine_field_projection_for_fields(
+            &requested_machine_fields,
+            &outputs,
+        );
+        if answer.is_none() && all_run_cmd_outputs != outputs {
+            answer = requested_raw_command_machine_field_projection_for_fields(
+                &requested_machine_fields,
+                &all_run_cmd_outputs,
+            );
+            used_evidence_ids_count = all_run_cmd_outputs.len();
+        }
+        if let Some(answer) = answer {
+            return Some((
+                answer,
+                crate::task_journal::TaskJournalFinalizerSummary {
+                    stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                    disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                    parsed: true,
+                    contract_ok: true,
+                    completion_ok: Some(true),
+                    grounded_ok: Some(true),
+                    format_ok: Some(true),
+                    needs_clarify: Some(false),
+                    used_evidence_ids_count,
+                    ..Default::default()
+                },
+            ));
+        }
     }
     if let Some(path) = latest_run_cmd_redirect_existing_file_path(state, loop_state) {
         return Some((
@@ -158,6 +191,171 @@ pub(super) fn direct_raw_command_output_projection(
             ..Default::default()
         },
     ))
+}
+
+pub(super) fn raw_command_machine_field_delivery_satisfies_request(
+    route: &crate::RouteResult,
+    delivery: &str,
+) -> bool {
+    let fields = requested_raw_command_machine_fields(route);
+    if fields.is_empty() {
+        return false;
+    }
+    fields
+        .iter()
+        .all(|field| raw_command_machine_field_value(delivery, field).is_some())
+}
+
+pub(crate) fn raw_command_machine_field_projection_from_journal(
+    route: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<String> {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+        || route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+    {
+        return None;
+    }
+    let fields = requested_raw_command_machine_fields(route);
+    if fields.is_empty() {
+        return None;
+    }
+    let outputs = successful_run_cmd_outputs_from_journal(journal);
+    let answer = requested_raw_command_machine_field_projection_for_fields(&fields, &outputs)?;
+    raw_command_machine_field_delivery_satisfies_request(route, &answer).then_some(answer)
+}
+
+pub(super) fn replace_final_delivery_with_raw_command_machine_field_projection(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+    delivery_messages: &mut Vec<String>,
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    let projected = direct_raw_command_output_projection(state, route, loop_state);
+    let current = super::final_answer_text_from_delivery(delivery_messages);
+    let answer = projected
+        .as_ref()
+        .and_then(|(answer, _)| {
+            raw_command_machine_field_delivery_satisfies_request(route, answer)
+                .then(|| answer.clone())
+        })
+        .or_else(|| normalize_raw_command_machine_field_delivery(route, &current));
+    let Some(answer) = answer else {
+        return false;
+    };
+    let summary = projected
+        .map(|(_, summary)| summary)
+        .unwrap_or_else(raw_command_machine_field_finalizer_summary);
+    if delivery_messages
+        .last()
+        .is_some_and(|message| message.trim() == answer.trim())
+    {
+        loop_state.last_user_visible_respond = Some(answer);
+        *finalizer_summary = Some(summary);
+        return false;
+    }
+    delivery_messages.clear();
+    delivery_messages.push(answer.clone());
+    loop_state.last_user_visible_respond = Some(answer);
+    *finalizer_summary = Some(summary);
+    super::log_deterministic_delivery_record(
+        &task.task_id,
+        "final_raw_command_machine_field_projection",
+        "replaced",
+        agent_run_context,
+        loop_state.executed_step_results.len(),
+    );
+    true
+}
+
+fn normalize_raw_command_machine_field_delivery(
+    route: &crate::RouteResult,
+    delivery: &str,
+) -> Option<String> {
+    let fields = requested_raw_command_machine_fields(route);
+    if fields.is_empty() {
+        return None;
+    }
+    let mut lines = Vec::new();
+    for field in fields {
+        match field.as_str() {
+            "exit_code" => {
+                let value = raw_command_machine_field_assignment_value(delivery, "exit_code")?;
+                let value = value
+                    .split_whitespace()
+                    .next()
+                    .filter(|value| value.chars().all(|ch| ch.is_ascii_digit()))?;
+                lines.push(format!("exit_code={value}"));
+            }
+            "stdout_path" => {
+                let value = raw_command_machine_field_assignment_value(delivery, "stdout_path")?
+                    .split_whitespace()
+                    .next()
+                    .filter(|value| raw_command_stdout_value_is_path(value))?;
+                lines.push(format!("stdout_path={value}"));
+            }
+            "stdout" => {
+                let value = raw_command_machine_field_assignment_value(delivery, "stdout")?;
+                lines.push(format!("stdout={}", value.trim()));
+            }
+            _ => {}
+        }
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn raw_command_machine_field_assignment_value<'a>(
+    delivery: &'a str,
+    field: &str,
+) -> Option<&'a str> {
+    let equals_prefix = format!("{field}=");
+    let colon_prefix = format!("{field}:");
+    delivery.lines().map(str::trim).find_map(|line| {
+        line.strip_prefix(equals_prefix.as_str())
+            .or_else(|| line.strip_prefix(colon_prefix.as_str()))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    })
+}
+
+fn raw_command_machine_field_finalizer_summary() -> crate::task_journal::TaskJournalFinalizerSummary
+{
+    crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        parsed: true,
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        ..Default::default()
+    }
+}
+
+fn raw_command_machine_field_value<'a>(delivery: &'a str, field: &str) -> Option<&'a str> {
+    let prefix = format!("{field}=");
+    let value = delivery
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix(prefix.as_str()))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    match field {
+        "exit_code" => value.chars().all(|ch| ch.is_ascii_digit()).then_some(value),
+        "stdout_path" => (raw_command_stdout_value_is_path(value)
+            && !value.contains(char::is_whitespace))
+        .then_some(value),
+        _ => Some(value),
+    }
 }
 
 fn direct_read_range_raw_command_projection(
@@ -276,6 +474,31 @@ fn latest_run_cmd_output_group(loop_state: &LoopState) -> Vec<String> {
     outputs
 }
 
+fn successful_run_cmd_outputs(loop_state: &LoopState) -> Vec<String> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.is_ok() && step.skill == "run_cmd")
+        .filter_map(|step| step.output.as_deref().map(str::trim))
+        .filter(|output| !output.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn successful_run_cmd_outputs_from_journal(
+    journal: &crate::task_journal::TaskJournal,
+) -> Vec<String> {
+    journal
+        .step_results
+        .iter()
+        .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+        .filter(|step| step.skill == "run_cmd")
+        .filter_map(|step| step.output_excerpt.as_deref().map(str::trim))
+        .filter(|output| !output.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
 fn latest_run_cmd_redirect_existing_file_path(
     state: &AppState,
     loop_state: &LoopState,
@@ -309,6 +532,86 @@ fn run_cmd_machine_command_from_output(output: &str) -> Option<&str> {
     line.strip_prefix("exit=0 command=")
         .map(str::trim)
         .filter(|command| !command.is_empty())
+}
+
+fn requested_raw_command_machine_field_projection_for_fields(
+    fields: &[String],
+    outputs: &[String],
+) -> Option<String> {
+    let stdout = raw_command_stdout_value(outputs);
+    let mut lines = Vec::new();
+    for field in fields {
+        match field.as_str() {
+            "exit_code" => lines.push("exit_code=0".to_string()),
+            "stdout" => {
+                let value = stdout.as_deref()?;
+                lines.push(format!("stdout={value}"));
+            }
+            "stdout_path" => {
+                let value = stdout
+                    .as_deref()
+                    .filter(|value| raw_command_stdout_value_is_path(value))?;
+                lines.push(format!("stdout_path={value}"));
+            }
+            _ => {}
+        }
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn requested_raw_command_machine_fields(route: &crate::RouteResult) -> Vec<String> {
+    let mut fields = Vec::new();
+    for surface in [
+        route.resolved_intent.as_str(),
+        route.route_reason.as_str(),
+        route.output_contract.locator_hint.as_str(),
+    ] {
+        for token in surface.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_')) {
+            if matches!(token, "exit_code" | "stdout" | "stdout_path")
+                && !fields.iter().any(|field| field == token)
+            {
+                fields.push(token.to_string());
+            }
+        }
+    }
+    if fields.iter().any(|field| field == "stdout_path") {
+        fields.retain(|field| field != "stdout");
+    }
+    fields
+}
+
+fn raw_command_stdout_value(outputs: &[String]) -> Option<String> {
+    let candidates = outputs
+        .iter()
+        .flat_map(|output| output.lines())
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| !raw_command_line_is_execution_metadata(line))
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    let mut seen = HashSet::new();
+    let unique_candidates = candidates
+        .into_iter()
+        .filter(|candidate| seen.insert(candidate.clone()))
+        .collect::<Vec<_>>();
+    match unique_candidates.as_slice() {
+        [value] => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn raw_command_line_is_execution_metadata(line: &str) -> bool {
+    line.starts_with("exit=")
+        || line.starts_with("EXIT=")
+        || line.starts_with("exit_code=")
+        || line.starts_with("stdout_path=")
+        || line.starts_with("command=")
+        || line.starts_with("detached=")
+        || line == "---"
+}
+
+fn raw_command_stdout_value_is_path(value: &str) -> bool {
+    !value.contains('\n') && Path::new(value).is_absolute()
 }
 
 fn normalize_workspace_existing_file_path(workspace_root: &Path, path: PathBuf) -> Option<String> {
@@ -523,7 +826,7 @@ fn apply_raw_command_structural_projection(
 }
 
 pub(super) fn route_explicitly_requests_command_result(route: &crate::RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+    route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
         && route.output_contract.response_shape != crate::OutputResponseShape::Strict
 }
 
@@ -531,7 +834,7 @@ pub(super) fn raw_command_output_needs_structural_projection(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput) {
         return false;
     }
     let latest_is_run_cmd = loop_state
@@ -630,16 +933,15 @@ pub(super) fn output_contract_requests_exact_delivery(route: &crate::RouteResult
     matches!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
-    ) || matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::RawCommandOutput
-            | crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::DirectoryEntryGroups
-            | crate::OutputSemanticKind::FilePaths
-            | crate::OutputSemanticKind::GitCommitSubject
-            | crate::OutputSemanticKind::GitRepositoryState
-            | crate::OutputSemanticKind::StructuredKeys
-    ) || (route.output_contract.semantic_kind == crate::OutputSemanticKind::CommandOutputSummary
+    ) || route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::RawCommandOutput,
+        crate::OutputSemanticKind::FileNames,
+        crate::OutputSemanticKind::DirectoryNames,
+        crate::OutputSemanticKind::DirectoryEntryGroups,
+        crate::OutputSemanticKind::FilePaths,
+        crate::OutputSemanticKind::GitCommitSubject,
+        crate::OutputSemanticKind::GitRepositoryState,
+        crate::OutputSemanticKind::StructuredKeys,
+    ]) || (route.output_contract_marker_is(crate::OutputSemanticKind::CommandOutputSummary)
         && route.output_contract.response_shape == crate::OutputResponseShape::Strict)
 }

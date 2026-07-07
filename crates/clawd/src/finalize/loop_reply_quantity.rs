@@ -672,7 +672,7 @@ pub(super) fn direct_quantity_comparison_from_compare_paths(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
         || route.output_contract.delivery_required
         || matches!(
             route.output_contract.response_shape,
@@ -706,6 +706,9 @@ pub(super) fn direct_quantity_comparison_from_compare_paths(
                     crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(
                         output,
                     );
+                if let Some(answer) = compare_paths_existence_verdict_answer(&output, route) {
+                    return Some(answer);
+                }
                 if strict_quantity_comparison_json_fallback_allowed(user_text, style)
                     && route.output_contract.response_shape == crate::OutputResponseShape::Strict
                 {
@@ -746,6 +749,87 @@ pub(super) fn direct_quantity_comparison_from_compare_paths(
     ))
 }
 
+pub(super) fn direct_quantity_compare_paths_required_metadata_from_compare_paths(
+    state: &AppState,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let (answer, summary) = direct_quantity_comparison_from_compare_paths(
+        state,
+        user_text,
+        loop_state,
+        agent_run_context,
+    )?;
+    compare_paths_required_metadata_answer(&answer).then_some((answer, summary))
+}
+
+pub(super) fn direct_compare_paths_required_metadata_from_observed_output(
+    loop_state: &crate::agent_engine::LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    if !route_allows_compare_paths_required_metadata_projection(route) {
+        return None;
+    }
+    let answer = loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find_map(|step| {
+            if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+                return None;
+            }
+            let output = step.output.as_deref()?;
+            let output =
+                crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(
+                    output,
+                );
+            compare_paths_existence_verdict_answer_from_body(&output)
+        })?;
+    Some((
+        answer,
+        crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: loop_state.executed_step_results.len(),
+            ..Default::default()
+        },
+    ))
+}
+
+fn compare_paths_required_metadata_answer(answer: &str) -> bool {
+    let mut has_same_path = false;
+    let mut has_left_exists = false;
+    let mut has_right_exists = false;
+    for line in answer.lines().map(str::trim) {
+        if line.starts_with("same_path=") {
+            has_same_path = true;
+        } else if line.starts_with("left_exists=") {
+            has_left_exists = true;
+        } else if line.starts_with("right_exists=") {
+            has_right_exists = true;
+        }
+    }
+    has_same_path && has_left_exists && has_right_exists
+}
+
+fn route_allows_compare_paths_required_metadata_projection(route: &crate::RouteResult) -> bool {
+    !route.output_contract.delivery_required
+        && route.output_contract.requires_content_evidence
+        && crate::evidence_policy::required_evidence_fields_for_output_contract(
+            &route.output_contract,
+        )
+        .iter()
+        .any(|field| matches!(field.as_str(), "exists" | "kind"))
+}
+
 fn strict_quantity_comparison_json_fallback_allowed(
     user_text: &str,
     style: SizeComparisonAnswerStyle,
@@ -753,6 +837,57 @@ fn strict_quantity_comparison_json_fallback_allowed(
     style != SizeComparisonAnswerStyle::DeltaOnly
         && crate::intent_router::contract_test_hint_value(user_text, "selector_answer_style")
             .is_none()
+}
+
+fn compare_paths_existence_verdict_answer(
+    body: &str,
+    route: &crate::RouteResult,
+) -> Option<String> {
+    if !route_allows_compare_paths_required_metadata_projection(route) {
+        return None;
+    }
+    compare_paths_existence_verdict_answer_from_body(body)
+}
+
+fn compare_paths_existence_verdict_answer_from_body(body: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    if value.get("action").and_then(serde_json::Value::as_str) != Some("compare_paths") {
+        return None;
+    }
+    let field_value = value.get("field_value").filter(|value| value.is_object());
+    let same_path = field_value
+        .and_then(|item| item.get("same_path"))
+        .or_else(|| {
+            value
+                .get("comparison")
+                .and_then(|item| item.get("same_path"))
+        })
+        .and_then(serde_json::Value::as_bool)?;
+    let left = value.get("left")?;
+    let right = value.get("right")?;
+    let left_exists = field_value
+        .and_then(|item| item.get("left_exists"))
+        .or_else(|| left.get("exists"))
+        .and_then(serde_json::Value::as_bool)?;
+    let right_exists = field_value
+        .and_then(|item| item.get("right_exists"))
+        .or_else(|| right.get("exists"))
+        .and_then(serde_json::Value::as_bool)?;
+    let left_kind = left
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
+        .unwrap_or("-");
+    let right_kind = right
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
+        .unwrap_or("-");
+    Some(format!(
+        "same_path={same_path}\nleft_exists={left_exists}\nleft_kind={left_kind}\nright_exists={right_exists}\nright_kind={right_kind}"
+    ))
 }
 
 pub(super) fn replace_delivery_with_deterministic_quantity_comparison_answer(

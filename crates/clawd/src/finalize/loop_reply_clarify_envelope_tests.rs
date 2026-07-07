@@ -5,7 +5,7 @@ async fn finalize_loop_reply_keeps_clarify_machine_envelope_internal_by_default(
     let state = test_state();
     let task = claimed_task("task-deferred-clarify-envelope");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.needs_clarify = true;
     route.route_reason =
         "ordinary_clarify_deferred_to_agent_loop; clarify_reason_code:missing_read_target"
@@ -73,7 +73,7 @@ async fn finalize_loop_reply_attaches_requested_clarify_machine_envelope() {
     let state = test_state();
     let task = claimed_task("task-requested-clarify-envelope");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.needs_clarify = true;
     route.route_reason =
         "ordinary_clarify_deferred_to_agent_loop; clarify_reason_code:missing_read_target"
@@ -168,7 +168,7 @@ async fn finalize_loop_reply_does_not_attach_clarify_envelope_after_completed_ac
     let state = test_state();
     let task = claimed_task("task-deferred-clarify-act-complete");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.needs_clarify = true;
     route.route_reason =
         "ordinary_clarify_deferred_to_agent_loop; clarify_reason_code:missing_read_target"
@@ -243,7 +243,7 @@ async fn finalize_loop_reply_does_not_mark_answer_delivery_as_clarify_from_route
     let state = test_state();
     let task = claimed_task("task-route-marker-answer-delivery");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.needs_clarify = true;
     route.route_reason =
         "ordinary_clarify_deferred_to_agent_loop; clarify_reason_code:missing_read_target"

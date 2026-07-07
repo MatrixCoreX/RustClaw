@@ -64,6 +64,7 @@ use super::{
     should_return_missing_file_delivery_reply, should_try_observed_output_language_fallback,
     structured_json_values_from_output, successful_delivery_final_status,
     verify_summary_requires_resume_confirmation, visible_answer_is_machine_payload,
+    visible_machine_payload_should_remain_structured,
 };
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{
@@ -84,6 +85,19 @@ fn visible_answer_machine_payload_detection_is_structural() {
     ));
     assert!(!visible_answer_is_machine_payload(
         "configs/config.toml has one observed risk."
+    ));
+}
+
+#[test]
+fn config_guard_machine_payload_remains_structured_for_final_delivery() {
+    assert!(visible_machine_payload_should_remain_structured(
+        r#"{"message_key":"clawd.msg.config_edit.guard","path":"configs/config.toml","risk_count":2,"candidates":["tools.allow_sudo=true"]}"#
+    ));
+    assert!(visible_machine_payload_should_remain_structured(
+        r#"{"message_key":"clawd.msg.config_risk.summary","path":"configs/config.toml","count":1,"risks":["tools.allow_sudo=true"]}"#
+    ));
+    assert!(!visible_machine_payload_should_remain_structured(
+        r#"{"message_key":"clawd.msg.config_edit.guard","count":1}"#
     ));
 }
 
@@ -171,6 +185,9 @@ mod matrix_shape_tests;
 #[path = "loop_reply_machine_envelope_tests.rs"]
 mod machine_envelope_tests;
 
+#[path = "loop_reply_machine_kv_text_boundary_tests.rs"]
+mod machine_kv_text_boundary_tests;
+
 #[path = "loop_reply_clarify_envelope_tests.rs"]
 mod clarify_envelope_tests;
 
@@ -179,6 +196,9 @@ mod route_helpers_tests;
 
 #[path = "loop_reply_tail_read_tests.rs"]
 mod tail_read_tests;
+
+#[path = "loop_reply_weather_tests.rs"]
+mod weather_tests;
 
 #[test]
 fn requested_machine_kv_summary_replaces_raw_observed_delivery() {
@@ -225,6 +245,310 @@ fn requested_machine_kv_summary_replaces_raw_observed_delivery() {
             .as_ref()
             .and_then(|summary| summary.grounded_ok),
         Some(true)
+    );
+}
+
+#[test]
+fn requested_machine_kv_summary_preserves_richer_recent_scalar_delivery() {
+    let task = claimed_task("task-machine-kv-summary-recent-scalar-richer");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false},"field_value":{"left_exists":true,"right_exists":true,"same_path":false},"left":{"exists":true},"right":{"exists":true}}}"#,
+    ));
+    let mut delivery_messages =
+        vec!["same_path=false\nleft_exists=true\nright_exists=true".to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "return same_path and existence fields",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec!["same_path=false\nleft_exists=true\nright_exists=true".to_string()]
+    );
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("same_path=false\nleft_exists=true\nright_exists=true")
+    );
+}
+
+#[test]
+fn requested_machine_kv_summary_preserves_richer_required_evidence_delivery() {
+    let task = claimed_task("task-machine-kv-summary-required-evidence-richer");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"path_batch_facts","facts":[{"path":"service_notes.md","exists":true},{"path":"release_checklist.md","exists":true}]}}"#,
+    ));
+    let mut delivery_messages = vec![
+        "same_path=false\nservice_notes.md exists=true\nrelease_checklist.md exists=true"
+            .to_string(),
+    ];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPathSummary;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    let _ = replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "return same_path and both exist fields",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    );
+
+    assert_eq!(
+        delivery_messages,
+        vec![
+            "same_path=false\nservice_notes.md exists=true\nrelease_checklist.md exists=true"
+                .to_string()
+        ]
+    );
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("same_path=false\nservice_notes.md exists=true\nrelease_checklist.md exists=true")
+    );
+}
+
+#[test]
+fn requested_machine_kv_summary_preserves_publishable_summary_over_marker_only_summary() {
+    let task = claimed_task("task-machine-kv-marker-only-summary");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        "fs_basic planner_kind",
+    ));
+    let table = "| 检查项 | 结果 |\n|---|---|\n| README.md 是否存在 | 是 |\n| docs 文件名 | release_checklist.md、service_notes.md |\n| logs 直接子项数量 | 2 |\n| fs_basic 的 planner_kind | tool |";
+    let tagged_table = format!("markdown\n{table}");
+    let mut delivery_messages = vec![tagged_table.clone()];
+    loop_state.last_user_visible_respond = Some(tagged_table.clone());
+    loop_state.last_publishable_synthesis_output = Some(tagged_table);
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "检查 README.md、列出 docs 文件名、统计 logs 直接子项数量，并读取 fs_basic 的 planner_kind，最后用表格回答。",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![table.to_string()]);
+    assert_eq!(loop_state.last_user_visible_respond.as_deref(), Some(table));
+}
+
+#[test]
+fn requested_machine_kv_summary_preserves_publishable_command_summary() {
+    let task = claimed_task("task-machine-kv-summary-command-summary");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        r#"{"extra":{"action":"run_cmd","command":"pwd","command_output":"/home/guagua/rustclaw"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "process_basic",
+        r#"{"extra":{"action":"port_list","port":8787,"process":"clawd","pid":892143}}"#,
+    ));
+    let full_answer = "The working directory is /home/guagua/rustclaw. A clawd-related process is running, and port 8787 is visible.";
+    let mut delivery_messages = vec![full_answer.to_string()];
+    loop_state.last_user_visible_respond = Some(full_answer.to_string());
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = OutputResponseShape::Scalar;
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        original_user_request: Some(
+            "Run pwd, inspect the local port, and answer with the working directory and whether a port is visible."
+                .to_string(),
+        ),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Run pwd, inspect the local port, and answer with the working directory and whether a port is visible.",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![full_answer.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(full_answer)
+    );
+    assert_ne!(delivery_messages, vec!["port=8787".to_string()]);
+}
+
+#[test]
+fn requested_machine_kv_summary_preserves_web_search_listing_delivery() {
+    let task = claimed_task("task-machine-kv-summary-web-search-listing");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "web_search_extract",
+        r#"{"extra":{"action":"search_extract","top_k":3,"candidates":[{"title":"tdejager/tutorial_bot","source":"github.com","url":"https://github.com/tdejager/tutorial_bot"},{"title":"volodymyrd/rust-async-tutorial","source":"github.com","url":"https://github.com/volodymyrd/rust-async-tutorial"}]}}"#,
+    ));
+    let answer = "tdejager/tutorial_bot\nvolodymyrd/rust-async-tutorial".to_string();
+    let mut delivery_messages = vec![answer.clone()];
+    loop_state.last_user_visible_respond = Some(answer.clone());
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent = "capability_ref=web.search_results top_k=3".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Search the web for Rust async tutorial top_k=3 and return titles only.",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![answer.clone()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(answer.as_str())
+    );
+}
+
+#[test]
+fn requested_machine_kv_summary_restores_service_status_terminal_delivery() {
+    let task = claimed_task("task-machine-kv-summary-service-status-terminal");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "docker_basic",
+        r#"{"extra":{"action":"version","available":false,"command_succeeded":false,"output":"docker unavailable: No such file or directory (os error 2)"},"text":"docker unavailable: No such file or directory (os error 2)"}"#,
+    ));
+    let terminal = "Docker version (read-only check)\n- status: unavailable\n- source: docker_basic (action=version)\n- command_succeeded: false\n- field_value: unavailable";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", terminal));
+    let mut delivery_messages = vec!["docker.version".to_string()];
+    loop_state.last_user_visible_respond = Some("docker.version".to_string());
+    let mut route = free_route_result();
+    route.resolved_intent = "docker.version".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    route
+        .output_contract
+        .self_extension
+        .structured_field_selector = Some("docker.version".to_string());
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Check Docker version read-only.",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![terminal.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(terminal)
+    );
+}
+
+#[test]
+fn requested_machine_kv_summary_preserves_colon_field_value_delivery() {
+    let task = claimed_task("task-machine-kv-summary-colon-fields");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","excerpt":"1|Archive fixtures for NL tests.\n2|This subdirectory exists so the docs directory has a nested child for directory-count and names-only prompts.","path":"/tmp/README.txt"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|Archive fixtures for NL tests.\\n2|This subdirectory exists so the docs directory has a nested child for directory-count and names-only prompts.\",\"path\":\"/tmp/README.txt\"}"}"#,
+    ));
+    let answer =
+        "text_excerpt: \"Archive fixtures for NL tests.\"\ndetected_format: plain text (.txt)";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", answer));
+    loop_state.delivery_messages.push(answer.to_string());
+    loop_state.last_user_visible_respond = Some(answer.to_string());
+    let mut delivery_messages = vec![answer.to_string()];
+    let mut route = free_route_result();
+    route.resolved_intent = "text_excerpt detected_format".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return text_excerpt and detected_format.",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![answer.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(answer)
     );
 }
 
@@ -351,6 +675,90 @@ fn requested_machine_kv_summary_preserves_full_structured_contract_json() {
         &mut delivery_messages,
     ));
     assert_eq!(delivery_messages, vec![contract]);
+}
+
+#[test]
+fn requested_machine_kv_summary_preserves_config_guard_machine_payload() {
+    let task = claimed_task("task-machine-kv-config-guard");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let guard = serde_json::json!({
+        "message_key": "clawd.msg.config_edit.guard",
+        "reason_code": "config_edit_guard_risk_found",
+        "path": "/home/guagua/rustclaw/configs/config.toml",
+        "count": 2,
+        "risk_count": 2,
+        "candidates": [
+            "tools.allow_sudo=true",
+            "tools.allow_path_outside_workspace=true"
+        ],
+        "enabled": false
+    })
+    .to_string();
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "config_basic", &guard));
+    loop_state.delivery_messages.push(guard.clone());
+    loop_state.last_user_visible_respond = Some(guard.clone());
+    let mut delivery_messages = vec![guard.clone()];
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "检查 configs/config.toml 是否有明显空字段或禁用技能数量，不要输出任何 secret、token、key 的值。",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+    assert_eq!(delivery_messages, vec![guard]);
+}
+
+#[test]
+fn requested_machine_kv_summary_restores_config_guard_payload_for_summary_route() {
+    let task = claimed_task("task-machine-kv-config-guard-restore");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    let guard = serde_json::json!({
+        "message_key": "clawd.msg.config_edit.guard",
+        "reason_code": "config_edit_guard_risk_found",
+        "path": "/home/guagua/rustclaw/configs/config.toml",
+        "risk_count": 2,
+        "candidates": [
+            "tools.allow_sudo=true",
+            "tools.allow_path_outside_workspace=true"
+        ],
+        "risks": [
+            "tools.allow_sudo=true",
+            "tools.allow_path_outside_workspace=true"
+        ]
+    })
+    .to_string();
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "config_basic", &guard));
+    let mut delivery_messages = vec!["count=2".to_string()];
+    let mut finalizer_summary = None;
+    let mut route = free_route_result();
+    route.resolved_intent =
+        "Inspect configs/config.toml and report disabled skill count plus empty fields."
+            .to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "检查 configs/config.toml 是否有明显空字段或禁用技能数量，不要输出任何 secret、token、key 的值。",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![guard.clone()]);
+    assert_eq!(loop_state.delivery_messages, vec![guard]);
 }
 
 struct TempDirGuard {
@@ -592,7 +1000,7 @@ async fn finalize_loop_reply_attaches_requested_control_machine_envelope() {
     let state = test_state();
     let task = claimed_task("task-control-envelope");
     let mut route = scalar_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.semantic_kind = OutputSemanticKind::DocumentHeading;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         route_result: Some(route),

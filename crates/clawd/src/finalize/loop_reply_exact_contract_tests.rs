@@ -301,6 +301,53 @@ fn archive_pack_capability_ref_prefers_observed_archive_path_without_semantic_ki
 }
 
 #[test]
+fn archive_pack_exact_contract_keeps_later_terminal_respond() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "archive_basic",
+        r#"{"extra":{"action":"pack","archive":"/home/guagua/rustclaw/tmp/nl_archive_case.zip","format":"zip","output":"exit=0\nupdating: scripts/skill_calls/"},"text":"archive_path=/home/guagua/rustclaw/tmp/nl_archive_case.zip\nexit=0"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "respond",
+        "needs_user_confirmation",
+    ));
+    loop_state.last_user_visible_respond = Some("needs_user_confirmation".to_string());
+    let mut delivery_messages = vec!["needs_user_confirmation".to_string()];
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/skill_calls | tmp/nl_archive_case.zip".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    prefer_observed_answer_for_exact_contract(
+        &state,
+        "task-archive-pack-terminal-respond",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut delivery_messages,
+        &mut finalizer_summary,
+    );
+
+    assert_eq!(delivery_messages, vec!["needs_user_confirmation"]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("needs_user_confirmation")
+    );
+}
+
+#[test]
 fn exact_contract_keeps_planned_subset_over_raw_observed_file_paths() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(3);

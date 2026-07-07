@@ -65,7 +65,7 @@ fn direct_structured_observed_answer_defers_implicit_metadata_path_facts() {
         r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"tmp/test_bundle.zip","resolved_path":"/tmp/test_bundle.zip","size_bytes":272,"modified_ts":1776352013},"path":"/tmp/test_bundle.zip"}],"include_missing":true}"#,
     ));
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
@@ -107,7 +107,7 @@ fn direct_db_basic_observed_answer_uses_latest_rows_after_synthesis_failure() {
     ));
 
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -148,7 +148,7 @@ fn direct_db_basic_observed_answer_counts_rows_for_scalar_count_contract() {
     ));
 
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
@@ -192,7 +192,7 @@ fn direct_structured_observed_answer_defers_when_plan_requested_synthesis() {
             verify_result: None,
         });
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/tmp/README.md".to_string();
@@ -213,7 +213,7 @@ fn direct_structured_observed_answer_keeps_passthrough_without_synthesis_plan() 
         r#"{"action":"read_range","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","excerpt":"1|[app]\n2|name = \"fixture\""}"#,
     ));
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/tmp/config.toml".to_string();
