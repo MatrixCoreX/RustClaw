@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use url::Url;
 
+const SKILL_NAME: &str = "browser_web";
+
 #[derive(Debug, Deserialize)]
 struct Request {
     request_id: String,
@@ -116,7 +118,7 @@ fn main() -> anyhow::Result<()> {
                 text: String::new(),
                 error_text: Some(format!("invalid input: {err}")),
                 buttons: None,
-                extra: None,
+                extra: Some(error_extra("invalid_input")),
             },
         };
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
@@ -141,7 +143,7 @@ fn handle(req: Request) -> Response {
                 text: String::new(),
                 error_text: Some("args must be object".to_string()),
                 buttons: None,
-                extra: None,
+                extra: Some(error_extra("invalid_input")),
             };
         }
     };
@@ -160,7 +162,7 @@ fn handle(req: Request) -> Response {
                 text: String::new(),
                 error_text: Some(err),
                 buttons: None,
-                extra: None,
+                extra: Some(error_extra("invalid_input")),
             };
         }
     };
@@ -207,9 +209,20 @@ fn handle(req: Request) -> Response {
             text: String::new(),
             error_text: Some(err),
             buttons: None,
-            extra: None,
+            extra: Some(error_extra("execution_failed")),
         },
     }
+}
+
+fn error_extra(error_kind: &str) -> Value {
+    json!({
+        "schema_version": 1,
+        "source_skill": SKILL_NAME,
+        "status": "error",
+        "error_kind": error_kind,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "retryable": false,
+    })
 }
 
 fn browser_web_success_extra(text: &str) -> Option<Value> {

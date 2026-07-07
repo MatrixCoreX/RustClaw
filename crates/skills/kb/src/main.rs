@@ -14,6 +14,7 @@ const DEFAULT_CHUNK_SIZE: usize = 1200;
 const DEFAULT_CHUNK_OVERLAP: usize = 180;
 const DEFAULT_TOP_K: usize = 5;
 const DEFAULT_MAX_FILE_SIZE: u64 = 2 * 1024 * 1024;
+const SKILL_NAME: &str = "kb";
 
 #[derive(Debug, Deserialize)]
 struct SkillRequest {
@@ -144,7 +145,7 @@ fn main() -> Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
-                extra: None,
+                extra: Some(error_extra("invalid_input")),
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -183,10 +184,21 @@ fn execute_request(req: SkillRequest) -> SkillResponse {
             request_id: req.request_id,
             status: "error".to_string(),
             text: String::new(),
-            extra: None,
+            extra: Some(error_extra("execution_failed")),
             error_text: Some(err.to_string()),
         },
     }
+}
+
+fn error_extra(error_kind: &str) -> Value {
+    json!({
+        "schema_version": 1,
+        "source_skill": SKILL_NAME,
+        "status": "error",
+        "error_kind": error_kind,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "retryable": false,
+    })
 }
 
 fn build_runtime_context(req: &SkillRequest) -> Result<KbRuntime> {
