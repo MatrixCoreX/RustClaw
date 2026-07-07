@@ -17,8 +17,8 @@ pub(crate) use output_transform::{
 #[path = "observed_output_success.rs"]
 mod output_success;
 pub(crate) use output_success::{
-    extract_latest_generic_successful_output, normalized_success_body_for_direct_answer,
-    normalized_success_body_for_observed_output, GenericObservedOutput,
+    extract_latest_generic_successful_output, normalized_success_body_for_observed_output,
+    GenericObservedOutput,
 };
 use output_success::{
     extract_latest_generic_successful_output_with_state, has_successful_step_for_skill,

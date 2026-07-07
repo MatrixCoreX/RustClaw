@@ -361,7 +361,7 @@ pub(super) fn latest_successful_observation_body(loop_state: &LoopState) -> Opti
         })
         .filter(|step| step.is_ok())
         .and_then(|step| step.output.as_deref())
-        .map(crate::agent_engine::observed_output::normalized_success_body_for_direct_answer)
+        .map(crate::agent_engine::observed_output::normalized_success_body_for_observed_output)
 }
 
 pub(super) fn latest_successful_raw_observation_body(loop_state: &LoopState) -> Option<&str> {

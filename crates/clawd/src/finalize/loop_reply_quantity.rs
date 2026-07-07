@@ -561,7 +561,7 @@ fn count_inventory_size_answer_with_shape(
 }
 
 fn output_has_count_inventory_total(output: &str) -> bool {
-    let output = crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(
+    let output = crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
         output.trim(),
     );
     let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
@@ -703,7 +703,7 @@ pub(super) fn direct_quantity_comparison_from_compare_paths(
                 }
                 let output = step.output.as_deref()?;
                 let output =
-                    crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(
+                    crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
                         output,
                     );
                 if let Some(answer) = compare_paths_existence_verdict_answer(&output, route) {
@@ -782,7 +782,7 @@ pub(super) fn direct_compare_paths_required_metadata_from_observed_output(
             }
             let output = step.output.as_deref()?;
             let output =
-                crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(
+                crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
                     output,
                 );
             compare_paths_existence_verdict_answer_from_body(&output)

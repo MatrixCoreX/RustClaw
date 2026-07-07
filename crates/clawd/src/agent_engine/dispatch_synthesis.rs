@@ -63,7 +63,7 @@ pub(super) fn synthesize_route_prefers_model_language_observed_status(
 }
 
 fn output_has_count_inventory_total(output: &str) -> bool {
-    let output = crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(
+    let output = crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
         output.trim(),
     );
     let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
