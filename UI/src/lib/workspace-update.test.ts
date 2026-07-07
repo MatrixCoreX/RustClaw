@@ -57,6 +57,16 @@ test("builds failed and canceled notices", () => {
   assert.equal(canceled.notice?.title, "编译已停止。");
 });
 
+test("explains oversized git path list failures", () => {
+  const view = buildWorkspaceUpdateView(
+    status({ status: "failed", error: "git path list output is too large to process safely" }),
+    "zh",
+  );
+  assert.equal(view.notice?.tone, "error");
+  assert.equal(view.notice?.title, "Git 文件列表过大，无法安全处理");
+  assert.match(view.notice?.detail ?? "", /未跟踪文件太多/);
+});
+
 test("recognizes remote up-to-date status", () => {
   const view = buildWorkspaceUpdateView(
     status({ status: "idle", old_commit: "abc", remote_commit: "abc" }),

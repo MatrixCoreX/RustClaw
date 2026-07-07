@@ -135,6 +135,35 @@ function workspaceUpdateLogPreview(status: WorkspaceUpdateStatus | null | undefi
     .join("\n\n");
 }
 
+function workspaceUpdateErrorNotice(
+  status: WorkspaceUpdateStatus,
+  lang: UiLanguage,
+): { title: string; detail: string } {
+  const error = status.error?.trim() || "";
+  if (error === "git path list output is too large to process safely") {
+    return {
+      title: copy(lang, "Git 文件列表过大，无法安全处理", "Git path list is too large to process safely"),
+      detail: copy(
+        lang,
+        "本地变更或未跟踪文件太多，自动更新无法安全判断哪些路径可以覆盖。请先清理无关构建产物、临时文件或手动处理 Git 状态，然后再重试。",
+        "There are too many local changes or untracked files for the updater to safely decide which paths can be overwritten. Clean unrelated build artifacts or temporary files, or resolve the Git state manually, then retry.",
+      ),
+    };
+  }
+  return {
+    title: error || copy(lang, "更新失败", "Update failed"),
+    detail: copy(
+      lang,
+      status.mode === "release_deploy"
+        ? "请查看下方日志摘要；修复网络、GitHub Release 或写入权限问题后再重试。"
+        : "请查看下方日志摘要；修复 Git、网络或编译问题后再重试。",
+      status.mode === "release_deploy"
+        ? "Check the log summary below, then fix network, GitHub Release, or write-permission issues and retry."
+        : "Check the log summary below, then fix Git, network, or build issues and retry.",
+    ),
+  };
+}
+
 function workspaceUpdateNotice(
   status: WorkspaceUpdateStatus | null | undefined,
   displayStatus: string | undefined,
@@ -154,18 +183,11 @@ function workspaceUpdateNotice(
     };
   }
   if (status.status === "failed" || status.error) {
+    const errorNotice = workspaceUpdateErrorNotice(status, lang);
     return {
       tone: "error",
-      title: status.error || copy(lang, "更新失败", "Update failed"),
-      detail: copy(
-        lang,
-        status.mode === "release_deploy"
-          ? "请查看下方日志摘要；修复网络、GitHub Release 或写入权限问题后再重试。"
-          : "请查看下方日志摘要；修复 Git、网络或编译问题后再重试。",
-        status.mode === "release_deploy"
-          ? "Check the log summary below, then fix network, GitHub Release, or write-permission issues and retry."
-          : "Check the log summary below, then fix Git, network, or build issues and retry.",
-      ),
+      title: errorNotice.title,
+      detail: errorNotice.detail,
     };
   }
   if (restarting) {

@@ -245,7 +245,11 @@ fn replay_diff_summary_reports_machine_field_changes() {
         "task": {
             "boundary_context": {
                 "route_gate_kind": "execute",
-                "semantic_route_authority": "agent_loop_default"
+                "decision_envelope": {
+                    "semantic_authority": "planner_loop",
+                    "decision": "call_capability",
+                    "capability_ref": "fs.read"
+                }
             },
             "result_json": {
                 "task_journal": {
@@ -292,7 +296,11 @@ fn replay_diff_summary_reports_machine_field_changes() {
         "task": {
             "boundary_context": {
                 "route_gate_kind": "execute",
-                "semantic_route_authority": "boundary_fallback"
+                "decision_envelope": {
+                    "semantic_authority": "planner_loop",
+                    "decision": "clarify",
+                    "capability_ref": "clarify"
+                }
             },
             "result_json": {
                 "task_journal": {
@@ -352,8 +360,8 @@ fn replay_diff_summary_reports_machine_field_changes() {
     assert_eq!(diff["left"]["artifact_ref_count"], 1);
     assert_eq!(diff["right"]["artifact_ref_count"], 0);
     assert_eq!(
-        diff["left"]["route_fingerprint"][0]["semantic_route_authority"],
-        "agent_loop_default"
+        diff["left"]["route_fingerprint"][0]["decision_envelope"]["decision"],
+        "call_capability"
     );
     assert_eq!(
         diff["right"]["action_sequence"][0]["error_code"],
