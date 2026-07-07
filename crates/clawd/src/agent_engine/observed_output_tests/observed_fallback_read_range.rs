@@ -20,14 +20,14 @@ fn observed_fallback_prompt_renders_language_and_response_style_hints() {
                 ("__REQUEST_LANGUAGE_HINT__", "mixed"),
                 (
                     "__RESPONSE_STYLE_HINT__",
-                    "Return exactly one sentence unless the current user request explicitly asks for another exact sentence count. If the request has multiple deliverables, include all of them in that one sentence.",
+                    "style_policy=one_sentence include_all_deliverables=true",
                 ),
             ],
         );
     assert!(prompt.contains("Request language hint:\nmixed"));
     assert!(prompt.contains("Response style hint:"));
-    assert!(prompt.contains("Return exactly one sentence"));
-    assert!(prompt.contains("include all of them in that one sentence"));
+    assert!(prompt.contains("style_policy=one_sentence"));
+    assert!(prompt.contains("include_all_deliverables=true"));
     assert!(prompt.contains("Do not collapse multi-dimensional structured evidence"));
     assert!(prompt.contains("combine the deliverables into one grammatical sentence"));
     assert!(prompt.contains("final_answer_shape` is `status_with_source"));

@@ -264,9 +264,9 @@ fn directory_purpose_summary_style_hint_uses_listing_evidence() {
 
     let hint = observed_response_style_hint(Some(&agent_run_context));
 
-    assert!(hint.contains("listing-grounded directory purpose summary"));
-    assert!(hint.contains("observed entry names"));
-    assert!(hint.contains("selected entries plus the purpose/role summary"));
+    assert!(hint.contains("style_policy=directory_purpose_summary"));
+    assert!(hint.contains("evidence=listing_metadata"));
+    assert!(hint.contains("include=selected_entries,purpose_summary"));
 }
 
 #[test]
@@ -305,7 +305,7 @@ fn excerpt_kind_judgment_style_hint_preserves_listing_and_excerpt_deliverables()
 
     let hint = observed_response_style_hint(Some(&agent_run_context));
 
-    assert!(hint.contains("observed listing names or candidates"));
-    assert!(hint.contains("excerpt-based judgment"));
-    assert!(hint.contains("one compact sentence"));
+    assert!(hint.contains("style_policy=excerpt_kind_judgment"));
+    assert!(hint.contains("include=candidates,judgment"));
+    assert!(hint.contains("one_sentence=combine_deliverables"));
 }

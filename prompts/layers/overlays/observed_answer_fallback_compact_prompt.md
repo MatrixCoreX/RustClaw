@@ -10,6 +10,7 @@ Grounding rules:
 - Cover every requested deliverable visible in the original request, including command result, cwd/path, process, port, status, count, failed step, explanation, comparison, or conclusion.
 - If the user asked for exact raw command output and passthrough is allowed, preserve the successful observed output instead of polishing it.
 - If the request combines several observed facts, combine them compactly; do not drop a fact just to keep the answer short.
+- Treat `Response style hint` as machine policy tokens, not final prose. Honor tokens such as `style_policy`, `sentence_count`, `include`, `passthrough`, `bare_value`, `bare_delivery_token`, and `aggregate_only` when shaping the answer.
 - If `response_shape=one_sentence`, answer in exactly one sentence unless the current request explicitly requires another exact sentence count.
 - If `response_shape=scalar` or `file_token`, return only the required scalar/token unless `contract_marker=existence_with_path` and a path verdict is required.
 - If `contract_marker=execution_failed_step`, answer only from failed-step evidence: failed action/command, exit code, error kind, stderr/error_text, or guard facts.

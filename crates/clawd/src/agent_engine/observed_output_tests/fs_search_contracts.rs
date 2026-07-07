@@ -1019,46 +1019,58 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
         route_result: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
-    assert!(observed_response_style_hint(Some(&agent_run_context)).contains("exactly one sentence"));
+    assert!(observed_response_style_hint(Some(&agent_run_context))
+        .contains("style_policy=evidence_synthesis"));
     assert!(
-        observed_response_style_hint(Some(&agent_run_context)).contains(
-            "If the request has multiple deliverables, include all of them in that one sentence"
-        )
+        observed_response_style_hint(Some(&agent_run_context))
+            .contains("response_shape=one_sentence")
     );
+    assert!(observed_response_style_hint(Some(&agent_run_context))
+        .contains("include_all_deliverables=true"));
 
     route_result.output_contract.exact_sentence_count = Some(3);
     agent_run_context.route_result = Some(route_result.clone());
-    assert!(observed_response_style_hint(Some(&agent_run_context)).contains("exactly 3 sentences"));
+    assert!(observed_response_style_hint(Some(&agent_run_context))
+        .contains("sentence_count=3"));
     route_result.output_contract.exact_sentence_count = None;
 
     route_result.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route_result.output_contract.response_shape = OutputResponseShape::Strict;
     route_result.output_contract.exact_sentence_count = Some(1);
     agent_run_context.route_result = Some(route_result.clone());
-    assert!(observed_response_style_hint(Some(&agent_run_context)).contains("key=value"));
+    assert!(observed_response_style_hint(Some(&agent_run_context))
+        .contains("style_policy=exact_observed_value"));
+    assert!(observed_response_style_hint(Some(&agent_run_context))
+        .contains("requested_format=preserve"));
     route_result.output_contract.exact_sentence_count = None;
     route_result.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
 
     route_result.output_contract.response_shape = OutputResponseShape::Scalar;
     agent_run_context.route_result = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("only the final scalar value"));
+        .contains("style_policy=scalar"));
+    assert!(observed_response_style_hint(Some(&agent_run_context)).contains("bare_value=true"));
 
     route_result.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
     agent_run_context.route_result = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("overrides response_shape=scalar"));
+        .contains("style_policy=existence_with_path"));
+    assert!(observed_response_style_hint(Some(&agent_run_context))
+        .contains("scalar_override=path_required"));
 
     route_result.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route_result.output_contract.response_shape = OutputResponseShape::OneSentence;
     agent_run_context.route_result = Some(route_result.clone());
     assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("Do not collapse component counts"));
+        .contains("style_policy=scalar_count"));
+    assert!(observed_response_style_hint(Some(&agent_run_context))
+        .contains("aggregate_only=explicit_request_only"));
 
     route_result.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route_result.output_contract.response_shape = OutputResponseShape::Free;
     agent_run_context.route_result = Some(route_result.clone());
-    assert!(observed_response_style_hint(Some(&agent_run_context)).contains("raw observed output"));
+    assert!(observed_response_style_hint(Some(&agent_run_context))
+        .contains("passthrough=disallowed"));
     assert!(route_disallows_direct_observation_passthrough(
         agent_run_context.route_result.as_ref().unwrap()
     ));
@@ -1078,7 +1090,10 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
 
     route_result.output_contract.response_shape = OutputResponseShape::FileToken;
     agent_run_context.route_result = Some(route_result);
-    assert!(observed_response_style_hint(Some(&agent_run_context)).contains("delivery token"));
+    assert!(observed_response_style_hint(Some(&agent_run_context))
+        .contains("style_policy=file_token"));
+    assert!(observed_response_style_hint(Some(&agent_run_context))
+        .contains("bare_delivery_token=true"));
 }
 
 #[test]
@@ -1092,7 +1107,8 @@ fn chat_wrapped_free_unclassified_contract_allows_finalizer_passthrough() {
     };
     let contract = observed_contract_json(Some(&agent_run_context));
     assert!(contract.contains(r#""direct_observation_passthrough_allowed":true"#));
-    assert!(observed_response_style_hint(Some(&agent_run_context)).contains("short direct answer"));
+    assert!(observed_response_style_hint(Some(&agent_run_context))
+        .contains("style_policy=compact_direct"));
 }
 
 #[test]
@@ -1226,7 +1242,7 @@ fn chat_wrapped_one_sentence_unclassified_contract_requires_synthesized_delivery
     let contract = observed_contract_json(Some(&agent_run_context));
     assert!(contract.contains(r#""direct_observation_passthrough_allowed":false"#));
     assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("Do not answer by copying only the raw observed output"));
+        .contains("passthrough=disallowed"));
 }
 
 #[test]
@@ -1247,7 +1263,9 @@ fn quantity_comparison_marker_embedded_in_reason_requires_synthesis() {
         ..AgentRunContext::default()
     };
     assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("include the requested concise model-language synthesis"));
+        .contains("synthesis=quantity_comparison"));
+    assert!(observed_response_style_hint(Some(&agent_run_context))
+        .contains("include=requested_model_language_synthesis"));
 }
 
 #[test]
@@ -1263,7 +1281,7 @@ fn chat_wrapped_strict_exact_sentence_contract_requires_synthesized_delivery() {
     let contract = observed_contract_json(Some(&agent_run_context));
     assert!(contract.contains(r#""direct_observation_passthrough_allowed":false"#));
     assert!(observed_response_style_hint(Some(&agent_run_context))
-        .contains("Do not answer by copying only the raw observed output"));
+        .contains("passthrough=disallowed"));
 }
 
 #[test]
