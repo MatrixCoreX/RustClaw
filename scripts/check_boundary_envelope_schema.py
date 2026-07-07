@@ -18,6 +18,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCHEMA = ROOT / "prompts" / "schemas" / "boundary_envelope.schema.json"
+DEFAULT_INTENT_NORMALIZER_SCHEMA = (
+    ROOT / "prompts" / "schemas" / "intent_normalizer.schema.json"
+)
 
 EXPECTED_FIELDS: frozenset[str] = frozenset(
     {
@@ -100,6 +103,13 @@ def schema_type_set(field: dict[str, Any]) -> set[str]:
     return set()
 
 
+def prefixed(findings: list[Finding], prefix: str) -> list[Finding]:
+    return [
+        dataclasses.replace(finding, location=f"{prefix}.{finding.location}")
+        for finding in findings
+    ]
+
+
 def scan_schema(schema: dict[str, Any], path: Path) -> list[Finding]:
     rel_path = rel(path)
     findings: list[Finding] = []
@@ -113,6 +123,17 @@ def scan_schema(schema: dict[str, Any], path: Path) -> list[Finding]:
                 "additionalProperties",
                 "additional_properties_not_false",
                 "BoundaryEnvelope must be closed to known machine fields",
+            )
+        )
+
+    schema_version = field_schema(schema, "schema_version")
+    if schema_type_set(schema_version) != {"integer"} or schema_version.get("const") != 1:
+        findings.append(
+            Finding(
+                rel_path,
+                "properties.schema_version",
+                "schema_version_not_const_one",
+                "schema_version must be integer const=1",
             )
         )
 
@@ -152,6 +173,46 @@ def scan_schema(schema: dict[str, Any], path: Path) -> list[Finding]:
 
 def scan_file(path: Path) -> list[Finding]:
     return scan_schema(load_schema(path), path)
+
+
+def scan_intent_normalizer_embedded_boundary(path: Path) -> list[Finding]:
+    return scan_intent_normalizer_embedded_boundary_from_schema(load_schema(path), path)
+
+
+def scan_intent_normalizer_embedded_boundary_from_schema(
+    schema: dict[str, Any],
+    path: Path,
+) -> list[Finding]:
+    rel_path = rel(path)
+    boundary_schema = schema.get("properties", {}).get("boundary_envelope")
+    if not isinstance(boundary_schema, dict):
+        return [
+            Finding(
+                rel_path,
+                "properties.boundary_envelope",
+                "embedded_boundary_missing",
+                "intent normalizer schema must embed the BoundaryEnvelope contract",
+            )
+        ]
+
+    findings: list[Finding] = []
+    type_set = schema_type_set(boundary_schema)
+    if "object" not in type_set or not type_set.issubset({"object", "null"}):
+        findings.append(
+            Finding(
+                rel_path,
+                "properties.boundary_envelope.type",
+                "embedded_boundary_not_nullable_object",
+                "boundary_envelope must be object or null for transitional compatibility",
+            )
+        )
+    findings.extend(
+        prefixed(
+            scan_schema(boundary_schema, path),
+            "properties.boundary_envelope",
+        )
+    )
+    return findings
 
 
 def print_report(findings: list[Finding]) -> int:
@@ -203,6 +264,44 @@ def run_self_test() -> int:
     }
     assert any(item.kind == "raw_chars_not_integer" for item in scan_schema(bad_raw_chars, dummy_path))
 
+    bad_schema_version = {
+        **good_schema,
+        "properties": {**good_schema["properties"], "schema_version": {"type": "integer"}},
+    }
+    assert any(
+        item.kind == "schema_version_not_const_one"
+        for item in scan_schema(bad_schema_version, dummy_path)
+    )
+
+    good_intent_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "boundary_envelope": {
+                **good_schema,
+                "type": ["object", "null"],
+            }
+        },
+    }
+    intent_path = DEFAULT_INTENT_NORMALIZER_SCHEMA
+    assert scan_intent_normalizer_embedded_boundary_from_schema(
+        good_intent_schema,
+        intent_path,
+    ) == []
+
+    bad_intent_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"boundary_envelope": {"type": ["object", "null"]}},
+    }
+    assert any(
+        item.kind == "missing_field"
+        for item in scan_intent_normalizer_embedded_boundary_from_schema(
+            bad_intent_schema,
+            intent_path,
+        )
+    )
+
     print("SELF_TEST_OK")
     return 0
 
@@ -211,10 +310,23 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA)
+    parser.add_argument(
+        "--intent-normalizer-schema",
+        type=Path,
+        default=DEFAULT_INTENT_NORMALIZER_SCHEMA,
+    )
+    parser.add_argument(
+        "--target-only",
+        action="store_true",
+        help="Only check boundary_envelope.schema.json, not the live normalizer embedding.",
+    )
     args = parser.parse_args(argv)
     if args.self_test:
         return run_self_test()
-    return print_report(scan_file(args.schema))
+    findings = scan_file(args.schema)
+    if not args.target_only:
+        findings.extend(scan_intent_normalizer_embedded_boundary(args.intent_normalizer_schema))
+    return print_report(findings)
 
 
 if __name__ == "__main__":
