@@ -768,7 +768,7 @@ pub(super) fn filesystem_find_route_prefers_structured_tool(
     route_result.is_some_and(|route| {
         !route.output_contract.delivery_required
             && matches!(
-                route.output_contract.semantic_kind,
+                route.effective_output_contract_semantic_kind(),
                 crate::OutputSemanticKind::DirectoryNames
                     | crate::OutputSemanticKind::FileNames
                     | crate::OutputSemanticKind::FilePaths
@@ -1178,6 +1178,7 @@ pub(super) fn action_is_path_metadata_facts_for_pair(
 
 pub(super) fn rewrite_archive_pack_plan_to_archive_basic(
     route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
     preserve_explicit_command: bool,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
@@ -1190,6 +1191,9 @@ pub(super) fn rewrite_archive_pack_plan_to_archive_basic(
     let Some((source, archive)) = archive_pack_pair_for_route(route) else {
         return actions;
     };
+    if archive_pack_observed_for_route(loop_state, &archive) {
+        return actions;
+    }
     if actions.iter().any(action_is_archive_basic_pack) {
         return actions;
     }
@@ -1241,6 +1245,47 @@ pub(super) fn rewrite_archive_pack_plan_to_archive_basic(
     }
     info!("plan_rewrite_archive_pack_plan_to_archive_basic");
     rewritten
+}
+
+fn archive_pack_observed_for_route(loop_state: &LoopState, archive: &str) -> bool {
+    loop_state.executed_step_results.iter().rev().any(|step| {
+        if !step.is_ok() || step.skill != "archive_basic" {
+            return false;
+        }
+        let Some(output) = step.output.as_deref() else {
+            return false;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(output.trim()) else {
+            return false;
+        };
+        let action = value
+            .get("action")
+            .or_else(|| value.get("extra").and_then(|extra| extra.get("action")))
+            .and_then(Value::as_str)
+            .map(str::trim);
+        if action != Some("pack") {
+            return false;
+        }
+        ["archive", "archive_path", "path"].iter().any(|key| {
+            value
+                .get(*key)
+                .or_else(|| value.get("extra").and_then(|extra| extra.get(*key)))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|observed| archive_paths_match(observed, archive))
+        })
+    })
+}
+
+fn archive_paths_match(observed: &str, expected: &str) -> bool {
+    let observed = observed.trim().replace('\\', "/");
+    let expected = expected.trim().replace('\\', "/");
+    if observed.is_empty() || expected.is_empty() {
+        return false;
+    }
+    observed == expected
+        || observed.ends_with(&format!("/{expected}"))
+        || expected.ends_with(&format!("/{observed}"))
 }
 
 /// 检测 `respond.content` 是否是裸的 `{{last_output}}` / `{{last_output.xxx}}` /
@@ -1356,7 +1401,7 @@ pub(super) fn route_should_prefer_observed_terminal_synthesis(route: Option<&Rou
     let Some(route) = route else {
         return false;
     };
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus {
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus) {
         return false;
     }
     route.output_contract.requires_content_evidence

@@ -446,15 +446,15 @@ db_path = "data/test_contract.sqlite"
     route.resolved_intent =
         "Return paths.logs_dir and paths.db_path from app_config.toml.".to_string();
     assert_eq!(
-            structured_field_selectors(
-                &route,
-                "scripts/nl_tests/fixtures/device_local/configs/app_config.toml 의 paths.logs_dir 와 paths.db_path 값만 알려줘.",
-                true,
-                None,
-                Some(&config_path),
-            ),
-            vec!["paths.logs_dir".to_string(), "paths.db_path".to_string()]
-        );
+        structured_field_selectors(
+            &route,
+            "scripts/nl_tests/fixtures/device_local/configs/app_config.toml 의 paths.logs_dir 와 paths.db_path 값만 알려줘.",
+            true,
+            None,
+            Some(&config_path),
+        ),
+        vec!["paths.logs_dir".to_string(), "paths.db_path".to_string()]
+    );
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -471,13 +471,13 @@ db_path = "data/test_contract.sqlite"
     ];
 
     let normalized = normalize_planned_actions(
-            &state,
-            Some(&route),
-            &LoopState::new(1),
-            "scripts/nl_tests/fixtures/device_local/configs/app_config.toml 의 paths.logs_dir 와 paths.db_path 값만 알려줘.",
-            None,
-            actions,
-        );
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "scripts/nl_tests/fixtures/device_local/configs/app_config.toml 의 paths.logs_dir 와 paths.db_path 값만 알려줘.",
+        None,
+        actions,
+    );
 
     assert_eq!(normalized.len(), 1, "normalized actions: {normalized:?}");
     let args = expect_planned_call(&normalized[0], "config_basic", "read_fields");
@@ -525,15 +525,15 @@ fn structured_multi_field_rewrite_ignores_background_filename_tokens() {
     }];
 
     let normalized = normalize_planned_actions(
-            &state,
-            Some(&route),
-            &LoopState::new(1),
-            "列出 prompts/schemas 下的 json 文件，找最大的并总结它描述什么对象。",
-            Some(
-                "STABLE_FACTS: 甲文件指向 docs/release_checklist.md，另一个文件是 docs/service_notes.md",
-            ),
-            actions,
-        );
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "列出 prompts/schemas 下的 json 文件，找最大的并总结它描述什么对象。",
+        Some(
+            "STABLE_FACTS: 甲文件指向 docs/release_checklist.md，另一个文件是 docs/service_notes.md",
+        ),
+        actions,
+    );
 
     assert!(
         normalized
@@ -870,8 +870,7 @@ planner_kind = "tool"
     route.resolved_intent =
         "Locate the run_cmd configuration in skills_registry.toml and report planner_kind."
             .to_string();
-    let request =
-        "在 configs/skills_registry.toml 里找到 run_cmd 相关配置位置，并告诉我它的 planner_kind 是什么";
+    let request = "在 configs/skills_registry.toml 里找到 run_cmd 相关配置位置，并告诉我它的 planner_kind 是什么";
 
     let args = assert_planner_supplied_tool_call_preserved(
         &state,
@@ -1080,8 +1079,8 @@ fn archive_basic_short_list_archive_uses_active_bound_target() {
         }),
     }];
     let plan_context = format!(
-            "### ACTIVE_EXECUTION_ANCHOR\nfollowup_op_kind: Read\nfollowup_bound_target: {bound_target}\nobserved_bound_target: {bound_target}"
-        );
+        "### ACTIVE_EXECUTION_ANCHOR\nfollowup_op_kind: Read\nfollowup_bound_target: {bound_target}\nobserved_bound_target: {bound_target}"
+    );
 
     let rewritten =
         rewrite_archive_basic_short_archive_to_active_bound_target(Some(&plan_context), actions);
@@ -1107,8 +1106,7 @@ fn contract_hint_preferred_run_cmd_uses_machine_hint_not_request_words() {
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.route_reason = "capability_ref=package.detect_manager".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::None;
-    let request =
-            "arbitrary multilingual surface\n[CONTRACT_TEST_HINT]\npreferred_action_ref=run_cmd\n[/CONTRACT_TEST_HINT]";
+    let request = "arbitrary multilingual surface\n[CONTRACT_TEST_HINT]\npreferred_action_ref=run_cmd\n[/CONTRACT_TEST_HINT]";
 
     let normalized = normalize_planned_actions_with_original_and_context(
         &state,
@@ -1643,8 +1641,7 @@ fn contract_hint_preferred_run_cmd_uses_docker_capability_ref_with_semantic_none
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.route_reason = "capability_ref=docker.list_images".to_string();
-    let request =
-        "arbitrary multilingual surface\n[CONTRACT_TEST_HINT]\npreferred_action_ref=run_cmd\n[/CONTRACT_TEST_HINT]";
+    let request = "arbitrary multilingual surface\n[CONTRACT_TEST_HINT]\npreferred_action_ref=run_cmd\n[/CONTRACT_TEST_HINT]";
 
     let run_args = json!({
         "command": "docker images 2>&1 || true",

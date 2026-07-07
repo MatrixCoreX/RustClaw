@@ -109,7 +109,7 @@ fn matrix_single_path_shape_accepts_root_prefixed_results() {
 
 #[test]
 fn structured_keys_answer_covering_all_keys_skips_llm_verifier() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    let mut route = route_with_mode(crate::AskMode::planner_execute_with_chat_finalizer());
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::StructuredKeys;

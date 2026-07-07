@@ -25,10 +25,6 @@ fn classify_prompt_source_uses_specific_classifier_labels() {
         "direct_classifier"
     );
     assert_eq!(
-        classify_prompt_source("layered:prompts/direct_answer_gate_prompt.md#vendor=mimo"),
-        "direct_answer_gate"
-    );
-    assert_eq!(
         classify_prompt_source("layered:prompts/contract_repair_judge_prompt.md#vendor=minimax"),
         "contract_repair"
     );

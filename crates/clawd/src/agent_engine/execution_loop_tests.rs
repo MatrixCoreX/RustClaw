@@ -4,7 +4,7 @@ use super::{
 };
 use crate::agent_engine::action_fingerprint_for_policy;
 use crate::agent_engine::support::{
-    AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope, SemanticRouteAuthority,
+    AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
 };
 use claw_core::skill_registry::SkillsRegistry;
 use std::sync::{Arc, RwLock};
@@ -20,8 +20,6 @@ fn test_policy(registry_idempotency_guard_enabled: bool) -> super::AgentLoopGuar
         multi_round_enabled: true,
         answer_verifier_retry_limit: 1,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
-        semantic_route_authority: SemanticRouteAuthority::Legacy,
-        agent_loop_canary_bucket: "none".to_string(),
         registry_idempotency_guard_scope: if registry_idempotency_guard_enabled {
             RegistryIdempotencyGuardScope::All
         } else {

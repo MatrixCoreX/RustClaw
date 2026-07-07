@@ -68,6 +68,7 @@ fn system_ops_is_high_risk() {
 #[test]
 fn generated_file_delivery_route_is_high_risk() {
     let mut route = base_route(crate::AskMode::planner_execute_plain());
+    route.route_reason = "generated_file_delivery".to_string();
     route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -83,6 +84,7 @@ fn generated_file_delivery_route_is_high_risk() {
 #[test]
 fn generated_file_path_report_route_is_high_risk() {
     let mut route = base_route(crate::AskMode::direct_answer());
+    route.route_reason = "generated_file_path_report".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.delivery_required = false;
@@ -100,6 +102,7 @@ fn generated_file_path_report_route_is_high_risk() {
 #[test]
 fn config_mutation_route_is_high_risk_even_with_locator_evidence() {
     let mut route = base_route(crate::AskMode::planner_execute_plain());
+    route.route_reason = "config_mutation".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigMutation;

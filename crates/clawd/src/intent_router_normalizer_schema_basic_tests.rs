@@ -229,7 +229,9 @@ fn normalizer_schema_normalization_drops_legacy_contract_marker_aliases() {
         .expect("output contract");
 
     assert_eq!(
-        contract.get("contract_marker").and_then(|value| value.as_str()),
+        contract
+            .get("contract_marker")
+            .and_then(|value| value.as_str()),
         Some("none")
     );
     for legacy_key in ["semantic", "kind", "answer_kind", "semantic_type"] {

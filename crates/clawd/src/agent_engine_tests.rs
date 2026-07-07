@@ -356,11 +356,9 @@ fn loop_state_ignores_legacy_current_workspace_scope_semantic_marker() {
 
     seed_loop_state_from_agent_context(&mut loop_state, Some(&ctx));
 
-    assert!(
-        !loop_state
-            .output_vars
-            .contains_key("current_workspace_scalar_count_targets")
-    );
+    assert!(!loop_state
+        .output_vars
+        .contains_key("current_workspace_scalar_count_targets"));
 }
 
 #[test]

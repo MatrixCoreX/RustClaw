@@ -317,11 +317,7 @@ fn multi_explicit_run_cmd_plan_marks_literal_commands_without_continue_on_error(
 fn explicit_configured_command_with_followup_skips_single_step_fast_path() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
     state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);

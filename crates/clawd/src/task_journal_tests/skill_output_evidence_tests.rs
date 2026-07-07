@@ -336,11 +336,9 @@ fn browser_web_output_counts_as_content_excerpt_evidence() {
     let coverage = evidence_coverage_for_route(&route, &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(
-        coverage
-            .observed_extractors
-            .contains("browser_web.structured_json_v1")
-    );
+    assert!(coverage
+        .observed_extractors
+        .contains("browser_web.structured_json_v1"));
 
     let trace = journal.to_trace_json();
     let items = trace
@@ -397,11 +395,9 @@ fn web_search_extract_output_counts_as_candidates_evidence() {
     let coverage = evidence_coverage_for_route(&route, &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(
-        coverage
-            .observed_extractors
-            .contains("web_search_extract.structured_json_v1")
-    );
+    assert!(coverage
+        .observed_extractors
+        .contains("web_search_extract.structured_json_v1"));
 }
 
 #[test]
@@ -444,11 +440,9 @@ fn web_search_extract_empty_candidates_count_as_candidates_evidence() {
     let coverage = evidence_coverage_for_route(&route, &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(
-        coverage
-            .observed_extractors
-            .contains("web_search_extract.structured_json_v1")
-    );
+    assert!(coverage
+        .observed_extractors
+        .contains("web_search_extract.structured_json_v1"));
 }
 
 #[test]
@@ -478,11 +472,9 @@ fn weather_output_counts_as_content_excerpt_evidence() {
     let coverage = evidence_coverage_for_route(&route, &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(
-        coverage
-            .observed_extractors
-            .contains("weather.structured_json_v1")
-    );
+    assert!(coverage
+        .observed_extractors
+        .contains("weather.structured_json_v1"));
 }
 
 #[test]
@@ -511,11 +503,9 @@ fn market_quote_output_counts_as_content_excerpt_evidence() {
     let coverage = evidence_coverage_for_route(&route, &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(
-        coverage
-            .observed_extractors
-            .contains("stock.structured_json_v1")
-    );
+    assert!(coverage
+        .observed_extractors
+        .contains("stock.structured_json_v1"));
 }
 
 #[test]
@@ -552,11 +542,9 @@ fn crypto_quote_extra_content_excerpt_counts_as_market_quote_evidence() {
     let coverage = evidence_coverage_for_route(&route, &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(
-        coverage
-            .observed_extractors
-            .contains("crypto.structured_json_v1")
-    );
+    assert!(coverage
+        .observed_extractors
+        .contains("crypto.structured_json_v1"));
 }
 
 #[test]
@@ -588,11 +576,9 @@ fn image_vision_output_counts_as_content_excerpt_evidence() {
     let coverage = evidence_coverage_for_route(&route, &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(
-        coverage
-            .observed_extractors
-            .contains("image_vision.structured_json_v1")
-    );
+    assert!(coverage
+        .observed_extractors
+        .contains("image_vision.structured_json_v1"));
 }
 
 #[test]
@@ -983,11 +969,9 @@ fn json_observed_evidence_array_items_include_provider_safe_sample_values() {
         .get("sample_values")
         .and_then(Value::as_array)
         .expect("names array should expose sample_values");
-    assert!(
-        sample_values
-            .iter()
-            .any(|item| item.as_str() == Some("manual_note_variant.txt"))
-    );
+    assert!(sample_values
+        .iter()
+        .any(|item| item.as_str() == Some("manual_note_variant.txt")));
 }
 
 #[test]
@@ -1103,16 +1087,12 @@ fn large_inventory_dir_observed_evidence_preserves_mtime_metadata_when_truncated
         .get("sample_keys")
         .and_then(Value::as_array)
         .expect("array object sample keys");
-    assert!(
-        sample_keys
-            .iter()
-            .any(|item| item.as_str() == Some("modified_ts"))
-    );
-    assert!(
-        sample_keys
-            .iter()
-            .any(|item| item.as_str() == Some("size_bytes"))
-    );
+    assert!(sample_keys
+        .iter()
+        .any(|item| item.as_str() == Some("modified_ts")));
+    assert!(sample_keys
+        .iter()
+        .any(|item| item.as_str() == Some("size_bytes")));
 
     let mut journal = TaskJournal::for_task("task-large-mtime-dir", "ask", "list recent entries");
     let mut route = route_for_semantic(crate::OutputSemanticKind::DirectoryEntryGroups);
@@ -1370,44 +1350,30 @@ fn service_status_http_basic_json_wrapper_extracts_embedded_body_status_fields()
     let coverage = evidence_coverage_for_route(&route, &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(
-        coverage
-            .observed_extractors
-            .contains("http_basic.structured_json_v1")
-    );
-    assert!(
-        coverage
-            .observed_fields
-            .contains("body.data.channel_gateway_healthy")
-    );
+    assert!(coverage
+        .observed_extractors
+        .contains("http_basic.structured_json_v1"));
+    assert!(coverage
+        .observed_fields
+        .contains("body.data.channel_gateway_healthy"));
     assert!(coverage.observed_fields.contains("body.data.version"));
-    assert!(
-        coverage
-            .observed_fields
-            .contains("body.data.uptime_seconds")
-    );
+    assert!(coverage
+        .observed_fields
+        .contains("body.data.uptime_seconds"));
     assert!(coverage.observed_fields.contains("body.data.queue_length"));
-    assert!(
-        coverage
-            .observed_fields
-            .contains("body.data.memory_rss_bytes")
-    );
+    assert!(coverage
+        .observed_fields
+        .contains("body.data.memory_rss_bytes"));
     assert!(coverage.observed_fields.contains("body.data.user_count"));
-    assert!(
-        coverage
-            .observed_fields
-            .contains("body.data.bound_channel_count")
-    );
-    assert!(
-        coverage
-            .observed_fields
-            .contains("body.data.telegram_bot_statuses[0].name")
-    );
-    assert!(
-        coverage
-            .observed_fields
-            .contains("body.data.telegram_bot_statuses[0].status")
-    );
+    assert!(coverage
+        .observed_fields
+        .contains("body.data.bound_channel_count"));
+    assert!(coverage
+        .observed_fields
+        .contains("body.data.telegram_bot_statuses[0].name"));
+    assert!(coverage
+        .observed_fields
+        .contains("body.data.telegram_bot_statuses[0].status"));
 }
 
 #[test]
@@ -1462,17 +1428,13 @@ fn web_page_summary_http_basic_json_wrapper_body_counts_as_content_excerpt_evide
     let coverage = evidence_coverage_for_route(&route, &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(
-        coverage
-            .observed_fields
-            .contains("body.data.channel_gateway_healthy")
-    );
+    assert!(coverage
+        .observed_fields
+        .contains("body.data.channel_gateway_healthy"));
     assert!(coverage.observed_fields.contains("body.data.version"));
-    assert!(
-        coverage
-            .observed_fields
-            .contains("body.data.uptime_seconds")
-    );
+    assert!(coverage
+        .observed_fields
+        .contains("body.data.uptime_seconds"));
 }
 
 #[test]

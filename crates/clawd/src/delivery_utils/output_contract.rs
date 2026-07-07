@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::{AppState, IntentOutputContract, OutputResponseShape, OutputSemanticKind};
+use crate::{AppState, IntentOutputContract, OutputResponseShape};
 
 use super::file_delivery::resolve_file_delivery_target_with_hint;
 use super::types::localize_delivery_message_for_request;
@@ -104,7 +104,7 @@ fn strip_preamble_before_markdown_table(text: &str) -> String {
 }
 
 fn should_strip_preamble_before_markdown_table(output_contract: &IntentOutputContract) -> bool {
-    if output_contract.semantic_kind == OutputSemanticKind::None {
+    if output_contract.semantic_kind_is_unclassified() {
         return true;
     }
     !crate::evidence_policy::final_answer_shape_for_output_contract(output_contract)
@@ -132,12 +132,10 @@ pub(super) fn enforce_output_contract(
             // structured count says the user requested more than one sentence.
         }
         OutputResponseShape::OneSentence
-            if matches!(
-                output_contract.semantic_kind,
-                crate::OutputSemanticKind::QuantityComparison
-            ) => {}
+            if output_contract.semantic_kind_is(crate::OutputSemanticKind::QuantityComparison) => {}
         OutputResponseShape::OneSentence => {
-            if output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary {
+            if !output_contract.semantic_kind_is(crate::OutputSemanticKind::DirectoryPurposeSummary)
+            {
                 *normalized_text = if output_contract.semantic_kind.is_content_excerpt_summary() {
                     take_tail_sentence(normalized_text)
                         .unwrap_or_else(|| take_first_sentence(normalized_text))
@@ -526,7 +524,7 @@ fn extract_scalar_literal_for_contract(
     text: &str,
     output_contract: &IntentOutputContract,
 ) -> Option<String> {
-    if output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount {
+    if output_contract.semantic_kind_is(crate::OutputSemanticKind::ScalarCount) {
         extract_scalar_count_literal(text)
     } else if allows_loose_scalar_token_extraction(output_contract.semantic_kind) {
         extract_scalar_literal_loose(text)
@@ -684,7 +682,7 @@ fn scalar_candidate_is_path_or_locator_for_non_path_contract(
     candidate: &str,
     output_contract: &IntentOutputContract,
 ) -> bool {
-    if output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly {
+    if output_contract.semantic_kind_is(crate::OutputSemanticKind::ScalarPathOnly) {
         return false;
     }
     let candidate = trim_scalar_token_punctuation(candidate);

@@ -102,11 +102,9 @@ fn trace_json_includes_redacted_observed_evidence_for_json_output() {
             && item.get("redacted").and_then(Value::as_bool) == Some(true)
             && item.get("excerpt").is_none()
     }));
-    assert!(
-        !serde_json::to_string(observed)
-            .expect("serialize observed evidence")
-            .contains("sk-test-super-secret-token-value")
-    );
+    assert!(!serde_json::to_string(observed)
+        .expect("serialize observed evidence")
+        .contains("sk-test-super-secret-token-value"));
 }
 
 #[test]
@@ -458,19 +456,16 @@ fn trace_json_includes_observed_evidence_for_text_output() {
             .and_then(Value::as_bool),
         Some(false)
     );
-    assert!(
-        observed
-            .get("items")
-            .and_then(Value::as_array)
-            .is_some_and(|items| {
-                items.iter().any(|item| {
-                    item.get("field").and_then(Value::as_str) == Some("text_excerpt")
-                        && item.get("excerpt").and_then(Value::as_str)
-                            == Some("first line second line")
-                        && item.get("hash").and_then(Value::as_str).is_some()
-                })
+    assert!(observed
+        .get("items")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("field").and_then(Value::as_str) == Some("text_excerpt")
+                    && item.get("excerpt").and_then(Value::as_str) == Some("first line second line")
+                    && item.get("hash").and_then(Value::as_str).is_some()
             })
-    );
+        }));
 }
 
 #[test]
@@ -504,26 +499,20 @@ fn explicit_extractor_registry_canonicalizes_virtual_tool_outputs() {
         extractor.get("source_action_ref").and_then(Value::as_str),
         Some("fs_basic.list_dir")
     );
-    assert!(
-        extractor
-            .get("provided_evidence")
-            .and_then(Value::as_array)
-            .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("candidates")))
-    );
-    assert!(
-        extractor
-            .get("provided_evidence")
-            .and_then(Value::as_array)
-            .is_some_and(|items| items
-                .iter()
-                .any(|item| item.as_str() == Some("modified_ts")))
-    );
-    assert!(
-        extractor
-            .get("provided_evidence")
-            .and_then(Value::as_array)
-            .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("sort_by")))
-    );
+    assert!(extractor
+        .get("provided_evidence")
+        .and_then(Value::as_array)
+        .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("candidates"))));
+    assert!(extractor
+        .get("provided_evidence")
+        .and_then(Value::as_array)
+        .is_some_and(|items| items
+            .iter()
+            .any(|item| item.as_str() == Some("modified_ts"))));
+    assert!(extractor
+        .get("provided_evidence")
+        .and_then(Value::as_array)
+        .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("sort_by"))));
 }
 
 #[test]
@@ -593,11 +582,9 @@ fn process_basic_port_list_evidence_keeps_public_port_samples() {
         .pointer("/extractor/provided_evidence")
         .and_then(Value::as_array)
         .expect("provided evidence");
-    assert!(
-        provided
-            .iter()
-            .any(|item| item.as_str() == Some("public_ports"))
-    );
+    assert!(provided
+        .iter()
+        .any(|item| item.as_str() == Some("public_ports")));
     let items = observed
         .get("items")
         .and_then(Value::as_array)
@@ -606,27 +593,23 @@ fn process_basic_port_list_evidence_keeps_public_port_samples() {
         .iter()
         .find(|item| item.get("field").and_then(Value::as_str) == Some("extra.public_ports"))
         .expect("public ports evidence item");
-    assert!(
-        public_ports
-            .get("sample_values")
-            .and_then(Value::as_array)
-            .is_some_and(|values| values.iter().any(|value| value.as_str() == Some("8787")))
-    );
+    assert!(public_ports
+        .get("sample_values")
+        .and_then(Value::as_array)
+        .is_some_and(|values| values.iter().any(|value| value.as_str() == Some("8787"))));
     let public_listener = items
         .iter()
         .find(|item| item.get("field").and_then(Value::as_str) == Some("extra.public_listeners"))
         .expect("public listener evidence item");
-    assert!(
-        public_listener
-            .get("sample_values")
-            .and_then(Value::as_array)
-            .is_some_and(|values| values.iter().any(|value| {
-                value.get("local_endpoint").and_then(Value::as_str) == Some("0.0.0.0:8787")
-                    && value.get("port").and_then(Value::as_str) == Some("8787")
-                    && value.get("process_name").and_then(Value::as_str) == Some("clawd")
-                    && value.get("pid").and_then(Value::as_i64) == Some(878474)
-            }))
-    );
+    assert!(public_listener
+        .get("sample_values")
+        .and_then(Value::as_array)
+        .is_some_and(|values| values.iter().any(|value| {
+            value.get("local_endpoint").and_then(Value::as_str) == Some("0.0.0.0:8787")
+                && value.get("port").and_then(Value::as_str) == Some("8787")
+                && value.get("process_name").and_then(Value::as_str) == Some("clawd")
+                && value.get("pid").and_then(Value::as_i64) == Some(878474)
+        })));
 }
 
 #[test]
@@ -1039,11 +1022,9 @@ fn file_names_content_search_paths_satisfy_candidate_evidence() {
     assert!(coverage.observed_canonical.contains("candidates"));
     assert!(coverage.observed_canonical.contains("content_match"));
     assert!(coverage.observed_canonical.contains("path"));
-    assert!(
-        coverage
-            .observed_extractors
-            .contains("fs_basic.grep_text.structured_json_v1")
-    );
+    assert!(coverage
+        .observed_extractors
+        .contains("fs_basic.grep_text.structured_json_v1"));
 }
 
 #[test]
@@ -1079,11 +1060,9 @@ fn file_paths_content_search_paths_satisfy_candidate_evidence() {
     assert!(coverage.observed_canonical.contains("candidates"));
     assert!(coverage.observed_canonical.contains("content_match"));
     assert!(coverage.observed_canonical.contains("path"));
-    assert!(
-        coverage
-            .observed_extractors
-            .contains("fs_basic.grep_text.structured_json_v1")
-    );
+    assert!(coverage
+        .observed_extractors
+        .contains("fs_basic.grep_text.structured_json_v1"));
 }
 
 #[test]
@@ -1124,11 +1103,9 @@ fn raw_command_output_grep_text_satisfies_command_output_evidence() {
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("command_output"));
     assert!(coverage.observed_canonical.contains("content_match"));
-    assert!(
-        coverage
-            .observed_extractors
-            .contains("fs_basic.grep_text.structured_json_v1")
-    );
+    assert!(coverage
+        .observed_extractors
+        .contains("fs_basic.grep_text.structured_json_v1"));
 }
 
 #[test]
@@ -1315,11 +1292,9 @@ fn directory_purpose_tree_summary_children_satisfy_candidates_evidence() {
     let coverage = evidence_coverage_for_route(&route, &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(
-        coverage
-            .observed_extractors
-            .contains("system_basic.tree_summary.structured_json_v1")
-    );
+    assert!(coverage
+        .observed_extractors
+        .contains("system_basic.tree_summary.structured_json_v1"));
 }
 
 #[test]
@@ -1350,11 +1325,9 @@ fn system_basic_info_without_action_uses_info_extractor() {
     let coverage = evidence_coverage_for_route(&route, &journal);
     assert!(coverage.observed_canonical.contains("path"));
     assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(
-        coverage
-            .observed_extractors
-            .contains("system_basic.info.structured_json_v1")
-    );
+    assert!(coverage
+        .observed_extractors
+        .contains("system_basic.info.structured_json_v1"));
 }
 
 #[test]

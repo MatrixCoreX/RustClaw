@@ -34,16 +34,12 @@ fn append_route_reason_does_not_treat_substring_as_existing_marker() {
         &route,
         "bare_topic_contextual_clarify_sanitized"
     ));
-    assert!(
-        route
-            .route_reason
-            .contains("agent_loop_default_entry_extra")
-    );
-    assert!(
-        route
-            .route_reason
-            .contains("bare_topic_contextual_clarify_sanitized_extra")
-    );
+    assert!(route
+        .route_reason
+        .contains("agent_loop_default_entry_extra"));
+    assert!(route
+        .route_reason
+        .contains("bare_topic_contextual_clarify_sanitized_extra"));
 }
 
 #[test]

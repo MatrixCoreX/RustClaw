@@ -1,6 +1,6 @@
 use super::{
-    PreparedAskFlow, agent_loop_boundary_observations_block, agent_loop_default_context,
-    apply_post_route_refinements, build_agent_run_context_from_prepared_flow,
+    agent_loop_boundary_observations_block, agent_loop_default_context,
+    apply_post_route_refinements, build_agent_run_context_from_prepared_flow, PreparedAskFlow,
 };
 
 fn base_route() -> crate::RouteResult {
@@ -200,12 +200,10 @@ fn post_route_missing_locator_boundary_defers_to_agent_loop_candidate() {
     );
 
     assert!(!post_route.execution_route_result.needs_clarify);
-    assert!(
-        post_route
-            .execution_route_result
-            .clarify_question
-            .is_empty()
-    );
+    assert!(post_route
+        .execution_route_result
+        .clarify_question
+        .is_empty());
     assert_eq!(
         candidates.as_slice(),
         ["post_route_missing_path_scoped_locator"]

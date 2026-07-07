@@ -4,9 +4,9 @@ use super::{
     build_agent_loop_user_input_checkpoint_progress_payload,
     collect_execution_recipe_progress_hints, execution_recipe_phase_progress_key,
     load_agent_loop_guard_policy, AgentLoopGuardPolicy, AnswerVerifierRequiredEvidenceScope,
-    LoopBudgetProfile, LoopRecipeOverrides, RegistryIdempotencyGuardScope, SemanticRouteAuthority,
+    LoopBudgetProfile, LoopRecipeOverrides, RegistryIdempotencyGuardScope,
 };
-use crate::agent_engine::{seed_loop_state_for_agent_run, LoopState};
+use crate::agent_engine::{seed_loop_state_for_agent_run, AgentRunContext, LoopState};
 use crate::execution_recipe::{
     ExecutionRecipeKind, ExecutionRecipePhase, ExecutionRecipeProfile, ExecutionRecipeRuntimeState,
     ExecutionRecipeSpec, ExecutionRecipeTargetScope,
@@ -29,8 +29,6 @@ fn base_policy() -> AgentLoopGuardPolicy {
         multi_round_enabled: true,
         answer_verifier_retry_limit: 2,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
-        semantic_route_authority: SemanticRouteAuthority::Legacy,
-        agent_loop_canary_bucket: "none".to_string(),
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
         structured_evidence_required_for_selected_contracts: false,
         fast_read: LoopRecipeOverrides {
@@ -521,6 +519,196 @@ fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
 }
 
 #[test]
+fn seed_loop_state_extracts_current_request_locator_boundary_observation() {
+    let observation = serde_json::json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "current_request_locator": {
+            "source": "current_request",
+            "has_concrete_surface": true,
+            "explicit_locator_hints": [
+                {"kind": "path", "hint": "docs/README.md"}
+            ],
+            "resolved_workspace_child": "/tmp/rustclaw/docs/README.md",
+            "has_multiple_local_paths": false
+        }
+    });
+    let block = format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS",
+        serde_json::to_string(&observation).expect("observation json")
+    );
+    let ctx = AgentRunContext {
+        user_request: Some(format!("read docs readme\n{block}")),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(4);
+
+    seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
+
+    let evidence = loop_state
+        .output_vars
+        .get("current_request_locator_evidence")
+        .expect("locator evidence");
+    assert!(evidence.contains("docs/README.md"));
+    assert!(evidence.contains("/tmp/rustclaw/docs/README.md"));
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("current_request_resolved_workspace_child_targets"),
+        Some(&"[\"/tmp/rustclaw/docs/README.md\"]".to_string())
+    );
+}
+
+#[test]
+fn seed_loop_state_extracts_default_main_config_contract_boundary_observation() {
+    let observation = serde_json::json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "default_main_config_contract": {
+            "source": "boundary_contract",
+            "contract": "rustclaw_main_config",
+            "logical_path": "configs/config.toml",
+            "workspace_path": "/tmp/rustclaw/configs/config.toml",
+            "exists": true,
+            "route_markers": ["config_validation"]
+        }
+    });
+    let block = format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS",
+        serde_json::to_string(&observation).expect("observation json")
+    );
+    let ctx = AgentRunContext {
+        user_request: Some(format!("audit config\n{block}")),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(4);
+
+    seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
+
+    let evidence = loop_state
+        .output_vars
+        .get("default_main_config_contract_evidence")
+        .expect("default config evidence");
+    assert!(evidence.contains("rustclaw_main_config"));
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("default_main_config_contract_logical_path"),
+        Some(&"configs/config.toml".to_string())
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("default_main_config_contract_workspace_path"),
+        Some(&"/tmp/rustclaw/configs/config.toml".to_string())
+    );
+}
+
+#[test]
+fn seed_loop_state_extracts_registry_capability_contract_boundary_observation() {
+    let observation = serde_json::json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "registry_capability_contract": {
+            "source": "registry_capability_ref",
+            "capability_refs": ["kb.list_namespaces", "kb.search"],
+            "has_conflicting_route_contract": true,
+            "route_gate_kind": "clarify",
+            "needs_clarify": true,
+            "locator_kind": "current_workspace",
+            "locator_hint": "docs",
+            "delivery_required": true,
+            "delivery_intent": "none",
+            "response_shape": "free"
+        }
+    });
+    let block = format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS",
+        serde_json::to_string(&observation).expect("observation json")
+    );
+    let ctx = AgentRunContext {
+        user_request: Some(format!("query kb\n{block}")),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(4);
+
+    seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
+
+    let evidence = loop_state
+        .output_vars
+        .get("registry_capability_contract_evidence")
+        .expect("registry capability evidence");
+    assert!(evidence.contains("kb.list_namespaces"));
+    assert!(!evidence.contains("directory_entry_groups"));
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("registry_capability_contract_refs"),
+        Some(&"[\"kb.list_namespaces\",\"kb.search\"]".to_string())
+    );
+}
+
+#[test]
+fn seed_loop_state_extracts_contract_repair_candidate_boundary_observation() {
+    let observation = serde_json::json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "contract_repair_candidates": [
+            {
+                "source": "sqlite_structured_version",
+                "contract_ref": "contract:sqlite_schema_version",
+                "locator_hint": "data/app.sqlite",
+                "response_shape": "scalar"
+            }
+        ]
+    });
+    let block = format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS",
+        serde_json::to_string(&observation).expect("observation json")
+    );
+    let ctx = AgentRunContext {
+        user_request: Some(format!("inspect sqlite\n{block}")),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(4);
+
+    seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
+
+    let evidence = loop_state
+        .output_vars
+        .get("contract_repair_candidate_evidence")
+        .expect("contract repair candidate evidence");
+    assert!(evidence.contains("sqlite_structured_version"));
+    assert!(evidence.contains("contract:sqlite_schema_version"));
+    assert!(evidence.contains("data/app.sqlite"));
+}
+
+#[test]
+fn seed_loop_state_extracts_pre_loop_clarify_candidates() {
+    let observation = serde_json::json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "pre_loop_clarify_candidates": ["bare_topic_context_expansion"]
+    });
+    let block = format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS",
+        serde_json::to_string(&observation).expect("observation json")
+    );
+    let ctx = AgentRunContext {
+        user_request: Some(format!("logs\n{block}")),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(4);
+
+    seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
+
+    assert_eq!(
+        loop_state.output_vars.get("pre_loop_clarify_candidates"),
+        Some(&"[\"bare_topic_context_expansion\"]".to_string())
+    );
+}
+
+#[test]
 fn guard_policy_defaults_to_agent_loop_authority_when_config_missing() {
     let root = temp_support_workspace("rollout-defaults");
     let mut state = crate::AppState::test_default_with_fixture_provider();
@@ -532,13 +720,6 @@ fn guard_policy_defaults_to_agent_loop_authority_when_config_missing() {
         policy.effective_answer_verifier_required_evidence_scope(),
         AnswerVerifierRequiredEvidenceScope::Off
     );
-    assert_eq!(
-        policy.semantic_route_authority,
-        SemanticRouteAuthority::AgentLoopDefault
-    );
-    assert!(policy.records_agent_decides_attribution());
-    assert!(policy.uses_agent_loop_semantic_authority());
-    assert_eq!(policy.agent_loop_canary_bucket, "none");
     assert!(!policy.structured_evidence_required_for_selected_contracts);
 
     let _ = std::fs::remove_dir_all(root);
@@ -796,8 +977,6 @@ fn rollout_switches_are_read_from_agent_guard_config() {
         r#"
 [agent.loop_guard]
 answer_verifier_enforce_required_scope = "all"
-semantic_route_authority = "agent_loop_canary"
-agent_loop_canary_bucket = "structured_field_read"
 registry_idempotency_guard_scope = "all"
 structured_evidence_required_for_selected_contracts = true
 "#,
@@ -812,12 +991,6 @@ structured_evidence_required_for_selected_contracts = true
         policy.effective_answer_verifier_required_evidence_scope(),
         AnswerVerifierRequiredEvidenceScope::All
     );
-    assert_eq!(
-        policy.semantic_route_authority,
-        SemanticRouteAuthority::AgentLoopCanary
-    );
-    assert!(policy.records_agent_decides_attribution());
-    assert_eq!(policy.agent_loop_canary_bucket, "structured_field_read");
     assert_eq!(
         policy.effective_registry_idempotency_guard_scope(),
         RegistryIdempotencyGuardScope::All
@@ -836,7 +1009,6 @@ fn answer_verifier_required_scope_accepts_selected_agent_loop_token() {
         config_dir.join("agent_guard.toml"),
         r#"
 [agent.loop_guard]
-semantic_route_authority = "agent_loop_default"
 answer_verifier_enforce_required_scope = "selected_agent_loop"
 "#,
     )
@@ -866,7 +1038,6 @@ fn answer_verifier_required_scope_accepts_all_token() {
         config_dir.join("agent_guard.toml"),
         r#"
 [agent.loop_guard]
-semantic_route_authority = "agent_loop_default"
 answer_verifier_enforce_required_scope = "all"
 "#,
     )
@@ -893,7 +1064,6 @@ answer_verifier_enforce_required_scope = "all"
 #[test]
 fn answer_verifier_required_scope_only_enables_selected_agent_loop_routes() {
     let mut policy = base_policy();
-    policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopDefault;
     policy.answer_verifier_enforce_required_scope =
         AnswerVerifierRequiredEvidenceScope::SelectedAgentLoop;
     let selected_route =
@@ -931,7 +1101,6 @@ fn registry_idempotency_guard_scope_accepts_selected_agent_loop_token() {
         config_dir.join("agent_guard.toml"),
         r#"
 [agent.loop_guard]
-semantic_route_authority = "agent_loop_default"
 registry_idempotency_guard_scope = "selected_agent_loop"
 "#,
     )
@@ -961,7 +1130,6 @@ fn registry_idempotency_guard_scope_accepts_all_token() {
         config_dir.join("agent_guard.toml"),
         r#"
 [agent.loop_guard]
-semantic_route_authority = "agent_loop_default"
 registry_idempotency_guard_scope = "all"
 "#,
     )
@@ -989,7 +1157,6 @@ registry_idempotency_guard_scope = "all"
 fn registry_idempotency_guard_scope_only_changes_selected_agent_loop_routes() {
     let state = state_with_registry(registry_governance_fixture(), &["config_edit"]);
     let mut policy = base_policy();
-    policy.semantic_route_authority = SemanticRouteAuthority::AgentLoopDefault;
     policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::SelectedAgentLoop;
     let selected_route =
         route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
@@ -1045,167 +1212,6 @@ fn registry_idempotency_guard_scope_all_enables_all_routes() {
 }
 
 #[test]
-fn semantic_route_authority_accepts_machine_tokens() {
-    for (token, expected, records, agent_authority) in [
-        ("legacy", SemanticRouteAuthority::Legacy, false, false),
-        ("shadow", SemanticRouteAuthority::Shadow, true, false),
-        (
-            "agent_loop_canary",
-            SemanticRouteAuthority::AgentLoopCanary,
-            true,
-            true,
-        ),
-        (
-            "agent_loop_default",
-            SemanticRouteAuthority::AgentLoopDefault,
-            true,
-            true,
-        ),
-    ] {
-        let root = temp_support_workspace(&format!("semantic-authority-{token}"));
-        let config_dir = root.join("configs");
-        std::fs::create_dir_all(&config_dir).expect("create config dir");
-        std::fs::write(
-            config_dir.join("agent_guard.toml"),
-            format!(
-                r#"
-[agent.loop_guard]
-semantic_route_authority = "{token}"
-"#
-            ),
-        )
-        .expect("write agent guard config");
-        let mut state = crate::AppState::test_default_with_fixture_provider();
-        state.skill_rt.workspace_root = root.clone();
-
-        let policy = load_agent_loop_guard_policy(&state);
-
-        assert_eq!(policy.semantic_route_authority, expected);
-        assert_eq!(policy.records_agent_decides_attribution(), records);
-        assert_eq!(policy.uses_agent_loop_semantic_authority(), agent_authority);
-        let _ = std::fs::remove_dir_all(root);
-    }
-}
-
-#[test]
-fn semantic_route_authority_rejects_freeform_text() {
-    let root = temp_support_workspace("semantic-authority-invalid");
-    let config_dir = root.join("configs");
-    std::fs::create_dir_all(&config_dir).expect("create config dir");
-    std::fs::write(
-        config_dir.join("agent_guard.toml"),
-        r#"
-[agent.loop_guard]
-semantic_route_authority = "let the agent decide from user text"
-"#,
-    )
-    .expect("write agent guard config");
-    let mut state = crate::AppState::test_default_with_fixture_provider();
-    state.skill_rt.workspace_root = root.clone();
-
-    let policy = load_agent_loop_guard_policy(&state);
-
-    assert_eq!(
-        policy.semantic_route_authority,
-        SemanticRouteAuthority::Legacy
-    );
-    assert!(!policy.records_agent_decides_attribution());
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn agent_loop_canary_bucket_rejects_unknown_tokens() {
-    let root = temp_support_workspace("agent-loop-canary-bucket-invalid");
-    let config_dir = root.join("configs");
-    std::fs::create_dir_all(&config_dir).expect("create config dir");
-    std::fs::write(
-        config_dir.join("agent_guard.toml"),
-        r#"
-[agent.loop_guard]
-agent_loop_canary_bucket = "freeform_user_phrase"
-"#,
-    )
-    .expect("write agent guard config");
-    let mut state = crate::AppState::test_default_with_fixture_provider();
-    state.skill_rt.workspace_root = root.clone();
-
-    let policy = load_agent_loop_guard_policy(&state);
-
-    assert_eq!(policy.agent_loop_canary_bucket, "none");
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn legacy_agent_decides_config_keys_are_ignored() {
-    let root = temp_support_workspace("legacy-agent-decides-config-ignored");
-    let config_dir = root.join("configs");
-    std::fs::create_dir_all(&config_dir).expect("create config dir");
-    std::fs::write(
-        config_dir.join("agent_guard.toml"),
-        r#"
-[agent.loop_guard]
-agent_decides_semantic_route = true
-agent_decides_migration_class = "structured_field_read"
-"#,
-    )
-    .expect("write agent guard config");
-    let mut state = crate::AppState::test_default_with_fixture_provider();
-    state.skill_rt.workspace_root = root.clone();
-
-    let policy = load_agent_loop_guard_policy(&state);
-
-    assert_eq!(
-        policy.semantic_route_authority,
-        SemanticRouteAuthority::AgentLoopDefault
-    );
-    assert_eq!(policy.agent_loop_canary_bucket, "none");
-    assert!(policy.records_agent_decides_attribution());
-    assert!(policy.uses_agent_loop_semantic_authority());
-
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
-fn agent_loop_canary_bucket_accepts_low_risk_tokens_only() {
-    for token in [
-        "none",
-        "bound_path_summary",
-        "structured_field_read",
-        "exact_path_list",
-        "recent_artifacts_judgment",
-        "scalar_count",
-        "low_risk_status_observation",
-        "low_risk_config_read",
-        "low_risk_log_observation",
-        "low_risk_workspace_question",
-        "low_risk_tool_discovery",
-        "low_risk_single_file_delivery",
-    ] {
-        let root = temp_support_workspace(&format!("agent-decides-class-{token}"));
-        let config_dir = root.join("configs");
-        std::fs::create_dir_all(&config_dir).expect("create config dir");
-        std::fs::write(
-            config_dir.join("agent_guard.toml"),
-            format!(
-                r#"
-[agent.loop_guard]
-agent_loop_canary_bucket = "{token}"
-"#
-            ),
-        )
-        .expect("write agent guard config");
-        let mut state = crate::AppState::test_default_with_fixture_provider();
-        state.skill_rt.workspace_root = root.clone();
-
-        let policy = load_agent_loop_guard_policy(&state);
-
-        assert_eq!(policy.agent_loop_canary_bucket, token);
-        let _ = std::fs::remove_dir_all(root);
-    }
-}
-
-#[test]
 fn deprecated_domain_action_lists_do_not_change_loop_guard_policy() {
     let root = temp_support_workspace("deprecated-domain-actions");
     let config_dir = root.join("configs");
@@ -1249,7 +1255,7 @@ fn route_with_contract(
     locator_kind: OutputLocatorKind,
 ) -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "test".to_string(),
         needs_clarify: false,
         route_reason: String::new(),

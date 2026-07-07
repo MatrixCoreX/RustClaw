@@ -370,12 +370,14 @@ fn lightweight_tool_spec_includes_route_evidence_policy_context() {
     assert!(spec.contains("evidence_policy_context"));
     assert!(spec.contains("boundary_contract_hint"));
     assert!(!spec.contains("route_gate_kind="));
-    assert!(spec.lines().any(|line| line
-        .split_whitespace()
-        .any(|part| part == "contract_marker=file_paths")));
-    assert!(!spec.lines().any(|line| line
-        .split_whitespace()
-        .any(|part| part.starts_with("semantic_kind="))));
+    assert!(spec.lines().any(|line| {
+        line.split_whitespace()
+            .any(|part| part == "contract_marker=file_paths")
+    }));
+    assert!(!spec.lines().any(|line| {
+        line.split_whitespace()
+            .any(|part| part.starts_with("semantic_kind="))
+    }));
     assert!(!spec.contains("ask_mode="));
     assert!(!spec.contains("derived_route_label="));
     assert!(!spec.contains("intent_kind="));

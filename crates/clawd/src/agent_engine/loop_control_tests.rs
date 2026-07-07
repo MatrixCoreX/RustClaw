@@ -10,7 +10,8 @@ use super::{
     suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
     suppress_answer_verifier_retry_if_structurally_satisfied,
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
-    terminal_user_answer_stop_signal, try_accept_language_only_output_format_answer_verifier_gap,
+    terminal_user_answer_stop_signal, text_has_exact_marker_line,
+    try_accept_language_only_output_format_answer_verifier_gap,
     try_preserve_rss_source_hosts_from_structured_evidence,
     try_recover_content_excerpt_summary_answer_verifier_gap,
     try_recover_document_heading_answer_verifier_gap,
@@ -22,8 +23,7 @@ use super::{
     try_recover_recent_artifacts_answer_verifier_gap, try_recover_rss_news_answer_verifier_gap,
     try_recover_structured_count_answer_verifier_gap,
     try_recover_structured_scalar_output_format_answer_verifier_gap,
-    try_recover_structured_search_answer_verifier_gap, text_has_exact_marker_line,
-    AgentLoopGuardPolicy, RoundOutcome,
+    try_recover_structured_search_answer_verifier_gap, AgentLoopGuardPolicy, RoundOutcome,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,

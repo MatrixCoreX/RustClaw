@@ -482,7 +482,7 @@ fn execution_text_context_is_not_suppressed_without_session_anchor() {
 #[test]
 fn session_anchored_chat_wrapped_content_reads_prefer_light_memory_budget() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
@@ -501,7 +501,7 @@ fn session_anchored_chat_wrapped_content_reads_prefer_light_memory_budget() {
 #[test]
 fn open_or_unanchored_routes_do_not_force_light_memory_budget() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     let unanchored_snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
@@ -532,7 +532,7 @@ fn open_or_unanchored_routes_do_not_force_light_memory_budget() {
 }
 
 #[test]
-fn session_anchored_normalizer_chat_keeps_full_memory_budget_for_recall() {
+fn session_anchored_direct_answer_trace_keeps_full_memory_budget_for_recall() {
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::direct_answer();
     let anchored_snapshot = crate::conversation_state::ActiveSessionSnapshot {
@@ -588,7 +588,7 @@ fn session_anchored_clarify_delivery_act_prefers_light_memory_budget() {
 }
 
 #[test]
-fn ordinary_normalizer_chat_without_state_anchor_keeps_full_memory_budget() {
+fn ordinary_direct_answer_trace_without_state_anchor_keeps_full_memory_budget() {
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::direct_answer();
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
@@ -605,7 +605,7 @@ fn ordinary_normalizer_chat_without_state_anchor_keeps_full_memory_budget() {
 #[test]
 fn stateful_light_routes_suppress_execution_anchor_context() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "README.md".to_string();
@@ -628,6 +628,9 @@ fn stateful_light_routes_suppress_execution_anchor_context() {
 #[test]
 fn quantity_comparison_keeps_recent_execution_history() {
     let mut route = base_route_result();
+    route.route_reason = crate::OutputSemanticKind::QuantityComparison
+        .as_str()
+        .to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
@@ -666,6 +669,7 @@ fn recent_observed_judgments_keep_recent_execution_history() {
         crate::OutputSemanticKind::FileBasename,
     ] {
         let mut route = base_route_result();
+        route.route_reason = semantic_kind.as_str().to_string();
         route.output_contract.semantic_kind = semantic_kind;
         route.output_contract.response_shape = crate::OutputResponseShape::Strict;
         route.output_contract.requires_content_evidence = true;
@@ -684,6 +688,9 @@ fn recent_observed_judgments_keep_recent_execution_history() {
 #[test]
 fn concrete_content_excerpt_path_uses_light_execution_without_recent_history() {
     let mut route = base_route_result();
+    route.route_reason = crate::OutputSemanticKind::ContentExcerptSummary
+        .as_str()
+        .to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -701,7 +708,7 @@ fn concrete_content_excerpt_path_uses_light_execution_without_recent_history() {
 #[test]
 fn unanchored_light_routes_keep_execution_anchor_context() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "README.md".to_string();
@@ -1060,6 +1067,7 @@ fn light_execution_budget_detects_explicit_tail_reads() {
 fn light_execution_budget_detects_bounded_listing_and_existence() {
     let mut listing = base_route_result();
     listing.resolved_intent = "列出 logs 目录下前 5 个文件名".to_string();
+    listing.route_reason = crate::OutputSemanticKind::FileNames.as_str().to_string();
     listing.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
     listing.output_contract.requires_content_evidence = true;
     listing.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
@@ -1070,6 +1078,9 @@ fn light_execution_budget_detects_bounded_listing_and_existence() {
     ));
 
     let mut existence = base_route_result();
+    existence.route_reason = crate::OutputSemanticKind::ExistenceWithPath
+        .as_str()
+        .to_string();
     existence.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
     existence.resolved_intent = "看看 /tmp/rustclaw.service 在不在".to_string();
     assert!(uses_light_execution_context_budget(
@@ -1082,6 +1093,9 @@ fn light_execution_budget_detects_bounded_listing_and_existence() {
 fn light_execution_budget_detects_scalar_path_only_pwd_route() {
     let mut route = base_route_result();
     route.resolved_intent = "只输出当前工作目录的绝对路径，不要解释".to_string();
+    route.route_reason = crate::OutputSemanticKind::ScalarPathOnly
+        .as_str()
+        .to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     assert!(uses_light_execution_context_budget(
@@ -1095,12 +1109,9 @@ fn light_execution_budget_detects_bounded_observation_summaries() {
     for semantic_kind in [
         crate::OutputSemanticKind::CommandOutputSummary,
         crate::OutputSemanticKind::ServiceStatus,
-        crate::OutputSemanticKind::PackageManagerDetection,
-        crate::OutputSemanticKind::DockerPs,
-        crate::OutputSemanticKind::DockerImages,
     ] {
         let mut route = base_route_result();
-        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
         route.resolved_intent = "observe local runtime state and summarize current evidence".into();
         route.output_contract.semantic_kind = semantic_kind;
         route.output_contract.response_shape = crate::OutputResponseShape::Strict;
@@ -1113,6 +1124,66 @@ fn light_execution_budget_detects_bounded_observation_summaries() {
             "{semantic_kind:?} should use light execution budget"
         );
     }
+}
+
+#[test]
+fn light_execution_budget_ignores_legacy_registry_bridge_semantic_without_capability_ref() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.resolved_intent = "legacy docker image observation".into();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DockerImages;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+
+    assert!(!uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
+}
+
+#[test]
+fn light_execution_budget_detects_bounded_capability_observations() {
+    for marker in [
+        "capability_ref=package.detect_manager",
+        "capability_ref=docker.list_containers",
+        "capability_ref=docker.list_images",
+        "capability_ref=docker.read_logs",
+        "capability_ref=docker.version",
+        "capability_ref=remote.lookup_extra",
+    ] {
+        let mut route = base_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+        route.resolved_intent = marker.to_string();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+
+        assert!(
+            uses_light_execution_context_budget(&route, &route.resolved_intent),
+            "{marker} should use light execution budget"
+        );
+    }
+}
+
+#[test]
+fn light_execution_budget_requires_exact_capability_marker() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.resolved_intent = "capability_ref=dockerversion".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+
+    assert!(!uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
 }
 
 #[test]
@@ -1132,7 +1203,7 @@ fn light_execution_budget_keeps_high_risk_observation_summaries_full() {
 #[test]
 fn light_execution_budget_detects_structured_chat_wrapped_content_reads() {
     let mut read_range = base_route_result();
-    read_range.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    read_range.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     read_range.resolved_intent = "先读一下 README.md 前 4 行".to_string();
     read_range.output_contract.response_shape = crate::OutputResponseShape::Free;
     read_range.output_contract.requires_content_evidence = true;
@@ -1144,7 +1215,7 @@ fn light_execution_budget_detects_structured_chat_wrapped_content_reads() {
     ));
 
     let mut single_read = base_route_result();
-    single_read.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    single_read.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     single_read.resolved_intent =
         "看一下 /home/guagua/rustclaw/configs/config.toml，然后一句话说它主要配了什么".to_string();
     single_read.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
@@ -1161,12 +1232,15 @@ fn light_execution_budget_detects_structured_chat_wrapped_content_reads() {
 #[test]
 fn light_execution_budget_skips_workspace_project_summary() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
         "Summarize the current repository, focusing only on the UI components".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.route_reason = crate::OutputSemanticKind::WorkspaceProjectSummary
+        .as_str()
+        .to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
     assert!(!uses_light_execution_context_budget(
         &route,
@@ -1191,7 +1265,7 @@ fn light_execution_budget_detects_clarify_rewrite_bound_reads() {
 #[test]
 fn light_execution_budget_skips_non_structured_chat_wrapped_or_clarify_routes() {
     let mut chat_wrapped_execution = base_route_result();
-    chat_wrapped_execution.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    chat_wrapped_execution.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     chat_wrapped_execution.resolved_intent = "比较这两个文件大小，然后一句话总结".to_string();
     assert!(!uses_light_execution_context_budget(
         &chat_wrapped_execution,
@@ -1199,7 +1273,7 @@ fn light_execution_budget_skips_non_structured_chat_wrapped_or_clarify_routes() 
     ));
 
     let mut delivery = base_route_result();
-    delivery.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    delivery.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     delivery.resolved_intent = "把 README.md 发给我".to_string();
     delivery.output_contract.requires_content_evidence = true;
     delivery.output_contract.delivery_required = true;
@@ -1220,7 +1294,7 @@ fn light_execution_budget_skips_non_structured_chat_wrapped_or_clarify_routes() 
 #[test]
 fn light_execution_budget_skips_unscoped_current_workspace_drafting_evidence() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
         "Write a short setup note grounded in the current workspace docs".to_string();
     route.output_contract.requires_content_evidence = true;
@@ -1237,7 +1311,7 @@ fn light_execution_budget_skips_unscoped_current_workspace_drafting_evidence() {
 #[test]
 fn light_execution_budget_skips_generic_current_workspace_hint_drafting_evidence() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
         "Write a short RustClaw setup note for the current workspace project".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;

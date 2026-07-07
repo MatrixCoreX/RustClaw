@@ -191,7 +191,7 @@ pub(super) fn ensure_existence_multi_file_targets_have_path_facts(
     if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
         || loop_state.has_tool_or_skill_output
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPath
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath)
     {
         return actions;
     }
@@ -419,13 +419,6 @@ pub(super) fn scoped_plan_context_file_targets(
             }
         }
     }
-    for section in direct_answer_gate_context_resolved_intents(plan_context) {
-        for path in collect_existing_file_targets_from_text(state, &section) {
-            if !targets.iter().any(|existing: &String| existing == &path) {
-                targets.push(path);
-            }
-        }
-    }
     for marker in ["Resolved semantic request:", "Turn analysis:"] {
         let Some((_, tail)) = plan_context.split_once(marker) else {
             continue;
@@ -438,21 +431,6 @@ pub(super) fn scoped_plan_context_file_targets(
         }
     }
     targets
-}
-
-fn direct_answer_gate_context_resolved_intents(plan_context: &str) -> Vec<String> {
-    plan_context
-        .split("\n\n")
-        .filter_map(|section| {
-            let value: Value = serde_json::from_str(section.trim()).ok()?;
-            value
-                .pointer("/direct_answer_gate/resolved_intent")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|resolved_intent| !resolved_intent.is_empty())
-                .map(ToOwned::to_owned)
-        })
-        .collect()
 }
 
 pub(super) fn authoritative_current_file_target_path(
@@ -613,7 +591,7 @@ pub(super) fn ensure_explicit_multi_file_targets_have_content_reads(
         || loop_state.has_tool_or_skill_output
         || !route_expects_terminal_user_answer(route)
         || route_requests_path_metadata_compare(route)
-        || route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+        || route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath)
     {
         return actions;
     }
@@ -1028,7 +1006,7 @@ pub(super) fn prune_unscoped_workspace_summary_evidence_for_scope(
     let scope_hint = route.output_contract.locator_hint.trim();
     if route_has_unresolved_clarify_or_locator_marker(route)
         || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::WorkspaceProjectSummary
+        || !route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary)
         || scope_hint.is_empty()
     {
         return actions;

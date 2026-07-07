@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use tracing::{debug, info, warn};
@@ -77,13 +77,13 @@ pub(crate) use self::filesystem_lifecycle_contract::{
 use self::skill_execution::execute_prepared_skill_action;
 pub(crate) use self::support::append_delivery_message;
 use self::support::{
-    AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN, action_fingerprint_for_policy,
-    append_progress_hint, build_safe_skill_args_summary, encode_progress_i18n,
-    load_agent_loop_guard_policy, maybe_publish_execution_recipe_phase_hint,
+    action_fingerprint_for_policy, append_progress_hint, build_safe_skill_args_summary,
+    encode_progress_i18n, load_agent_loop_guard_policy, maybe_publish_execution_recipe_phase_hint,
     publish_agent_loop_user_input_checkpoint_progress, registry_idempotency_guard_attribution,
+    AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN,
 };
 
-use crate::{AgentAction, AppState, AskReply, ClaimedTask, repo};
+use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
 
 pub(crate) fn answer_verifier_enforce_required_enabled_for_route(
     state: &AppState,

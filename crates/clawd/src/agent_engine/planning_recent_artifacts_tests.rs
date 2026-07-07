@@ -126,12 +126,10 @@ fn recent_artifacts_judgment_keeps_config_file_content_reads() {
         "normalized actions should keep bounded content reads: {normalized:?}"
     );
     assert!(
-        normalized
-            .iter()
-            .all(|action| {
-                planned_call(action, "config_basic", "read_field").is_none()
-                    && planned_call(action, "config_basic", "read_fields").is_none()
-            }),
+        normalized.iter().all(|action| {
+            planned_call(action, "config_basic", "read_field").is_none()
+                && planned_call(action, "config_basic", "read_fields").is_none()
+        }),
         "recent artifact classification must not rewrite content reads to field reads: {normalized:?}"
     );
 }

@@ -8,9 +8,9 @@ use super::{
     filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
     package_docker_probe_structured_answer, strip_internal_execution_args,
     strip_unsupported_planner_metadata_args, synthesize_answer_allows_direct_fallback,
-    synthesize_evidence_policy_direct_observed_fallback_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
-    synthesize_direct_observed_fallback_answer, synthesize_failure_observed_facts,
+    synthesize_direct_observed_fallback_answer,
+    synthesize_evidence_policy_direct_observed_fallback_answer, synthesize_failure_observed_facts,
     synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
     synthesize_route_prefers_model_language_observed_status,
     unresolved_file_token_delivery_artifact,
@@ -18,8 +18,7 @@ use super::{
 use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{
-    AgentAction, AgentRuntimeConfig, AppState, PlanKind, PlanResult, SkillViewsSnapshot,
-    ToolsPolicy, DEFAULT_AGENT_ID,
+    AgentAction, AgentRuntimeConfig, AppState, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
 };
 use claw_core::config::{AgentConfig, ToolsConfig};
 use claw_core::skill_registry::SkillsRegistry;
@@ -30,6 +29,8 @@ mod active_recipe_terminal_discussion;
 mod filesystem_mutation_lifecycle;
 #[path = "dispatch_support_tests/machine_envelope.rs"]
 mod machine_envelope;
+#[path = "dispatch_support_tests/read_range_synthesis_fallback.rs"]
+mod read_range_synthesis_fallback;
 #[path = "dispatch_support_tests/synthesize_failure_replan.rs"]
 mod synthesize_failure_replan;
 #[path = "dispatch_support_tests/text_protocol_boundary.rs"]
@@ -1301,7 +1302,7 @@ fn synthesize_direct_fallback_defers_multi_observation_grounded_summary_to_model
         r#"{"extra":{"action":"extract_field","exists":true,"field_path":"name","path":"/repo/UI/package.json","resolved_path":"/repo/UI/package.json","value":"react-example","value_text":"react-example","value_type":"string"},"text":"{\"action\":\"extract_field\",\"exists\":true,\"field_path\":\"name\",\"path\":\"/repo/UI/package.json\",\"resolved_path\":\"/repo/UI/package.json\",\"value\":\"react-example\",\"value_text\":\"react-example\",\"value_type\":\"string\"}"}"#,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent:
             "summarize repository layout and UI role from directory listing and package name"
                 .to_string(),
@@ -1353,7 +1354,7 @@ fn contract_matrix_synthesis_defers_multiline_content_excerpt_summary_to_model()
         r#"{"action":"read_range","excerpt":"7|{\"status\":\"ok\",\"response\":\"path resolved\"}\n8|{\"status\":\"ok\",\"response\":\"db inspected\"}\n9|{\"status\":\"ok\",\"response\":\"log tailed\"}\n10|{\"status\":\"ok\",\"response\":\"binding remembered\"}","path":"/tmp/model_io.log"}"#,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent:
             "read the last four log lines and summarize the observed phenomenon in one sentence"
                 .to_string(),
@@ -1406,7 +1407,7 @@ fn command_output_summary_contract_defers_direct_fallback_to_synthesis() {
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "/home/guagua/rustclaw\n"));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "Run commands and summarize the observed outputs.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1448,126 +1449,6 @@ fn command_output_summary_contract_defers_direct_fallback_to_synthesis() {
     )
     .is_none());
     assert!(synthesize_direct_observed_fallback_answer(&state, &loop_state, Some(&ctx)).is_none());
-}
-
-#[test]
-fn synthesize_direct_fallback_blocks_multiline_raw_read_range_when_plan_requests_synthesis() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r#"{"action":"read_range","mode":"tail","excerpt":"1|WARN cache miss ratio above baseline\n2|ERROR provider timeout\n3|INFO provider retry succeeded","path":"/tmp/app.log"}"#,
-    ));
-    let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: "tail a log slice and provide a takeaway".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "raw route but plan requested synthesis".to_string(),
-        route_confidence: Some(0.9),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
-            locator_hint: "/tmp/app.log".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
-    let ctx = AgentRunContext {
-        route_result: Some(route),
-        ..AgentRunContext::default()
-    };
-
-    assert!(
-        !synthesize_direct_fallback_would_passthrough_multiline_read_range(&loop_state, Some(&ctx))
-    );
-
-    loop_state
-        .round_traces
-        .push(crate::task_journal::TaskJournalRoundTrace {
-            round_no: 1,
-            goal: String::new(),
-            execution_recipe_summary: None,
-            plan_result: Some(PlanResult {
-                goal: String::new(),
-                missing_slots: Vec::new(),
-                needs_confirmation: false,
-                steps: vec![crate::plan_step_from_agent_action(
-                    &AgentAction::SynthesizeAnswer {
-                        evidence_refs: vec!["last_output".to_string()],
-                    },
-                    "step_2".to_string(),
-                    Vec::new(),
-                    String::new(),
-                )],
-                planner_notes: String::new(),
-                plan_kind: PlanKind::Single,
-                raw_plan_text: String::new(),
-            }),
-            verify_result: None,
-        });
-
-    assert!(
-        synthesize_direct_fallback_would_passthrough_multiline_read_range(&loop_state, Some(&ctx))
-    );
-}
-
-#[test]
-fn synthesize_direct_fallback_blocks_multiline_read_range_for_scalar_extraction() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.executed_step_results.push(ok_step(
-        "step_1",
-        "fs_basic",
-        r##"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|Operators should check the app log first when requests fail, then verify the config file and database tables.","path":"/tmp/service_notes.md"}"##,
-    ));
-    let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: "extract one scalar from a markdown file".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "scalar locator requires evidence".to_string(),
-        route_confidence: Some(0.9),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: "/tmp/service_notes.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
-    let ctx = AgentRunContext {
-        route_result: Some(route),
-        ..AgentRunContext::default()
-    };
-
-    assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
-    assert!(
-        synthesize_direct_fallback_would_passthrough_multiline_read_range(&loop_state, Some(&ctx))
-    );
 }
 
 #[test]
@@ -1706,7 +1587,7 @@ fn synthesize_route_allows_direct_fallback_for_plain_act_observed_read() {
 #[test]
 fn synthesize_route_blocks_direct_fallback_for_failed_step_language_contract() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "Run an ordered command sequence and report only the failed step."
             .to_string(),
         needs_clarify: false,
@@ -1784,7 +1665,7 @@ fn synthesize_route_allows_direct_fallback_for_structured_listing_contract() {
 #[test]
 fn synthesize_route_allows_direct_fallback_for_config_validation_contract() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "Validate config syntax from structured parser evidence.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1836,7 +1717,7 @@ fn synthesize_route_allows_direct_fallback_for_config_validation_contract() {
 #[test]
 fn synthesize_route_uses_llm_for_chat_wrapped_unclassified_delivery() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "Run a command, then produce a short final reply based on the result."
             .to_string(),
         needs_clarify: false,
@@ -1874,7 +1755,7 @@ fn synthesize_route_uses_llm_for_chat_wrapped_unclassified_delivery() {
 #[test]
 fn synthesize_route_allows_direct_fallback_for_strict_plain_observation() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "Return an already formatted observed result.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1911,7 +1792,7 @@ fn synthesize_route_allows_direct_fallback_for_strict_plain_observation() {
 #[test]
 fn synthesize_route_uses_llm_for_strict_raw_output_contract() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "Run a command and return its raw output.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

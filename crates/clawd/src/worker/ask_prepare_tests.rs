@@ -1,12 +1,12 @@
 use super::{
     active_clarify_existing_workspace_locator_reply, active_clarify_locator_reply_fast_path_route,
     active_clarify_run_control_prompt, active_clarify_state_has_structural_binding_contract,
-    append_active_delivery_content_target_token, bind_content_read_to_active_delivery_target,
-    bind_ordered_entry_reference_from_active_frame, merged_prompt_from_task_turn_analysis,
+    append_active_delivery_content_target_token, bind_active_clarify_locator_reply_for_loop,
+    bind_active_clarify_structured_payload_reply_for_loop,
+    bind_content_read_to_active_delivery_target, bind_ordered_entry_reference_from_active_frame,
+    merged_prompt_from_task_turn_analysis,
     preserve_active_clarify_output_contract_for_locator_reply,
-    preserve_locator_reply_runtime_intent, promote_active_clarify_locator_reply_to_execute,
-    promote_active_clarify_structured_payload_reply_to_execute,
-    repair_scalar_field_value_contract_for_locator_reply,
+    preserve_locator_reply_runtime_intent, repair_scalar_field_value_contract_for_locator_reply,
     repair_structural_file_delivery_resolution, should_apply_task_turn_merge,
     should_probe_transcript_for_clarify_fallback, task_turn_merge_prior_context,
 };
@@ -448,6 +448,10 @@ fn active_clarify_locator_fast_path_preserves_existence_contract() {
     );
     assert_eq!(
         route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    );
+    assert_eq!(
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::ExistenceWithPath
     );
     assert_eq!(
@@ -601,10 +605,14 @@ fn active_clarify_locator_reply_preserves_existence_contract() {
         );
 
     preserve_active_clarify_output_contract_for_locator_reply(&mut route, &resolution, &snapshot);
-    promote_active_clarify_locator_reply_to_execute(&mut route, &resolution, &snapshot);
+    bind_active_clarify_locator_reply_for_loop(&mut route, &resolution, &snapshot);
 
     assert_eq!(
         route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    );
+    assert_eq!(
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::ExistenceWithPath
     );
     assert_eq!(
@@ -618,7 +626,7 @@ fn active_clarify_locator_reply_preserves_existence_contract() {
         .contains("preserve_active_clarify_output_contract"));
     assert!(route
         .route_reason
-        .contains("active_clarify_locator_reply_execute"));
+        .contains("active_clarify_locator_reply_bound_for_loop"));
 }
 
 #[test]
@@ -686,6 +694,27 @@ fn active_clarify_candidate_only_state_is_not_fast_path_contract() {
     assert!(
         !active_clarify_state_has_structural_binding_contract(&clarify_state),
         "candidate lists alone are clarify context, not an executable contract"
+    );
+}
+
+#[test]
+fn active_clarify_unknown_legacy_semantic_is_not_fast_path_contract() {
+    let clarify_state = crate::clarify_state::ClarifyState {
+        missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
+        pending_question: "Which target should I use?".to_string(),
+        candidate_targets: Vec::new(),
+        delivery_required: false,
+        output_shape: None,
+        semantic_kind: Some("legacy_unknown_contract".to_string()),
+        source_request: "Use that target.".to_string(),
+        source_task_id: "task-1".to_string(),
+        updated_at_ts: 1,
+        expires_at_ts: 2,
+    };
+
+    assert!(
+        !active_clarify_state_has_structural_binding_contract(&clarify_state),
+        "unknown legacy semantic_kind values must not drive fast-path behavior"
     );
 }
 
@@ -991,6 +1020,10 @@ fn clarify_locator_reply_preserves_prior_content_excerpt_contract() {
     );
     assert_eq!(
         route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    );
+    assert_eq!(
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::ContentExcerptSummary
     );
     assert!(route
@@ -1077,7 +1110,7 @@ fn clarify_locator_reply_keeps_current_file_delivery_over_weak_prior_shape() {
 }
 
 #[test]
-fn clarify_locator_reply_promotes_bare_path_back_to_execution() {
+fn clarify_locator_reply_binds_bare_path_back_to_loop() {
     let mut route = crate::RouteResult {
         ask_mode: crate::AskMode::clarify(),
         resolved_intent: "scripts/nl_tests/fixtures/device_local/logs/model_io.log".to_string(),
@@ -1141,7 +1174,7 @@ fn clarify_locator_reply_promotes_bare_path_back_to_execution() {
         );
 
     preserve_active_clarify_output_contract_for_locator_reply(&mut route, &resolution, &snapshot);
-    promote_active_clarify_locator_reply_to_execute(&mut route, &resolution, &snapshot);
+    bind_active_clarify_locator_reply_for_loop(&mut route, &resolution, &snapshot);
 
     assert!(route.is_execute_gate());
     assert!(!route.needs_clarify);
@@ -1156,18 +1189,22 @@ fn clarify_locator_reply_promotes_bare_path_back_to_execution() {
     );
     assert_eq!(
         route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    );
+    assert_eq!(
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::ContentExcerptSummary
     );
     assert!(route.output_contract.requires_content_evidence);
     assert!(route
         .route_reason
-        .contains("active_clarify_locator_reply_execute"));
+        .contains("active_clarify_locator_reply_bound_for_loop"));
 }
 
 #[test]
 fn clarify_archive_locator_reply_restores_unpack_contract() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "Read archive content".to_string(),
         needs_clarify: false,
         route_reason: "User supplied missing archive path".to_string(),
@@ -1229,11 +1266,15 @@ fn clarify_archive_locator_reply_restores_unpack_contract() {
         );
 
     preserve_active_clarify_output_contract_for_locator_reply(&mut route, &resolution, &snapshot);
-    promote_active_clarify_locator_reply_to_execute(&mut route, &resolution, &snapshot);
+    bind_active_clarify_locator_reply_for_loop(&mut route, &resolution, &snapshot);
 
     assert!(route.is_execute_gate());
     assert_eq!(
         route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    );
+    assert_eq!(
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::ArchiveUnpack
     );
     assert_eq!(
@@ -1254,7 +1295,7 @@ fn clarify_archive_locator_reply_restores_unpack_contract() {
 #[test]
 fn clarify_structured_payload_reply_is_not_rewritten_as_locator() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "Transform inline structured data into a table".to_string(),
         needs_clarify: false,
         route_reason: "Inline structured data transform".to_string(),
@@ -1311,8 +1352,8 @@ fn clarify_structured_payload_reply_is_not_rewritten_as_locator() {
         );
 
     preserve_active_clarify_output_contract_for_locator_reply(&mut route, &resolution, &snapshot);
-    promote_active_clarify_structured_payload_reply_to_execute(&mut route, &resolution, &snapshot);
-    promote_active_clarify_locator_reply_to_execute(&mut route, &resolution, &snapshot);
+    bind_active_clarify_structured_payload_reply_for_loop(&mut route, &resolution, &snapshot);
+    bind_active_clarify_locator_reply_for_loop(&mut route, &resolution, &snapshot);
 
     assert!(route.is_execute_gate());
     assert_eq!(
@@ -1331,17 +1372,17 @@ fn clarify_structured_payload_reply_is_not_rewritten_as_locator() {
     assert!(!route.output_contract.requires_content_evidence);
     assert!(!route
         .route_reason
-        .contains("active_clarify_locator_reply_execute"));
+        .contains("active_clarify_locator_reply_bound_for_loop"));
     assert!(route
         .route_reason
         .contains("preserve_active_clarify_output_contract"));
     assert!(route
         .route_reason
-        .contains("active_clarify_structured_payload_execute"));
+        .contains("active_clarify_structured_payload_bound_for_loop"));
 }
 
 #[test]
-fn clarify_structured_payload_reply_promotes_direct_route_to_execute() {
+fn clarify_structured_payload_reply_binds_direct_route_for_loop() {
     let mut route = crate::RouteResult {
         ask_mode: crate::AskMode::direct_answer(),
         resolved_intent: "Inline payload can be answered directly".to_string(),
@@ -1401,8 +1442,8 @@ fn clarify_structured_payload_reply_promotes_direct_route_to_execute() {
         );
 
     preserve_active_clarify_output_contract_for_locator_reply(&mut route, &resolution, &snapshot);
-    promote_active_clarify_structured_payload_reply_to_execute(&mut route, &resolution, &snapshot);
-    promote_active_clarify_locator_reply_to_execute(&mut route, &resolution, &snapshot);
+    bind_active_clarify_structured_payload_reply_for_loop(&mut route, &resolution, &snapshot);
+    bind_active_clarify_locator_reply_for_loop(&mut route, &resolution, &snapshot);
 
     assert!(route.is_execute_gate());
     assert!(!route.needs_clarify);
@@ -1418,10 +1459,10 @@ fn clarify_structured_payload_reply_promotes_direct_route_to_execute() {
     assert!(route.output_contract.locator_hint.is_empty());
     assert!(route
         .route_reason
-        .contains("active_clarify_structured_payload_execute"));
+        .contains("active_clarify_structured_payload_bound_for_loop"));
     assert!(!route
         .route_reason
-        .contains("active_clarify_locator_reply_execute"));
+        .contains("active_clarify_locator_reply_bound_for_loop"));
 }
 
 #[test]
@@ -1477,7 +1518,7 @@ fn scalar_field_value_contract_repair_overrides_locator_reply_existence_contract
             .to_string(),
         needs_clarify: false,
         route_reason:
-            "structured_field_selector_requires_scalar_value; active_clarify_locator_reply_execute"
+            "structured_field_selector_requires_scalar_value; active_clarify_locator_reply_bound_for_loop"
                 .to_string(),
         route_confidence: Some(0.9),
         visible_skill_candidates: Vec::new(),
@@ -1558,7 +1599,7 @@ fn scalar_field_pair_contract_repair_uses_recent_scalar_equality_contract() {
     );
 
     assert_eq!(
-        route.output_contract.semantic_kind,
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::RecentScalarEqualityCheck
     );
     assert!(route
@@ -1617,7 +1658,7 @@ fn clarify_locator_reply_preserves_prior_file_delivery_contract() {
             },
         );
 
-    promote_active_clarify_locator_reply_to_execute(&mut route, &resolution, &snapshot);
+    bind_active_clarify_locator_reply_for_loop(&mut route, &resolution, &snapshot);
 
     assert!(route.is_execute_gate());
     assert!(!route.needs_clarify);
@@ -1696,7 +1737,7 @@ fn clarify_locator_reply_injects_locator_into_existing_execute_route() {
             },
         );
 
-    promote_active_clarify_locator_reply_to_execute(&mut route, &resolution, &snapshot);
+    bind_active_clarify_locator_reply_for_loop(&mut route, &resolution, &snapshot);
 
     assert!(route.is_execute_gate());
     assert!(!route.needs_clarify);
@@ -1713,7 +1754,7 @@ fn clarify_locator_reply_injects_locator_into_existing_execute_route() {
 }
 
 #[test]
-fn clarify_locator_reply_does_not_promote_stale_prior_request() {
+fn clarify_locator_reply_does_not_bind_stale_prior_request() {
     let mut route = crate::RouteResult {
         ask_mode: crate::AskMode::clarify(),
         resolved_intent: "/tmp/a.log".to_string(),
@@ -1758,7 +1799,7 @@ fn clarify_locator_reply_does_not_promote_stale_prior_request() {
             },
         );
 
-    promote_active_clarify_locator_reply_to_execute(&mut route, &resolution, &snapshot);
+    bind_active_clarify_locator_reply_for_loop(&mut route, &resolution, &snapshot);
 
     assert_eq!(route.ask_mode, crate::AskMode::clarify());
     assert!(route.needs_clarify);
@@ -1911,6 +1952,10 @@ fn clarify_locator_reply_preserves_prior_scalar_path_contract_without_delivery()
     );
     assert_eq!(
         route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    );
+    assert_eq!(
+        route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::ScalarPathOnly
     );
     assert!(route

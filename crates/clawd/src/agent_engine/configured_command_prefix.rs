@@ -1077,6 +1077,9 @@ pub(super) fn replace_explicit_command_substitute_plan_with_run_cmd(
     else {
         return actions;
     };
+    if planner_has_allowed_capability_ref_action(route_result, &actions) {
+        return actions;
+    }
     let exact_command = explicit_command_segment(&state.policy.command_intent, original_user_text);
     let has_literal_command_sequence = exact_command.is_some()
         || execution_failed_step_literal_command_segments(
@@ -1134,6 +1137,30 @@ pub(super) fn replace_explicit_command_substitute_plan_with_run_cmd(
     };
     info!("plan_rewrite_explicit_command_substitute_to_run_cmd");
     rewritten
+}
+
+fn planner_has_allowed_capability_ref_action(
+    route_result: Option<&RouteResult>,
+    actions: &[AgentAction],
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if crate::machine_capability_ref::route_capability_ref_tokens(route).is_empty() {
+        return false;
+    }
+    actions.iter().any(|action| {
+        let Some((skill, args)) = planned_execution_action_ref(action) else {
+            return false;
+        };
+        !skill.eq_ignore_ascii_case("run_cmd")
+            && crate::evidence_policy::capability_ref_action_policy_for_route(
+                Some(route),
+                skill,
+                args,
+            )
+            .is_some_and(|policy| policy.is_allowed())
+    })
 }
 
 #[cfg(test)]

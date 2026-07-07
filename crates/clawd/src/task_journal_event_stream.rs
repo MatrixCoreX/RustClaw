@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use super::{
-    TaskJournal, TaskJournalFinalStatus, capability_resolution_source, next_requested_capability,
-    requested_capability_sequence, step_action_kind,
+    capability_resolution_source, next_requested_capability, requested_capability_sequence,
+    step_action_kind, TaskJournal, TaskJournalFinalStatus,
 };
 
 fn task_event_json(seq: &mut u64, event_type: &'static str, payload: Value) -> Value {

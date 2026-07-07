@@ -67,7 +67,9 @@ fn normalize_planned_actions_keeps_sqlite_query_on_db_basic_despite_literal_sql(
         Some(&route),
         &LoopState::new(1),
         "Run read-only SQLite query `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name LIMIT 5` on /tmp/app.sqlite and return names.",
-        Some("Run read-only SQLite query `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name LIMIT 5` on /tmp/app.sqlite and return names."),
+        Some(
+            "Run read-only SQLite query `SELECT name FROM sqlite_master WHERE type='table' ORDER BY name LIMIT 5` on /tmp/app.sqlite and return names.",
+        ),
         None,
         actions,
     );

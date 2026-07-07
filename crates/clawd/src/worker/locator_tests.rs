@@ -601,6 +601,96 @@ fn relative_explicit_file_token_scans_exact_suffix_before_parent_directory_fallb
 }
 
 #[test]
+fn bare_database_filename_locator_resolves_unique_deep_match() {
+    let workspace = TempDirGuard::new("bare_database_deep_match");
+    let data_dir = workspace
+        .path
+        .join("scripts")
+        .join("nl_tests")
+        .join("fixtures")
+        .join("device_local")
+        .join("data");
+    fs::create_dir_all(&data_dir).expect("create data dir");
+    let target = data_dir.join("test_contract.sqlite");
+    fs::write(&target, "sqlite placeholder").expect("write sqlite placeholder");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = workspace.path.clone();
+    state.skill_rt.default_locator_search_dir = workspace.path.clone();
+    state.skill_rt.locator_scan_max_depth = 2;
+    state.skill_rt.locator_scan_max_files = 100;
+
+    let out = super::try_resolve_implicit_locator_path(
+        &state,
+        "query test_contract.sqlite with a read-only database action",
+        "",
+        crate::OutputLocatorKind::Path,
+        None,
+    );
+
+    match out {
+        Some(super::LocatorAutoResolution::Direct(path)) => {
+            assert_eq!(
+                PathBuf::from(path)
+                    .canonicalize()
+                    .expect("canonical resolved sqlite"),
+                target.canonicalize().expect("canonical target sqlite")
+            );
+        }
+        other => panic!("expected direct sqlite locator, got {other:?}"),
+    }
+}
+
+#[test]
+fn bare_database_filename_locator_returns_fuzzy_for_multiple_deep_matches() {
+    let workspace = TempDirGuard::new("bare_database_deep_multi");
+    let first_dir = workspace
+        .path
+        .join("scripts")
+        .join("nl_tests")
+        .join("fixtures")
+        .join("device_a")
+        .join("data");
+    let second_dir = workspace
+        .path
+        .join("scripts")
+        .join("nl_tests")
+        .join("fixtures")
+        .join("device_b")
+        .join("data");
+    fs::create_dir_all(&first_dir).expect("create first data dir");
+    fs::create_dir_all(&second_dir).expect("create second data dir");
+    fs::write(first_dir.join("test_contract.sqlite"), "a").expect("write first sqlite");
+    fs::write(second_dir.join("test_contract.sqlite"), "b").expect("write second sqlite");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = workspace.path.clone();
+    state.skill_rt.default_locator_search_dir = workspace.path.clone();
+    state.skill_rt.locator_scan_max_depth = 2;
+    state.skill_rt.locator_scan_max_files = 100;
+
+    let out = super::try_resolve_implicit_locator_path(
+        &state,
+        "query test_contract.sqlite with a read-only database action",
+        "",
+        crate::OutputLocatorKind::Path,
+        None,
+    );
+
+    match out {
+        Some(super::LocatorAutoResolution::Fuzzy(candidates)) => {
+            assert_eq!(
+                candidates.len(),
+                2,
+                "expected two sqlite candidates: {candidates:?}"
+            );
+            assert!(candidates
+                .iter()
+                .all(|path| path.ends_with("test_contract.sqlite")));
+        }
+        other => panic!("expected fuzzy sqlite locator, got {other:?}"),
+    }
+}
+
+#[test]
 fn unresolved_relative_explicit_file_token_does_not_fallback_to_parent_directory() {
     let workspace = TempDirGuard::new("relative_missing_file_workspace");
     fs::create_dir_all(workspace.path.join("data")).expect("create workspace data dir");
@@ -743,7 +833,7 @@ fn direct_child_filename_precheck_beats_context_root_for_unique_workspace_readme
 }
 
 #[test]
-fn implicit_locator_does_not_promote_keyword_fragment_over_missing_filename() {
+fn implicit_locator_does_not_bind_keyword_fragment_over_missing_filename() {
     let root = TempDirGuard::new("missing_filename_keyword_fragment");
     fs::write(root.path.join("rustclaw"), "binary").expect("write rustclaw");
     let roots = vec![root.path.clone()];

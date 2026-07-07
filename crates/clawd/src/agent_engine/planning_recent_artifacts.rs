@@ -27,10 +27,20 @@ fn normalize_recent_artifacts_listing_action(
 ) -> AgentAction {
     match action {
         AgentAction::CallTool { tool, mut args } => {
+            if let Some(rewritten) =
+                recent_artifacts_run_cmd_listing_to_list_dir(route, tool.as_str(), &args)
+            {
+                return rewritten;
+            }
             apply_recent_artifact_listing_selector(route, tool.as_str(), &mut args);
             AgentAction::CallTool { tool, args }
         }
         AgentAction::CallSkill { skill, mut args } => {
+            if let Some(rewritten) =
+                recent_artifacts_run_cmd_listing_to_list_dir(route, skill.as_str(), &args)
+            {
+                return rewritten;
+            }
             apply_recent_artifact_listing_selector(route, skill.as_str(), &mut args);
             AgentAction::CallSkill { skill, args }
         }
@@ -43,6 +53,55 @@ fn normalize_recent_artifacts_listing_action(
         }
         other => other,
     }
+}
+
+fn recent_artifacts_run_cmd_listing_to_list_dir(
+    route: &RouteResult,
+    skill: &str,
+    args: &Value,
+) -> Option<AgentAction> {
+    if !skill.eq_ignore_ascii_case("run_cmd") {
+        return None;
+    }
+    let command = args.get("command").and_then(Value::as_str)?.trim();
+    let parsed_path = cd_ls_head_listing_path(command)?;
+    let path = route
+        .output_contract
+        .locator_hint
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .to_string();
+    let path = if path.is_empty() { parsed_path } else { path };
+    let mut args = json!({
+        "action": "list_dir",
+        "path": path,
+    });
+    apply_recent_artifact_listing_selector(route, "fs_basic", &mut args);
+    Some(AgentAction::CallSkill {
+        skill: "fs_basic".to_string(),
+        args,
+    })
+}
+
+fn cd_ls_head_listing_path(command: &str) -> Option<String> {
+    let (cd_part, listing_part) = command.split_once("&&")?;
+    let path = cd_part.trim().strip_prefix("cd ")?.trim();
+    let path = path.trim_matches('"').trim_matches('\'').trim().to_string();
+    if path.is_empty() {
+        return None;
+    }
+    let listing_tokens = listing_part
+        .split_whitespace()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    let has_ls = listing_tokens.iter().any(|token| *token == "ls");
+    let has_head = listing_tokens
+        .iter()
+        .any(|token| *token == "head" || token.starts_with("head"));
+    (has_ls && has_head).then_some(path)
 }
 
 fn apply_recent_artifact_listing_selector(route: &RouteResult, skill: &str, args: &mut Value) {

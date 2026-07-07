@@ -502,14 +502,14 @@ fn normalized_multi_command_failure_summary_preserves_all_observations() {
 
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let normalized = normalize_planned_actions_with_original(
-            &state,
-            Some(&route),
-            &loop_state,
-            "先执行 echo THINK_BREAK_CN，再执行 definitely_missing_command_minimax_think_24690，然后总结成功和失败分别是什么",
-            None,
-            Some("/home/guagua/rustclaw"),
-            actions,
-        );
+        &state,
+        Some(&route),
+        &loop_state,
+        "先执行 echo THINK_BREAK_CN，再执行 definitely_missing_command_minimax_think_24690，然后总结成功和失败分别是什么",
+        None,
+        Some("/home/guagua/rustclaw"),
+        actions,
+    );
 
     assert_eq!(
         actions_as_json(&normalized),
@@ -1236,14 +1236,14 @@ fn normalized_single_sequential_run_cmd_splits_for_step_status_evidence() {
 
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let normalized = normalize_planned_actions_with_original(
-            &state,
-            Some(&route),
-            &loop_state,
-            "执行两个命令：echo THINK_BREAK_CN 和 definitely_missing_command_minimax_think_24690，然后总结哪些成功、哪些失败",
-            None,
-            Some("/home/guagua/rustclaw"),
-            actions,
-        );
+        &state,
+        Some(&route),
+        &loop_state,
+        "执行两个命令：echo THINK_BREAK_CN 和 definitely_missing_command_minimax_think_24690，然后总结哪些成功、哪些失败",
+        None,
+        Some("/home/guagua/rustclaw"),
+        actions,
+    );
 
     assert_eq!(
         actions_as_json(&normalized),
@@ -1295,16 +1295,16 @@ fn normalized_planner_introduced_and_sequence_splits_for_step_status_evidence() 
 
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let normalized = normalize_planned_actions_with_original(
-            &state,
-            Some(&route),
-            &loop_state,
-            "执行两个命令：先 echo BEFORE_BREAK，再 definitely_missing_command_rustclaw_user_ops_13579，报告哪一步失败了",
-            Some(
-                "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_user_ops_13579，只告诉我哪一步挂了",
-            ),
-            Some("/home/guagua/rustclaw"),
-            actions,
-        );
+        &state,
+        Some(&route),
+        &loop_state,
+        "执行两个命令：先 echo BEFORE_BREAK，再 definitely_missing_command_rustclaw_user_ops_13579，报告哪一步失败了",
+        Some(
+            "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_user_ops_13579，只告诉我哪一步挂了",
+        ),
+        Some("/home/guagua/rustclaw"),
+        actions,
+    );
 
     assert_eq!(
         actions_as_json(&normalized),

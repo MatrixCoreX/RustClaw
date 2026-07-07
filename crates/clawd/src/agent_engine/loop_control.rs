@@ -1,13 +1,13 @@
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tracing::{info, warn};
 
 use super::support::publish_agent_loop_checkpoint_progress;
 use super::{
-    AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome, append_progress_hint,
-    attempt_ledger, encode_progress_i18n, ensure_task_running, execute_actions_once,
-    load_agent_loop_guard_policy, prepare_round_actions, push_round_trace,
+    append_progress_hint, attempt_ledger, encode_progress_i18n, ensure_task_running,
+    execute_actions_once, load_agent_loop_guard_policy, prepare_round_actions, push_round_trace,
+    AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome,
 };
 use crate::{AgentAction, AppState, AskReply, ClaimedTask, RouteResult};
 

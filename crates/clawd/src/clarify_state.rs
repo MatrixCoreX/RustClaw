@@ -253,7 +253,7 @@ pub(crate) fn normalize_structured_field_selector_token(raw: &str) -> Option<Str
 
 fn clarify_state_semantic_kind(route_result: &crate::RouteResult) -> Option<String> {
     if !matches!(
-        route_result.output_contract.semantic_kind,
+        route_result.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::None
     ) {
         return Some(

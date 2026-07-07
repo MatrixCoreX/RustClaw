@@ -89,7 +89,7 @@ fn evidence_policy_contract_includes_structured_workspace_target() {
 #[test]
 fn directory_purpose_summary_uses_listing_candidates_as_required_evidence() {
     let route = route_with_contract(
-        AskMode::planner_execute_chat_wrapped(),
+        AskMode::planner_execute_with_chat_finalizer(),
         IntentOutputContract {
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
@@ -175,6 +175,80 @@ fn task_contract_failure_policy_does_not_depend_on_execute_gate_trace() {
 }
 
 #[test]
+fn task_contract_uses_generic_capability_ref_machine_token_when_semantic_kind_is_none() {
+    for (marker, target, operation, delivery, evidence) in [
+        (
+            "capability_ref=weather.current",
+            TaskTargetObject::Web,
+            TaskOperation::Summarize,
+            TaskDeliveryShape::Raw,
+            vec!["content_excerpt"],
+        ),
+        (
+            "capability_ref=package.detect_manager",
+            TaskTargetObject::System,
+            TaskOperation::Inspect,
+            TaskDeliveryShape::Raw,
+            vec!["field_value"],
+        ),
+        (
+            "capability_ref=docker.list_images",
+            TaskTargetObject::Process,
+            TaskOperation::List,
+            TaskDeliveryShape::List,
+            vec!["candidates"],
+        ),
+        (
+            "capability_ref=docker.stop_container",
+            TaskTargetObject::Process,
+            TaskOperation::Modify,
+            TaskDeliveryShape::Raw,
+            vec!["field_value"],
+        ),
+        (
+            "capability_ref=social.publish",
+            TaskTargetObject::Web,
+            TaskOperation::Modify,
+            TaskDeliveryShape::Raw,
+            vec!["field_value"],
+        ),
+        (
+            "capability_ref=photo.prepare_source_candidates",
+            TaskTargetObject::Path,
+            TaskOperation::List,
+            TaskDeliveryShape::List,
+            vec!["candidates"],
+        ),
+        (
+            "capability_ref=remote.lookup_extra",
+            TaskTargetObject::Unknown,
+            TaskOperation::Inspect,
+            TaskDeliveryShape::Raw,
+            vec!["field_value"],
+        ),
+    ] {
+        let mut route = route_with_contract(
+            AskMode::planner_execute_plain(),
+            IntentOutputContract {
+                response_shape: OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::None,
+                semantic_kind: OutputSemanticKind::None,
+                ..IntentOutputContract::default()
+            },
+        );
+        route.resolved_intent = marker.to_string();
+
+        let contract = EvidencePolicyContract::from_route_result(&route);
+
+        assert_eq!(contract.target_object, target, "{marker}");
+        assert_eq!(contract.operation, operation, "{marker}");
+        assert_eq!(contract.delivery_shape, delivery, "{marker}");
+        assert_eq!(contract.required_evidence_fields, evidence, "{marker}");
+    }
+}
+
+#[test]
 fn task_contract_uses_specific_config_archive_capability_ref_evidence() {
     for (marker, target, operation, evidence) in [
         (
@@ -229,6 +303,26 @@ fn task_contract_uses_specific_config_archive_capability_ref_evidence() {
 }
 
 #[test]
+fn task_contract_capability_ref_requires_exact_machine_token() {
+    let mut route = route_with_contract(
+        AskMode::planner_execute_plain(),
+        IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::None,
+            semantic_kind: OutputSemanticKind::None,
+            ..IntentOutputContract::default()
+        },
+    );
+    route.resolved_intent = "capability_ref=xpublish".to_string();
+
+    let contract = EvidencePolicyContract::from_route_result(&route);
+
+    assert_eq!(contract.target_object, TaskTargetObject::Unknown);
+    assert_ne!(contract.operation, TaskOperation::Modify);
+}
+
+#[test]
 fn task_contract_ignores_normalizer_schema_capability_bridge_without_capability_ref() {
     for semantic_kind in [
         OutputSemanticKind::WeatherQuery,
@@ -266,6 +360,27 @@ fn task_contract_ignores_normalizer_schema_capability_bridge_without_capability_
         assert_eq!(contract.delivery_shape, TaskDeliveryShape::Raw);
         assert!(contract.required_evidence_fields.is_empty());
     }
+}
+
+#[test]
+fn task_contract_accepts_new_machine_capability_refs_without_static_whitelist() {
+    let mut route = route_with_contract(
+        AskMode::planner_execute_plain(),
+        IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::None,
+            semantic_kind: OutputSemanticKind::None,
+            ..IntentOutputContract::default()
+        },
+    );
+    route.resolved_intent = "capability_ref=social.publish_extra".to_string();
+
+    let contract = EvidencePolicyContract::from_route_result(&route);
+
+    assert_eq!(contract.target_object, TaskTargetObject::Web);
+    assert_eq!(contract.operation, TaskOperation::Modify);
+    assert_eq!(contract.required_evidence_fields, vec!["field_value"]);
 }
 
 #[test]

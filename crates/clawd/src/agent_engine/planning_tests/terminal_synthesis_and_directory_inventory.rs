@@ -42,13 +42,13 @@ version = "0.1.7"
         },
     ];
     let normalized = super::super::normalize_planned_actions(
-            &state,
-            Some(&route),
-            &LoopState::new(2),
-            "Read workspace package version from Cargo.toml and compare it with the version mentioned in README.md",
-            Some(cargo_path.to_string_lossy().as_ref()),
-            actions,
-        );
+        &state,
+        Some(&route),
+        &LoopState::new(2),
+        "Read workspace package version from Cargo.toml and compare it with the version mentioned in README.md",
+        Some(cargo_path.to_string_lossy().as_ref()),
+        actions,
+    );
     assert!(!normalized.iter().any(|action| matches!(
         action,
         AgentAction::CallSkill { skill, args }
