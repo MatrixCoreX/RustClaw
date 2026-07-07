@@ -74,7 +74,6 @@ pub(super) fn route_output_contract_machine_json(
         "response_shape": route.output_contract.response_shape.as_str(),
         "final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str),
         "final_answer_shape_class": final_answer_shape.map(|shape| shape.class().as_str()),
-        "contract_marker": route.effective_output_contract_semantic_kind().as_str(),
         "locator_kind": route.output_contract.locator_kind.as_str(),
         "delivery_required": route.output_contract.delivery_required,
         "requires_content_evidence": route.output_contract.requires_content_evidence
