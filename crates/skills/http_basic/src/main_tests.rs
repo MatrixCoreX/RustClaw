@@ -1,4 +1,18 @@
-use super::{bounded_preview, http_observation, resolve_output_path, HttpArtifact};
+use super::{
+    bounded_preview, error_extra, http_observation, resolve_output_path, HttpArtifact, SKILL_NAME,
+};
+
+#[test]
+fn error_extra_exposes_machine_contract() {
+    let extra = error_extra("execution_failed");
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(extra["message_key"], "skill.http_basic.execution_failed");
+    assert_eq!(extra["retryable"], false);
+}
 
 #[test]
 fn http_non_success_response_is_structured_observation() {

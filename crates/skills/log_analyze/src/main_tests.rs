@@ -1,8 +1,21 @@
 use super::{
-    analyze_log_file, candidate_priority, execute, log_level_from_line, sanitize_match_line,
+    analyze_log_file, candidate_priority, error_extra, execute, log_level_from_line,
+    sanitize_match_line, SKILL_NAME,
 };
 use serde_json::json;
 use std::path::Path;
+
+#[test]
+fn error_extra_exposes_machine_contract() {
+    let extra = error_extra("execution_failed");
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(extra["message_key"], "skill.log_analyze.execution_failed");
+    assert_eq!(extra["retryable"], false);
+}
 
 #[test]
 fn candidate_priority_prefers_operational_logs_over_model_io() {

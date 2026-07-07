@@ -1,7 +1,19 @@
 use super::{
-    git_success_extra, normalize_action, parse_branch_list, parse_git_log_commits,
-    parse_git_status_summary, parse_remote_list,
+    error_extra, git_success_extra, normalize_action, parse_branch_list, parse_git_log_commits,
+    parse_git_status_summary, parse_remote_list, SKILL_NAME,
 };
+
+#[test]
+fn error_extra_exposes_machine_contract() {
+    let extra = error_extra("execution_failed");
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(extra["message_key"], "skill.git_basic.execution_failed");
+    assert_eq!(extra["retryable"], false);
+}
 
 #[test]
 fn normalizes_git_basic_action_aliases() {
