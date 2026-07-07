@@ -2,6 +2,18 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn error_extra_exposes_machine_contract() {
+    let extra = error_extra("execution_failed");
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(extra["message_key"], "skill.browser_web.execution_failed");
+    assert_eq!(extra["retryable"], false);
+}
+
+#[test]
 fn test_args_non_object_returns_error() {
     let req = Request {
         request_id: "test-1".to_string(),

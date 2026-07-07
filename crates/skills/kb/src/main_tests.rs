@@ -1,10 +1,23 @@
 use super::{
-    do_ingest, do_list_namespaces, do_stats, normalize_search_path_prefix, parse_ingest_args,
-    parse_stats_args, split_chunks, storage_path_for, storage_segment, tokenize, KbRuntime,
+    do_ingest, do_list_namespaces, do_stats, error_extra, normalize_search_path_prefix,
+    parse_ingest_args, parse_stats_args, split_chunks, storage_path_for, storage_segment, tokenize,
+    KbRuntime, SKILL_NAME,
 };
 use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
+
+#[test]
+fn error_extra_exposes_machine_contract() {
+    let extra = error_extra("execution_failed");
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(extra["message_key"], "skill.kb.execution_failed");
+    assert_eq!(extra["retryable"], false);
+}
 
 #[test]
 fn split_chunks_keeps_overlap_context() {
