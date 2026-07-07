@@ -109,7 +109,7 @@ pub(super) fn latest_grounded_synthesis_for_mixed_listing_contract(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryEntryGroups)
+    if !crate::finalize::route_prefers_grouped_name_list_output(route)
         || !latest_publishable_synthesis_step_matches(loop_state)
         || !loop_has_structured_listing_observation(loop_state)
         || !loop_state

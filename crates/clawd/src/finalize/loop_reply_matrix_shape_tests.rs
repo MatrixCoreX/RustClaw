@@ -697,6 +697,41 @@ fn mixed_listing_contract_prefers_grounded_synthesis_after_file_read() {
 }
 
 #[test]
+fn mixed_listing_synthesis_uses_capability_shape_without_semantic_kind() {
+    let mut route = free_route_result();
+    route.route_reason = "capability_ref=filesystem.list_entries".to_string();
+    route.resolved_intent = "capability_ref=filesystem.list_entries".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let answer = "UI/package.json 显示这个前端包名是 react-example。";
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","counts":{"dirs":1,"files":1,"total":2},"names_by_kind":{"files":["Cargo.toml"],"dirs":["UI"],"other":[]},"path":"."}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "fs_basic",
+        r#"{"action":"read_range","path":"UI/package.json","excerpt":"1|{\n2|  \"name\": \"react-example\"\n3|}"}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "synthesize_answer", answer));
+    loop_state.last_publishable_synthesis_output = Some(answer.to_string());
+
+    let (actual, summary) =
+        super::super::latest_grounded_synthesis_for_mixed_listing_contract(&route, &loop_state)
+            .expect("capability-owned mixed evidence synthesis");
+
+    assert_eq!(actual, answer);
+    assert_eq!(summary.grounded_ok, Some(true));
+    assert_eq!(summary.completion_ok, Some(true));
+}
+
+#[test]
 fn matrix_shape_guard_replaces_unstructured_grouped_name_list_with_observed_groups() {
     let state = test_state();
     let task = claimed_task("task-matrix-shape-guard-grouped-name-list");
