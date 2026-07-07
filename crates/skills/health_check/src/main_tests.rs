@@ -1,10 +1,23 @@
 use super::{
-    build_system_warnings, execute, load_is_high, parse_df_root_kilobytes, parse_linux_meminfo,
-    parse_linux_uptime, parse_macos_available_memory_bytes, parse_macos_boot_time_seconds,
-    parse_macos_load_avg, resource_is_low, SystemHealthSnapshot,
+    build_system_warnings, error_extra, execute, load_is_high, parse_df_root_kilobytes,
+    parse_linux_meminfo, parse_linux_uptime, parse_macos_available_memory_bytes,
+    parse_macos_boot_time_seconds, parse_macos_load_avg, resource_is_low, SystemHealthSnapshot,
+    SKILL_NAME,
 };
 use serde_json::json;
 use std::fs;
+
+#[test]
+fn error_extra_exposes_machine_contract() {
+    let extra = error_extra("execution_failed");
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(extra["message_key"], "skill.health_check.execution_failed");
+    assert_eq!(extra["retryable"], false);
+}
 
 fn snapshot() -> SystemHealthSnapshot {
     SystemHealthSnapshot {
