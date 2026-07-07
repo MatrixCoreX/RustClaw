@@ -16,7 +16,7 @@ pub(super) fn direct_directory_purpose_summary_from_size_facts(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryPurposeSummary)
         || route.output_contract.delivery_required
         || matches!(
             route.output_contract.response_shape,
@@ -125,7 +125,7 @@ pub(super) fn direct_recent_artifacts_judgment_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RecentArtifactsJudgment
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
         || route.output_contract.delivery_required
         || matches!(
             route.output_contract.response_shape,
@@ -624,7 +624,7 @@ pub(super) async fn compose_recent_artifacts_machine_field_delivery(
     delivery: &str,
 ) -> Option<String> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RecentArtifactsJudgment
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
         || !recent_artifacts_delivery_is_machine_field_dump(delivery)
     {
         return None;
@@ -714,7 +714,7 @@ fn direct_directory_purpose_summary_from_listing_content(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryPurposeSummary)
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || matches!(
@@ -1145,7 +1145,7 @@ fn delivery_omits_relevant_document_file(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryPurposeSummary)
         || !route.output_contract.requires_content_evidence
         || delivery.trim().is_empty()
     {
@@ -1330,7 +1330,7 @@ pub(super) fn direct_current_workspace_top_level_dirs_overview_answer(
                 | crate::OutputResponseShape::OneSentence
         )
         || !matches!(
-            route.output_contract.semantic_kind,
+            route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::None | crate::OutputSemanticKind::WorkspaceProjectSummary
         )
         || loop_state
@@ -1441,7 +1441,7 @@ pub(super) fn replace_delivery_with_deterministic_directory_purpose_answer(
     if agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(|route| {
-            route.output_contract.semantic_kind
+            route.effective_output_contract_semantic_kind()
                 == crate::OutputSemanticKind::DirectoryPurposeSummary
         })
         && current_delivery_is_latest_publishable_synthesis(loop_state, current_delivery)

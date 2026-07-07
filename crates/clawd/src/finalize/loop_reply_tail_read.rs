@@ -47,21 +47,21 @@ pub(super) fn latest_path_batch_facts_has_implicit_metadata_fields(loop_state: &
 }
 
 pub(super) fn route_allows_latest_tail_read_range_delivery(route: &crate::RouteResult) -> bool {
+    let contract = route.effective_output_contract();
     if matches!(
-        route.output_contract.response_shape,
+        contract.response_shape,
         crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
     ) {
         return false;
     }
-    !route.output_contract.delivery_required
-        && route.output_contract.requires_content_evidence
-        && matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::ContentExcerptSummary
-                | crate::OutputSemanticKind::ExcerptKindJudgment
-                | crate::OutputSemanticKind::RawCommandOutput
-                | crate::OutputSemanticKind::None
-        )
+    !contract.delivery_required
+        && contract.requires_content_evidence
+        && (route.output_contract_is_unclassified()
+            || route.output_contract_marker_is_any(&[
+                crate::OutputSemanticKind::ContentExcerptSummary,
+                crate::OutputSemanticKind::ExcerptKindJudgment,
+                crate::OutputSemanticKind::RawCommandOutput,
+            ]))
 }
 
 pub(super) fn latest_tail_read_range_observed_answer(
@@ -411,7 +411,7 @@ fn latest_tail_read_range_should_preserve_current_delivery(
     }
     route
         .map(|route| {
-            route.output_contract.semantic_kind == crate::OutputSemanticKind::ContentExcerptSummary
+            route.output_contract_marker_is(crate::OutputSemanticKind::ContentExcerptSummary)
         })
         .unwrap_or(false)
 }
@@ -427,12 +427,13 @@ fn semantic_kind_prefers_deterministic_tail_line(kind: crate::OutputSemanticKind
 fn route_prefers_deterministic_tail_line(route: Option<&crate::RouteResult>) -> bool {
     route
         .map(|route| {
-            route.output_contract.response_shape == crate::OutputResponseShape::OneSentence
+            let contract = route.effective_output_contract();
+            contract.response_shape == crate::OutputResponseShape::OneSentence
                 && semantic_kind_prefers_deterministic_tail_line(
-                    route.output_contract.semantic_kind,
+                    route.effective_output_contract_semantic_kind(),
                 )
-                && route.output_contract.requires_content_evidence
-                && !route.output_contract.delivery_required
+                && contract.requires_content_evidence
+                && !contract.delivery_required
         })
         .unwrap_or(false)
 }
@@ -440,10 +441,11 @@ fn route_prefers_deterministic_tail_line(route: Option<&crate::RouteResult>) -> 
 pub(super) fn route_requires_raw_tail_read_passthrough(route: Option<&crate::RouteResult>) -> bool {
     route
         .map(|route| {
-            route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
-                && route.output_contract.response_shape == crate::OutputResponseShape::Strict
-                && route.output_contract.requires_content_evidence
-                && !route.output_contract.delivery_required
+            let contract = route.effective_output_contract();
+            route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+                && contract.response_shape == crate::OutputResponseShape::Strict
+                && contract.requires_content_evidence
+                && !contract.delivery_required
         })
         .unwrap_or(false)
 }

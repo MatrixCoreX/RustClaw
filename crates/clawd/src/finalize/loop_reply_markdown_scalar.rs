@@ -15,7 +15,7 @@ pub(super) fn deterministic_scalar_markdown_heading_answer_from_loop(
     if !route_allows_direct_scalar_observed_answer(route)
         || route.output_contract.delivery_required
         || matches!(
-            route.output_contract.semantic_kind,
+            route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames
                 | crate::OutputSemanticKind::FilePaths
@@ -53,7 +53,7 @@ pub(super) fn route_allows_observed_markdown_heading_scalar_delivery(
                 | crate::OutputResponseShape::OneSentence
         )
         && matches!(
-            route.output_contract.semantic_kind,
+            route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::None
         )
         && !matches!(
@@ -72,7 +72,7 @@ fn route_allows_observed_markdown_heading_body_reduction(route: &crate::RouteRes
                 | crate::OutputResponseShape::OneSentence
         )
         && matches!(
-            route.output_contract.semantic_kind,
+            route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::None
         )
         && !matches!(
@@ -90,7 +90,7 @@ pub(super) fn observed_markdown_heading_scalar_answer_for_delivery(
     if !route_allows_observed_markdown_heading_scalar_delivery(route)
         || route.output_contract.delivery_required
         || matches!(
-            route.output_contract.semantic_kind,
+            route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames
                 | crate::OutputSemanticKind::FilePaths

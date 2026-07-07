@@ -115,7 +115,7 @@ fn raw_listing_passthrough_is_dropped_for_content_evidence_free_shape() {
         finished_at: 0,
     });
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -175,7 +175,7 @@ fn single_listing_entry_passthrough_is_dropped_for_content_evidence() {
         finished_at: 0,
     });
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
         resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

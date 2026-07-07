@@ -14,6 +14,171 @@ fn compare_paths_size_ratio_answer_computes_ratio_from_structured_output() {
 }
 
 #[test]
+fn direct_quantity_compare_paths_preserves_existence_fields_when_contract_requires_metadata() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false,"same_size":false,"size_delta_bytes":119},"field_value":{"left_exists":true,"right_exists":true,"same_path":false,"same_size":false,"size_delta_bytes":119},"left":{"exists":true,"kind":"file","path":"service_notes.md","size_bytes":272},"right":{"exists":true,"kind":"file","path":"release_checklist.md","size_bytes":153}},"text":"{}"}"#,
+    ));
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "service_notes.md | release_checklist.md".to_string();
+    route.route_reason = "required_evidence_fields=exists,field_value,kind,size_bytes".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let (answer, _summary) = direct_quantity_comparison_from_compare_paths(
+        &state,
+        "return same_path and existence fields",
+        &loop_state,
+        Some(&ctx),
+    )
+    .expect("existence metadata answer");
+
+    assert_eq!(
+        answer,
+        "same_path=false\nleft_exists=true\nleft_kind=file\nright_exists=true\nright_kind=file"
+    );
+}
+
+#[test]
+fn direct_quantity_compare_paths_uses_output_contract_required_metadata_without_route_reason() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false,"same_size":false,"size_delta_bytes":119},"field_value":{"left_exists":true,"right_exists":true,"same_path":false,"same_size":false,"size_delta_bytes":119},"left":{"exists":true,"kind":"file","path":"service_notes.md","size_bytes":272},"right":{"exists":true,"kind":"file","path":"release_checklist.md","size_bytes":153}},"text":"{\"action\":\"compare_paths\",\"comparison\":{\"same_path\":false,\"same_size\":false,\"size_delta_bytes\":119},\"field_value\":{\"left_exists\":true,\"right_exists\":true,\"same_path\":false,\"same_size\":false,\"size_delta_bytes\":119},\"left\":{\"exists\":true,\"kind\":\"file\",\"path\":\"service_notes.md\",\"size_bytes\":272},\"right\":{\"exists\":true,\"kind\":\"file\",\"path\":\"release_checklist.md\",\"size_bytes\":153}}"}"#,
+    ));
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.route_reason = "quantity_comparison".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let (answer, _summary) = direct_quantity_comparison_from_compare_paths(
+        &state,
+        "return same_path and existence fields",
+        &loop_state,
+        Some(&ctx),
+    )
+    .expect("existence metadata answer");
+
+    assert_eq!(
+        answer,
+        "same_path=false\nleft_exists=true\nleft_kind=file\nright_exists=true\nright_kind=file"
+    );
+}
+
+#[tokio::test]
+async fn finalize_quantity_compare_paths_preserves_required_existence_fields() {
+    let state = test_state();
+    let task = claimed_task("task-quantity-compare-paths-existence-fields");
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "service_notes.md | release_checklist.md".to_string();
+    route.route_reason = "required_evidence_fields=exists,field_value,kind,size_bytes".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false,"same_size":false,"size_delta_bytes":119},"field_value":{"left_exists":true,"right_exists":true,"same_path":false,"same_size":false,"size_delta_bytes":119},"left":{"exists":true,"kind":"file","path":"service_notes.md","size_bytes":272},"right":{"exists":true,"kind":"file","path":"release_checklist.md","size_bytes":153}},"text":"{}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "respond",
+        r#"{"left":{"path":"service_notes.md","exists":true,"kind":"file","size_bytes":272},"right":{"path":"release_checklist.md","exists":true,"kind":"file","size_bytes":153},"same_path":false}"#,
+    ));
+    let prose_delivery =
+        "same_path=false; both exist:\n- service_notes.md exists=true\n- release_checklist.md exists=true";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "respond", prose_delivery));
+    loop_state
+        .delivery_messages
+        .push(prose_delivery.to_string());
+    loop_state.last_user_visible_respond = Some(prose_delivery.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "return same_path and both exist fields",
+        loop_state,
+        Some(&ctx),
+    )
+    .await
+    .expect("finalize should preserve compare_paths existence fields");
+
+    assert_eq!(
+        reply.text,
+        "same_path=false\nleft_exists=true\nleft_kind=file\nright_exists=true\nright_kind=file"
+    );
+}
+
+#[tokio::test]
+async fn finalize_one_sentence_quantity_compare_paths_projects_required_metadata() {
+    let state = test_state();
+    let task = claimed_task("task-one-sentence-quantity-compare-paths-metadata");
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.route_reason = "quantity_comparison".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false,"same_size":false,"size_delta_bytes":119},"field_value":{"left_exists":true,"right_exists":true,"same_path":false,"same_size":false,"size_delta_bytes":119},"left":{"exists":true,"kind":"file","path":"service_notes.md","size_bytes":272},"right":{"exists":true,"kind":"file","path":"release_checklist.md","size_bytes":153}},"text":"{\"action\":\"compare_paths\",\"comparison\":{\"same_path\":false,\"same_size\":false,\"size_delta_bytes\":119},\"field_value\":{\"left_exists\":true,\"right_exists\":true,\"same_path\":false,\"same_size\":false,\"size_delta_bytes\":119},\"left\":{\"exists\":true,\"kind\":\"file\",\"path\":\"service_notes.md\",\"size_bytes\":272},\"right\":{\"exists\":true,\"kind\":\"file\",\"path\":\"release_checklist.md\",\"size_bytes\":153}}"}"#,
+    ));
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "return same_path and both exist fields",
+        loop_state,
+        Some(&ctx),
+    )
+    .await
+    .expect("finalize should project compare_paths metadata");
+
+    assert_eq!(
+        reply.text,
+        "same_path=false\nleft_exists=true\nleft_kind=file\nright_exists=true\nright_kind=file"
+    );
+}
+
+#[test]
 fn path_batch_size_comparison_answer_picks_largest_structured_size() {
     let answer = path_batch_size_comparison_answer(
         r#"{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","path":"Cargo.toml","size_bytes":2606},"path":"Cargo.toml"},{"exists":true,"fact":{"kind":"file","path":"Cargo.lock","size_bytes":121647},"path":"Cargo.lock"}]}"#,

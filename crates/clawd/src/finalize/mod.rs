@@ -26,9 +26,7 @@ pub(crate) use journal::{build_from_loop_state, ensure_task_metrics};
 
 // === HELPER 层（已物理位于 finalize/helpers.rs，Stage 2.1）===
 // 纯函数工具（planner artifact / delivery token 分类 / FinalizerDisposition 等）
-pub(crate) use clarify::{
-    clarify_fallback_source_or_default, render_clarify_question, ClarifyRenderRequest,
-};
+pub(crate) use clarify::{render_clarify_question, ClarifyRenderRequest};
 pub(crate) use helpers::*;
 
 // === TASK 层（已物理位于 finalize/task.rs，Stage 2.2）===
@@ -42,5 +40,6 @@ pub(crate) use task::{
 // 从 LoopState 选择 delivery + 构建 journal
 pub(crate) use loop_reply::{
     deterministic_matrix_observed_shape_answer, direct_config_edit_observed_answer,
-    finalize_loop_reply, selected_tail_read_range_line_from_step_output,
+    finalize_loop_reply, raw_command_machine_field_projection_from_journal,
+    selected_tail_read_range_line_from_step_output,
 };

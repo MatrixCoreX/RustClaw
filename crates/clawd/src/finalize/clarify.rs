@@ -2,12 +2,6 @@ use crate::{
     fallback::ClarifyFallbackSource, intent_router::ClarifyQuestionPolicy, AppState, ClaimedTask,
 };
 
-pub(crate) fn clarify_fallback_source_or_default(
-    source: Option<ClarifyFallbackSource>,
-) -> ClarifyFallbackSource {
-    source.unwrap_or(ClarifyFallbackSource::IntentUnresolved)
-}
-
 pub(crate) struct ClarifyRenderRequest<'a> {
     pub(crate) user_request: &'a str,
     pub(crate) resolver_reason: &'a str,

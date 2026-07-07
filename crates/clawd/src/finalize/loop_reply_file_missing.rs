@@ -100,10 +100,11 @@ pub(super) fn generated_delivery_existing_file_content_synthesis_token(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::GeneratedFileDelivery
-        || !route.output_contract.delivery_required
-        || route.output_contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
-        || route.output_contract.response_shape != crate::OutputResponseShape::FileToken
+    let contract = route.effective_output_contract();
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::GeneratedFileDelivery)
+        || !contract.delivery_required
+        || contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
+        || contract.response_shape != crate::OutputResponseShape::FileToken
         || !latest_publishable_synthesis_step_matches(loop_state)
         || !loop_state
             .executed_step_results

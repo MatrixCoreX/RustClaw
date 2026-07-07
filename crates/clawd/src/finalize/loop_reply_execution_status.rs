@@ -54,12 +54,11 @@ pub(super) fn successful_content_observation_should_precede_status_summary(
     if !route.output_contract.requires_content_evidence {
         return false;
     }
-    if matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ExecutionFailedStep
-            | crate::OutputSemanticKind::RawCommandOutput
-            | crate::OutputSemanticKind::ServiceStatus
-    ) {
+    if route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::ExecutionFailedStep,
+        crate::OutputSemanticKind::RawCommandOutput,
+        crate::OutputSemanticKind::ServiceStatus,
+    ]) {
         return false;
     }
     loop_state.executed_step_results.iter().any(|step| {

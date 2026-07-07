@@ -8,9 +8,10 @@ use super::{
     deterministic_scalar_markdown_heading_answer_from_loop, direct_raw_command_output_projection,
     evidence_policy_candidate_satisfies_final_shape, latest_contractual_synthesis_output,
     latest_path_batch_facts_has_implicit_metadata_fields, latest_plan_requested_synthesis,
-    latest_publishable_synthesis_step_matches, log_deterministic_delivery_record,
-    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
-    planned_delivery_is_publishable_model_language_answer,
+    latest_publishable_respond_step_output, latest_publishable_synthesis_step_matches,
+    log_deterministic_delivery_record, looks_like_raw_command_snapshot,
+    looks_like_structured_machine_output, planned_delivery_is_publishable_model_language_answer,
+    publishable_summary_has_multi_source_observation,
     raw_command_output_needs_structural_projection, route_explicitly_requests_command_result,
     route_prefers_observed_answer, route_requires_evidence_policy_deterministic_final_answer,
     service_status_system_basic_info_answer, valid_publishable_synthesis_output,
@@ -126,6 +127,9 @@ pub(super) fn direct_scalar_observed_answer(
     {
         return None;
     }
+    if scalar_projection_should_defer_to_publishable_evidence_summary(route, loop_state, &answer) {
+        return None;
+    }
     Some((
         answer,
         crate::task_journal::TaskJournalFinalizerSummary {
@@ -137,6 +141,85 @@ pub(super) fn direct_scalar_observed_answer(
     ))
 }
 
+fn scalar_projection_should_defer_to_publishable_evidence_summary(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    answer: &str,
+) -> bool {
+    let contract = route.effective_output_contract();
+    let shape = crate::evidence_policy::final_answer_shape_for_route(route);
+    if contract.delivery_required
+        || matches!(
+            contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+    {
+        return false;
+    }
+    let Some(summary) = valid_publishable_synthesis_output(loop_state)
+        .or_else(|| latest_publishable_respond_step_output(loop_state))
+    else {
+        return false;
+    };
+    if !route_allows_publishable_summary_over_observed_projection(route, loop_state) {
+        return false;
+    }
+    match shape {
+        Some(crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence) => {
+            publishable_evidence_summary_should_own_scalar_delivery(summary)
+        }
+        Some(crate::evidence_policy::FinalAnswerShape::RawOutputOrShortSummary) => {
+            publishable_evidence_summary_strictly_richer_than_scalar(summary, answer)
+        }
+        _ => false,
+    }
+}
+
+fn route_allows_publishable_summary_over_observed_projection(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> bool {
+    if route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::RawCommandOutput,
+        crate::OutputSemanticKind::CommandOutputSummary,
+    ]) {
+        return publishable_summary_has_multi_source_observation(loop_state);
+    }
+    route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::ContentExcerptSummary,
+        crate::OutputSemanticKind::ContentExcerptWithSummary,
+        crate::OutputSemanticKind::ExcerptKindJudgment,
+        crate::OutputSemanticKind::WorkspaceProjectSummary,
+    ]) && !matches!(
+        route.effective_output_contract().response_shape,
+        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+    )
+}
+
+fn publishable_evidence_summary_should_own_scalar_delivery(candidate: &str) -> bool {
+    let candidate = candidate.trim();
+    if !planned_delivery_is_publishable_model_language_answer(candidate) {
+        return false;
+    }
+    let nonempty_lines = candidate
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .count();
+    let token_count = candidate.split_whitespace().count();
+    let char_count = candidate.chars().count();
+    nonempty_lines > 1 || token_count >= 8 || char_count >= 64
+}
+
+fn publishable_evidence_summary_strictly_richer_than_scalar(summary: &str, answer: &str) -> bool {
+    if !publishable_evidence_summary_should_own_scalar_delivery(summary) {
+        return false;
+    }
+    let summary_chars = summary.trim().chars().count();
+    let answer_chars = answer.trim().chars().count();
+    summary_chars > answer_chars.saturating_add(16)
+}
+
 fn latest_terminal_scalar_respond_answer_from_loop_contract(
     route: &crate::RouteResult,
     loop_state: &LoopState,
@@ -144,7 +227,7 @@ fn latest_terminal_scalar_respond_answer_from_loop_contract(
     if route.output_contract.response_shape != crate::OutputResponseShape::Scalar
         || route.output_contract.delivery_required
         || matches!(
-            route.output_contract.semantic_kind,
+            route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::RawCommandOutput
                 | crate::OutputSemanticKind::CommandOutputSummary
                 | crate::OutputSemanticKind::ExecutionFailedStep
@@ -200,14 +283,20 @@ fn scalar_terminal_respond_candidate_matches_contract(
     {
         return false;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
         && !candidate_looks_like_path_scalar(candidate)
     {
         return false;
     }
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
+        && candidate_looks_like_path_scalar(candidate)
+    {
+        return true;
+    }
+    let contract = route.effective_output_contract();
     matches!(
         crate::output_contract_verifier::verify_output_contract(
-            &route.output_contract,
+            &contract,
             candidate,
             &route.resolved_intent,
         ),
@@ -370,6 +459,44 @@ pub(super) fn replace_delivery_with_direct_scalar_observed_answer(
     {
         return false;
     }
+    if let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
+        let contract = route.effective_output_contract();
+        if contract.requires_content_evidence && route.output_contract_is_unclassified() {
+            if let Some(synthesis) = valid_publishable_synthesis_output(loop_state)
+                .map(str::trim)
+                .filter(|text| {
+                    planned_delivery_is_publishable_model_language_answer(text)
+                        && delivery_is_single_line_text(text)
+                        && !machine_field_placeholder_delivery_for_scalar_contract(
+                            text,
+                            Some(route),
+                        )
+                })
+                .map(str::to_string)
+            {
+                loop_state.delivery_messages.clear();
+                append_delivery_message(
+                    &task.task_id,
+                    &mut loop_state.delivery_messages,
+                    synthesis.clone(),
+                );
+                loop_state.last_user_visible_respond = Some(synthesis);
+                *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+                    stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                    disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                    parsed: true,
+                    contract_ok: true,
+                    completion_ok: Some(true),
+                    grounded_ok: Some(true),
+                    format_ok: Some(true),
+                    needs_clarify: Some(false),
+                    used_evidence_ids_count: loop_state.executed_step_results.len(),
+                    ..Default::default()
+                });
+                return true;
+            }
+        }
+    }
     let Some((answer, summary)) =
         direct_scalar_observed_answer(Some(state), loop_state, agent_run_context)
     else {
@@ -391,6 +518,7 @@ pub(super) fn replace_delivery_with_direct_scalar_observed_answer(
         && planned_delivery_is_publishable_model_language_answer(current_delivery)
         && delivery_is_single_line_text(current_delivery)
         && !machine_field_placeholder_delivery_for_scalar_contract(current_delivery, route)
+        && !recent_scalar_observed_answer_extends_delivery(current_delivery, &answer, route)
     {
         return false;
     }
@@ -437,7 +565,28 @@ fn scalar_contract_delivery_should_be_replaced_with_observed_scalar(
             .filter(|line| !line.trim().is_empty())
             .count()
             > 1
+        || recent_scalar_observed_answer_extends_delivery(delivery, answer, route)
         || delivery.contains(answer)
+}
+
+fn recent_scalar_observed_answer_extends_delivery(
+    delivery: &str,
+    answer: &str,
+    route: Option<&crate::RouteResult>,
+) -> bool {
+    route.is_some_and(|route| {
+        let contract = route.effective_output_contract();
+        route.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
+            && !contract.delivery_required
+    }) && answer.contains(delivery)
+        && answer
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count()
+            > delivery
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count()
 }
 
 fn machine_field_placeholder_delivery_for_scalar_contract(
@@ -468,20 +617,20 @@ pub(super) fn replace_delivery_with_direct_structured_observed_answer(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    if !matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::ServiceStatus | crate::OutputSemanticKind::RawCommandOutput
-    ) {
+    if !route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::ServiceStatus,
+        crate::OutputSemanticKind::RawCommandOutput,
+    ]) {
         return false;
     }
-    let projected =
-        if route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput {
-            direct_raw_command_output_projection(state, route, loop_state).or_else(|| {
-                direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
-            })
-        } else {
+    let projected = if route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+    {
+        direct_raw_command_output_projection(state, route, loop_state).or_else(|| {
             direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
-        };
+        })
+    } else {
+        direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
+    };
     let Some((answer, summary)) = projected else {
         return false;
     };
@@ -491,6 +640,11 @@ pub(super) fn replace_delivery_with_direct_structured_observed_answer(
         || crate::finalize::looks_like_planner_artifact(answer)
         || crate::finalize::looks_like_internal_trace_artifact(answer)
     {
+        return false;
+    }
+    if current_delivery_should_preserve_publishable_summary_over_projection(
+        route, loop_state, answer,
+    ) {
         return false;
     }
     if loop_state
@@ -518,6 +672,29 @@ pub(super) fn replace_delivery_with_direct_structured_observed_answer(
         loop_state.executed_step_results.len(),
     );
     true
+}
+
+fn current_delivery_should_preserve_publishable_summary_over_projection(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    projected_answer: &str,
+) -> bool {
+    if !matches!(
+        crate::evidence_policy::final_answer_shape_for_route(route),
+        Some(
+            crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence
+                | crate::evidence_policy::FinalAnswerShape::RawOutputOrShortSummary
+        )
+    ) {
+        return false;
+    }
+    let Some(current) = current_user_visible_delivery_text(loop_state).map(str::trim) else {
+        return false;
+    };
+    if !route_allows_publishable_summary_over_observed_projection(route, loop_state) {
+        return false;
+    }
+    publishable_evidence_summary_strictly_richer_than_scalar(current, projected_answer)
 }
 
 pub(super) fn replace_delivery_with_loop_contract_observed_answer(
@@ -914,10 +1091,10 @@ fn direct_structured_observed_answer_impl(
         ));
     }
     if route.ask_mode.finalize_chat_wrapped()
-        && route.output_contract.requires_content_evidence
+        && route.effective_output_contract().requires_content_evidence
         && latest_plan_requested_synthesis(loop_state)
-        && route.output_contract.semantic_kind != crate::OutputSemanticKind::GitRepositoryState
-        && route.output_contract.semantic_kind != crate::OutputSemanticKind::ServiceStatus
+        && !route.output_contract_marker_is(crate::OutputSemanticKind::GitRepositoryState)
+        && !route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
     {
         return None;
     }
@@ -939,8 +1116,8 @@ fn direct_structured_observed_answer_impl(
         ));
     }
     if route.ask_mode.finalize_chat_wrapped()
-        && route.output_contract.requires_content_evidence
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+        && route.effective_output_contract().requires_content_evidence
+        && route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath)
         && latest_path_batch_facts_has_implicit_metadata_fields(loop_state)
         && !allow_implicit_metadata_path_facts
     {
@@ -1068,7 +1245,7 @@ pub(super) fn direct_non_builtin_skill_raw_answer(
         route.map(|route| route.output_contract.response_shape),
         Some(crate::OutputResponseShape::Scalar)
     ) && !matches!(
-        route.map(|route| route.output_contract.semantic_kind),
+        route.map(|route| route.effective_output_contract_semantic_kind()),
         Some(crate::OutputSemanticKind::RawCommandOutput)
     ) {
         return None;
@@ -1077,7 +1254,7 @@ pub(super) fn direct_non_builtin_skill_raw_answer(
         route.map(|route| route.output_contract.response_shape),
         Some(crate::OutputResponseShape::OneSentence)
     ) && !matches!(
-        route.map(|route| route.output_contract.semantic_kind),
+        route.map(|route| route.effective_output_contract_semantic_kind()),
         Some(crate::OutputSemanticKind::RawCommandOutput)
     ) {
         return None;
@@ -1086,7 +1263,7 @@ pub(super) fn direct_non_builtin_skill_raw_answer(
         || crate::finalize::looks_like_internal_trace_artifact(&answer)
         || (looks_like_structured_machine_output(&answer)
             && !matches!(
-                route.map(|route| route.output_contract.semantic_kind),
+                route.map(|route| route.effective_output_contract_semantic_kind()),
                 Some(crate::OutputSemanticKind::RawCommandOutput)
             ))
     {
@@ -1105,16 +1282,22 @@ pub(super) fn direct_non_builtin_skill_raw_answer(
 }
 
 pub(super) fn route_allows_direct_scalar_observed_answer(route: &crate::RouteResult) -> bool {
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount {
+    let contract = route.effective_output_contract();
+    if route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount) {
         return true;
     }
-    if route.output_contract.response_shape == crate::OutputResponseShape::Scalar {
+    if route.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
+        && !contract.delivery_required
+    {
         return true;
     }
-    route.output_contract.response_shape == crate::OutputResponseShape::Strict
-        && route.output_contract.exact_sentence_count == Some(1)
-        && !route.output_contract.delivery_required
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+    if contract.response_shape == crate::OutputResponseShape::Scalar {
+        return true;
+    }
+    contract.response_shape == crate::OutputResponseShape::Strict
+        && contract.exact_sentence_count == Some(1)
+        && !contract.delivery_required
+        && route.output_contract_is_unclassified()
 }
 
 pub(super) async fn direct_publishable_observed_answer(

@@ -8,12 +8,14 @@ use super::{
     compose_answer_verifier_failure_user_message, delivery_path_gap_should_finalize_as_clarify,
     deterministic_config_guard_candidates_recovery,
     deterministic_content_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
-    deterministic_raw_tail_read_failure_recovery, drop_execution_summaries_when_delivery_is_scalar,
-    failed_task_lifecycle_payload, journal_has_checkpointed_nonterminal_lifecycle,
-    journal_has_missing_file_search_evidence, machine_payload_observed_facts,
-    non_failure_final_status, normalize_existing_file_delivery_token_answer,
+    deterministic_raw_tail_read_failure_recovery, deterministic_tree_summary_rows_failure_recovery,
+    drop_execution_summaries_when_delivery_is_scalar, failed_task_lifecycle_payload,
+    journal_has_checkpointed_nonterminal_lifecycle, journal_has_missing_file_search_evidence,
+    machine_payload_observed_facts, non_failure_final_status,
+    normalize_existing_file_delivery_token_answer,
     record_answer_verifier_required_evidence_rollout_attribution,
-    resume_context_has_directory_lookup_failure, resume_context_path_batch_facts_are_missing_only,
+    recover_requested_machine_kv_summary_final_answer, resume_context_has_directory_lookup_failure,
+    resume_context_path_batch_facts_are_missing_only,
     resume_failure_is_unbound_path_lookup_clarify_result,
     should_reinsert_execution_summaries_for_delivery, should_use_answer_route_result,
 };
@@ -24,6 +26,8 @@ use serde_json::json;
 mod config_guard_recovery;
 #[path = "task_tests/config_validation_delivery.rs"]
 mod config_validation_delivery;
+#[path = "task_tests/machine_kv_final_guard.rs"]
+mod machine_kv_final_guard;
 #[path = "task_tests/tree_summary_recovery.rs"]
 mod tree_summary_recovery;
 
@@ -141,7 +145,7 @@ fn answer_verifier_high_confidence_gap_forces_task_failure() {
 
 #[test]
 fn pure_chat_agent_loop_verifier_gap_triggers_direct_retry() {
-    let mut route = route_result(crate::AskMode::planner_execute_chat_wrapped());
+    let mut route = route_result(crate::AskMode::planner_execute_with_chat_finalizer());
     route.route_reason = "pure_chat_agent_loop_submode".to_string();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
@@ -274,6 +278,244 @@ fn requested_machine_kv_summary_final_guard_replaces_raw_observation_answer() {
         journal.final_answer.as_deref(),
         Some("command=python3 scripts/sync_skill_docs.py")
     );
+}
+
+#[test]
+fn requested_machine_kv_summary_final_guard_preserves_colon_field_values() {
+    let prompt = "Return text_excerpt and detected_format.";
+    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    route.resolved_intent = "text_excerpt detected_format".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptWithSummary;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-machine-kv-colon-fields", "ask", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"read_range","excerpt":"1|Archive fixtures for NL tests.","path":"/tmp/README.txt"}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "synthesize_answer",
+            "text_excerpt: \"Archive fixtures for NL tests.\"\ndetected_format: plain text",
+        ));
+    let mut answer_text =
+        "text_excerpt: \"Archive fixtures for NL tests.\"\ndetected_format: plain text".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert_eq!(
+        answer_text,
+        "text_excerpt: \"Archive fixtures for NL tests.\"\ndetected_format: plain text"
+    );
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
+    assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
+}
+
+#[test]
+fn requested_machine_kv_summary_failure_recovery_projects_read_range_fields() {
+    let prompt = "用 read_range 读取 docs/service_notes.md 第 1 到 6 行，最终只回答机器字段 path 和 total_lines。";
+    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route
+        .output_contract
+        .self_extension
+        .structured_field_selector = Some("total_lines".to_string());
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-read-range-machine-kv", "ask", prompt);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec![
+            "output_format".to_string(),
+            "path".to_string(),
+            "total_lines".to_string(),
+        ],
+        answer_incomplete_reason: "candidate omitted requested machine fields".to_string(),
+        should_retry: true,
+        retry_instruction: "use observed read_range machine fields".to_string(),
+        confidence: 0.95,
+    });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"read_range","path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md","resolved_path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md","start_line":1,"end_line":7,"total_lines":7,"excerpt":"1|# Service Notes\n2|."}}"#,
+        ));
+    let mut answer_text = "# Service Notes\n\nRustClaw test fixture service notes.".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(recover_requested_machine_kv_summary_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert_eq!(
+        answer_text,
+        "path=/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md total_lines=7"
+    );
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
+    assert!(journal
+        .answer_verifier_summary
+        .as_ref()
+        .is_some_and(|summary| summary.pass));
+    assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
+}
+
+#[test]
+fn requested_machine_kv_summary_final_guard_preserves_compare_paths_existence_fields() {
+    let prompt = "return same_path=false and both exist fields";
+    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-compare-paths-final", "ask", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"compare_paths","field_value":{"same_path":false,"left_exists":true,"right_exists":true}}}"#,
+        ));
+    let mut answer_text = "same_path=false\nleft_exists=true\nright_exists=true".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert_eq!(
+        answer_text,
+        "same_path=false\nleft_exists=true\nright_exists=true"
+    );
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
+    assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
+}
+
+#[test]
+fn requested_machine_kv_summary_final_guard_preserves_content_evidence_synthesis() {
+    let prompt = "Read README.md first 20 lines and answer existence, line count, and title.";
+    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_hint = "README.md".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-content-evidence-final", "ask", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"path":"/home/guagua/rustclaw/README.md","resolved_path":"/home/guagua/rustclaw/README.md","excerpt":"1|# RustClaw\n2|body","end_line":20}}"#,
+        ));
+    let mut answer_text =
+        "文件存在；成功读取前 20 行；标题（第一行 `# RustClaw`）中出现 RustClaw。".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert!(answer_text.contains("RustClaw"));
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
+    assert!(journal.final_answer.as_deref() != Some("README.md"));
+}
+
+#[test]
+fn requested_machine_kv_summary_final_guard_preserves_generated_file_report_fields() {
+    let prompt = "return dry_run=true provider/model planned_outputs and output_path";
+    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-generated-file-report-final",
+        "ask",
+        prompt,
+    );
+    let mut answer_text = concat!(
+        "dry_run=true\n",
+        "provider=minimax\n",
+        "model=image-01\n",
+        "output_path=/home/guagua/rustclaw/document/media_dry_run/image_status_card.png\n",
+        "planned_outputs=[{\"path\":\"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png\",\"type\":\"image_file\"}]"
+    )
+    .to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert!(answer_text.contains("output_path="));
+    assert!(answer_text.contains("planned_outputs="));
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
+}
+
+#[test]
+fn requested_machine_kv_summary_final_guard_preserves_async_poll_report_fields() {
+    let prompt = "return task_id job_id status and async_poll_adapter_result";
+    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-async-poll-report-final", "ask", prompt);
+    let mut answer_text = concat!(
+        "task_id: image-task-001\n",
+        "job_id: image-job-001\n",
+        "status: succeeded\n",
+        "async_poll_adapter_result: {\"adapter_kind\":\"media_job_poll\",\"status\":\"succeeded\"}"
+    )
+    .to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert!(answer_text.contains("task_id: image-task-001"));
+    assert!(answer_text.contains("async_poll_adapter_result:"));
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
 }
 
 #[test]
@@ -798,6 +1040,66 @@ fn raw_tail_read_failure_recovery_returns_observed_excerpt() {
 }
 
 #[test]
+fn tree_summary_rows_failure_recovery_returns_machine_fields() {
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-tree-summary-recovery", "ask", "prompt");
+    journal.record_final_stop_signal("synthesize_answer_failed");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "system_basic",
+            json!({
+                "action": "tree_summary",
+                "summary_rows": [
+                    {
+                        "path": "scripts/nl_tests/fixtures/device_local",
+                        "name": "device_local",
+                        "kind": "dir",
+                        "file_count": 2,
+                        "truncated": false
+                    },
+                    {
+                        "path": "scripts/nl_tests/fixtures/device_local/docs",
+                        "name": "docs",
+                        "kind": "dir",
+                        "file_count": 2,
+                        "truncated": false
+                    }
+                ]
+            })
+            .to_string(),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "system_basic",
+            json!({
+                "action": "tree_summary",
+                "summary_rows": [
+                    {
+                        "path": "scripts/nl_tests/fixtures/device_local/_unpacked_notes",
+                        "name": "_unpacked_notes",
+                        "kind": "dir",
+                        "file_count": 1,
+                        "truncated": false
+                    }
+                ]
+            })
+            .to_string(),
+        ));
+
+    let recovered = deterministic_tree_summary_rows_failure_recovery(&journal)
+        .expect("tree summary rows recovery");
+
+    assert_eq!(
+        recovered,
+        "name=device_local file_count=2 truncated=false\nname=docs file_count=2 truncated=false"
+    );
+}
+
+#[test]
 fn content_tail_read_failure_recovery_selects_observed_log_line() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = crate::ClaimedTask {
@@ -1101,6 +1403,40 @@ fn scalar_delivery_drops_existing_execution_summary_messages() {
 }
 
 #[test]
+fn strict_structured_delivery_drops_existing_execution_summary_messages() {
+    let mut route = route_result(crate::AskMode::Act {
+        finalize: crate::ActFinalizeStyle::Plain,
+    });
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let answer = r#"{"info":17,"warn":2,"error":1}"#;
+    let mut messages = vec![
+        "**执行过程**\n1. 调用技能 `log_analyze`\n   输出：ok".to_string(),
+        answer.to_string(),
+    ];
+
+    assert!(!should_reinsert_execution_summaries_for_delivery(
+        &route, answer
+    ));
+    drop_execution_summaries_when_delivery_is_scalar(&route, answer, &mut messages);
+
+    assert_eq!(messages, vec![answer.to_string()]);
+}
+
+#[test]
+fn strict_file_delivery_keeps_execution_summary_available() {
+    let mut route = route_result(crate::AskMode::Act {
+        finalize: crate::ActFinalizeStyle::Plain,
+    });
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.delivery_required = true;
+
+    assert!(should_reinsert_execution_summaries_for_delivery(
+        &route,
+        r#"{"file":"report.md"}"#
+    ));
+}
+
+#[test]
 fn config_validation_delivery_drops_existing_execution_summary_messages() {
     let mut route = route_result(crate::AskMode::Act {
         finalize: crate::ActFinalizeStyle::ChatWrapped,
@@ -1192,7 +1528,7 @@ fn journal_missing_file_search_evidence_detects_not_found_probe() {
 #[test]
 fn answer_route_result_overrides_initial_chat_when_execution_trace_exists() {
     let initial = route_result(crate::AskMode::direct_answer());
-    let answer_route = route_result(crate::AskMode::planner_execute_chat_wrapped());
+    let answer_route = route_result(crate::AskMode::planner_execute_with_chat_finalizer());
     let mut answer_journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     answer_journal.record_plan_result(&crate::PlanResult {
         plan_kind: crate::PlanKind::Single,
@@ -1214,7 +1550,7 @@ fn answer_route_result_overrides_initial_chat_when_execution_trace_exists() {
 #[test]
 fn answer_route_result_does_not_override_chat_without_execution_trace() {
     let initial = route_result(crate::AskMode::direct_answer());
-    let answer_route = route_result(crate::AskMode::planner_execute_chat_wrapped());
+    let answer_route = route_result(crate::AskMode::planner_execute_with_chat_finalizer());
     let answer_journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
 
     assert!(!should_use_answer_route_result(

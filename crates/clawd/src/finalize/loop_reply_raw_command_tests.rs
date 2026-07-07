@@ -1,12 +1,13 @@
 use super::*;
 use crate::finalize::loop_reply::replace_delivery_with_direct_structured_observed_answer;
 use crate::finalize::loop_reply::shell_stdout_redirect_target_path;
+use crate::finalize::raw_command_machine_field_projection_from_journal;
 
 #[test]
 fn raw_command_chatact_prefers_exact_observed_output_over_planned_extra_content() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -45,7 +46,7 @@ fn raw_command_chatact_prefers_exact_observed_output_over_planned_extra_content(
 fn raw_command_multiline_output_replaces_reordered_synthesis() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -85,7 +86,7 @@ async fn finalize_loop_reply_replaces_drifted_raw_command_short_list_synthesis()
     let state = test_state();
     let task = claimed_task("task-raw-command-short-list-drift");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -127,7 +128,7 @@ async fn finalize_loop_reply_replaces_drifted_raw_command_short_list_synthesis()
 fn raw_command_projection_plan_replaces_drifted_projected_answer() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
         "List /home/guagua/rustclaw/scripts in descending name order and return only five names."
             .to_string();
@@ -178,7 +179,7 @@ fn raw_command_projection_plan_replaces_drifted_projected_answer() {
 fn raw_command_projection_plan_replaces_unprojected_listing_output() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
         "List /home/guagua/rustclaw/scripts in descending name order and return only five names."
             .to_string();
@@ -297,6 +298,191 @@ fn raw_command_redirect_projection_returns_existing_workspace_file_path() {
     assert!(finalizer_summary.is_some());
 }
 
+#[test]
+fn raw_command_requested_stdout_path_uses_observed_stdout_path_value() {
+    let state = test_state();
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent =
+        "Run pwd and return only exit_code and stdout_path machine fields.".to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "/home/guagua/rustclaw\n",
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "respond",
+        r#"{"capability":"run_cmd","reason_code":"verify_capability_unavailable"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_3",
+        "respond",
+        r#"{"capability":"run_cmd","reason_code":"verify_capability_unavailable"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_4",
+        "run_cmd",
+        "exit=0 command=pwd > /tmp/pwd_stdout.txt",
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_5", "run_cmd", "EXIT=0\n"));
+
+    let (answer, summary) = direct_raw_command_output_projection(&state, &route, &loop_state)
+        .expect("raw command projection");
+
+    assert_eq!(answer, "exit_code=0\nstdout_path=/home/guagua/rustclaw");
+    assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
+fn raw_command_requested_stdout_uses_observed_stdout_value() {
+    let state = test_state();
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent = "Run printf and return only exit_code and stdout fields.".to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "run_cmd", "RUSTCLAW_NL_100"));
+
+    let (answer, summary) = direct_raw_command_output_projection(&state, &route, &loop_state)
+        .expect("raw command projection");
+
+    assert_eq!(answer, "exit_code=0\nstdout=RUSTCLAW_NL_100");
+    assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
+fn raw_command_requested_stdout_path_ignores_temp_stdout_file_wrapper() {
+    let state = test_state();
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent =
+        "Run pwd and return only exit_code and stdout_path machine fields.".to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "/home/guagua/rustclaw\n",
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "run_cmd",
+        "exit_code=0\nstdout_path=/tmp/pwd_stdout.txt\n---\n/home/guagua/rustclaw\n",
+    ));
+
+    let (answer, summary) = direct_raw_command_output_projection(&state, &route, &loop_state)
+        .expect("raw command projection");
+
+    assert_eq!(answer, "exit_code=0\nstdout_path=/home/guagua/rustclaw");
+    assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
+fn raw_command_journal_projection_prefers_real_stdout_over_wrapper_metadata() {
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent =
+        "Run pwd and return only exit_code and stdout_path machine fields.".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-raw-command-journal", "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "run_cmd",
+            "/home/guagua/rustclaw\n",
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "run_cmd",
+            "exit_code=0\nstdout_path=/tmp/pwd_stdout.txt\n",
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3",
+            "respond",
+            "exit_code=0\nstdout_path=/tmp/pwd_stdout.txt stdout_path",
+        ));
+
+    let answer = raw_command_machine_field_projection_from_journal(&route, &journal)
+        .expect("raw command journal projection");
+
+    assert_eq!(answer, "exit_code=0\nstdout_path=/home/guagua/rustclaw");
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_keeps_requested_raw_command_machine_fields_exact() {
+    let state = test_state();
+    let task = claimed_task("task-raw-command-machine-fields-exact");
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent =
+        "Run pwd and return only exit_code and stdout_path machine fields.".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "/home/guagua/rustclaw\n",
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "run_cmd",
+        "exit_code=0\nstdout_path=/tmp/pwd_stdout.txt\n---\n/home/guagua/rustclaw\n",
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_3",
+        "respond",
+        "exit_code=0\nstdout_path=/home/guagua/rustclaw stdout_path",
+    ));
+    loop_state
+        .delivery_messages
+        .push("exit_code=0\nstdout_path=/home/guagua/rustclaw stdout_path".to_string());
+    loop_state.last_user_visible_respond =
+        Some("exit_code=0\nstdout_path=/home/guagua/rustclaw stdout_path".to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "Run pwd and return only exit_code and stdout_path.",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should keep exact machine fields");
+
+    assert_eq!(
+        reply.text.trim(),
+        "exit_code=0\nstdout_path=/home/guagua/rustclaw"
+    );
+    assert!(!reply.text.contains(" stdout_path"));
+    assert!(!reply.should_fail_task);
+}
+
 #[tokio::test]
 async fn finalize_loop_reply_returns_redirected_file_path_for_scalar_raw_command_contract() {
     let mut state = test_state();
@@ -358,7 +544,7 @@ async fn finalize_loop_reply_returns_redirected_file_path_for_scalar_raw_command
 fn backfill_suppresses_raw_run_cmd_when_plan_declares_projection() {
     let task = claimed_task("task-backfill-raw-projection");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;

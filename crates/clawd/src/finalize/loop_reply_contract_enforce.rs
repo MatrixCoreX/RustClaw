@@ -6,9 +6,11 @@ use crate::{AppState, ClaimedTask};
 use super::{
     direct_scalar_observed_answer, direct_structured_observed_answer,
     generated_delivery_existing_file_content_synthesis_token,
-    last_respond_matches_single_line_observation, latest_tail_read_range_answer_from_loop,
-    log_deterministic_delivery_record, looks_like_raw_command_snapshot,
-    looks_like_structured_machine_output, output_contract_requests_exact_delivery,
+    last_respond_matches_single_line_observation, latest_publishable_respond_step_output,
+    latest_tail_read_range_answer_from_loop, log_deterministic_delivery_record,
+    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
+    output_contract_requests_exact_delivery, planned_delivery_is_publishable_model_language_answer,
+    publishable_summary_has_multi_source_observation,
     route_requires_compound_content_file_delivery, route_requires_raw_tail_read_passthrough,
     strict_raw_command_output_exact_observation_answer, valid_publishable_synthesis_output,
 };
@@ -91,6 +93,29 @@ pub(super) async fn enforce_delivery_output_contract(
         loop_state.delivery_messages = delivery_messages;
         return;
     }
+    if let Some(synthesis) = publishable_synthesis
+        .as_deref()
+        .or_else(|| latest_publishable_respond_step_output(loop_state))
+        .filter(|text| route_prefers_content_evidence_synthesis(route, text))
+    {
+        let mut delivery_messages = loop_state
+            .delivery_messages
+            .iter()
+            .filter(|message| crate::finalize::is_execution_summary_message(message))
+            .cloned()
+            .collect::<Vec<_>>();
+        append_delivery_message(&task.task_id, &mut delivery_messages, synthesis.to_string());
+        loop_state.last_user_visible_respond = Some(synthesis.to_string());
+        loop_state.delivery_messages = delivery_messages;
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "content_evidence_keep_publishable_synthesis",
+            "kept",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return;
+    }
     let seed_text = if publishable_synthesis.is_some() {
         loop_state
             .last_publishable_synthesis_output
@@ -170,7 +195,13 @@ pub(super) async fn enforce_delivery_output_contract(
     // - Reject：候选明显违反结构 contract（如 strict scalar 缺路径/整数），走 §7.2
     //   ClarifyFallbackSource::VerifyRejected fallback，丢弃 candidate。
     // 三种情况都打 tracing event verify_contract_emitted，便于 inspect_task.sh 关联。
-    if !normalized_text.trim().is_empty() {
+    if !normalized_text.trim().is_empty()
+        && !model_language_evidence_summary_should_skip_low_level_reshape(
+            route,
+            loop_state,
+            &normalized_text,
+        )
+    {
         let verdict = crate::output_contract_verifier::verify_output_contract(
             &route.output_contract,
             &normalized_text,
@@ -252,6 +283,50 @@ pub(super) async fn enforce_delivery_output_contract(
     loop_state.delivery_messages = normalized_messages;
 }
 
+fn model_language_evidence_summary_should_skip_low_level_reshape(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    candidate: &str,
+) -> bool {
+    let contract = route.effective_output_contract();
+    if contract.delivery_required
+        || matches!(
+            contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+    {
+        return false;
+    }
+    if !matches!(
+        crate::evidence_policy::final_answer_shape_for_route(route),
+        Some(
+            crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence
+                | crate::evidence_policy::FinalAnswerShape::RawOutputOrShortSummary
+        )
+    ) {
+        return false;
+    }
+    let candidate = candidate.trim();
+    if !planned_delivery_is_publishable_model_language_answer(candidate) {
+        return false;
+    }
+    if route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::RawCommandOutput,
+        crate::OutputSemanticKind::CommandOutputSummary,
+    ]) && !publishable_summary_has_multi_source_observation(loop_state)
+    {
+        return false;
+    }
+    let nonempty_lines = candidate
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .count();
+    let token_count = candidate.split_whitespace().count();
+    let char_count = candidate.chars().count();
+    nonempty_lines > 1 || token_count >= 8 || char_count >= 64
+}
+
 pub(super) fn route_accepts_filesystem_mutation_synthesis(
     route: &crate::RouteResult,
     synthesis: &str,
@@ -278,6 +353,32 @@ fn filesystem_mutation_synthesis_payload_is_complete(synthesis: &str) -> bool {
             .is_some_and(|steps| !steps.is_empty())
 }
 
+pub(super) fn route_prefers_content_evidence_synthesis(
+    route: &crate::RouteResult,
+    synthesis: &str,
+) -> bool {
+    let contract = route.effective_output_contract();
+    let content_summary_contract = route.output_contract_marker_is_any(&[
+        crate::OutputSemanticKind::ContentExcerptSummary,
+        crate::OutputSemanticKind::ContentExcerptWithSummary,
+        crate::OutputSemanticKind::ExcerptKindJudgment,
+        crate::OutputSemanticKind::WorkspaceProjectSummary,
+    ]) && !matches!(
+        contract.response_shape,
+        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+    );
+    if !contract.requires_content_evidence
+        || contract.delivery_required
+        || (output_contract_requests_exact_delivery(route) && !content_summary_contract)
+        || synthesis.trim().is_empty()
+        || crate::finalize::parse_delivery_token(synthesis).is_some()
+        || crate::finalize::looks_like_planner_artifact(synthesis)
+        || crate::finalize::looks_like_internal_trace_artifact(synthesis)
+    {
+        return false;
+    }
+    content_summary_contract
+}
 pub(super) async fn discard_meta_respond_placeholder_for_content_evidence(
     state: &AppState,
     task: &ClaimedTask,

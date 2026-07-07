@@ -5,7 +5,7 @@ async fn finalize_loop_reply_preserves_health_check_summary_synthesis() {
     let state = test_state();
     let task = claimed_task("task-service-status-wrapped-health-check");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = "Show system/service status".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
@@ -119,7 +119,7 @@ async fn finalize_loop_reply_honors_system_health_selector() {
     let state = test_state();
     let task = claimed_task("task-service-status-system-health-selector");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
         "Run a basic health check with system_health field selector".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
@@ -231,7 +231,7 @@ async fn finalize_loop_reply_uses_machine_closeout_when_recipe_done_and_synthesi
     let state = test_state();
     let task = claimed_task("task-ops-validated-closeout");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = "Start local service and validate it".to_string();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -299,7 +299,7 @@ async fn finalize_loop_reply_preserves_process_basic_status_summary_synthesis() 
     let state = test_state();
     let task = claimed_task("task-service-status-process-basic-json-synthesis");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
         "检查 telegramd 服务进程当前是否仍在运行，并用一句话解释其状态".to_string();
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
@@ -380,7 +380,7 @@ async fn finalize_loop_reply_prefers_service_control_status_over_health_check_du
     let state = test_state();
     let task = claimed_task("task-service-status-service-control-priority");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent = "check ssh service active status in one sentence".to_string();
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
@@ -478,6 +478,72 @@ async fn finalize_loop_reply_prefers_service_control_status_over_health_check_du
     assert!(
         !reply.text.contains("service_name=sshd"),
         "one-sentence synthesis should not be replaced with key=value fields: {}",
+        reply.text
+    );
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_projects_service_control_target_status_fields() {
+    let state = test_state();
+    let task = claimed_task("task-service-status-service-control-target-fields");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.resolved_intent =
+        "return target, status, manager_type for clawd service status".to_string();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        user_request: Some(
+            "Check clawd service/process status only; return target, status, manager_type."
+                .to_string(),
+        ),
+        ..Default::default()
+    };
+    let service_output = serde_json::json!({
+        "executed_actions": ["status"],
+        "manager_type": "rustclaw",
+        "post_state": "clawd=running",
+        "pre_state": "clawd=running",
+        "requested_action": "status",
+        "service_name": "clawd",
+        "status": "ok",
+        "summary": "Status: clawd=running",
+        "target": "clawd",
+        "verified": true
+    })
+    .to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "service_control".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(service_output),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "Check clawd service/process status only; return target, status, manager_type.",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should project structured service fields");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert!(reply.text.contains("target=clawd"), "{}", reply.text);
+    assert!(reply.text.contains("status=ok"), "{}", reply.text);
+    assert!(
+        reply.text.contains("manager_type=rustclaw"),
+        "{}",
         reply.text
     );
 }
@@ -674,7 +740,7 @@ fn package_manager_summary_uses_structured_detect_answer() {
     });
 
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
     route.resolved_intent =
         "check which package manager is recognized and briefly say the everyday default"
             .to_string();

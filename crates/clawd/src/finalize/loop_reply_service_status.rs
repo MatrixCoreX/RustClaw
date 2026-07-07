@@ -4,7 +4,11 @@ pub(super) fn service_status_system_basic_info_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<String> {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ServiceStatus {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
+        && !crate::machine_capability_ref::route_has_capability_namespace(route, &["system"])
+        && !crate::machine_capability_ref::route_has_capability_namespace(route, &["service"])
+        && !crate::machine_capability_ref::route_has_capability_namespace(route, &["health"])
+    {
         return None;
     }
     let system_health_only = service_status_selector_is_system_health_only(route);
@@ -199,6 +203,8 @@ fn service_control_status_observed_answer(loop_state: &LoopState) -> Option<Stri
         .and_then(|step| step.output.as_deref())
         .and_then(service_control_payload_from_output)?;
     let mut fields = Vec::new();
+    push_json_path_alias_field(&mut fields, &value, "target", "target");
+    push_json_path_alias_field(&mut fields, &value, "service_name", "target");
     push_json_path_field(&mut fields, &value, "service_name");
     push_json_path_field(&mut fields, &value, "post_state");
     push_json_path_field(&mut fields, &value, "pre_state");
@@ -324,6 +330,29 @@ fn push_json_path_field(
         return;
     }
     fields.push(format!("{field_path}={field_value}"));
+}
+
+fn push_json_path_alias_field(
+    fields: &mut Vec<String>,
+    value: &serde_json::Value,
+    field_path: &'static str,
+    output_field: &'static str,
+) {
+    if fields.iter().any(|field| {
+        field
+            .split_once('=')
+            .is_some_and(|(key, _)| key == output_field)
+    }) {
+        return;
+    }
+    let Some(field_value) = json_value_at_path(value, field_path).and_then(json_scalar_to_string)
+    else {
+        return;
+    };
+    if field_value.trim().is_empty() {
+        return;
+    }
+    fields.push(format!("{output_field}={field_value}"));
 }
 
 fn json_value_at_path<'a>(

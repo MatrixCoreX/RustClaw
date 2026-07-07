@@ -1,5 +1,8 @@
 use super::*;
-use crate::finalize::loop_reply::replace_delivery_with_direct_scalar_observed_answer;
+use crate::finalize::loop_reply::{
+    enforce_delivery_output_contract, replace_delivery_with_direct_scalar_observed_answer,
+    replace_delivery_with_direct_structured_observed_answer,
+};
 
 #[tokio::test]
 async fn finalize_loop_reply_prefers_observed_raw_scalar_after_synthesis_error() {
@@ -44,6 +47,97 @@ async fn finalize_loop_reply_prefers_observed_raw_scalar_after_synthesis_error()
 
     assert_eq!(reply.text, "guagua");
     assert_eq!(reply.messages, vec!["guagua".to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_preserves_publishable_evidence_summary_over_scalar_projection() {
+    let state = test_state();
+    let task = claimed_task("task-generic-evidence-summary-over-scalar");
+    let mut route = scalar_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let summary = "Working directory: /home/guagua/rustclaw. A clawd process and a listening port are both visible in the current task evidence.";
+    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "/home/guagua/rustclaw\n",
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "process_basic",
+        r#"{"extra":{"action":"port_list","ports":[8787],"public_ports":[8787],"listeners":[{"port":8787,"process_name":"clawd"}]},"text":"port=8787"}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "synthesize_answer", summary));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_4", "respond", summary));
+    loop_state.last_publishable_synthesis_output = Some(summary.to_string());
+    loop_state.last_user_visible_respond = Some("port=8787".to_string());
+
+    assert!(
+        direct_scalar_observed_answer(Some(&state), &loop_state, Some(&agent_run_context))
+            .is_none(),
+        "summary-with-evidence routes should not be compressed into one observed scalar"
+    );
+
+    let mut staged_loop_state = loop_state.clone();
+    backfill_delivery_from_last_outputs(&task, &mut staged_loop_state, Some(&agent_run_context));
+    assert_eq!(
+        final_answer_text_from_delivery(&staged_loop_state.delivery_messages),
+        summary
+    );
+    enforce_delivery_output_contract(
+        &state,
+        &task,
+        "execute and summarize the observed working directory plus local process evidence",
+        &mut staged_loop_state,
+        Some(&agent_run_context),
+    )
+    .await;
+    assert_eq!(
+        final_answer_text_from_delivery(&staged_loop_state.delivery_messages),
+        summary
+    );
+    let mut staged_finalizer_summary = None;
+    assert!(
+        !replace_delivery_with_direct_structured_observed_answer(
+            &state,
+            &task,
+            &mut staged_loop_state,
+            Some(&agent_run_context),
+            &mut staged_finalizer_summary,
+        ),
+        "direct raw projection should preserve richer publishable summary"
+    );
+    assert_eq!(
+        final_answer_text_from_delivery(&staged_loop_state.delivery_messages),
+        summary
+    );
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "execute and summarize the observed working directory plus local process evidence",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should preserve publishable evidence summary");
+
+    assert_eq!(reply.text, summary);
+    assert_eq!(reply.messages, vec![summary.to_string()]);
     assert!(!reply.should_fail_task);
 }
 
