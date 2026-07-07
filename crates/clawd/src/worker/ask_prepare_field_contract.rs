@@ -111,6 +111,20 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
     );
     let structured_refinement_present =
         surface.has_structured_target_refinement() || selector_declares_field_value_request;
+    if target_count >= 3
+        && structured_refinement_present
+        && locator_hint_declares_multiple_targets(route_result)
+    {
+        set_effective_contract_marker(route_result, "contract:command_output_summary");
+        if route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar {
+            route_result.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        }
+        route_result.route_reason.push_str("; ");
+        route_result
+            .route_reason
+            .push_str("multi_locator_structured_field_preserves_summary_contract");
+        return;
+    }
     if target_count >= 2
         && structured_refinement_present
         && route_preserves_heterogeneous_observation_summary_contract(route_result)
@@ -187,6 +201,18 @@ fn explicit_locator_target_count_excluding_structured_selector(
         push_unique_raw_candidate(&mut candidates, candidate);
     }
     candidates.len()
+}
+
+fn locator_hint_declares_multiple_targets(route_result: &crate::RouteResult) -> bool {
+    route_result
+        .output_contract
+        .locator_hint
+        .split(';')
+        .map(normalize_raw_locator_candidate_token)
+        .filter(|candidate| !candidate.is_empty())
+        .take(2)
+        .count()
+        >= 2
 }
 
 fn route_preserves_heterogeneous_observation_summary_contract(
