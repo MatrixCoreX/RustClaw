@@ -233,7 +233,7 @@ pub(super) fn build_lightweight_tool_spec(
         lines.push(crate::evidence_policy::evidence_policy_context_prompt_line_for_route(route));
         let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route);
         lines.push(format!(
-            "- boundary_contract_hint response_shape={} final_answer_shape={} final_answer_shape_class={} contract_marker={} locator_kind={}",
+            "- boundary_contract_hint response_shape={} final_answer_shape={} final_answer_shape_class={} locator_kind={}",
             route.output_contract.response_shape.as_str(),
             final_answer_shape
                 .map(crate::evidence_policy::FinalAnswerShape::as_str)
@@ -241,7 +241,6 @@ pub(super) fn build_lightweight_tool_spec(
             final_answer_shape
                 .map(|shape| shape.class().as_str())
                 .unwrap_or("none"),
-            route.effective_output_contract_semantic_kind().as_str(),
             route.output_contract.locator_kind.as_str(),
         ));
         if !route.output_contract.locator_hint.trim().is_empty() {

@@ -370,9 +370,9 @@ fn lightweight_tool_spec_includes_route_evidence_policy_context() {
     assert!(spec.contains("evidence_policy_context"));
     assert!(spec.contains("boundary_contract_hint"));
     assert!(!spec.contains("route_gate_kind="));
-    assert!(spec.lines().any(|line| {
+    assert!(!spec.lines().any(|line| {
         line.split_whitespace()
-            .any(|part| part == "contract_marker=file_paths")
+            .any(|part| part.starts_with("contract_marker="))
     }));
     assert!(spec.lines().any(|line| {
         line.split_whitespace()
@@ -671,9 +671,9 @@ fn lightweight_tool_spec_includes_contract_and_auto_locator() {
     assert!(rendered.contains("boundary_contract_hint"));
     assert!(!rendered.contains("route_gate_kind="));
     assert!(rendered.contains("response_shape=scalar"));
-    assert!(rendered.lines().any(|line| {
+    assert!(!rendered.lines().any(|line| {
         line.split_whitespace()
-            .any(|part| part == "contract_marker=scalar_path_only")
+            .any(|part| part.starts_with("contract_marker="))
     }));
     assert!(rendered.lines().any(|line| {
         line.split_whitespace()
