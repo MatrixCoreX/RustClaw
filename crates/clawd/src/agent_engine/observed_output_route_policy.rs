@@ -122,68 +122,58 @@ pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunCo
     if route_has_marker(crate::OutputSemanticKind::RawCommandOutput)
         && response_shape == Some(crate::OutputResponseShape::Strict)
     {
-        return "Use the observed command output as the value for the exact format requested by the user. If the user asked for a prefix, suffix, template, or key=value shape, apply that formatting instead of returning the raw command output unchanged.".to_string();
+        return "style_policy=exact_observed_value observed_source=command_output requested_format=preserve raw_passthrough=conditional".to_string();
     }
     if route_has_marker(crate::OutputSemanticKind::DirectoryPurposeSummary) {
-        return "For a listing-grounded directory purpose summary, use observed entry names, paths, counts, metadata, and file extensions as sufficient evidence for a cautious directory-level purpose or role. Include the requested selected entries plus the purpose/role summary; do not refuse only because file contents were not read unless the user asked for exact per-file contents or concrete setup steps.".to_string();
+        return "style_policy=directory_purpose_summary evidence=listing_metadata include=selected_entries,purpose_summary content_read_required=only_when_requested".to_string();
     }
     if route_has_marker(crate::OutputSemanticKind::ExcerptKindJudgment) {
-        return "For an excerpt-kind judgment, base the category judgment on the observed excerpt. If the same current task also observed listing names or candidates, include those observed names/candidates and the excerpt-based judgment in the final answer; for one_sentence shape, combine both deliverables into one compact sentence.".to_string();
+        return "style_policy=excerpt_kind_judgment evidence=observed_excerpt include=candidates,judgment one_sentence=combine_deliverables".to_string();
     }
     if let Some(route) = route {
         if route_disallows_direct_observation_passthrough(route) {
             if route_quantity_comparison_requires_model_language_synthesis(route) {
-                return "Use the observed comparison values as evidence, and include the requested concise model-language synthesis. Do not answer with only the raw comparison verdict; that would be incomplete for this contract.".to_string();
+                return "style_policy=evidence_synthesis passthrough=disallowed synthesis=quantity_comparison include=requested_model_language_synthesis".to_string();
             }
             if let Some(count) = route.output_contract.exact_sentence_count {
-                let sentence_label = if count == 1 { "sentence" } else { "sentences" };
                 return format!(
-                    "Use the observed output as evidence to produce exactly {count} {sentence_label}. Do not answer by copying only the raw observed output; that would be an incomplete passthrough for this contract."
+                    "style_policy=evidence_synthesis passthrough=disallowed sentence_count={count}"
                 );
             }
             if route.output_contract.response_shape == crate::OutputResponseShape::OneSentence {
-                return "Use the observed output as evidence to produce exactly one sentence. If the request has multiple deliverables, include all of them in that one sentence. Do not answer by copying only the raw observed output; that would be an incomplete passthrough for this contract.".to_string();
+                return "style_policy=evidence_synthesis passthrough=disallowed response_shape=one_sentence include_all_deliverables=true".to_string();
             }
-            return "Use the observed output as evidence to produce the requested final wording. Do not answer by copying only the raw observed output; that would be an incomplete passthrough for this contract.".to_string();
+            return "style_policy=evidence_synthesis passthrough=disallowed response_shape=requested_final_wording".to_string();
         }
     }
     if let Some(count) = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .and_then(|route| route.output_contract.exact_sentence_count)
     {
-        let sentence_label = if count == 1 { "sentence" } else { "sentences" };
-        return format!(
-            "Return exactly {count} {sentence_label}. Do not compress the answer into fewer sentences or expand beyond that count."
-        );
+        return format!("style_policy=exact_sentence_count sentence_count={count}");
     }
     if route_has_marker(crate::OutputSemanticKind::ExistenceWithPathSummary) {
-        return "Return whether the target exists, the resolved path when found, and the requested brief content-grounded purpose or summary. Do not answer from path evidence alone if content evidence is available.".to_string();
+        return "style_policy=existence_with_path_summary include=verdict,path,summary evidence_preference=content_when_available".to_string();
     }
     if route_has_marker(crate::OutputSemanticKind::ExistenceWithPath) {
-        return "Return a concise existence verdict and include the target path or observed path. This path requirement overrides response_shape=scalar unless the original user explicitly requested one bare boolean/scalar. Do not reduce the answer to only yes/no/exists/missing.".to_string();
+        return "style_policy=existence_with_path include=verdict,path scalar_override=path_required".to_string();
     }
     if route_has_marker(crate::OutputSemanticKind::ScalarCount)
         && response_shape != Some(crate::OutputResponseShape::Scalar)
     {
-        return "Use observed numeric fields to answer the requested count dimensions. Do not collapse component counts into only an aggregate total unless the user explicitly asked for only the aggregate.".to_string();
+        return "style_policy=scalar_count include=count_dimensions aggregate_only=explicit_request_only".to_string();
     }
     match response_shape {
-        Some(crate::OutputResponseShape::Scalar) => {
-            "Return only the final scalar value with no label, prefix, suffix, or explanation."
-        }
+        Some(crate::OutputResponseShape::Scalar) => "style_policy=scalar bare_value=true",
         Some(crate::OutputResponseShape::FileToken) => {
-            "Return only the delivery token or delivery-marker output itself. Do not add explanation."
+            "style_policy=file_token bare_delivery_token=true"
         }
         Some(crate::OutputResponseShape::OneSentence) => {
-            "Return exactly one sentence unless the current user request explicitly asks for another exact sentence count. If the request has multiple deliverables, include all of them in that one sentence."
+            "style_policy=one_sentence include_all_deliverables=true"
         }
-        Some(crate::OutputResponseShape::Strict) => {
-            "Return exactly the format requested by the user. Do not add execution traces, headings, prefixes, suffixes, or extra explanation."
-        }
-        Some(crate::OutputResponseShape::Free) => {
-            "Return a short direct answer: one short paragraph or compact listing plus one concise conclusion."
-        }
-        None => "Return the shortest grounded answer that directly satisfies the user request.",
+        Some(crate::OutputResponseShape::Strict) => "style_policy=strict_user_format no_extra=true",
+        Some(crate::OutputResponseShape::Free) => "style_policy=compact_direct answer_shape=short",
+        None => "style_policy=shortest_grounded_direct",
     }
     .to_string()
 }
