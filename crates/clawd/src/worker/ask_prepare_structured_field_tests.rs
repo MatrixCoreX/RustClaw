@@ -759,3 +759,72 @@ fn multi_locator_summary_contract_requires_exact_summary_marker() {
         .route_reason
         .contains("scalar_field_pair_contract_repair"));
 }
+
+#[test]
+fn three_target_structured_field_request_preserves_summary_contract() {
+    let root = TempDirGuard::new("structured_field_three_target_summary");
+    let readme = root.path.join("README.md");
+    let docs = root.path.join("docs");
+    let config = root.path.join("config.toml");
+    fs::write(&readme, "# RustClaw\n").expect("write readme");
+    fs::create_dir_all(&docs).expect("create docs");
+    fs::write(docs.join("service_notes.md"), "status ok\n").expect("write docs");
+    fs::write(&config, "[skills.fs_basic]\nplanner_kind = \"builtin\"\n").expect("write config");
+
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent:
+            "Collect file existence, directory listing, and one config field into a table."
+                .to_string(),
+        needs_clarify: false,
+        route_reason: "structured_field_selector_requires_scalar_value".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: format!(
+                "{}; {}; {}",
+                readme.display(),
+                docs.display(),
+                config.display()
+            ),
+            self_extension: crate::SelfExtensionContract {
+                structured_field_selector: Some("skills.fs_basic.planner_kind".to_string()),
+                ..crate::SelfExtensionContract::default()
+            },
+        },
+    };
+    let prompt = format!(
+        "Check whether {} exists; list filenames under {}; read skills.fs_basic.planner_kind from {}; return a table.",
+        readme.display(),
+        docs.display(),
+        config.display()
+    );
+
+    repair_scalar_field_value_contract_for_locator_reply(&mut route, &prompt);
+
+    assert_eq!(
+        route.effective_output_contract_semantic_kind(),
+        crate::OutputSemanticKind::CommandOutputSummary
+    );
+    assert!(route
+        .route_reason
+        .contains("multi_locator_structured_field_preserves_summary_contract"));
+    assert!(!route
+        .route_reason
+        .contains("scalar_field_pair_contract_repair"));
+}
