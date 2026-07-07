@@ -855,7 +855,7 @@ fn observed_entries_preserve_full_find_name_results_for_synthesis() {
 }
 
 #[test]
-fn observed_contract_json_includes_semantic_kind_and_locator_hint() {
+fn observed_contract_json_includes_final_answer_shape_and_locator_hint() {
     let route_result = RouteResult {
         ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "读一下 README.md 开头，然后用一句话总结".to_string(),
@@ -893,7 +893,19 @@ fn observed_contract_json_includes_semantic_kind_and_locator_hint() {
     assert!(parsed.get("route_gate_kind").is_none());
     assert!(parsed.get("ask_mode").is_none());
     assert!(parsed.get("derived_route_label").is_none());
-    assert!(contract.contains(r#""contract_marker":"content_excerpt_summary""#));
+    assert!(parsed.get("contract_marker").is_none());
+    assert_eq!(
+        parsed
+            .get("final_answer_shape")
+            .and_then(serde_json::Value::as_str),
+        Some("summary_grounded_in_excerpt")
+    );
+    assert_eq!(
+        parsed
+            .get("final_answer_shape_class")
+            .and_then(serde_json::Value::as_str),
+        Some("grounded_summary")
+    );
     assert!(contract.contains(r#""locator_hint":"README.md""#));
 }
 
