@@ -22,7 +22,7 @@ fn state_with_registry(toml: &str, skills: &[&str]) -> crate::AppState {
     state
 }
 
-fn demo_task_contract() -> Value {
+fn demo_capability_contract() -> Value {
     json!({
         "schema_version": 1,
         "source": "run_skill",
@@ -107,14 +107,14 @@ fn direct_run_skill_observation_records_redacted_extra_evidence() {
     let token = "sk-test_abcdefghijklmnopqrstuvwxyz1234567890";
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-1", "run_skill", "run_skill:demo");
-    let task_contract = demo_task_contract();
+    let capability_contract = demo_capability_contract();
     let machine_payload = super::run_skill_success_machine_payload();
 
     super::record_run_skill_task_observation(
         &mut journal,
         "demo",
         "ok",
-        &task_contract,
+        &capability_contract,
         &machine_payload,
         Some("done"),
         None,
@@ -202,13 +202,13 @@ fn direct_run_skill_observation_records_redacted_extra_evidence() {
     );
     assert_eq!(
         observation
-            .pointer("/task_contract/capability_ref")
+            .pointer("/capability_contract/capability_ref")
             .and_then(Value::as_str),
         Some("demo.preview")
     );
     assert_eq!(
         observation
-            .pointer("/task_contract/effect")
+            .pointer("/capability_contract/effect")
             .and_then(Value::as_str),
         Some("observe")
     );
@@ -283,14 +283,14 @@ async fn direct_run_skill_async_start_publishes_waiting_checkpoint() {
 fn direct_run_skill_failure_records_error_observation() {
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-2", "run_skill", "run_skill:demo");
-    let task_contract = demo_task_contract();
+    let capability_contract = demo_capability_contract();
     let machine_payload = super::run_skill_failure_machine_payload("missing required field: path");
 
     super::record_run_skill_task_observation(
         &mut journal,
         "demo",
         "error",
-        &task_contract,
+        &capability_contract,
         &machine_payload,
         None,
         Some("missing required field: path"),

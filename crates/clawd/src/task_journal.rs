@@ -57,6 +57,7 @@ const JSON_EVIDENCE_PRIORITY_KEYS: &[&str] = &[
     "content_excerpt",
     "excerpt",
     "text",
+    "extra",
     "summary",
     "snippet",
     "field_value",
