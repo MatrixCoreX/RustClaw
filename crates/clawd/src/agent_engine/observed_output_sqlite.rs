@@ -1,6 +1,9 @@
 use super::*;
 
 pub(super) fn db_basic_scalar_candidate(value: &serde_json::Value) -> Option<String> {
+    if let Some(answer) = value.get("schema_version").and_then(value_scalar_text) {
+        return Some(answer);
+    }
     let columns = value.get("columns")?.as_array()?;
     if columns.len() != 1 {
         return None;

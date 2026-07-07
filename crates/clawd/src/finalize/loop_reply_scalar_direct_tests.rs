@@ -50,6 +50,34 @@ async fn finalize_loop_reply_prefers_observed_raw_scalar_after_synthesis_error()
     assert!(!reply.should_fail_task);
 }
 
+#[test]
+fn schema_version_capability_shape_uses_observed_scalar_without_semantic_kind() {
+    let state = test_state();
+    let mut route = free_route_result();
+    route.route_reason = "capability_ref=database.schema_version".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "db_basic",
+        r#"{"action":"schema_version","schema_version":7}"#,
+    ));
+
+    let (answer, summary) =
+        direct_scalar_observed_answer(Some(&state), &loop_state, Some(&agent_run_context))
+            .expect("schema_version shape should project observed scalar");
+
+    assert_eq!(answer, "7");
+    assert!(summary.contract_ok);
+}
+
 #[tokio::test]
 async fn finalize_loop_reply_preserves_publishable_evidence_summary_over_scalar_projection() {
     let state = test_state();
