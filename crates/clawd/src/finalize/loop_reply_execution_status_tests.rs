@@ -59,7 +59,7 @@ fn deterministic_missing_observed_target_answer_reports_missing_scalar_count_pat
 
     assert!(answer.contains("configs/config_copy"));
     assert!(answer.contains("exists=false"));
-    assert!(answer.contains("contract_marker=scalar_count"));
+    assert!(answer.contains("final_answer_shape=scalar"));
     assert!(answer.contains("count_available=false"));
 }
 
@@ -94,7 +94,7 @@ fn deterministic_missing_observed_target_answer_respects_scalar_existence_shape(
 
     assert_eq!(
         answer,
-        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt`\nkind=missing\ncontract_marker=existence_with_path\nresponse_shape=existence_with_path"
+        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt`\nkind=missing\nfinal_answer_shape=existence_verdict_with_path\nresponse_shape=existence_with_path"
     );
 }
 
@@ -132,7 +132,7 @@ fn deterministic_missing_observed_target_answer_uses_machine_payload_for_non_bil
 
     assert_eq!(
         answer,
-        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/tmp/rustclaw-missing-ja.txt`\nkind=missing\ncontract_marker=existence_with_path\nresponse_shape=existence_with_path"
+        "schema_version=1\nreason_code=missing_observed_target\nexists=false\npath=`/tmp/rustclaw-missing-ja.txt`\nkind=missing\nfinal_answer_shape=existence_verdict_with_path\nresponse_shape=existence_with_path"
     );
 }
 

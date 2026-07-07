@@ -189,7 +189,12 @@ pub(super) fn execution_failed_step_guard_entry(
         return None;
     }
     let mut lines = vec![
-        "contract_marker=execution_failed_step".to_string(),
+        format!(
+            "final_answer_shape={}",
+            crate::evidence_policy::final_answer_shape_for_route(route)
+                .map(crate::evidence_policy::FinalAnswerShape::as_str)
+                .unwrap_or("failed_step_with_evidence")
+        ),
         "answer_scope=failed_steps_only".to_string(),
         "successful_step_outputs_are_not_final_answer=true".to_string(),
     ];

@@ -208,6 +208,9 @@ pub(super) fn deterministic_missing_observed_target_answer(
     let contract_marker = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .map(crate::RouteResult::effective_output_contract_semantic_kind);
+    let final_answer_shape = agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(crate::evidence_policy::final_answer_shape_for_route);
     let scalar_count = contract_marker == Some(crate::OutputSemanticKind::ScalarCount);
     let concise_existence = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
@@ -227,8 +230,11 @@ pub(super) fn deterministic_missing_observed_target_answer(
         format!("path=`{path}`"),
         "kind=missing".to_string(),
     ];
-    if let Some(contract_marker) = contract_marker {
-        lines.push(format!("contract_marker={}", contract_marker.as_str()));
+    if let Some(final_answer_shape) = final_answer_shape {
+        lines.push(format!(
+            "final_answer_shape={}",
+            final_answer_shape.as_str()
+        ));
     }
     if scalar_count {
         lines.push("count_available=false".to_string());
