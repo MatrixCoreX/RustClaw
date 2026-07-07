@@ -7,7 +7,7 @@ fn sqlite_database_kind_judgment_is_not_hard_classified_by_observed_output() {
         r#"{"columns":["name"],"rows":[]}"#,
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent:
             "看看 data/db-basic-contract.sqlite 里有哪些表，再一句话说这更像业务库还是测试库"
                 .to_string(),
@@ -54,7 +54,7 @@ fn sqlite_database_kind_judgment_uses_contract_selector_and_cites_tables() {
             r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]}"#,
         ));
     let route_result = RouteResult {
-            ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+            ask_mode: crate::AskMode::act_with_chat_finalizer(),
             resolved_intent:
                 "判断 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 更像业务库还是测试库，并给出依据"
                     .to_string(),
@@ -109,7 +109,7 @@ fn sqlite_database_kind_judgment_uses_run_cmd_table_names_without_llm() {
         "orders\nservice_logs\nusers\n",
     ));
     let route_result = RouteResult {
-            ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+            ask_mode: crate::AskMode::act_with_chat_finalizer(),
             resolved_intent:
                 "判断 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 更像业务库还是测试库，并给出依据"
                     .to_string(),
@@ -161,7 +161,7 @@ fn sqlite_schema_version_uses_run_cmd_value_without_llm() {
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "schema_version=7\n"));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent:
             "读取 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的 schema 版本"
                 .to_string(),
@@ -209,7 +209,7 @@ fn sqlite_table_listing_uses_run_cmd_table_names_without_llm() {
         "orders\nservice_logs\nusers\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent:
             "列出 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里的表"
                 .to_string(),
@@ -262,7 +262,7 @@ fn sqlite_database_kind_judgment_prefers_table_inventory_over_later_name_columns
             r#"{"columns":["id","name","email"],"rows":[{"email":"alice@example.com","id":1,"name":"Alice"},{"email":"bob@example.com","id":2,"name":"Bob"}]}"#,
         ));
     let route_result = RouteResult {
-            ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+            ask_mode: crate::AskMode::act_with_chat_finalizer(),
             resolved_intent:
                 "判断 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 更像业务库还是测试库，并给出依据"
                     .to_string(),
@@ -317,7 +317,7 @@ fn direct_answer_lists_sqlite_table_names_without_llm_when_names_only_is_request
         r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
     ));
     let route_result = RouteResult {
-            ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+            ask_mode: crate::AskMode::act_with_chat_finalizer(),
             resolved_intent:
                 "看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里有哪些表，只输出表名"
                     .to_string(),
@@ -365,7 +365,7 @@ fn direct_scalar_lists_sqlite_table_names_when_names_only_contract_is_scalar() {
         r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
     ));
     let route_result = RouteResult {
-            ask_mode: crate::AskMode::planner_execute_plain(),
+            ask_mode: crate::AskMode::act_plain(),
             resolved_intent:
                 "看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里有哪些表，只输出表名"
                     .to_string(),
@@ -442,7 +442,7 @@ fn direct_scalar_does_not_take_first_db_row_from_multi_row_query() {
         r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Read a scalar value from the SQLite database".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -777,7 +777,7 @@ fn sqlite_table_listing_summary_defers_to_synthesis() {
         r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "列一下 data/app.sqlite 里有哪些表".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -822,7 +822,7 @@ fn direct_scalar_defers_route_locator_hint_quantity_comparison_to_synthesis() {
         .executed_step_results
         .push(ok_step("step_2", "list_dir", "a\nb\nc\n"));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "上一个和上上个哪个更多，只回答目录名".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -869,7 +869,7 @@ fn direct_scalar_defers_compare_paths_result_to_synthesis() {
             r#"{"action":"compare_paths","left":{"path":"Cargo.toml","resolved_path":"/tmp/Cargo.toml","kind":"file","size_bytes":123},"right":{"path":"Cargo.lock","resolved_path":"/tmp/Cargo.lock","kind":"file","size_bytes":456},"comparison":{"same_kind":true,"same_name":false,"same_size":false,"size_delta_bytes":-333,"left_newer":null,"same_content":false}}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因"
             .to_string(),
         needs_clarify: false,
@@ -913,7 +913,7 @@ fn direct_scalar_defers_compare_paths_result_to_synthesis() {
 #[test]
 fn quantity_comparison_does_not_force_direct_scalar_observed_answer() {
     let route = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "比较 Cargo.toml 和 Cargo.lock 哪个更大".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -953,7 +953,7 @@ fn direct_answer_defers_git_status_dirty_worktree_to_llm() {
         "exit=0\n## main...origin/main\n M Cargo.toml\n?? new_file.txt\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "检查当前仓库是否存在未提交的改动，用一句话返回结果".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -998,7 +998,7 @@ fn direct_answer_defers_git_repository_state_one_sentence_to_synthesis() {
         "exit=0\n## main...origin/main\n M Cargo.toml\n?? tmp/generated.txt\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "检查当前仓库是否存在未提交的改动，用一句话返回结果".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1052,7 +1052,7 @@ fn direct_answer_defers_wrapped_git_repository_state_one_sentence_to_synthesis()
         .executed_step_results
         .push(ok_step("step_1", "git_basic", &output));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "semantic contract only".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1098,7 +1098,7 @@ fn direct_answer_defers_strict_git_repository_state_when_exact_one_sentence() {
         "exit=0\n## main...origin/main\n M Cargo.toml\n?? tmp/generated.txt\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "semantic contract only".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1144,7 +1144,7 @@ fn direct_answer_defers_git_repository_state_for_any_language() {
         "exit=0\n## main...origin/main\n M Cargo.toml\n?? tmp/generated.txt\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "現在のリポジトリに未コミットの変更があるか、一文で答えてください"
             .to_string(),
         needs_clarify: false,
@@ -1196,7 +1196,7 @@ fn direct_answer_does_not_override_git_state_language_synthesis() {
         "是的，当前仓库有 8 个文件有未提交的改动。",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "检查当前仓库是否存在未提交的改动，用一句话返回结果".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1247,7 +1247,7 @@ fn direct_answer_defers_git_branch_and_dirty_state_language_request() {
         "exit=0\n## main...origin/main\n M Cargo.toml\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "show the current git branch, then say whether the worktree looks clean or mid-edit"
                 .to_string(),
@@ -1313,7 +1313,7 @@ fn direct_answer_defers_git_log_release_note_to_synthesis() {
             "exit=0\n09342a6a fix: expose nl execution and locator flows\n336e8d92 docs: update planner-first architecture diagrams\n",
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "Write a short release note for RustClaw.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1359,7 +1359,7 @@ fn direct_scalar_extracts_git_commit_subject_from_oneline_log() {
         "exit=0\n09342a6a fix: expose nl execution and locator flows\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "return the latest git commit subject only".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1425,7 +1425,7 @@ fn direct_scalar_extracts_git_current_branch_from_structured_field() {
         .executed_step_results
         .push(ok_step("step_1", "git_basic", &output));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "semantic contract only".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1469,7 +1469,7 @@ fn direct_answer_defers_git_status_clean_when_exit_only_to_llm() {
         .executed_step_results
         .push(ok_step("step_1", "git_basic", "exit=0\n"));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "看看这个仓库现在有没有未提交改动，用一句话告诉我".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1514,7 +1514,7 @@ fn direct_answer_defers_git_status_dirty_without_branch_header_to_llm() {
         " M Cargo.toml\n?? new_file.txt\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "看看这个仓库现在有没有未提交改动，用一句话告诉我".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

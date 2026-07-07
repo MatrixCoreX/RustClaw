@@ -9,7 +9,7 @@ use crate::{
 
 fn route_result(shape: OutputResponseShape, kind: OutputSemanticKind) -> RouteResult {
     RouteResult {
-        ask_mode: AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: AskMode::act_with_chat_finalizer(),
         resolved_intent: "test".to_string(),
         needs_clarify: false,
         route_reason: String::new(),

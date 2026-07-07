@@ -45,7 +45,7 @@ fn chat_wrapped_execution_route_keeps_health_check_observation_only_plan() {
     }];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_with_chat_finalizer(),
+            crate::AskMode::act_with_chat_finalizer(),
             false,
             OutputResponseShape::OneSentence,
         )),
@@ -64,7 +64,7 @@ fn non_scalar_route_still_repairs_after_prior_observation_when_delivery_is_empty
     }];
     assert!(should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_with_chat_finalizer(),
+            crate::AskMode::act_with_chat_finalizer(),
             false,
             OutputResponseShape::Free,
         )),
@@ -81,7 +81,7 @@ fn scalar_route_keeps_single_observation_plan_without_followup() {
         args: serde_json::json!({ "action": "current_branch" }),
     }];
     let route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         false,
         OutputResponseShape::Scalar,
     );
@@ -95,7 +95,7 @@ fn scalar_route_keeps_single_observation_plan_without_followup() {
 #[test]
 fn git_basic_branch_alias_scalar_route_normalizes_to_current_branch() {
     let route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -117,7 +117,7 @@ fn git_basic_branch_alias_scalar_route_normalizes_to_current_branch() {
 #[test]
 fn git_basic_branch_alias_non_scalar_route_normalizes_to_branch() {
     let route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -167,7 +167,7 @@ fn git_repository_state_remote_request_plans_git_remote_action() {
 fn git_repository_state_contract_without_machine_token_defers_to_planner() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -208,7 +208,7 @@ fn git_repository_state_status_capability_ref_plans_git_status_action() {
 fn git_repository_state_one_sentence_branch_summary_defers_to_planner() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -222,7 +222,7 @@ fn git_repository_state_one_sentence_branch_summary_defers_to_planner() {
 fn git_repository_state_strict_branch_summary_defers_to_planner() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -281,7 +281,7 @@ fn recent_scalar_current_workspace_git_observation_satisfies_repair_guard() {
     let state = test_state_with_enabled_skills(&["git_basic", "run_cmd"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -316,7 +316,7 @@ fn raw_command_output_route_keeps_single_run_cmd_plan_without_followup() {
         args: serde_json::json!({ "command": "ls", "cwd": "/tmp/rustclaw-workspace" }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         false,
         OutputResponseShape::Free,
     );
@@ -333,7 +333,7 @@ fn runtime_status_scalar_patch_plans_current_user_system_basic_status() {
     let state = test_state_with_enabled_skills(&["system_basic"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -364,7 +364,7 @@ fn runtime_status_scalar_string_patch_plans_current_user_system_basic_status() {
     let state = test_state_with_enabled_skills(&["system_basic"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -422,7 +422,7 @@ fn runtime_status_scalar_patch_prefers_system_basic_when_available() {
     let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -453,7 +453,7 @@ fn runtime_status_scalar_patch_plans_hostname_system_basic_status() {
     let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -493,7 +493,7 @@ async fn runtime_status_query_reaches_planner_without_literal_command_fast_path(
         payload_json: json!({ "text": prompt }).to_string(),
     };
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -547,7 +547,7 @@ fn runtime_status_scalar_patch_maps_kernel_release_to_uname_r() {
     let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -578,7 +578,7 @@ fn raw_command_output_runtime_status_plan_keeps_system_basic_when_available() {
     let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -622,7 +622,7 @@ fn raw_command_output_runtime_status_planner_tool_choice_is_not_fallback_rewritt
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -691,7 +691,7 @@ fn ops_recipe_apply_phase_without_mutation_forces_plan_repair() {
     }];
     assert!(should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Free,
         )),
@@ -718,7 +718,7 @@ fn ops_recipe_apply_phase_without_mutation_uses_specific_repair_reason() {
     assert_eq!(
         repair_reason(
             Some(&route_result(
-                crate::AskMode::planner_execute_plain(),
+                crate::AskMode::act_plain(),
                 false,
                 OutputResponseShape::Free,
             )),
@@ -752,7 +752,7 @@ fn ops_recipe_apply_phase_with_mutation_keeps_plan() {
     ];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Scalar,
         )),
@@ -785,7 +785,7 @@ fn config_change_profile_without_post_change_validation_forces_repair() {
     ];
     assert!(should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Free,
         )),
@@ -795,7 +795,7 @@ fn config_change_profile_without_post_change_validation_forces_repair() {
     assert_eq!(
         repair_reason(
             Some(&route_result(
-                crate::AskMode::planner_execute_plain(),
+                crate::AskMode::act_plain(),
                 false,
                 OutputResponseShape::Free,
             )),
@@ -834,7 +834,7 @@ fn skill_authoring_profile_requires_integration_validation_not_readback_only() {
     ];
     assert!(should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Free,
         )),
@@ -844,7 +844,7 @@ fn skill_authoring_profile_requires_integration_validation_not_readback_only() {
     assert_eq!(
         repair_reason(
             Some(&route_result(
-                crate::AskMode::planner_execute_plain(),
+                crate::AskMode::act_plain(),
                 false,
                 OutputResponseShape::Free,
             )),
@@ -883,7 +883,7 @@ fn code_change_profile_requires_verification_not_readback_only() {
     ];
     assert!(should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Free,
         )),
@@ -893,7 +893,7 @@ fn code_change_profile_requires_verification_not_readback_only() {
     assert_eq!(
         repair_reason(
             Some(&route_result(
-                crate::AskMode::planner_execute_plain(),
+                crate::AskMode::act_plain(),
                 false,
                 OutputResponseShape::Free,
             )),
@@ -934,7 +934,7 @@ fn code_change_profile_done_allows_terminal_response_without_extra_validation_st
 
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Free,
         )),
@@ -968,7 +968,7 @@ fn package_change_profile_without_post_install_validation_forces_repair() {
     ];
     assert!(should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Free,
         )),
@@ -978,7 +978,7 @@ fn package_change_profile_without_post_install_validation_forces_repair() {
     assert_eq!(
         repair_reason(
             Some(&route_result(
-                crate::AskMode::planner_execute_plain(),
+                crate::AskMode::act_plain(),
                 false,
                 OutputResponseShape::Free,
             )),
@@ -1023,7 +1023,7 @@ fn database_change_profile_keeps_schema_validation_after_execute() {
     assert!(
         !should_force_plan_repair(
             Some(&route_result(
-                crate::AskMode::planner_execute_plain(),
+                crate::AskMode::act_plain(),
                 false,
                 OutputResponseShape::Free,
             )),
@@ -1033,7 +1033,7 @@ fn database_change_profile_keeps_schema_validation_after_execute() {
         "unexpected repair reason: {}",
         repair_reason(
             Some(&route_result(
-                crate::AskMode::planner_execute_plain(),
+                crate::AskMode::act_plain(),
                 false,
                 OutputResponseShape::Free,
             )),
@@ -1074,7 +1074,7 @@ fn code_change_profile_with_structured_cargo_check_keeps_plan() {
     ];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Scalar,
         )),
@@ -1107,7 +1107,7 @@ fn code_change_profile_with_run_cmd_cargo_check_keeps_plan() {
     ];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Scalar,
         )),
@@ -1148,7 +1148,7 @@ fn current_repo_scope_rejects_external_absolute_path() {
     ];
     assert!(should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Free,
         )),
@@ -1158,7 +1158,7 @@ fn current_repo_scope_rejects_external_absolute_path() {
     assert_eq!(
         repair_reason(
             Some(&route_result(
-                crate::AskMode::planner_execute_plain(),
+                crate::AskMode::act_plain(),
                 false,
                 OutputResponseShape::Free,
             )),
@@ -1201,7 +1201,7 @@ fn external_workspace_scope_requires_explicit_external_target() {
     ];
     assert!(should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Free,
         )),
@@ -1211,7 +1211,7 @@ fn external_workspace_scope_requires_explicit_external_target() {
     assert_eq!(
         repair_reason(
             Some(&route_result(
-                crate::AskMode::planner_execute_plain(),
+                crate::AskMode::act_plain(),
                 false,
                 OutputResponseShape::Free,
             )),
@@ -1241,7 +1241,7 @@ fn greenfield_scope_requires_creation_step_before_validation() {
     }];
     assert!(should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Free,
         )),
@@ -1251,7 +1251,7 @@ fn greenfield_scope_requires_creation_step_before_validation() {
     assert_eq!(
         repair_reason(
             Some(&route_result(
-                crate::AskMode::planner_execute_plain(),
+                crate::AskMode::act_plain(),
                 false,
                 OutputResponseShape::Free,
             )),
@@ -1297,7 +1297,7 @@ fn greenfield_scope_with_make_dir_and_write_file_keeps_plan() {
         },
     ];
     let route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         false,
         OutputResponseShape::Scalar,
     );
@@ -1336,7 +1336,7 @@ fn external_workspace_scope_persists_across_rounds_without_repeating_path() {
     }];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Scalar,
         )),
@@ -1373,7 +1373,7 @@ fn greenfield_scope_persists_creation_across_rounds() {
     }];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_plain(),
+            crate::AskMode::act_plain(),
             false,
             OutputResponseShape::Scalar,
         )),
@@ -1391,7 +1391,7 @@ fn content_evidence_route_allows_respond_only_after_prior_observation() {
     }];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_with_chat_finalizer(),
+            crate::AskMode::act_with_chat_finalizer(),
             true,
             OutputResponseShape::Free,
         )),
@@ -1478,7 +1478,7 @@ fn strips_intermediate_synthesize_before_later_execution() {
 #[test]
 fn strips_terminal_placeholder_respond_for_exact_listing_contract() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1565,7 +1565,7 @@ fn injects_synthesize_answer_when_respond_is_bare_placeholder() {
 #[test]
 fn appends_terminal_synthesize_for_command_summary_observation_plan() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1595,7 +1595,7 @@ fn appends_terminal_synthesize_for_command_summary_observation_plan() {
 #[test]
 fn does_not_append_terminal_synthesize_for_strict_raw_command_output() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );

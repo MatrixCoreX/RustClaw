@@ -788,7 +788,7 @@ fn evidence_policy_preflight_rejects_missing_bound_target_arg() {
     );
 
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

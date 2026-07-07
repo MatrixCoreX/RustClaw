@@ -19,7 +19,7 @@ fn observed_markdown_heading_scalar_ignores_markdown_json_hidden_in_visible_text
         .to_string(),
     ));
     let mut route = scalar_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;

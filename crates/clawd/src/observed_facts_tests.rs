@@ -2,7 +2,7 @@ use super::{derive_observed_facts_from_ask_outcome, ObservedFacts};
 
 fn dummy_route_result() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),

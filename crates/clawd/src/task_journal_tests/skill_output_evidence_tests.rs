@@ -47,7 +47,7 @@ fn generated_file_delivery_wrapped_missing_find_name_supplies_checked_path_evide
 fn docker_success_exit_text_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-docker-version", "ask", "检查 Docker 是否可用");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -104,7 +104,7 @@ fn docker_success_exit_text_counts_as_field_value_evidence() {
 fn package_manager_key_value_text_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-package-manager", "ask", "检测包管理器");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -157,7 +157,7 @@ fn docker_unavailable_text_counts_as_list_candidate_evidence() {
     let mut journal =
         TaskJournal::for_task("task-docker-images-unavailable", "ask", "列出 Docker 镜像");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1139,7 +1139,7 @@ fn large_inventory_dir_observed_evidence_preserves_mtime_metadata_when_truncated
 fn service_status_health_check_fields_count_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-service-status", "ask", "检查 clawd 服务状态");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),

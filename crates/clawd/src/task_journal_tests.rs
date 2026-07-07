@@ -28,7 +28,7 @@ mod failure_attribution;
 
 fn route_for_semantic(semantic_kind: crate::OutputSemanticKind) -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -54,7 +54,7 @@ fn route_for_semantic(semantic_kind: crate::OutputSemanticKind) -> crate::RouteR
 fn summary_json_includes_finalizer_and_task_metrics() {
     let mut journal = TaskJournal::for_task("task-1", "ask", "总结 README");
     journal.record_route_result(&crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "不要用现有技能，先规划一个新能力".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1364,7 +1364,7 @@ fn summary_json_includes_validation_result_machine_shape() {
 fn trace_json_compacts_plan_action_ref_to_contract_action() {
     let mut journal = TaskJournal::for_task("task-service", "ask", "check service");
     journal.record_route_result(&crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "check clawd service".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

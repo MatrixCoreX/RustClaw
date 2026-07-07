@@ -71,7 +71,7 @@ fn test_task(task_id: &str) -> crate::ClaimedTask {
 
 fn config_route(route_marker: &str, resolved_intent: &str) -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: resolved_intent.to_string(),
         needs_clarify: false,
         route_reason: route_marker.to_string(),

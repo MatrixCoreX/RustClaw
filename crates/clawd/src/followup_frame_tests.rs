@@ -342,7 +342,7 @@ fn persisted_followup_frame_round_trips_with_slice_and_entries() {
             ..Default::default()
         });
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "看一下那个 model io log 最后 4 行，再一句话说有什么现象".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -436,7 +436,7 @@ fn config_read_field_extra_path_persists_followup_bound_target() {
             ..Default::default()
         });
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "read structured field".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -493,7 +493,7 @@ fn compact_listing_answer_persists_ordered_entries_for_followup() {
     };
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "列出 logs 目录下前 5 个文件名".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -562,7 +562,7 @@ fn read_answer_with_visible_structural_bullets_persists_ordered_entries_for_foll
     let root = "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3";
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "find matching entries under a known directory".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -643,7 +643,7 @@ fn visible_listing_answer_overrides_full_journal_listing_for_followup() {
             ..Default::default()
         });
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "列出 logs 目录下前 5 个文件名".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -740,7 +740,7 @@ fn fs_basic_inventory_journal_replaces_prior_ordered_entries_for_followup() {
             ..Default::default()
         });
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "List first 5 filenames in logs directory".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -857,7 +857,7 @@ fn fs_basic_wrapped_inventory_journal_persists_ordered_entries_for_followup() {
             ..Default::default()
         });
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "List first 5 filenames in logs directory".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1055,7 +1055,7 @@ fn selected_target_turn_inherits_prior_ordered_entries_and_index() {
             ..Default::default()
         });
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "看第二个最后 2 行".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1290,7 +1290,7 @@ fn delivery_answer_sets_bound_target_from_file_token_and_inherits_selection() {
     persist_frame(&state, &task, &prior_frame).expect("persist prior frame");
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "把第二个发给我".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1364,7 +1364,7 @@ fn delivery_answer_with_absolute_file_token_still_inherits_relative_listing_sele
     persist_frame(&state, &task, &prior_frame).expect("persist prior frame");
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "把第二个发给我".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1483,7 +1483,7 @@ fn clarify_outcome_with_stale_locator_hint_still_clears_followup_frame() {
     };
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "看一下那个模型日志最后 5 行".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

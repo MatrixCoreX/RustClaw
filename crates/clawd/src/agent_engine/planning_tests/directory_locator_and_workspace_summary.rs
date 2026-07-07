@@ -30,7 +30,7 @@ fn file_paths_directory_locator_builds_structured_list_dir_plan() {
     fs::write(root.path.join("lib.rs"), "fn planner_loop_marker() {}\n").expect("write rust");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -90,7 +90,7 @@ fn file_paths_directory_locator_with_extension_token_uses_recursive_find_entries
     fs::write(root.path.join("Cargo.lock"), "# not toml").expect("write lock");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -144,7 +144,7 @@ fn scalar_path_auto_locator_does_not_use_deterministic_plan_for_directory_search
     fs::write(root.path.join("ABCD.txt"), "hello").expect("write report");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -170,7 +170,7 @@ fn scalar_path_directory_locator_search_uses_structural_name_target() {
     fs::write(root.path.join("ABCD.txt"), "hello").expect("write report");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -217,7 +217,7 @@ fn scalar_path_directory_locator_search_resolves_unique_entry_token_without_phra
     fs::write(root.path.join("ABCD.txt"), "hello").expect("write target");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -262,7 +262,7 @@ fn scalar_path_directory_locator_search_rejects_ambiguous_current_quoted_targets
     fs::write(root.path.join("WXYZ.txt"), "hello").expect("write second target");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -291,7 +291,7 @@ fn scalar_path_directory_locator_search_requires_scalar_path_contract() {
     fs::write(root.path.join("ABCD.txt"), "hello").expect("write target");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -315,7 +315,7 @@ fn scalar_path_auto_locator_directory_builds_observation_plan() {
     let root = TempDirGuard::new("scalar_auto_locator_dir");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -346,7 +346,7 @@ fn generic_directory_auto_locator_builds_inventory_synthesis_plan() {
     fs::write(root.path.join("large.log"), "xxxxxx").expect("write large");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -433,7 +433,7 @@ fn directory_entry_groups_auto_locator_preserves_bounded_names_shape() {
     fs::write(root.path.join("Cargo.toml"), "hello").expect("write cargo");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -483,7 +483,7 @@ fn directory_entry_groups_auto_locator_preserves_name_desc_selector() {
     fs::write(root.path.join("Cargo.toml"), "hello").expect("write cargo");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -533,7 +533,7 @@ fn generic_directory_auto_locator_uses_mtime_for_directory_entry_groups() {
     fs::write(root.path.join("README.md"), "hello").expect("write readme");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -570,7 +570,7 @@ fn directory_entry_groups_auto_locator_uses_tree_summary_for_machine_action_toke
     fs::create_dir_all(root.path.join("docs")).expect("create docs");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -614,7 +614,7 @@ fn directory_names_contract_overrides_planner_hidden_inventory() {
     fs::create_dir_all(root.path.join("docs")).expect("create docs dir");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -705,7 +705,7 @@ fn workspace_summary_auto_locator_lists_structure_and_reads_readme() {
     .expect("write README");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -898,7 +898,7 @@ fn directory_purpose_auto_locator_uses_inventory_for_many_text_candidates() {
     }
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1085,7 +1085,7 @@ fn directory_purpose_extension_from_resolved_intent_uses_recursive_find_entries(
     fs::write(root.path.join("nested/contract_repair.schema.json"), "{}").expect("write nested");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1195,7 +1195,7 @@ fn directory_purpose_extension_inventory_defers_explicit_extension_assess_gap() 
     let root = TempDirGuard::new("directory_purpose_extension_assess_gap_defers");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1228,7 +1228,7 @@ fn directory_purpose_reads_representative_found_files_after_extension_inventory(
     fs::write(&channel_path, "[telegram]\n").expect("write channel");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1309,7 +1309,7 @@ fn directory_purpose_reads_representative_found_files_from_wrapped_extra() {
     fs::write(&second_path, "{\"title\":\"contract\"}\n").expect("write second");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1380,7 +1380,7 @@ fn directory_tree_auto_locator_does_not_override_exact_file_names_contract() {
     fs::write(root.path.join("README.md"), "hello").expect("write readme");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1403,7 +1403,7 @@ fn directory_tree_auto_locator_does_not_override_raw_command_output_contract() {
     fs::write(root.path.join("README.md"), "hello").expect("write readme");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1428,7 +1428,7 @@ fn directory_tree_auto_locator_does_not_override_multi_directory_contract() {
     let left_path = root.path.join("left").display().to_string();
     let right_path = root.path.join("right").display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1452,7 +1452,7 @@ fn scalar_path_respond_only_uses_auto_locator_observation() {
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1490,7 +1490,7 @@ fn content_excerpt_summary_inserts_auto_locator_read_before_synthesis() {
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
     let readme_path = readme.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1540,7 +1540,7 @@ fn content_excerpt_summary_inserts_auto_locator_read_before_synthesis() {
 #[test]
 fn workspace_synthesis_respond_only_with_generic_semantic_uses_default_evidence() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1588,7 +1588,7 @@ fn workspace_synthesis_respond_only_with_generic_semantic_uses_default_evidence(
 #[test]
 fn workspace_default_evidence_requires_content_evidence_contract() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         false,
         OutputResponseShape::OneSentence,
     );
@@ -1655,7 +1655,7 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_doc_parse_for_lo
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
     let readme_path = readme.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1706,7 +1706,7 @@ fn content_excerpt_summary_auto_locator_reads_nested_file_without_workspace_inve
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );

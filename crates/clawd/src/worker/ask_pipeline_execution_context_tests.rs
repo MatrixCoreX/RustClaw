@@ -232,7 +232,7 @@ fn active_task_correction_keeps_resolved_context_rewrite() {
 #[test]
 fn evidence_route_keeps_resolved_prompt_rewrite() {
     let mut route = base_route(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         "Summarize the current workspace using evidence.",
     );
     route.output_contract.requires_content_evidence = true;

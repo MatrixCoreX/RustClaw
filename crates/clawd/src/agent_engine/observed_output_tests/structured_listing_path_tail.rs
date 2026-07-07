@@ -7,7 +7,7 @@ fn direct_answer_does_not_passthrough_listing_when_content_evidence_is_required(
         "base_skill_response_contract.md\nskill_integration_guide.md\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -52,7 +52,7 @@ fn direct_answer_does_not_passthrough_inventory_dir_when_content_evidence_is_req
             r#"{"action":"inventory_dir","path":"/tmp/docs","resolved_path":"/tmp/docs","names_only":true,"names":["base_skill_response_contract.md","skill_integration_guide.md"]}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -102,7 +102,7 @@ fn direct_answer_does_not_passthrough_run_cmd_listing_when_content_evidence_is_r
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "a.md\nb.md\n"));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -146,7 +146,7 @@ fn direct_answer_blocks_contract_forbidden_observation_action() {
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "hello from shell"));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "读取 docs/guide.md 并总结".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -192,7 +192,7 @@ fn directory_purpose_summary_is_not_hard_classified_by_observed_output() {
             r#"{"action":"inventory_dir","path":"/tmp/docs","resolved_path":"/tmp/docs","names_only":true,"names":["release_checklist.md","operator-guide.md","rollout-summary.pdf"]}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -231,7 +231,7 @@ fn directory_purpose_summary_is_not_hard_classified_by_observed_output() {
 #[test]
 fn directory_purpose_summary_style_hint_uses_listing_evidence() {
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "list recent docs and summarize their role".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -272,7 +272,7 @@ fn directory_purpose_summary_style_hint_uses_listing_evidence() {
 #[test]
 fn excerpt_kind_judgment_style_hint_preserves_listing_and_excerpt_deliverables() {
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "list files and classify the selected excerpt".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

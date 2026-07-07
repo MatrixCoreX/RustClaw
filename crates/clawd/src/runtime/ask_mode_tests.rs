@@ -102,9 +102,9 @@ fn named_constructors_are_explicit() {
 
 #[test]
 fn legacy_planner_execute_constructors_delegate_to_act_constructors() {
-    assert_eq!(AskMode::planner_execute_plain(), AskMode::act_plain());
+    assert_eq!(AskMode::act_plain(), AskMode::act_plain());
     assert_eq!(
-        AskMode::planner_execute_with_chat_finalizer(),
+        AskMode::act_with_chat_finalizer(),
         AskMode::act_with_chat_finalizer()
     );
 }

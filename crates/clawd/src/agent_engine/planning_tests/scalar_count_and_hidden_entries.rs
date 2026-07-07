@@ -7,7 +7,7 @@ fn scalar_count_listing_plan_preserves_dirs_only_dimension_for_count_inventory()
     fs::create_dir_all(root.path.join("child")).expect("create child");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -67,7 +67,7 @@ fn scalar_count_uses_active_listing_target_when_route_is_locatorless() {
     fs::write(root.path.join("service_notes.md"), "service").expect("write service");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -116,7 +116,7 @@ fn scalar_count_uses_current_workspace_scope_target_without_route_prebind() {
     fs::write(root.path.join("service_notes.md"), "service").expect("write service");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -169,7 +169,7 @@ fn scalar_count_planner_count_entries_inherits_dirs_filter_from_machine_contract
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -301,7 +301,7 @@ fn scalar_count_strict_single_sentence_shape_exposes_structured_file_count_hint(
     fs::write(root.path.join("a.txt"), "a").expect("write file");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -356,7 +356,7 @@ fn scalar_count_contract_filter_repairs_existing_count_entries_action() {
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.default_locator_search_dir = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -411,7 +411,7 @@ fn scalar_count_listing_plan_preserves_files_kind_for_count_inventory() {
     fs::create_dir_all(root.path.join("child")).expect("create child");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -463,7 +463,7 @@ fn scalar_count_listing_plan_preserves_extension_filter_for_count_inventory() {
     fs::write(root.path.join("b.txt"), "b").expect("write b");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -514,7 +514,7 @@ fn scalar_count_repair_preserves_explicit_count_path_over_auto_locator() {
     let root_path = root.path.display().to_string();
     let git_path = root.path.join(".git").display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -579,7 +579,7 @@ fn scalar_count_unqualified_listing_plan_forces_structured_count_repair() {
     fs::create_dir_all(root.path.join("child")).expect("create child");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -643,7 +643,7 @@ fn scalar_count_missing_explicit_path_checks_that_path_not_auto_parent() {
     let missing = root.path.join("configs/config_copy");
     let missing_path = missing.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -707,7 +707,7 @@ fn observed_missing_read_file_reply_does_not_force_plan_repair() {
         finished_at: 2,
     });
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -733,7 +733,7 @@ fn scalar_count_pathlike_hint_in_current_workspace_does_not_use_parent_auto_loca
     fs::create_dir_all(&parent).expect("create parent");
     let parent_path = parent.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -786,7 +786,7 @@ fn hidden_entries_scalar_contract_uses_inventory_dir() {
     fs::write(root.path.join("visible.txt"), "b").expect("write visible");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -847,7 +847,7 @@ fn hidden_entries_strict_contract_uses_hidden_inventory_dir() {
     fs::write(root.path.join("visible.txt"), "b").expect("write visible");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -901,7 +901,7 @@ fn hidden_entries_strict_contract_uses_hidden_inventory_dir() {
 #[test]
 fn hidden_entries_scalar_current_workspace_hint_falls_back_to_dot_inventory() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -951,7 +951,7 @@ fn hidden_entries_scalar_current_workspace_hint_falls_back_to_dot_inventory() {
 #[test]
 fn service_status_contract_rewrites_pgrep_run_cmd_to_service_control_status() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -988,7 +988,7 @@ fn service_status_contract_rewrites_pgrep_run_cmd_to_service_control_status() {
 #[test]
 fn service_status_contract_rewrites_pgrep_script_without_trailing_shell_words() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1018,7 +1018,7 @@ fn service_status_contract_rewrites_pgrep_script_without_trailing_shell_words() 
 #[test]
 fn service_status_contract_rewrites_systemctl_status_to_service_control_systemd() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1054,7 +1054,7 @@ fn normalize_service_status_capability_ref_keeps_planner_action_and_requests_rep
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1099,7 +1099,7 @@ fn normalize_prefers_registry_sqlite_rewrite_over_text_read_fallback() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1134,7 +1134,7 @@ fn normalize_prefers_registry_repair_from_docker_capability_ref() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1170,7 +1170,7 @@ fn legacy_docker_semantic_kind_without_capability_ref_does_not_select_registry_s
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1199,7 +1199,7 @@ fn archive_unpack_semantic_kind_without_capability_ref_stays_non_actionable() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1235,7 +1235,7 @@ fn explicit_service_command_is_preserved_as_run_cmd() {
     let mut state = test_state_with_enabled_skills(&["service_control", "run_cmd"]);
     state.policy.command_intent.execute_prefixes = vec!["执行命令 ".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1273,7 +1273,7 @@ fn explicit_service_command_is_preserved_as_run_cmd() {
 #[test]
 fn observed_judgment_mixed_placeholder_respond_uses_synthesize_after_listing() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1323,7 +1323,7 @@ fn scalar_count_preserves_planned_run_cmd_observation() {
     fs::write(root.path.join("visible.txt"), "b").expect("write visible");
     let root_path = root.path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1382,7 +1382,7 @@ fn structured_keys_contract_rewrites_read_range_to_structured_keys() {
     fs::write(&config_path, "alpha = 1\n[beta]\nvalue = 2\n").expect("write config");
     let config_path = config_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1438,7 +1438,7 @@ fn structured_keys_contract_rewrites_validate_to_structured_keys() {
     fs::write(&config_path, "alpha = 1\n[beta]\nvalue = 2\n").expect("write config");
     let config_path = config_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );

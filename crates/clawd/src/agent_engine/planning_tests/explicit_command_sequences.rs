@@ -88,7 +88,7 @@ fn execution_failed_step_prefixed_bare_sequence_gets_multi_run_cmd_plan() {
     state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -135,7 +135,7 @@ fn execution_failed_step_prefixed_echo_sequence_counts_as_explicit_command_reque
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
     state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -198,7 +198,7 @@ fn execution_failed_step_prefixed_echo_sequence_counts_as_explicit_command_reque
 fn conditional_step_update_limits_current_explicit_command_plan_to_pre_update_steps() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -271,7 +271,7 @@ fn conditional_step_update_limits_current_explicit_command_plan_to_pre_update_st
 #[test]
 fn multi_explicit_run_cmd_plan_marks_literal_commands_without_continue_on_error() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -318,7 +318,7 @@ fn explicit_configured_command_with_followup_skips_single_step_fast_path() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
     state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -386,7 +386,7 @@ fn explicit_configured_command_without_followup_keeps_single_step_fast_path() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
     state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -413,7 +413,7 @@ fn explicit_configured_command_inside_clause_is_detected() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
     state.policy.command_intent.execute_prefixes = vec!["请执行".to_string(), "执行".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -445,7 +445,7 @@ fn embedded_standalone_command_with_structural_args_keeps_single_step_fast_path(
     state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -477,7 +477,7 @@ fn embedded_standalone_command_sequence_uses_configured_command_tokens() {
     state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string(), "whoami".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -544,7 +544,7 @@ fn command_output_summary_explicit_command_plan_synthesizes_configured_sequence(
     state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string(), "whoami".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -594,7 +594,7 @@ fn command_output_summary_embedded_code_span_after_run_prefix_uses_literal_comma
     state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -641,7 +641,7 @@ fn command_output_summary_prefixed_unknown_second_command_gets_multi_step_plan()
     state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -712,7 +712,7 @@ fn leading_shellish_command_sequence_gets_deterministic_run_cmd_plan() {
     }
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -775,7 +775,7 @@ fn explicit_prefixed_shellish_code_span_keeps_single_step_fast_path() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
     state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -805,7 +805,7 @@ fn explicit_prefixed_shellish_code_span_keeps_single_step_fast_path() {
 #[test]
 fn existence_with_path_filename_deterministic_plan_uses_name_search() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -851,7 +851,7 @@ fn existence_with_path_directory_locator_uses_child_selector_search() {
     let locator_path = locator.display().to_string();
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -889,7 +889,7 @@ fn existence_with_path_directory_locator_uses_child_selector_search() {
 #[test]
 fn existence_with_path_multi_file_targets_deterministic_plan_uses_path_batch_facts() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -928,7 +928,7 @@ fn existence_with_path_multi_file_targets_deterministic_plan_uses_path_batch_fac
 #[test]
 fn existence_with_path_multi_file_targets_preserve_relative_path_segments() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -972,7 +972,7 @@ fn existence_with_path_multi_file_targets_preserve_relative_path_segments() {
 #[test]
 fn existence_with_path_current_workspace_single_file_target_uses_path_batch_facts() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1007,7 +1007,7 @@ fn existence_with_path_current_workspace_single_file_target_uses_path_batch_fact
 #[test]
 fn missing_existing_file_delivery_uses_find_name_probe() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::FileToken,
     );
@@ -1048,7 +1048,7 @@ fn missing_existing_file_delivery_uses_find_name_probe() {
 #[test]
 fn generated_file_delivery_without_state_patch_uses_existing_file_probe() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::FileToken,
     );
@@ -1087,7 +1087,7 @@ fn generated_file_delivery_without_state_patch_uses_existing_file_probe() {
 #[test]
 fn existence_with_path_current_workspace_service_file_target_uses_path_batch_facts() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1123,7 +1123,7 @@ fn existence_with_path_current_workspace_service_file_target_uses_path_batch_fac
 #[test]
 fn existence_with_path_path_deterministic_plan_uses_path_facts() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1156,7 +1156,7 @@ fn existence_with_path_path_deterministic_plan_uses_path_facts() {
 #[test]
 fn existence_with_path_retry_read_text_range_is_preserved_when_verifier_requests_excerpt() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1207,7 +1207,7 @@ fn archive_entry_existence_uses_archive_list_instead_of_archive_stat() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1252,7 +1252,7 @@ fn archive_entry_existence_scalar_shape_uses_archive_list() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1296,7 +1296,7 @@ fn archive_entry_existence_scalar_shape_uses_archive_list() {
 fn archive_file_existence_without_member_target_still_stats_archive() {
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1334,7 +1334,7 @@ fn existence_with_path_directory_locator_with_file_target_uses_find_path() {
     let directory = root.path.join("case_only");
     let directory_path = directory.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1386,7 +1386,7 @@ fn existence_with_path_directory_auto_locator_does_not_parse_history_entries_as_
     fs::create_dir_all(root.path.join("configs")).expect("mkdir configs");
     let directory_path = root.path.join("configs").display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1415,7 +1415,7 @@ fn file_paths_current_workspace_deterministic_plan_uses_name_search() {
     fs::write(&script, "#!/usr/bin/env bash\n").expect("write script");
     let script_path = script.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1456,7 +1456,7 @@ fn file_paths_current_workspace_deterministic_plan_uses_name_search() {
 #[test]
 fn file_paths_path_like_locator_hint_uses_parent_search_scope() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );

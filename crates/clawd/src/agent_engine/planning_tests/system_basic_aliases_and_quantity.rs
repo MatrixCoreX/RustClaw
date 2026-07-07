@@ -366,7 +366,7 @@ fn hidden_entries_contract_forces_inventory_dir_include_hidden() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -409,7 +409,7 @@ fn structured_scalar_compare_plan_appends_synthesize_answer() {
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -448,7 +448,7 @@ fn free_quantity_compare_plan_appends_synthesize_for_compare_paths() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -510,7 +510,7 @@ fn quantity_comparison_single_directory_count_observation_is_nonrecursive() {
 #[test]
 fn structured_scalar_compare_repairs_whole_file_read_plan() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -556,7 +556,7 @@ fn structured_scalar_compare_repair_can_add_text_after_prior_scalar_extract() {
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -604,7 +604,7 @@ fn recent_scalar_equality_repair_counts_prior_config_basic_field_extract() {
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -680,7 +680,7 @@ version = "0.1.0"
     let package_path_text = package_path.display().to_string();
     let cargo_path_text = cargo_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -805,7 +805,7 @@ fn structured_scalar_compare_allows_text_read_after_wrapped_inventory_evidence()
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -887,7 +887,7 @@ fn structured_scalar_compare_allows_text_read_after_wrapped_inventory_evidence()
 #[test]
 fn structured_scalar_compare_keeps_two_structured_extracts_for_strict_shape() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -940,7 +940,7 @@ fn structured_scalar_compare_keeps_two_structured_extracts_for_strict_shape() {
 #[test]
 fn structured_scalar_compare_accepts_two_directory_inventory_observations() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -990,7 +990,7 @@ fn structured_scalar_compare_accepts_two_directory_inventory_observations() {
 #[test]
 fn structured_scalar_compare_accepts_path_batch_facts_for_file_metadata() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1031,7 +1031,7 @@ fn structured_scalar_compare_accepts_path_batch_facts_for_file_metadata() {
 #[test]
 fn structured_scalar_compare_one_sentence_accepts_path_batch_facts_metadata_evidence() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1073,7 +1073,7 @@ fn structured_scalar_compare_one_sentence_accepts_path_batch_facts_metadata_evid
 #[test]
 fn structured_scalar_compare_free_shape_accepts_path_batch_facts_metadata_evidence() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1227,7 +1227,7 @@ fn directory_pair_locator_exposes_resolved_targets_even_without_quantity_semanti
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
