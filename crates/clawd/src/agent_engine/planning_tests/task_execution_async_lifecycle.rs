@@ -51,6 +51,51 @@ fn structured_async_start_keeps_planner_action_when_route_contract_is_generic_co
 }
 
 #[test]
+fn async_job_protocol_dry_run_does_not_inject_real_run_cmd_async_start() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = base_route_result();
+    route.resolved_intent =
+        "async_job_protocol=version:1 mode=dry_run adapter_result_key=async_poll_adapter_result"
+            .to_string();
+    route.route_reason =
+        "async_job_protocol=version:1 mode=dry_run would_mutate=false required_job_fields=job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key"
+            .to_string();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    let actions = vec![AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: json!({"command":"sleep 2 && echo RUSTCLAW_ASYNC_DRY_RUN"}),
+    }];
+
+    let normalized = normalize_planned_actions_with_original_and_context(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "dry-run runtime async job",
+        Some("dry-run runtime async job"),
+        Some(&route.route_reason),
+        None,
+        actions,
+    );
+
+    assert!(
+        !normalized.is_empty(),
+        "planner action should remain visible for preflight classification"
+    );
+    for action in normalized {
+        let AgentAction::CallSkill { skill, args } = action else {
+            panic!("expected run_cmd call(s), got {action:?}");
+        };
+        assert_eq!(skill, "run_cmd");
+        assert!(args.get("async_start").is_none());
+        assert!(args
+            .get(super::super::super::CLAWD_RUNTIME_ASYNC_JOB_START_ARG)
+            .is_none());
+    }
+}
+
+#[test]
 fn execution_recipe_async_plan_hint_preserves_planner_run_cmd_without_route_async_marker() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = base_route_result();

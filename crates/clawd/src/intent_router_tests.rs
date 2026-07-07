@@ -29,7 +29,6 @@ fn parse_execution_recipe_hint_accepts_explicit_ops_service_contract() {
 fn runtime_async_job_start_state_patch_survives_schema_and_becomes_plan_hint() {
     let raw = r#"{
       "resolved_user_intent":"start async local command",
-      "answer_candidate":"",
       "resume_behavior":"none",
       "schedule_kind":"none",
       "schedule_intent":null,
