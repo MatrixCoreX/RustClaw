@@ -449,7 +449,9 @@ fn matrix_inventory_file_paths_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths) {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths)
+        && !route_requests_filesystem_path_list(route)
+    {
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
