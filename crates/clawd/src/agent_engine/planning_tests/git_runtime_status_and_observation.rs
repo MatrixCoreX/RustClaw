@@ -174,6 +174,95 @@ fn git_show_file_at_rev_capability_rewrites_fs_read_to_git_basic() {
 }
 
 #[test]
+fn git_status_run_cmd_rewrites_to_structured_git_basic() {
+    let state = test_state_with_enabled_skills(&["git_basic", "run_cmd"]);
+    let workspace_root = state.skill_rt.workspace_root.display().to_string();
+    let actions = vec![AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: serde_json::json!({
+            "command": "git status --porcelain",
+            "cwd": workspace_root
+        }),
+    }];
+
+    let normalized = rewrite_readonly_git_run_cmd_to_git_basic(&state, None, actions);
+
+    assert!(matches!(
+        &normalized[0],
+        AgentAction::CallSkill { skill, args }
+            if skill == "git_basic"
+                && args.get("action").and_then(Value::as_str) == Some("status")
+    ));
+}
+
+#[test]
+fn git_status_run_cmd_with_foreign_cwd_is_preserved() {
+    let state = test_state_with_enabled_skills(&["git_basic", "run_cmd"]);
+    let actions = vec![AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: serde_json::json!({
+            "command": "git status --porcelain",
+            "cwd": "/tmp/other-repository"
+        }),
+    }];
+
+    let normalized = rewrite_readonly_git_run_cmd_to_git_basic(&state, None, actions);
+
+    assert!(matches!(
+        &normalized[0],
+        AgentAction::CallSkill { skill, args }
+            if skill == "run_cmd"
+                && args.get("cwd").and_then(Value::as_str) == Some("/tmp/other-repository")
+    ));
+}
+
+#[test]
+fn git_status_call_capability_rewrites_after_resolution() {
+    let state = test_state_with_enabled_skills(&["git_basic", "run_cmd"]);
+    let normalized = normalize_planned_actions(
+        &state,
+        None,
+        &LoopState::new(1),
+        "machine field request",
+        None,
+        vec![AgentAction::CallCapability {
+            capability: "system.run_command".to_string(),
+            args: serde_json::json!({ "command": "git status --porcelain" }),
+        }],
+    );
+
+    assert!(matches!(
+        &normalized[0],
+        AgentAction::CallSkill { skill, args }
+            if skill == "git_basic"
+                && args.get("action").and_then(Value::as_str) == Some("status")
+    ));
+}
+
+#[test]
+fn literal_git_status_run_cmd_is_preserved() {
+    let state = test_state_with_enabled_skills(&["git_basic", "run_cmd"]);
+    let mut args = serde_json::json!({ "command": "git status --porcelain" });
+    args.as_object_mut().unwrap().insert(
+        crate::agent_engine::CLAWD_LITERAL_COMMAND_ARG.to_string(),
+        Value::Bool(true),
+    );
+    let actions = vec![AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args,
+    }];
+
+    let normalized = rewrite_readonly_git_run_cmd_to_git_basic(&state, None, actions);
+
+    assert!(matches!(
+        &normalized[0],
+        AgentAction::CallSkill { skill, args }
+            if skill == "run_cmd"
+                && args.get("command").and_then(Value::as_str) == Some("git status --porcelain")
+    ));
+}
+
+#[test]
 fn git_repository_state_remote_request_plans_git_remote_action() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(

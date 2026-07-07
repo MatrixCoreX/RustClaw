@@ -677,6 +677,179 @@ pub(super) fn normalize_git_basic_schema_aliases(
         .collect()
 }
 
+pub(super) fn rewrite_readonly_git_run_cmd_to_git_basic(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if !git_basic_available_for_plan(state) {
+        return actions;
+    }
+    if matches!(
+        route_result.map(|route| route.effective_output_contract_semantic_kind()),
+        Some(crate::OutputSemanticKind::RawCommandOutput)
+    ) {
+        return actions;
+    }
+    let mut changed = false;
+    let rewritten = actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallSkill { skill, args }
+                if state.resolve_canonical_skill_name(&skill) == "run_cmd" =>
+            {
+                if args
+                    .get(super::super::CLAWD_LITERAL_COMMAND_ARG)
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    || !run_cmd_git_command_scope_matches_workspace(state, &args)
+                {
+                    return AgentAction::CallSkill { skill, args };
+                }
+                let Some(command) = run_cmd_command_from_args(&args) else {
+                    return AgentAction::CallSkill { skill, args };
+                };
+                let Some(git_args) = git_basic_args_from_readonly_git_command(command) else {
+                    return AgentAction::CallSkill { skill, args };
+                };
+                changed = true;
+                AgentAction::CallSkill {
+                    skill: "git_basic".to_string(),
+                    args: git_args,
+                }
+            }
+            AgentAction::CallTool { tool, args }
+                if state.resolve_canonical_skill_name(&tool) == "run_cmd" =>
+            {
+                if args
+                    .get(super::super::CLAWD_LITERAL_COMMAND_ARG)
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    || !run_cmd_git_command_scope_matches_workspace(state, &args)
+                {
+                    return AgentAction::CallTool { tool, args };
+                }
+                let Some(command) = run_cmd_command_from_args(&args) else {
+                    return AgentAction::CallTool { tool, args };
+                };
+                let Some(git_args) = git_basic_args_from_readonly_git_command(command) else {
+                    return AgentAction::CallTool { tool, args };
+                };
+                changed = true;
+                AgentAction::CallSkill {
+                    skill: "git_basic".to_string(),
+                    args: git_args,
+                }
+            }
+            AgentAction::CallCapability { capability, args }
+                if matches!(capability.as_str(), "system.run_command" | "run_cmd") =>
+            {
+                if args
+                    .get(super::super::CLAWD_LITERAL_COMMAND_ARG)
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    || !run_cmd_git_command_scope_matches_workspace(state, &args)
+                {
+                    return AgentAction::CallCapability { capability, args };
+                }
+                let Some(command) = run_cmd_command_from_args(&args) else {
+                    return AgentAction::CallCapability { capability, args };
+                };
+                let Some(git_args) = git_basic_args_from_readonly_git_command(command) else {
+                    return AgentAction::CallCapability { capability, args };
+                };
+                changed = true;
+                AgentAction::CallSkill {
+                    skill: "git_basic".to_string(),
+                    args: git_args,
+                }
+            }
+            other => other,
+        })
+        .collect();
+    if changed {
+        info!("plan_rewrite_readonly_git_run_cmd_to_git_basic");
+    }
+    rewritten
+}
+
+fn run_cmd_git_command_scope_matches_workspace(state: &AppState, args: &Value) -> bool {
+    let Some(cwd) = args
+        .get("cwd")
+        .or_else(|| args.get("working_dir"))
+        .or_else(|| args.get("workdir"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|cwd| !cwd.is_empty())
+    else {
+        return true;
+    };
+    if !std::path::Path::new(cwd).is_absolute() {
+        return false;
+    }
+    std::path::Path::new(cwd) == state.skill_rt.workspace_root.as_path()
+}
+
+fn git_basic_args_from_readonly_git_command(command: &str) -> Option<Value> {
+    let command = command.trim();
+    if command.is_empty() || command_has_shell_control_or_expansion(command) {
+        return None;
+    }
+    let tokens = command.split_whitespace().collect::<Vec<_>>();
+    let executable = tokens.first()?.rsplit('/').next().unwrap_or_default();
+    if executable != "git" {
+        return None;
+    }
+    let subcommand = *tokens.get(1)?;
+    if subcommand == "-C" {
+        return None;
+    }
+    let args = &tokens[2..];
+    let action = match subcommand {
+        "status" if git_status_args_are_readonly(args) => "status",
+        "remote" if git_remote_args_are_readonly(args) => "remote",
+        "diff" if git_diff_args_are_changed_files(args) => "changed_files",
+        _ => return None,
+    };
+    Some(serde_json::json!({ "action": action }))
+}
+
+fn git_status_args_are_readonly(args: &[&str]) -> bool {
+    args.iter().all(|arg| {
+        matches!(
+            *arg,
+            "--short"
+                | "-s"
+                | "--branch"
+                | "-b"
+                | "--porcelain"
+                | "--porcelain=v1"
+                | "--porcelain=v2"
+        ) || arg.starts_with("--untracked-files")
+    })
+}
+
+fn git_remote_args_are_readonly(args: &[&str]) -> bool {
+    args.iter()
+        .all(|arg| matches!(*arg, "-v" | "--verbose" | "show"))
+}
+
+fn git_diff_args_are_changed_files(args: &[&str]) -> bool {
+    if args.is_empty() {
+        return false;
+    }
+    let mut saw_name_only = false;
+    for arg in args {
+        match *arg {
+            "--name-only" => saw_name_only = true,
+            "HEAD" | "--cached" | "--staged" | "--" => {}
+            value if value.starts_with("HEAD~") || value.starts_with("HEAD^") => {}
+            _ => return false,
+        }
+    }
+    saw_name_only
+}
+
 pub(super) fn rewrite_git_show_file_at_rev_capability_fs_reads(
     route_result: Option<&RouteResult>,
     actions: Vec<AgentAction>,

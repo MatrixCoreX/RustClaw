@@ -382,7 +382,11 @@ fn append_git_status_extra(
         "untracked_count".to_string(),
         json!(summary.untracked_count),
     );
-    root.insert("changed_files".to_string(), json!(summary.changed_files));
+    root.insert(
+        "changed_files".to_string(),
+        json!(summary.changed_files.clone()),
+    );
+    root.insert("paths".to_string(), json!(summary.changed_files.clone()));
     field_value.insert("clean".to_string(), json!(summary.clean));
     field_value.insert(
         "worktree_state".to_string(),
@@ -395,6 +399,7 @@ fn append_git_status_extra(
         "untracked_count".to_string(),
         json!(summary.untracked_count),
     );
+    field_value.insert("paths".to_string(), json!(summary.changed_files.clone()));
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -514,9 +519,11 @@ fn append_changed_files_extra(
     field_value: &mut Map<String, Value>,
 ) {
     let files = non_empty_lines(text);
-    root.insert("changed_files".to_string(), json!(files));
+    root.insert("changed_files".to_string(), json!(files.clone()));
+    root.insert("paths".to_string(), json!(files.clone()));
     root.insert("changed_count".to_string(), json!(files.len()));
     field_value.insert("changed_count".to_string(), json!(files.len()));
+    field_value.insert("paths".to_string(), json!(files));
 }
 
 fn append_git_log_extra(
@@ -601,8 +608,15 @@ fn append_remote_list_extra(
     field_value: &mut Map<String, Value>,
 ) {
     let remotes = parse_remote_list(text);
+    let remote_names = unique_remote_names(&remotes);
+    let remote_urls = unique_remote_urls(&remotes);
     root.insert("remotes".to_string(), json!(remotes));
+    root.insert("remote_names".to_string(), json!(remote_names.clone()));
+    root.insert("remote_urls".to_string(), json!(remote_urls.clone()));
     root.insert("remote_count".to_string(), json!(remotes.len()));
+    field_value.insert("remotes".to_string(), json!(remote_names.clone()));
+    field_value.insert("remote_names".to_string(), json!(remote_names));
+    field_value.insert("remote_urls".to_string(), json!(remote_urls));
     field_value.insert("remote_count".to_string(), json!(remotes.len()));
 }
 
@@ -654,6 +668,42 @@ fn parse_remote_list(text: &str) -> Vec<Value> {
             }))
         })
         .collect()
+}
+
+fn unique_remote_names(remotes: &[Value]) -> Vec<String> {
+    let mut names = Vec::new();
+    for remote in remotes {
+        let Some(name) = remote
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        if !names.iter().any(|existing| existing == name) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+fn unique_remote_urls(remotes: &[Value]) -> Vec<String> {
+    let mut urls = Vec::new();
+    for remote in remotes {
+        let Some(url) = remote
+            .get("url")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+        else {
+            continue;
+        };
+        if !urls.iter().any(|existing| existing == url) {
+            urls.push(url.to_string());
+        }
+    }
+    urls
 }
 
 fn first_non_empty_line(text: &str) -> Option<String> {
