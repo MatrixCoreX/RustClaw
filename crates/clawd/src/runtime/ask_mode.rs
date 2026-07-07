@@ -194,9 +194,9 @@ impl AskMode {
         }
     }
 
-    /// Direct-answer compatibility trace.
+    /// Respond compatibility trace.
     #[cfg(test)]
-    pub(crate) fn is_direct_answer_trace(&self) -> bool {
+    pub(crate) fn is_respond_trace(&self) -> bool {
         matches!(
             self,
             AskMode::Respond {

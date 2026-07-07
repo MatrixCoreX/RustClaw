@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn direct_answer_maps_to_direct_answer_trace() {
+fn direct_answer_maps_to_respond_trace() {
     let m = AskMode::direct_answer();
     assert_eq!(
         m,
@@ -10,7 +10,7 @@ fn direct_answer_maps_to_direct_answer_trace() {
         }
     );
     assert!(m.is_chat_gate());
-    assert!(m.is_direct_answer_trace());
+    assert!(m.is_respond_trace());
     assert_eq!(m.route_trace_label_for_log(), "respond");
 }
 

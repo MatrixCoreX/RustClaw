@@ -22,11 +22,11 @@ FORBIDDEN_DISPATCH_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("chat_gate_dispatch", re.compile(r"\bis_chat_gate\s*\(")),
     ("clarify_gate_dispatch", re.compile(r"\bis_clarify_gate\s*\(")),
     ("clarify_only_dispatch", re.compile(r"\bis_clarify_only\s*\(")),
-    ("direct_answer_trace_dispatch", re.compile(r"\bis_direct_answer_trace\s*\(")),
+    ("respond_trace_dispatch", re.compile(r"\bis_respond_trace\s*\(")),
     ("first_layer_decision_dispatch", re.compile(r"\bFirstLayerDecision\b")),
     ("direct_answer_mode_dispatch", re.compile(r"\bdirect_answer\s*\(")),
     ("clarify_mode_dispatch", re.compile(r"\bAskMode::clarify\s*\(")),
-    ("direct_answer_trace_variant", re.compile(r"\bDirectAnswerTrace\b")),
+    ("respond_trace_variant", re.compile(r"\bRespondTrace\b")),
     ("clarify_trace_variant", re.compile(r"\bClarifyTrace\b")),
 )
 
@@ -111,7 +111,7 @@ def scan_ask_mode_trace_variants() -> list[str]:
     lines = read(ASK_MODE).splitlines()
     findings: list[str] = []
     for index, line in enumerate(lines):
-        if "DirectAnswerTrace" not in line and "ClarifyTrace" not in line:
+        if "RespondTrace" not in line and "ClarifyTrace" not in line:
             continue
         if has_cfg_test_near(lines, index):
             continue
@@ -128,7 +128,7 @@ def scan_repo() -> list[str]:
 
 def run_self_test() -> int:
     assert FORBIDDEN_DISPATCH_PATTERNS[0][1].search("ask_mode.is_chat_gate()")
-    assert FORBIDDEN_DISPATCH_PATTERNS[3][1].search("ask_mode.is_direct_answer_trace()")
+    assert FORBIDDEN_DISPATCH_PATTERNS[3][1].search("ask_mode.is_respond_trace()")
     assert "run_agent_with_tools" in REQUIRED_DISPATCH_TOKENS
     print("SELF_TEST_OK")
     return 0
