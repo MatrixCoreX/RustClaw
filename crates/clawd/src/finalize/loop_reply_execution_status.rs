@@ -91,7 +91,7 @@ pub(super) fn delivery_is_content_answer_candidate(
         || crate::finalize::is_execution_summary_message(delivery)
         || crate::finalize::looks_like_planner_artifact(delivery)
         || crate::finalize::looks_like_internal_trace_artifact(delivery)
-        || crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+        || crate::agent_engine::observed_output::answer_matches_observed_output_passthrough(
             delivery, loop_state,
         )
     {

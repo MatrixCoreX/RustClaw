@@ -111,9 +111,14 @@ mod output_direct_answer;
 use output_direct_answer::{
     allows_normalized_scalar_direct_fallback, fs_search_output_direct_answer_candidate,
 };
+#[cfg(test)]
 pub(crate) use output_direct_answer::{
     answer_is_direct_observation_passthrough, extract_direct_answer_from_generic_output,
     extract_direct_answer_from_generic_output_i18n,
+};
+pub(crate) use output_direct_answer::{
+    answer_matches_observed_output_passthrough, extract_answer_from_observed_output,
+    extract_answer_from_observed_output_i18n,
 };
 
 #[path = "observed_output_read_range.rs"]
@@ -1230,7 +1235,7 @@ fn replace_internal_missing_sentinel_with_structured_observation(
     if !is_internal_missing_scalar_sentinel(answer) {
         return None;
     }
-    extract_direct_answer_from_generic_output_i18n(loop_state, state, agent_run_context)
+    extract_answer_from_observed_output_i18n(loop_state, state, agent_run_context)
         .or_else(|| {
             extract_direct_scalar_from_generic_output_i18n(loop_state, state, agent_run_context)
         })
@@ -1542,7 +1547,7 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
     let direct_passthrough_disallowed = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(route_disallows_direct_observation_passthrough)
-        && (answer_is_direct_observation_passthrough(&answer, loop_state)
+        && (answer_matches_observed_output_passthrough(&answer, loop_state)
             || answer_is_git_repository_state_machine_summary(&answer));
     if direct_passthrough_disallowed {
         tracing::info!(

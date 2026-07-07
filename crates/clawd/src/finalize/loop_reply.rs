@@ -523,7 +523,7 @@ fn replace_raw_passthrough_delivery_with_publishable_synthesis(
         let candidate = message.trim();
         !candidate.is_empty()
             && candidate != synthesis
-            && (crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+            && (crate::agent_engine::observed_output::answer_matches_observed_output_passthrough(
                 candidate, loop_state,
             ) || candidate_matches_successful_external_observation(loop_state, candidate))
     });

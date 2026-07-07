@@ -377,12 +377,11 @@ fn direct_read_range_raw_command_projection(
         route_result: Some(route.clone()),
         ..Default::default()
     };
-    let answer =
-        crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
-            loop_state,
-            state,
-            Some(&agent_run_context),
-        )?;
+    let answer = crate::agent_engine::observed_output::extract_answer_from_observed_output_i18n(
+        loop_state,
+        state,
+        Some(&agent_run_context),
+    )?;
     let answer = answer.trim_end().to_string();
     (!answer.trim().is_empty()).then_some((answer, 1))
 }

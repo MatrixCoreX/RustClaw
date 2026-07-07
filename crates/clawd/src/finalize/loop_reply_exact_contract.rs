@@ -249,7 +249,7 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         && delivery_messages.last().is_some_and(|message| {
             let message = message.trim();
             !message.is_empty()
-                && !crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+                && !crate::agent_engine::observed_output::answer_matches_observed_output_passthrough(
                     message, loop_state,
                 )
                 && matches!(
