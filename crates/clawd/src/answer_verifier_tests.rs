@@ -266,6 +266,7 @@ fn answer_verifier_output_contract_exposes_evidence_profile() {
     assert!(block.contains("\"compact_line\""));
     assert!(block.contains("\"evidence_profile\""));
     assert!(block.contains("\"workspace_user_docs_first\""));
+    assert!(!block.contains("\"contract_marker\""));
     assert!(output_contract.get("contract_marker").is_none());
     assert_eq!(
         output_contract
