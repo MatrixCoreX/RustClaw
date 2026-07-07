@@ -256,6 +256,9 @@ async fn try_rewrite_exhausted_answer_verifier_gap_with_observed_evidence(
         journal.answer_verifier_summary = None;
         journal.record_final_answer(&retried_answer);
         journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        journal.record_final_stop_signal(
+            crate::task_journal::ANSWER_VERIFIER_RECOVERED_TERMINAL_STOP_SIGNAL,
+        );
     }
     reply.text = retried_answer;
     reply.messages = messages;

@@ -35,9 +35,7 @@ pub(in crate::agent_engine::loop_control) fn try_recover_structured_evidence_tab
         return false;
     };
     if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        mark_answer_verifier_recovery_success(journal, &answer);
     }
     reply.text = answer.clone();
     reply.messages = vec![answer];

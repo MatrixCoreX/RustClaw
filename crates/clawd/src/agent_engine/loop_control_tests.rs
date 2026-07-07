@@ -1308,6 +1308,13 @@ fn latest_terminal_recovery_uses_latest_terminal_for_non_structured_gap() {
     assert_eq!(reply.text, stale_answer);
     assert!(!reply.should_fail_task);
     assert!(reply.error_text.is_none());
+    assert_eq!(
+        reply
+            .task_journal
+            .as_ref()
+            .and_then(|journal| journal.final_stop_signal.as_deref()),
+        Some(crate::task_journal::ANSWER_VERIFIER_RECOVERED_TERMINAL_STOP_SIGNAL)
+    );
 }
 
 #[test]

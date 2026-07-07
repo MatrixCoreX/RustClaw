@@ -210,6 +210,9 @@ pub(super) fn try_accept_language_only_output_format_answer_verifier_gap(
     journal.answer_verifier_summary = None;
     journal.record_final_answer(&reply.text);
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    journal.record_final_stop_signal(
+        crate::task_journal::ANSWER_VERIFIER_RECOVERED_TERMINAL_STOP_SIGNAL,
+    );
     reply.should_fail_task = false;
     reply.error_text = None;
     info!("answer_verifier_retry_exhausted_accepted_language_only_output_format_gap");
