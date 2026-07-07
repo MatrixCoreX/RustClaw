@@ -18,6 +18,32 @@ fn test_args_non_object_returns_error() {
 }
 
 #[test]
+fn success_extra_preserves_helper_json_and_adds_source_skill() {
+    let extra = browser_web_success_extra(
+        r#"{"action":"searchExtract","query":"rust","results":[{"title":"Rust"}]}"#,
+    )
+    .expect("structured extra");
+
+    assert_eq!(
+        extra.get("action").and_then(serde_json::Value::as_str),
+        Some("searchExtract")
+    );
+    assert_eq!(
+        extra
+            .get("source_skill")
+            .and_then(serde_json::Value::as_str),
+        Some("browser_web")
+    );
+    assert_eq!(
+        extra
+            .pointer("/results/0/title")
+            .and_then(serde_json::Value::as_str),
+        Some("Rust")
+    );
+    assert!(browser_web_success_extra("plain text fallback").is_none());
+}
+
+#[test]
 fn test_parse_open_extract_args_valid() {
     let obj = json!({
         "action": "open_extract",
