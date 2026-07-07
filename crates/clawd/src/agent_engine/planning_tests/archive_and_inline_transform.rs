@@ -374,6 +374,14 @@ fn lightweight_tool_spec_includes_route_evidence_policy_context() {
         line.split_whitespace()
             .any(|part| part == "contract_marker=file_paths")
     }));
+    assert!(spec.lines().any(|line| {
+        line.split_whitespace()
+            .any(|part| part == "final_answer_shape=path_list")
+    }));
+    assert!(spec.lines().any(|line| {
+        line.split_whitespace()
+            .any(|part| part == "final_answer_shape_class=strict_list")
+    }));
     assert!(!spec.lines().any(|line| {
         line.split_whitespace()
             .any(|part| part.starts_with("semantic_kind="))
@@ -666,6 +674,10 @@ fn lightweight_tool_spec_includes_contract_and_auto_locator() {
     assert!(rendered.lines().any(|line| {
         line.split_whitespace()
             .any(|part| part == "contract_marker=scalar_path_only")
+    }));
+    assert!(rendered.lines().any(|line| {
+        line.split_whitespace()
+            .any(|part| part == "final_answer_shape=single_path")
     }));
     assert!(rendered.contains("locator_hint=UI/package.json"));
     assert!(rendered.contains("auto_locator_path=/tmp/UI/package.json"));
