@@ -1,4 +1,5 @@
 use super::*;
+use crate::finalize::loop_reply::successful_content_observation_should_precede_status_summary;
 
 #[test]
 fn deterministic_observed_execution_status_answer_reports_mixed_results() {
@@ -27,6 +28,38 @@ fn deterministic_observed_execution_status_answer_reports_mixed_results() {
     assert!(answer.contains("step.2.skill=run_cmd"));
     assert!(answer.contains("step.2.status=error"));
     assert!(answer.contains("exit code 127"));
+}
+
+#[test]
+fn status_shape_does_not_precede_with_generic_content_answer() {
+    let mut route = free_route_result();
+    route.route_reason = "capability_ref=service.status".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "service_control",
+        r#"{"extra":{"service_name":"clawd","post_state":"running","status":"active","verified":true,"manager_type":"systemd"}}"#,
+    ));
+    let delivery_messages = vec!["service status is active".to_string()];
+
+    assert!(
+        !successful_content_observation_should_precede_status_summary(
+            Some(&agent_run_context),
+            &loop_state,
+        )
+    );
+    assert!(!delivery_is_content_answer_candidate(
+        Some(&agent_run_context),
+        &loop_state,
+        &delivery_messages,
+    ));
 }
 
 #[test]
