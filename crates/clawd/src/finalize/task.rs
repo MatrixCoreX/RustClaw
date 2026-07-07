@@ -32,7 +32,9 @@ use task_answer_verifier_failure::{
 };
 use task_config_guard_recovery::deterministic_config_guard_candidates_recovery;
 use task_failure_lifecycle::failed_task_lifecycle_payload;
+#[cfg(test)]
 use task_machine_kv_summary::apply_requested_machine_kv_summary_to_final_answer;
+use task_machine_kv_summary::recover_requested_machine_kv_summary_final_answer;
 use task_resume::{
     answer_verifier_retry_applicable, resume_context_execution_summary_messages,
     resume_failure_execution_failed_step_answer, resume_failure_is_missing_file_delivery_result,
@@ -61,27 +63,6 @@ pub(crate) async fn retry_loop_answer_after_verifier(
         verifier,
     )
     .await
-}
-
-fn recover_requested_machine_kv_summary_final_answer(
-    prompt: &str,
-    route_result: &crate::RouteResult,
-    journal: &mut crate::task_journal::TaskJournal,
-    answer_text: &mut String,
-    answer_messages: &mut Vec<String>,
-) -> bool {
-    if !apply_requested_machine_kv_summary_to_final_answer(
-        prompt,
-        route_result,
-        journal,
-        answer_text,
-        answer_messages,
-    ) {
-        return false;
-    }
-    journal.answer_verifier_summary = None;
-    mark_answer_verifier_recovered_by_deterministic_observed_evidence(journal);
-    true
 }
 
 fn recover_raw_command_machine_field_final_answer(
@@ -1528,6 +1509,8 @@ pub(crate) async fn finalize_ask_result(
                 );
             }
             let mut recovered_requested_machine_kv_summary = false;
+            let force_requested_machine_kv_summary =
+                failure_reply || answer_verifier_forces_task_failure(semantic_clarify, &journal);
             if !semantic_clarify
                 && !recovered_structured_machine_rows
                 && recover_requested_machine_kv_summary_final_answer(
@@ -1536,6 +1519,7 @@ pub(crate) async fn finalize_ask_result(
                     &mut journal,
                     &mut answer_text,
                     &mut answer_messages,
+                    force_requested_machine_kv_summary,
                 )
             {
                 failure_reply = false;
@@ -1557,6 +1541,7 @@ pub(crate) async fn finalize_ask_result(
                     &mut journal,
                     &mut answer_text,
                     &mut answer_messages,
+                    false,
                 )
             {
                 info!(

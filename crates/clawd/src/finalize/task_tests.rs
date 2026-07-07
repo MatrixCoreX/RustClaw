@@ -26,6 +26,8 @@ use serde_json::json;
 mod config_guard_recovery;
 #[path = "task_tests/config_validation_delivery.rs"]
 mod config_validation_delivery;
+#[path = "task_tests/git_machine_kv_recovery.rs"]
+mod git_machine_kv_recovery;
 #[path = "task_tests/machine_kv_final_guard.rs"]
 mod machine_kv_final_guard;
 #[path = "task_tests/tree_summary_recovery.rs"]
@@ -365,6 +367,7 @@ fn requested_machine_kv_summary_failure_recovery_projects_read_range_fields() {
         &mut journal,
         &mut answer_text,
         &mut answer_messages,
+        true,
     ));
 
     assert_eq!(

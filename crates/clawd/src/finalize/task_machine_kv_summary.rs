@@ -1,9 +1,83 @@
+pub(super) fn recover_requested_machine_kv_summary_final_answer(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    journal: &mut crate::task_journal::TaskJournal,
+    answer_text: &mut String,
+    answer_messages: &mut Vec<String>,
+    force_structured: bool,
+) -> bool {
+    let applied = if force_structured {
+        apply_requested_machine_kv_summary_to_final_answer_force_structured(
+            prompt,
+            route_result,
+            journal,
+            answer_text,
+            answer_messages,
+        )
+    } else {
+        apply_requested_machine_kv_summary_to_final_answer(
+            prompt,
+            route_result,
+            journal,
+            answer_text,
+            answer_messages,
+        )
+    };
+    if !applied {
+        return false;
+    }
+    journal.record_answer_verifier_summary(crate::answer_verifier::AnswerVerifierOut {
+        pass: true,
+        missing_evidence_fields: Vec::new(),
+        answer_incomplete_reason: String::new(),
+        should_retry: false,
+        retry_instruction: String::new(),
+        confidence: 1.0,
+    });
+    true
+}
+
 pub(super) fn apply_requested_machine_kv_summary_to_final_answer(
     prompt: &str,
     route_result: &crate::RouteResult,
     journal: &mut crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,
+) -> bool {
+    apply_requested_machine_kv_summary_to_final_answer_inner(
+        prompt,
+        route_result,
+        journal,
+        answer_text,
+        answer_messages,
+        false,
+    )
+}
+
+pub(super) fn apply_requested_machine_kv_summary_to_final_answer_force_structured(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    journal: &mut crate::task_journal::TaskJournal,
+    answer_text: &mut String,
+    answer_messages: &mut Vec<String>,
+) -> bool {
+    apply_requested_machine_kv_summary_to_final_answer_inner(
+        prompt,
+        route_result,
+        journal,
+        answer_text,
+        answer_messages,
+        true,
+    )
+}
+
+fn apply_requested_machine_kv_summary_to_final_answer_inner(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    journal: &mut crate::task_journal::TaskJournal,
+    answer_text: &mut String,
+    answer_messages: &mut Vec<String>,
+    force_structured: bool,
 ) -> bool {
     if route_preserves_generated_file_machine_report(route_result, answer_text, answer_messages) {
         journal.record_final_answer(answer_text.as_str());
@@ -31,13 +105,15 @@ pub(super) fn apply_requested_machine_kv_summary_to_final_answer(
         journal.record_final_answer(answer_text.as_str());
         return false;
     }
-    if final_answer_preserves_publishable_evidence_summary(
-        route_result,
-        journal,
-        answer_text,
-        answer_messages,
-        &summary,
-    ) {
+    if !force_structured
+        && final_answer_preserves_publishable_evidence_summary(
+            route_result,
+            journal,
+            answer_text,
+            answer_messages,
+            &summary,
+        )
+    {
         journal.record_final_answer(answer_text.as_str());
         return false;
     }
@@ -60,7 +136,12 @@ pub(super) fn apply_requested_machine_kv_summary_to_final_answer(
         journal.record_final_answer(answer_text.as_str());
         return false;
     }
-    if final_answer_has_values_for_requested_marker_summary(answer_text, answer_messages, &summary)
+    if !force_structured
+        && final_answer_has_values_for_requested_marker_summary(
+            answer_text,
+            answer_messages,
+            &summary,
+        )
     {
         journal.record_final_answer(answer_text.as_str());
         return false;
