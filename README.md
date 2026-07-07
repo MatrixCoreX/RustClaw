@@ -21,7 +21,7 @@ Current repository highlights:
 
 ## Agent Loop Architecture
 
-RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default. The boundary layer binds the turn to identity and session state, builds structured routing signals, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: respond, call a capability, synthesize from evidence, repair, continue, or stop. Recoverable failures are passed back through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. Ordinary missing-slot decisions stay loop-owned; boundary finalization is limited to explicit schedule, safety, protocol, or already-observed completion paths. The intent normalizer is an initial structured hint, not the final semantic authority. The old pre-agent semantic route switch has been removed from runtime configuration; ordinary ask/chat fallback is handled by the agent loop.
+RustClaw's main natural-language path now uses a Codex / Claude style agent loop by default. The boundary layer binds the turn to identity and session state, builds structured boundary hints, applies locator, contract, safety, confirmation, dry-run, budget, capability, and evidence guards, then gives the agent loop the ordinary semantic decision: respond, call a capability, synthesize from evidence, repair, continue, or stop. Recoverable failures are passed back through `RepairEnvelope` machine fields, attempt history, and checkpoint state instead of user-language phrase matching. Ordinary missing-slot decisions stay loop-owned; boundary finalization is limited to explicit schedule, safety, protocol, or already-observed completion paths. The intent normalizer is an initial structured hint, not the final semantic authority. The old pre-agent semantic route switch has been removed from runtime configuration; ordinary ask/chat fallback is handled by the agent loop.
 
 ### Request And Agent Loop Flow
 
@@ -187,7 +187,7 @@ flowchart TD
 
 ### Permission Plane And Command Policy
 
-The permission plane is a structured execution boundary, not a second semantic router. Registry metadata from `configs/skills_registry.toml`, bundled evidence policy for non-capability output shapes, and verifier state are projected into `permission_decision` so UI/API/finalizer layers can explain what happened without hardcoded runtime prose. Ordinary registry capability families are selected by planner `call_capability` plus resolver metadata, not by legacy `semantic_kind` values.
+The permission plane is a structured execution boundary, not a second semantic router. Registry metadata from `configs/skills_registry.toml`, bundled evidence policy for non-capability output shapes, and verifier state are projected into `permission_decision` so UI/API/finalizer layers can explain what happened without hardcoded runtime prose. Ordinary registry capability families are selected by planner `call_capability` plus resolver metadata, not by legacy `semantic_kind` or compatibility contract-marker values.
 
 - `risk_level`, `requires_confirmation`, `once_per_task`, `idempotent`, and `dedup_scope` come from registry and planner capability metadata where available.
 - `action_effect` is derived from structured skill/action args and contract metadata, not from user-language phrase matching.
@@ -201,7 +201,8 @@ RustClaw keeps natural-language understanding on the LLM side and deterministic 
 
 Runtime code should consume stable contracts such as:
 
-- schema enums for non-capability output shapes, for example `semantic_kind = "content_excerpt_summary"`
+- evidence-policy answer-shape fields, for example `final_answer_shape = "content_excerpt_summary"` and `final_answer_shape_class = "grounded_summary"`
+- schema compatibility enums for non-capability output shapes, such as `semantic_kind` / `contract_marker`, only when they arrive as machine fields from the normalizer, historical trace, or output-contract compatibility boundary
 - capability refs emitted by the planner or boundary context, for example `capability_ref = "package.detect_manager"` or `call_capability("package.detect_manager")`
 - action names, for example `read_field`, `validate_config`, or `transform_data`
 - registry metadata and `planner_capabilities`
@@ -209,7 +210,7 @@ Runtime code should consume stable contracts such as:
 - JSON/TOML/YAML field paths, file extensions, structured tool output, exit codes, error kinds, and risk/effect metadata
 - `permission_decision` and `command_policy` machine fields
 
-Runtime code should not add per-language phrase tables or `prompt.contains(...)` branches to make a single natural-language case pass. If a new user wording needs better handling, update the normalizer/planner schema, registry capability metadata, `INTERFACE.md`, generated skill prompts, or vendor prompt patch so the LLM emits the same structured contract in any language. Ordinary skills such as weather, web, image, photo, publishing, package manager, Docker, RSS, and market quote must flow through registry capability metadata; stale registry-bridge `semantic_kind` values fall through to generic contract policy and cannot select those capability families. `python3 scripts/check_no_nl_hardmatch.py` is the local guard for this boundary.
+Runtime code should not add per-language phrase tables or `prompt.contains(...)` branches to make a single natural-language case pass. If a new user wording needs better handling, update the normalizer/planner schema, registry capability metadata, `INTERFACE.md`, generated skill prompts, or vendor prompt patch so the LLM emits the same structured contract in any language. Ordinary skills such as weather, web, image, photo, publishing, package manager, Docker, RSS, and market quote must flow through registry capability metadata; stale registry-bridge `semantic_kind` or contract-marker values fall through to generic contract policy and cannot select those capability families. Current planner, verifier, finalizer, and journal diagnostics should expose `final_answer_shape` rather than old marker names except inside isolated normalizer/schema compatibility and historical trace readers. `python3 scripts/check_no_nl_hardmatch.py` is the local guard for this boundary.
 
 ## Memory System
 
