@@ -86,18 +86,44 @@ fn main() -> Result<()> {
                 }),
             }
         };
+        let runner_status = payload
+            .get("status")
+            .and_then(Value::as_str)
+            .filter(|status| *status == "error")
+            .unwrap_or("ok");
+        let error_text = (runner_status == "error").then(|| {
+            payload
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("transform failed")
+                .to_string()
+        });
+        let extra = transform_response_extra(&payload);
 
         let out = json!({
             "request_id": request_id,
-            "status": "ok",
+            "status": runner_status,
             "text": serde_json::to_string(&payload)?,
-            "error_text": Value::Null,
-            "extra": { "action": "transform_data" }
+            "error_text": error_text,
+            "extra": extra
         });
         writeln!(stdout, "{}", serde_json::to_string(&out)?)?;
         stdout.flush()?;
     }
     Ok(())
+}
+
+fn transform_response_extra(payload: &Value) -> Value {
+    let mut extra = payload.clone();
+    if let Some(object) = extra.as_object_mut() {
+        object
+            .entry("action".to_string())
+            .or_insert_with(|| json!("transform_data"));
+        object
+            .entry("source_skill".to_string())
+            .or_insert_with(|| json!("transform"));
+    }
+    extra
 }
 
 fn handle_transform(req: &Value) -> Result<Value> {
