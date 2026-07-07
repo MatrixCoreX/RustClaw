@@ -1107,7 +1107,7 @@ fn route_requests_scalar_path_candidate_projection(
             let contract = route.effective_output_contract();
             !contract.delivery_required
                 && contract.response_shape == crate::OutputResponseShape::Scalar
-                && route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
+                && crate::finalize::route_matches_single_path_output_contract(route)
         })
 }
 

@@ -283,12 +283,12 @@ fn scalar_terminal_respond_candidate_matches_contract(
     {
         return false;
     }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
+    if crate::finalize::route_matches_single_path_output_contract(route)
         && !candidate_looks_like_path_scalar(candidate)
     {
         return false;
     }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly)
+    if crate::finalize::route_matches_single_path_output_contract(route)
         && candidate_looks_like_path_scalar(candidate)
     {
         return true;
