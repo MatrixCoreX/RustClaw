@@ -190,7 +190,7 @@ use matrix_shape::{
     matrix_grouped_name_list_observed_answer, matrix_observed_shape_summary,
     replace_delivery_with_matrix_observed_shape_answer,
     route_requires_evidence_policy_deterministic_final_answer,
-    route_requires_observed_semantic_projection, should_try_observed_output_language_fallback,
+    route_requires_observed_output_projection, should_try_observed_output_language_fallback,
     synthetic_task_for_evidence_policy_shape_check,
 };
 
