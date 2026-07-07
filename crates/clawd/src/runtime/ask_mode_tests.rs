@@ -45,8 +45,8 @@ fn resume_execution_override_wins_over_discussion() {
 }
 
 #[test]
-fn planner_execute_plain_maps_to_plain() {
-    let m = AskMode::planner_execute_plain();
+fn act_plain_maps_to_plain() {
+    let m = AskMode::act_plain();
     assert_eq!(
         m,
         AskMode::Act {
@@ -59,8 +59,8 @@ fn planner_execute_plain_maps_to_plain() {
 }
 
 #[test]
-fn planner_execute_with_chat_finalizer_maps_to_chat_wrapped() {
-    let m = AskMode::planner_execute_with_chat_finalizer();
+fn act_with_chat_finalizer_maps_to_chat_wrapped() {
+    let m = AskMode::act_with_chat_finalizer();
     assert_eq!(
         m,
         AskMode::Act {
@@ -87,16 +87,25 @@ fn named_constructors_are_explicit() {
         }
     );
     assert_eq!(
-        AskMode::planner_execute_plain(),
+        AskMode::act_plain(),
         AskMode::Act {
             finalize: ActFinalizeStyle::Plain
         }
     );
     assert_eq!(
-        AskMode::planner_execute_with_chat_finalizer(),
+        AskMode::act_with_chat_finalizer(),
         AskMode::Act {
             finalize: ActFinalizeStyle::ChatWrapped
         }
+    );
+}
+
+#[test]
+fn legacy_planner_execute_constructors_delegate_to_act_constructors() {
+    assert_eq!(AskMode::planner_execute_plain(), AskMode::act_plain());
+    assert_eq!(
+        AskMode::planner_execute_with_chat_finalizer(),
+        AskMode::act_with_chat_finalizer()
     );
 }
 
@@ -131,11 +140,11 @@ fn route_trace_labels_match_log_names() {
     );
     assert_eq!(AskMode::clarify().route_trace_label_for_log(), "clarify");
     assert_eq!(
-        AskMode::planner_execute_plain().route_trace_label_for_log(),
+        AskMode::act_plain().route_trace_label_for_log(),
         "act_plain_finalizer"
     );
     assert_eq!(
-        AskMode::planner_execute_with_chat_finalizer().route_trace_label_for_log(),
+        AskMode::act_with_chat_finalizer().route_trace_label_for_log(),
         "act_chat_finalizer"
     );
 }
@@ -147,9 +156,9 @@ fn as_str_uses_stable_ids() {
         "clarify_or_chat:direct_answer_trace"
     );
     assert_eq!(AskMode::clarify().as_str(), "clarify_or_chat:clarify_trace");
-    assert_eq!(AskMode::planner_execute_plain().as_str(), "act:plain");
+    assert_eq!(AskMode::act_plain().as_str(), "act:plain");
     assert_eq!(
-        AskMode::planner_execute_with_chat_finalizer().as_str(),
+        AskMode::act_with_chat_finalizer().as_str(),
         "act:chat_wrapped"
     );
     let rd = AskMode::direct_answer().with_resume_overrides(true, false);
@@ -160,11 +169,11 @@ fn as_str_uses_stable_ids() {
 
 #[test]
 fn is_plain_act_only_for_plain_finalize() {
-    assert!(AskMode::planner_execute_plain().is_plain_act());
-    assert!(!AskMode::planner_execute_with_chat_finalizer().is_plain_act());
+    assert!(AskMode::act_plain().is_plain_act());
+    assert!(!AskMode::act_with_chat_finalizer().is_plain_act());
     assert!(!AskMode::direct_answer().is_plain_act());
     assert!(!AskMode::clarify().is_plain_act());
-    let resume = AskMode::planner_execute_plain().with_resume_overrides(false, true);
+    let resume = AskMode::act_plain().with_resume_overrides(false, true);
     assert!(!resume.is_plain_act(), "ResumeContinue must not be plain");
     assert!(resume.is_execute_gate());
 }
@@ -174,8 +183,8 @@ fn helpers_are_disjoint_for_each_variant() {
     let cases = [
         AskMode::direct_answer(),
         AskMode::clarify(),
-        AskMode::planner_execute_plain(),
-        AskMode::planner_execute_with_chat_finalizer(),
+        AskMode::act_plain(),
+        AskMode::act_with_chat_finalizer(),
         AskMode::direct_answer().with_resume_overrides(true, false),
         AskMode::direct_answer().with_resume_overrides(false, true),
     ];
@@ -201,12 +210,9 @@ fn helpers_are_disjoint_for_each_variant() {
 fn gate_kind_maps_to_three_gates() {
     assert_eq!(AskMode::direct_answer().gate_kind(), RouteGateKind::Chat);
     assert_eq!(AskMode::clarify().gate_kind(), RouteGateKind::Clarify);
+    assert_eq!(AskMode::act_plain().gate_kind(), RouteGateKind::Execute);
     assert_eq!(
-        AskMode::planner_execute_plain().gate_kind(),
-        RouteGateKind::Execute
-    );
-    assert_eq!(
-        AskMode::planner_execute_with_chat_finalizer().gate_kind(),
+        AskMode::act_with_chat_finalizer().gate_kind(),
         RouteGateKind::Execute
     );
 }
@@ -222,11 +228,11 @@ fn route_trace_decision_for_journal_maps_to_three_decisions() {
         AskRouteTraceDecision::Clarify
     );
     assert_eq!(
-        AskMode::planner_execute_plain().route_trace_decision_for_journal(),
+        AskMode::act_plain().route_trace_decision_for_journal(),
         AskRouteTraceDecision::Act
     );
     assert_eq!(
-        AskMode::planner_execute_with_chat_finalizer().route_trace_decision_for_journal(),
+        AskMode::act_with_chat_finalizer().route_trace_decision_for_journal(),
         AskRouteTraceDecision::Act
     );
 }
