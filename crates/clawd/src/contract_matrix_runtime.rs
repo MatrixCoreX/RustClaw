@@ -268,31 +268,8 @@ pub(crate) fn final_answer_shape_for_route(route: &RouteResult) -> Option<FinalA
 }
 
 fn final_answer_shape_for_route_capability_ref(route: &RouteResult) -> Option<FinalAnswerShape> {
-    scalar_contract_capability_ref_shape(route)
-        .or_else(|| registry_final_answer_shape_for_route_capability_ref(route, true))
+    registry_final_answer_shape_for_route_capability_ref(route, true)
         .or_else(|| registry_final_answer_shape_for_route_capability_ref(route, false))
-}
-
-fn scalar_contract_capability_ref_shape(route: &RouteResult) -> Option<FinalAnswerShape> {
-    let output_contract = route.effective_output_contract();
-    if output_contract.response_shape != OutputResponseShape::Scalar {
-        return None;
-    }
-    if crate::machine_capability_ref::route_has_capability_action_name(
-        route,
-        &["system"],
-        &["runtime_status"],
-    ) {
-        return Some(FinalAnswerShape::Scalar);
-    }
-    if crate::machine_capability_ref::route_has_capability_action_name(
-        route,
-        &["system_basic"],
-        &["extract_field"],
-    ) {
-        return Some(FinalAnswerShape::Scalar);
-    }
-    None
 }
 
 fn registry_final_answer_shape_for_route_capability_ref(
