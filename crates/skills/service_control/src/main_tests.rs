@@ -95,6 +95,7 @@ fn runner_status_response_serializes_target_alias() {
     let resp = build_runner_response("req-target-alias".to_string(), Ok(out));
     assert_eq!(resp.status, "ok");
     let parsed: Value = serde_json::from_str(&resp.text).expect("structured service status");
+    assert_eq!(resp.extra.as_ref(), Some(&parsed));
     assert_eq!(parsed.get("target").and_then(Value::as_str), Some("clawd"));
     assert_eq!(
         parsed.get("service_name").and_then(Value::as_str),

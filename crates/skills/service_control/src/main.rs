@@ -7,7 +7,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 mod platform;
 
@@ -115,6 +115,8 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error_kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -329,6 +331,7 @@ fn build_runner_response(request_id: String, result: Result<OutputContract, Stri
             if out.target.is_empty() {
                 out.target = out.service_name.clone();
             }
+            let extra = serde_json::to_value(&out).ok();
             let text = serde_json::to_string(&out).unwrap_or_default();
             let is_business_error = out.status == "error";
             Resp {
@@ -339,6 +342,7 @@ fn build_runner_response(request_id: String, result: Result<OutputContract, Stri
                     "ok".to_string()
                 },
                 text: text.clone(),
+                extra,
                 error_kind: is_business_error
                     .then(|| out.error_kind.trim().to_string())
                     .filter(|kind| !kind.is_empty()),
@@ -358,6 +362,11 @@ fn build_runner_response(request_id: String, result: Result<OutputContract, Stri
             request_id,
             status: "error".to_string(),
             text: String::new(),
+            extra: Some(json!({
+                "status": "error",
+                "error_kind": "skill_execution_failed",
+                "platform": std::env::consts::OS,
+            })),
             error_kind: Some("skill_execution_failed".to_string()),
             platform: Some(std::env::consts::OS.to_string()),
             error_text: Some(err),
@@ -403,6 +412,11 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: Some(json!({
+                    "status": "error",
+                    "error_kind": "invalid_input",
+                    "platform": std::env::consts::OS,
+                })),
                 error_kind: Some("invalid_input".to_string()),
                 platform: Some(std::env::consts::OS.to_string()),
                 error_text: Some(format!("invalid input: {err}")),
