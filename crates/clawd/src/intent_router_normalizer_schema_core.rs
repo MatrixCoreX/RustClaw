@@ -194,7 +194,8 @@ pub(super) fn retain_intent_normalizer_top_level_schema_fields(
     obj.retain(|key, _| {
         matches!(
             key.as_str(),
-            "resolved_user_intent"
+            "boundary_envelope"
+                | "resolved_user_intent"
                 | "resume_behavior"
                 | "schedule_kind"
                 | "schedule_intent"

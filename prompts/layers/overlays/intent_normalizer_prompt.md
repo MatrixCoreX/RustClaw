@@ -19,7 +19,8 @@ Architecture boundary:
 - If a machine `capability_ref=<registry.capability>` token is already present in context, preserve it as context for the planner. Do not invent a capability ref from natural-language wording here.
 
 Compatibility fields:
-- Always emit boundary schema keys: `resolved_user_intent`, `resume_behavior`, `schedule_kind`, `schedule_intent`, `wants_file_delivery`, `should_refresh_long_term_memory`, `agent_display_name_hint`, `needs_clarify`, `clarify_question`, `reason`, `confidence`, `output_contract`, `execution_recipe`, `turn_type`, `target_task_policy`, `should_interrupt_active_run`, `state_patch`, `attachment_processing_required`.
+- Always emit boundary schema keys: `boundary_envelope`, `resolved_user_intent`, `resume_behavior`, `schedule_kind`, `schedule_intent`, `wants_file_delivery`, `should_refresh_long_term_memory`, `agent_display_name_hint`, `needs_clarify`, `clarify_question`, `reason`, `confidence`, `output_contract`, `execution_recipe`, `turn_type`, `target_task_policy`, `should_interrupt_active_run`, `state_patch`, `attachment_processing_required`.
+- `boundary_envelope` is machine-only. Include `schema_version=1`, `raw_chars`, optional `language_hint`, `schedule_intent`, `attachment_refs`, `explicit_locators`, `active_task_reference`, `session_binding`, and `safety_budget_hint`; never put raw user text, answer text, or route decisions inside it.
 - Do not emit legacy `decision`; runtime derives any route trace from machine boundary fields. Do not put ordinary semantic decisions here.
 - `output_contract` is a compatibility evidence/delivery envelope, not a capability router.
 - Set `output_contract.contract_marker="none"` in normalizer output. Do not emit legacy semantic-route field names.

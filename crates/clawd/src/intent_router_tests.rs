@@ -665,6 +665,7 @@ fn intent_normalizer_schema_drift() {
     // §3.5c-小切口 步骤 2：每个 live IntentNormalizerOut schema 字段必须在 properties 里登记。
     // Removed legacy fields such as answer_candidate must stay out of both the live schema and parser model.
     const STRUCT_FIELDS: &[&str] = &[
+        "boundary_envelope",
         "resolved_user_intent",
         "resume_behavior",
         "schedule_kind",

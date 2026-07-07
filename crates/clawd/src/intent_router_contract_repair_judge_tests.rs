@@ -102,6 +102,7 @@ fn contract_repair_judge_rejects_scalar_semantic_repair_without_machine_marker()
     .expect("contract repair judge payload should validate");
 
     let mut out = super::IntentNormalizerOut {
+        boundary_envelope: None,
         resolved_user_intent: "read package.json name field".to_string(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
@@ -138,6 +139,7 @@ fn contract_repair_judge_rejects_scalar_semantic_repair_without_machine_marker()
 #[test]
 fn contract_repair_judge_rejects_directory_semantic_repair_without_machine_marker() {
     let mut out = super::IntentNormalizerOut {
+        boundary_envelope: None,
         resolved_user_intent: "列出 document 目录下的所有文件名".to_string(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
@@ -207,6 +209,7 @@ fn contract_repair_judge_rejects_directory_semantic_repair_without_machine_marke
 #[test]
 fn contract_repair_judge_machine_marker_restores_execution_failed_step_contract() {
     let mut out = super::IntentNormalizerOut {
+        boundary_envelope: None,
         resolved_user_intent: "Review the prior observed execution failure.".to_string(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
@@ -281,6 +284,7 @@ fn contract_repair_judge_machine_marker_restores_execution_failed_step_contract(
 #[test]
 fn contract_repair_judge_generated_file_delivery_runtime_target_overrides_clarify() {
     let mut out = super::IntentNormalizerOut {
+        boundary_envelope: None,
         resolved_user_intent: "写一个脚本，保存并发送给用户".to_string(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
@@ -407,6 +411,7 @@ fn delivery_contract_clears_spurious_attachment_processing_without_semantic_kind
 #[test]
 fn contract_repair_judge_machine_marker_reuses_active_completed_task_status() {
     let mut out = super::IntentNormalizerOut {
+        boundary_envelope: None,
         resolved_user_intent: "Continue from the prior task.".to_string(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
@@ -480,6 +485,7 @@ fn contract_repair_judge_machine_marker_reuses_active_completed_task_status() {
 #[test]
 fn contract_repair_judge_missing_turn_binding_forces_missing_locator_clarify() {
     let mut out = super::IntentNormalizerOut {
+        boundary_envelope: None,
         resolved_user_intent: "read remembered log alias".to_string(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
@@ -557,6 +563,7 @@ fn contract_repair_judge_missing_turn_binding_forces_missing_locator_clarify() {
 #[test]
 fn contract_repair_judge_output_clears_stale_file_delivery_flag() {
     let mut out = super::IntentNormalizerOut {
+        boundary_envelope: None,
         resolved_user_intent: "Write a short release note for RustClaw".to_string(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
@@ -634,6 +641,7 @@ fn contract_repair_judge_output_clears_stale_file_delivery_flag() {
 #[test]
 fn contract_repair_judge_output_rejects_low_confidence() {
     let mut out = super::IntentNormalizerOut {
+        boundary_envelope: None,
         resolved_user_intent: "总结刚才的对话".to_string(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
@@ -688,6 +696,7 @@ fn contract_repair_judge_output_rejects_low_confidence() {
 #[test]
 fn contract_repair_judge_rejects_decision_change_without_machine_contract_signal() {
     let mut out = super::IntentNormalizerOut {
+        boundary_envelope: None,
         resolved_user_intent: "summarize the prior discussion".to_string(),
         resume_behavior: "none".to_string(),
         schedule_kind: "none".to_string(),
