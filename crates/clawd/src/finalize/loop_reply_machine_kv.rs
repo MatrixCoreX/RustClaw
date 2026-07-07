@@ -638,11 +638,7 @@ fn latest_publishable_service_status_terminal_delivery(
 }
 
 fn route_is_service_status_contract(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
-        || crate::machine_capability_ref::route_has_capability_namespace(
-            route,
-            &["system", "service", "service_control", "health"],
-        )
+    crate::finalize::route_matches_service_status_output_contract(route)
 }
 
 fn publishable_service_status_terminal_delivery(
