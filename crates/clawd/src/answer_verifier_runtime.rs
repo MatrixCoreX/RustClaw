@@ -1199,13 +1199,15 @@ pub(super) fn evidence_policy_context_prompt_block(route_result: &RouteResult) -
 
 pub(super) fn output_contract_prompt_block(route_result: &RouteResult) -> String {
     let evidence_policy_trace = verifier_evidence_policy_prompt_trace(route_result);
+    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route_result);
     serde_json::to_string_pretty(&json!({
         "response_shape": route_result.output_contract.response_shape.as_str(),
+        "final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str),
+        "final_answer_shape_class": final_answer_shape.map(|shape| shape.class().as_str()),
         "requires_content_evidence": route_result.output_contract.requires_content_evidence,
         "delivery_required": route_result.output_contract.delivery_required,
         "locator_kind": route_result.output_contract.locator_kind.as_str(),
         "delivery_intent": route_result.output_contract.delivery_intent.as_str(),
-        "contract_marker": route_result.effective_output_contract_semantic_kind().as_str(),
         "locator_hint": route_result.output_contract.locator_hint,
         "evidence_policy": evidence_policy_trace,
     }))
