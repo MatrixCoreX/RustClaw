@@ -1488,10 +1488,7 @@ fn step_trace_includes_contract_and_action_policy_for_success() {
         step_contract.get("contract_match").and_then(Value::as_str),
         Some("file_names")
     );
-    assert_eq!(
-        step_contract.get("contract_marker").and_then(Value::as_str),
-        Some("file_names")
-    );
+    assert!(step_contract.get("contract_marker").is_none());
     assert!(step_contract.get("semantic_kind").is_none());
     assert_eq!(
         step_contract
