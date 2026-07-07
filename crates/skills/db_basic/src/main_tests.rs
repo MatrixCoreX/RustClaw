@@ -79,6 +79,13 @@ fn schema_version_action_runs_pragma_without_sql_arg() {
             .and_then(Value::as_str),
         Some("schema_version")
     );
+    assert_eq!(extra.get("schema_version").and_then(Value::as_i64), Some(0));
+    assert_eq!(
+        extra
+            .pointer("/field_value/schema_version")
+            .and_then(Value::as_i64),
+        Some(0)
+    );
 }
 
 #[test]

@@ -15,6 +15,8 @@ mod task_failure_lifecycle;
 mod task_machine_kv_summary;
 #[path = "task_resume.rs"]
 mod task_resume;
+#[path = "task_structured_evidence_table.rs"]
+mod task_structured_evidence_table;
 #[path = "task_tree_summary_recovery.rs"]
 mod task_tree_summary_recovery;
 
@@ -38,6 +40,8 @@ use task_resume::{
     resume_failure_is_unbound_path_lookup_clarify_result, retry_answer_after_verifier,
     text_looks_like_missing_file_target,
 };
+use task_structured_evidence_table::deterministic_structured_evidence_table_recovery;
+use task_structured_evidence_table::verified_terminal_answer_after_verifier_pass;
 use task_tree_summary_recovery::deterministic_tree_summary_rows_failure_recovery;
 
 pub(crate) async fn retry_loop_answer_after_verifier(
@@ -1435,10 +1439,31 @@ pub(crate) async fn finalize_ask_result(
                                 .await
                             {
                                 journal.record_answer_verifier_summary(retry_verifier);
+                            } else {
+                                failure_reply = false;
+                                semantic_clarify = false;
                             }
                         }
                     }
                 }
+            }
+            if let Some(recovered_answer) = deterministic_structured_evidence_table_recovery(
+                route_result,
+                &journal,
+                failure_reply,
+            ) {
+                failure_reply = false;
+                semantic_clarify = false;
+                answer_text = recovered_answer;
+                answer_messages.clear();
+                answer_messages.push(answer_text.clone());
+                journal.record_final_answer(&answer_text);
+                mark_answer_verifier_recovered_by_deterministic_observed_evidence(&mut journal);
+                info!(
+                    "finalize_structured_evidence_table_recovered task_id={} answer={}",
+                    task.task_id,
+                    crate::truncate_for_log(&answer_text)
+                );
             }
             if let Some(recovered_answer) = deterministic_filtered_log_entry_recovery(&journal) {
                 failure_reply = false;
@@ -1567,6 +1592,23 @@ pub(crate) async fn finalize_ask_result(
             journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
             journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
             crate::finalize::ensure_task_metrics(&mut journal, &answer_text, &answer_messages);
+            if failure_reply {
+                if let Some(recovered_answer) =
+                    verified_terminal_answer_after_verifier_pass(&journal)
+                {
+                    failure_reply = false;
+                    semantic_clarify = false;
+                    answer_text = recovered_answer;
+                    answer_messages.clear();
+                    answer_messages.push(answer_text.clone());
+                    journal.record_final_answer(&answer_text);
+                    info!(
+                        "finalize_verified_terminal_answer_recovered task_id={} answer={}",
+                        task.task_id,
+                        crate::truncate_for_log(&answer_text)
+                    );
+                }
+            }
             if !failure_reply
                 && !semantic_clarify
                 && journal_has_checkpointed_nonterminal_lifecycle(&journal)

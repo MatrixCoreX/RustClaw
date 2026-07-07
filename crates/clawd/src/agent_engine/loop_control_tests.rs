@@ -22,6 +22,7 @@ use super::{
     try_recover_machine_kv_summary_output_format_answer_verifier_gap,
     try_recover_recent_artifacts_answer_verifier_gap, try_recover_rss_news_answer_verifier_gap,
     try_recover_structured_count_answer_verifier_gap,
+    try_recover_structured_evidence_table_answer_verifier_gap,
     try_recover_structured_scalar_output_format_answer_verifier_gap,
     try_recover_structured_search_answer_verifier_gap, AgentLoopGuardPolicy, RoundOutcome,
 };
@@ -1162,7 +1163,7 @@ fn language_only_output_format_gap_keeps_best_model_answer_success() {
 }
 
 #[test]
-fn latest_terminal_recovery_prefers_strict_list_candidate_that_satisfies_contract() {
+fn latest_terminal_recovery_rejects_structured_visible_rewrite_gap() {
     let mut route = route_result(OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -1231,11 +1232,80 @@ fn latest_terminal_recovery_prefers_strict_list_candidate_that_satisfies_contrac
         .with_messages(vec!["failed".to_string()])
         .with_task_journal(journal);
 
+    assert!(!try_recover_latest_synthesis_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+    assert_eq!(reply.text, "failed");
+    assert!(reply.task_journal.as_ref().is_some_and(|journal| journal
+        .answer_verifier_summary
+        .as_ref()
+        .is_some_and(|summary| summary.high_confidence_retry_gap())));
+}
+
+#[test]
+fn latest_terminal_recovery_uses_latest_terminal_for_non_structured_gap() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+            .to_string();
+    let first_answer = "# Service Notes\n\nRustClaw test fixture service notes.";
+    let stale_answer = "service notes";
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["content_excerpt".to_string()],
+        answer_incomplete_reason: "latest retry omitted observed excerpt".to_string(),
+        should_retry: true,
+        retry_instruction: "use the observed excerpt".to_string(),
+        confidence: 0.94,
+    });
+    journal.step_results.push(crate::task_journal::TaskJournalStepTrace {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output_excerpt: Some(
+            r##"{"extra":{"path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md","content_excerpt":"# Service Notes\n\nRustClaw test fixture service notes."}}"##
+                .to_string(),
+        ),
+        error_excerpt: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_2".to_string(),
+            skill: "respond".to_string(),
+            status: StepExecutionStatus::Ok,
+            output_excerpt: Some(first_answer.to_string()),
+            error_excerpt: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_3".to_string(),
+            skill: "respond".to_string(),
+            status: StepExecutionStatus::Ok,
+            output_excerpt: Some(stale_answer.to_string()),
+            error_excerpt: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    let mut reply = AskReply::non_llm("failed".to_string())
+        .with_messages(vec!["failed".to_string()])
+        .with_task_journal(journal);
+
     assert!(try_recover_latest_synthesis_answer_verifier_gap(
         Some(&route),
         &mut reply
     ));
-    assert_eq!(reply.text, first_three);
+    assert_eq!(reply.text, stale_answer);
     assert!(!reply.should_fail_task);
     assert!(reply.error_text.is_none());
 }

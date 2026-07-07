@@ -129,6 +129,7 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
 
     match action {
         "schema_version" | "sqlite_schema_version" => run_query(&conn, &sql, obj).map(|payload| {
+            let schema_version = schema_version_from_query_payload(&payload);
             (
                 payload.to_string(),
                 json!({
@@ -136,6 +137,10 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
                     "db_path": db_path_text,
                     "sql": sql,
                     "result": payload,
+                    "schema_version": schema_version,
+                    "field_value": {
+                        "schema_version": schema_version,
+                    },
                 }),
             )
         }),
@@ -232,6 +237,16 @@ fn table_names_from_query_payload(payload: &Value) -> Vec<String> {
         .filter(|name| !name.is_empty())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+fn schema_version_from_query_payload(payload: &Value) -> Option<i64> {
+    payload
+        .get("rows")
+        .and_then(Value::as_array)
+        .and_then(|rows| rows.first())
+        .and_then(Value::as_object)
+        .and_then(|row| row.get("schema_version"))
+        .and_then(Value::as_i64)
 }
 
 fn required_sql(obj: &serde_json::Map<String, Value>) -> Result<String, SkillError> {
