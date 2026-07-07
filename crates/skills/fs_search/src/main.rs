@@ -5,6 +5,8 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+const SKILL_NAME: &str = "fs_search";
+
 #[derive(Debug, Deserialize)]
 struct Req {
     request_id: String,
@@ -431,7 +433,7 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    extra: None,
+                    extra: Some(error_extra("execution_failed")),
                     error_text: Some(err),
                 },
             },
@@ -439,7 +441,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
-                extra: None,
+                extra: Some(error_extra("invalid_input")),
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -447,6 +449,17 @@ fn main() -> anyhow::Result<()> {
         stdout.flush()?;
     }
     Ok(())
+}
+
+fn error_extra(error_kind: &str) -> Value {
+    json!({
+        "schema_version": 1,
+        "source_skill": SKILL_NAME,
+        "status": "error",
+        "error_kind": error_kind,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "retryable": false,
+    })
 }
 
 fn execute(args: Value) -> Result<Value, String> {

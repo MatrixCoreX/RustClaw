@@ -1,5 +1,17 @@
 use super::*;
 
+#[test]
+fn error_extra_exposes_machine_contract() {
+    let extra = error_extra("execution_failed");
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(extra["message_key"], "skill.fs_search.execution_failed");
+    assert_eq!(extra["retryable"], false);
+}
+
 fn unique_temp_dir(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("rustclaw-fs-search-{name}-{}", std::process::id()))
 }
