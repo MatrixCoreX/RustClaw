@@ -181,6 +181,8 @@ pub(super) fn normalize_intent_normalizer_top_level_for_schema(
     normalize_bool_field_with_default(obj, "should_interrupt_active_run", false);
     obj.entry("state_patch".to_string()).or_insert(Value::Null);
     normalize_state_patch_for_schema(obj);
+    promote_top_level_machine_state_patch_fields(obj);
+    normalize_state_patch_for_schema(obj);
     obj.entry("attachment_processing_required".to_string())
         .or_insert(Value::Bool(false));
     normalize_bool_field_with_default(obj, "attachment_processing_required", false);
@@ -527,6 +529,60 @@ fn normalize_state_patch_for_schema(obj: &mut serde_json::Map<String, Value>) {
         _ => {
             *value = Value::Null;
         }
+    }
+}
+
+fn promote_top_level_machine_state_patch_fields(obj: &mut serde_json::Map<String, Value>) {
+    const STATE_PATCH_KEYS: &[&str] = &[
+        "alias_bindings",
+        "deictic_reference",
+        "ordered_entry_ref",
+        "scalar_count_filter",
+        "structured_field_selector",
+        "runtime_status_query",
+        "runtime_async_job_start",
+        "required_field",
+        "required_machine_field",
+        "required_machine_fields",
+        "required_content_literals",
+        "forbidden_visible_literals",
+        "replacement_pairs",
+        "quantity_comparison",
+        "primary_task_update",
+    ];
+    let mut promoted = serde_json::Map::new();
+    for key in STATE_PATCH_KEYS {
+        if let Some(value) = obj.remove(*key) {
+            if state_patch_value_is_meaningful(&value) {
+                promoted.insert((*key).to_string(), value);
+            }
+        }
+    }
+    if promoted.is_empty() {
+        return;
+    }
+    match obj.get_mut("state_patch") {
+        Some(Value::Object(existing)) => {
+            for (key, value) in promoted {
+                existing.entry(key).or_insert(value);
+            }
+        }
+        _ => {
+            obj.insert("state_patch".to_string(), Value::Object(promoted));
+        }
+    }
+}
+
+fn state_patch_value_is_meaningful(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(_) | Value::Number(_) => true,
+        Value::String(text) => {
+            let normalized = normalize_schema_token(text);
+            !normalized.is_empty() && !matches!(normalized.as_str(), "none" | "null" | "no")
+        }
+        Value::Array(items) => items.iter().any(state_patch_value_is_meaningful),
+        Value::Object(map) => map.values().any(state_patch_value_is_meaningful),
     }
 }
 
