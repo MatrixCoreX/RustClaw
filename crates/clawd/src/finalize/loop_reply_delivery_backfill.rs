@@ -186,6 +186,37 @@ pub(super) fn latest_publishable_respond_step_output(loop_state: &LoopState) -> 
         .find(|output| planned_delivery_is_publishable_model_language_answer(output))
 }
 
+fn loop_has_non_control_observation(loop_state: &LoopState) -> bool {
+    loop_state.executed_step_results.iter().any(|step| {
+        !matches!(
+            step.skill.as_str(),
+            "respond" | "synthesize_answer" | "think" | "answer_verifier"
+        )
+    })
+}
+
+fn terminal_respond_delivery_candidate(output: &str) -> bool {
+    let output = output.trim();
+    !output.is_empty()
+        && !crate::finalize::looks_like_planner_artifact(output)
+        && !crate::finalize::looks_like_internal_trace_artifact(output)
+        && !crate::finalize::is_execution_summary_message(output)
+}
+
+fn terminal_respond_step_without_observed_execution(loop_state: &LoopState) -> Option<&str> {
+    if loop_has_non_control_observation(loop_state) {
+        return None;
+    }
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && step.skill == "respond")
+        .filter_map(|step| step.output.as_deref())
+        .map(str::trim)
+        .find(|output| terminal_respond_delivery_candidate(output))
+}
+
 pub(super) fn last_respond_matches_single_line_observation(
     loop_state: &LoopState,
     answer: &str,
@@ -394,6 +425,28 @@ pub(super) fn backfill_delivery_from_last_outputs(
             log_deterministic_delivery_record(
                 &task.task_id,
                 "final_result_use_free_answer_respond_step",
+                "backfilled",
+                agent_run_context,
+                loop_state.executed_step_results.len(),
+            );
+        }
+    }
+
+    if loop_state.delivery_messages.is_empty()
+        && free_answer_route_allows_terminal_respond_delivery(agent_run_context)
+    {
+        if let Some(answer) =
+            terminal_respond_step_without_observed_execution(loop_state).map(str::to_string)
+        {
+            append_delivery_message(
+                &task.task_id,
+                &mut loop_state.delivery_messages,
+                answer.clone(),
+            );
+            loop_state.last_user_visible_respond = Some(answer);
+            log_deterministic_delivery_record(
+                &task.task_id,
+                "final_result_use_terminal_respond_without_observed_execution",
                 "backfilled",
                 agent_run_context,
                 loop_state.executed_step_results.len(),

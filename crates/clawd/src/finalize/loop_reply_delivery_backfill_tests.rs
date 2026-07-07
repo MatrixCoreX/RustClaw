@@ -87,6 +87,49 @@ fn backfill_delivery_uses_free_answer_respond_step() {
 }
 
 #[test]
+fn backfill_delivery_uses_terminal_contract_respond_without_observed_execution() {
+    let task = claimed_task("task-terminal-contract-respond-no-observed-execution");
+    let answer = r#"Dry-run async_start contract shape:
+
+{
+  "args": {
+    "command": "sleep 2 && echo RUSTCLAW_ASYNC_100",
+    "async_start": true,
+    "poll_after_seconds": 5
+  },
+  "extra": {
+    "adapter_kind": "local_process_poll",
+    "checkpoint_id": "ckpt-<runtime-uuid>",
+    "poll_ref": "run_cmd:local_process_poll:ckpt-<runtime-uuid>",
+    "cancel_ref": "run_cmd:cancel:ckpt-<runtime-uuid>"
+  }
+}"#;
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.last_output = Some(answer.to_string());
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "respond", answer));
+    let mut route = free_route_result();
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    backfill_delivery_from_last_outputs(&task, &mut loop_state, Some(&ctx));
+
+    assert_eq!(loop_state.delivery_messages, vec![answer.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(answer)
+    );
+}
+
+#[test]
 fn backfill_delivery_does_not_use_respond_step_for_content_evidence_route() {
     let task = claimed_task("task-content-evidence-respond-step");
     let answer = "Dry run - content evidence routes must not backfill from a plain respond step.";
