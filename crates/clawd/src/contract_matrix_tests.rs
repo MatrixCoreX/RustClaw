@@ -737,7 +737,7 @@ fn filesystem_list_entries_capability_ref_supplies_grouped_name_shape_without_se
 }
 
 #[test]
-fn system_runtime_status_capability_ref_supplies_scalar_shape_only_for_scalar_contract() {
+fn system_runtime_status_capability_ref_supplies_registry_scalar_shape() {
     let mut route = route_with_machine_capability_ref("capability_ref=system.runtime_status");
     route.output_contract.response_shape = OutputResponseShape::Scalar;
 
@@ -747,7 +747,7 @@ fn system_runtime_status_capability_ref_supplies_scalar_shape_only_for_scalar_co
     );
 
     route.output_contract.response_shape = OutputResponseShape::Strict;
-    assert_ne!(
+    assert_eq!(
         final_answer_shape_for_route(&route),
         Some(FinalAnswerShape::Scalar)
     );
