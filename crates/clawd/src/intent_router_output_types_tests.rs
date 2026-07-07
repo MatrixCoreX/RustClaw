@@ -103,3 +103,47 @@ fn boundary_envelope_projects_only_machine_boundary_fields() {
     assert!(!prompt_line.contains("check config/app.toml later"));
     assert!(!prompt_line.contains("config/app.toml"));
 }
+
+#[test]
+fn boundary_envelope_merges_model_machine_fields_without_overriding_runtime_authority() {
+    let envelope = BoundaryEnvelope::from_request(
+        "read x",
+        None,
+        false,
+        &crate::IntentOutputContract::default(),
+        None,
+        crate::ResumeBehavior::None,
+    )
+    .merge_model_machine_fields(Some(&serde_json::json!({
+        "schema_version": 1,
+        "raw_chars": 999,
+        "language_hint": "ja",
+        "schedule_intent": {"kind": "query"},
+        "attachment_refs": ["current_request_attachments", ""],
+        "explicit_locators": ["docs/readme.md", "docs/readme.md"],
+        "active_task_reference": "reuse_active",
+        "session_binding": "resume_execute",
+        "safety_budget_hint": "bounded",
+    })));
+
+    assert_eq!(envelope.raw_chars, 6);
+    assert_eq!(envelope.language_hint.as_deref(), Some("en"));
+    assert_eq!(
+        envelope
+            .schedule_intent
+            .as_ref()
+            .map(|intent| intent.kind.as_str()),
+        Some("query")
+    );
+    assert_eq!(
+        envelope.attachment_refs,
+        vec!["current_request_attachments"]
+    );
+    assert_eq!(envelope.explicit_locators, vec!["docs/readme.md"]);
+    assert_eq!(
+        envelope.active_task_reference.as_deref(),
+        Some("reuse_active")
+    );
+    assert_eq!(envelope.session_binding.as_deref(), Some("resume_execute"));
+    assert_eq!(envelope.safety_budget_hint.as_deref(), Some("bounded"));
+}

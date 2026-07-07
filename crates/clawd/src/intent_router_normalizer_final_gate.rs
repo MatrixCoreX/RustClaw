@@ -32,6 +32,7 @@ pub(super) fn build_normalizer_output_with_final_gate(
     turn_analysis: Option<TurnAnalysis>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
+    model_boundary_envelope: Option<&serde_json::Value>,
     contract_repair_report: &ContractRepairReport,
     repair_reasons: &[Option<&'static str>],
 ) -> IntentNormalizerOutput {
@@ -122,7 +123,8 @@ pub(super) fn build_normalizer_output_with_final_gate(
         &output_contract,
         turn_analysis.as_ref(),
         resume_behavior,
-    );
+    )
+    .merge_model_machine_fields(model_boundary_envelope);
     info!(
         "{} intent_normalizer_route_trace task_id={} owner_layer={} reason_code={} outcome={} route_trace_decision={} needs_clarify={} output_contract_ref={} repair_codes={} repair_classes={}",
         crate::highlight_tag("routing"),
