@@ -682,6 +682,47 @@ fn loop_contract_path_observed_answer_replaces_status_and_drops_progress_summary
 }
 
 #[test]
+fn loop_contract_observed_answer_preserves_publishable_terminal_summary_for_free_route() {
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "README.md; docs; configs/skills_registry.toml".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..crate::agent_engine::AgentRunContext::default()
+    };
+
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let mut step_contract = scalar_route_result().output_contract;
+    step_contract.self_extension.structured_field_selector =
+        Some("fs_basic.planner_kind".to_string());
+    loop_state.output_contract = Some(step_contract);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_basic",
+        "fs_basic planner_kind\n",
+    ));
+    let answer = "| 检查项 | 结果 |\n| --- | --- |\n| README.md 是否存在 | 存在 |\n| docs 文件名 | service_notes.md, release_checklist.md |\n| fs_basic.planner_kind | tool |";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", answer));
+    loop_state.delivery_messages.push(answer.to_string());
+    let task = claimed_task("task-loop-contract-preserve-terminal-summary");
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_loop_contract_observed_answer(
+        &task,
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+    ));
+
+    assert_eq!(loop_state.delivery_messages, vec![answer.to_string()]);
+    assert!(finalizer_summary.is_none());
+}
+
+#[test]
 fn loop_contract_observed_answer_preserves_explicit_json_delivery() {
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     let mut contract = scalar_route_result().output_contract;

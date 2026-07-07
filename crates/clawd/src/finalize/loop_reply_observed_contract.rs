@@ -446,6 +446,27 @@ fn loop_contract_observed_answer_satisfies_required_evidence(
     })
 }
 
+fn current_delivery_is_publishable_terminal_answer(loop_state: &LoopState) -> bool {
+    let Some(current) = current_user_visible_delivery_text(loop_state)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    else {
+        return false;
+    };
+    if !planned_delivery_is_publishable_model_language_answer(current) {
+        return false;
+    }
+    [
+        valid_publishable_synthesis_output(loop_state),
+        latest_publishable_respond_step_output(loop_state),
+        latest_contractual_synthesis_output(loop_state),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::trim)
+    .any(|terminal| terminal == current)
+}
+
 pub(super) fn replace_delivery_with_direct_scalar_observed_answer(
     state: &AppState,
     task: &ClaimedTask,
@@ -728,6 +749,15 @@ pub(super) fn replace_delivery_with_loop_contract_observed_answer(
                         && !crate::finalize::looks_like_internal_trace_artifact(delivery)
                         && crate::finalize::parse_delivery_token(delivery).is_none()
                 })
+        })
+    {
+        return false;
+    }
+    if agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .is_some_and(|route| {
+            !route_prefers_observed_answer(route)
+                && current_delivery_is_publishable_terminal_answer(loop_state)
         })
     {
         return false;
