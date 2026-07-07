@@ -421,6 +421,8 @@ fn valid_single_machine_marker(value: &str) -> bool {
             | "query"
             | "provider"
             | "model"
+            | "line"
+            | "line_number"
     )
 }
 
@@ -623,11 +625,13 @@ fn collect_machine_text_fragments_from_json_path(
                         if let Some(parent) = parent_path {
                             values.push(format!("{parent}.{key}={value}"));
                         }
+                        push_machine_field_aliases(parent_path, key, &value, values);
                     } else if let Some(value) = machine_scalar_json_value_as_surface(child) {
                         values.push(format!("{key}={value}"));
                         if let Some(parent) = parent_path {
                             values.push(format!("{parent}.{key}={value}"));
                         }
+                        push_machine_field_aliases(parent_path, key, &value, values);
                     } else if let Some(value) = machine_array_json_value_as_surface(child) {
                         values.push(format!("{key}={value}"));
                         if let Some(parent) = parent_path {
@@ -655,6 +659,21 @@ fn collect_machine_text_fragments_from_json_path(
         serde_json::Value::Number(value) => values.push(value.to_string()),
         serde_json::Value::Bool(value) => values.push(value.to_string()),
         serde_json::Value::Null => {}
+    }
+}
+
+fn push_machine_field_aliases(
+    parent_path: Option<&str>,
+    key: &str,
+    value: &str,
+    values: &mut Vec<String>,
+) {
+    if key != "line" {
+        return;
+    }
+    values.push(format!("line_number={value}"));
+    if let Some(parent) = parent_path {
+        values.push(format!("{parent}.line_number={value}"));
     }
 }
 
@@ -713,9 +732,35 @@ fn machine_kv_pairs_grounded_by_observation(
 }
 
 fn machine_kv_pair_has_observed_value(pair: &(String, String), observed_texts: &[String]) -> bool {
+    if line_number_machine_key(&pair.0) {
+        return observed_texts
+            .iter()
+            .any(|text| text_has_exact_machine_kv_pair(text, &pair.0, &pair.1));
+    }
     observed_texts
         .iter()
         .any(|text| text.contains(pair.1.as_str()))
+}
+
+fn line_number_machine_key(key: &str) -> bool {
+    matches!(
+        key,
+        "line" | "line_number" | "matches.line" | "matches.line_number"
+    )
+}
+
+fn text_has_exact_machine_kv_pair(text: &str, key: &str, value: &str) -> bool {
+    let key = match key {
+        "line_number" => "line",
+        "matches.line_number" => "matches.line",
+        _ => key,
+    };
+    let exact = format!("{key}={value}");
+    text == exact
+        || text
+            .split(char::is_whitespace)
+            .map(|token| token.trim_matches(|ch| matches!(ch, ',' | ';')))
+            .any(|token| token == exact)
 }
 
 fn machine_marker_is_observed(marker: &str, observed_texts: &[String]) -> bool {
