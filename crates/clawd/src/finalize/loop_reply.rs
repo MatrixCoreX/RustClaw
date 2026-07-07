@@ -485,7 +485,7 @@ fn terminal_scalar_placeholder_replacement_matches_route(
     {
         return false;
     }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::ScalarPathOnly) {
+    if crate::finalize::route_matches_single_path_output_contract(route) {
         return candidate.starts_with('/')
             || candidate.starts_with("./")
             || candidate.starts_with("../")
