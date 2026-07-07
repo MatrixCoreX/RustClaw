@@ -292,7 +292,6 @@ output_schema = { type = "object", required = ["text"], properties = { text = { 
 [[skills]]
 name = "schedule"
 enabled = true
-planner_visible = false
 kind = "builtin"
 planner_kind = "workflow"
 group = "workflow"
@@ -305,8 +304,17 @@ auto_invocable = false
 requires_confirmation = true
 side_effect = true
 retryable = false
-input_schema = { type = "object", required = ["action"], properties = { action = { type = "string" } } }
-output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+planner_capabilities = [
+  { name = "schedule.create", action = "create", effect = "mutate", required = ["text|intent"], optional = ["timezone", "schedule", "task", "mode", "dry_run", "preview_only"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
+  { name = "schedule.preview", action = "preview", effect = "observe", required = ["text|intent"], optional = ["timezone", "schedule", "task"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "schedule.list", action = "list", effect = "observe", optional = ["text|intent", "target_job_id"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "schedule.delete", action = "delete", effect = "mutate", optional = ["text|intent", "target_job_id"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
+  { name = "schedule.pause", action = "pause", effect = "mutate", optional = ["text|intent", "target_job_id"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
+  { name = "schedule.resume", action = "resume", effect = "mutate", optional = ["text|intent", "target_job_id"], risk_level = "medium", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
+  { name = "schedule.compile", action = "compile", effect = "observe", required = ["text"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
+]
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["compile", "create", "preview", "list", "delete", "pause", "resume"] }, text = { type = "string" }, raw = { type = "string" }, intent = { type = "object" }, kind = { type = "string" }, timezone = { type = "string" }, schedule = { type = "object" }, task = { type = "object" }, target_job_id = { type = "string" }, mode = { type = "string" }, dry_run = { type = "boolean" }, preview_only = { type = "boolean" }, create_real = { type = "boolean" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "x"
