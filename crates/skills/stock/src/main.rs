@@ -28,6 +28,8 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<Value>,
     error_text: Option<String>,
 }
 
@@ -158,16 +160,18 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => match execute(req.args, &runtime) {
-                Ok(text) => Resp {
+                Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
                     text,
+                    extra: Some(extra),
                     error_text: None,
                 },
                 Err(err) => Resp {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
+                    extra: Some(stock_error_extra("stock_quote_failed")),
                     error_text: Some(err),
                 },
             },
@@ -175,6 +179,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: Some(stock_error_extra("invalid_input")),
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -184,7 +189,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value, runtime: &RuntimeConfig) -> Result<String, String> {
+fn execute(args: Value, runtime: &RuntimeConfig) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -210,6 +215,14 @@ fn execute(args: Value, runtime: &RuntimeConfig) -> Result<String, String> {
         }
         _ => Err("不支持的 action，仅支持 quote|query".to_string()),
     }
+}
+
+fn stock_error_extra(error_kind: &str) -> Value {
+    json!({
+        "status": "error",
+        "error_kind": error_kind,
+        "source_skill": "stock",
+    })
 }
 
 fn default_true() -> bool {
@@ -332,7 +345,7 @@ fn resolve_symbol(input: &str, runtime: &RuntimeConfig) -> Result<ResolvedSymbol
     }
 }
 
-fn quote_a_share(resolved: &ResolvedSymbol) -> Result<String, String> {
+fn quote_a_share(resolved: &ResolvedSymbol) -> Result<(String, Value), String> {
     let code = normalize_code(&resolved.code);
     let url = format!("{SINA_HQ_URL}{code}");
     let client = Client::builder()
@@ -366,7 +379,7 @@ fn decode_sina_body(bytes: &[u8]) -> String {
 }
 
 /// 解析新浪 var hq_str_sh600519="name,open,prev,current,...";
-fn parse_sina_hq(body: &str, code: &str, note: Option<&str>) -> Result<String, String> {
+fn parse_sina_hq(body: &str, code: &str, note: Option<&str>) -> Result<(String, Value), String> {
     let prefix = "var hq_str_";
     let start = body
         .find(prefix)
@@ -409,14 +422,34 @@ fn parse_sina_hq(body: &str, code: &str, note: Option<&str>) -> Result<String, S
     if let Some(note) = note {
         lines.insert(0, note.to_string());
     }
+    let mut change_pct_value = None;
     if let (Ok(c), Ok(p)) = (current.parse::<f64>(), prev_close.parse::<f64>()) {
         if p > 0.0 {
             let pct = (c - p) / p * 100.0;
+            change_pct_value = Some(pct);
             let sign = if pct >= 0.0 { "+" } else { "" };
             lines.insert(2, format!("涨跌幅 {} {:.2}%", sign, pct));
         }
     }
-    Ok(lines.join("\n"))
+    let extra = json!({
+        "action": "quote",
+        "source_skill": "stock",
+        "status": "ok",
+        "code": code.to_uppercase(),
+        "symbol": code,
+        "name": name,
+        "open": open,
+        "prev_close": prev_close,
+        "current": current,
+        "high": high,
+        "low": low,
+        "volume": volume,
+        "date": date,
+        "time": time,
+        "change_pct": change_pct_value,
+        "correction_note": note,
+    });
+    Ok((lines.join("\n"), extra))
 }
 
 fn looks_like_stock_code(input: &str) -> bool {
