@@ -83,6 +83,47 @@ impl BoundaryEnvelope {
         self.raw_chars
     }
 
+    pub(crate) fn merge_model_machine_fields(mut self, model: Option<&serde_json::Value>) -> Self {
+        let Some(model) = model.and_then(serde_json::Value::as_object) else {
+            return self;
+        };
+        if self.schedule_intent.is_none() {
+            self.schedule_intent = model
+                .get("schedule_intent")
+                .filter(|value| value.is_object())
+                .and_then(|value| {
+                    serde_json::from_value::<crate::ScheduleIntentOutput>(value.clone()).ok()
+                });
+        }
+        merge_boundary_string_array(
+            &mut self.attachment_refs,
+            model.get("attachment_refs"),
+            BoundaryStringKind::Reference,
+        );
+        merge_boundary_string_array(
+            &mut self.explicit_locators,
+            model.get("explicit_locators"),
+            BoundaryStringKind::Locator,
+        );
+        if self.active_task_reference.is_none() {
+            self.active_task_reference = boundary_string_field(
+                model.get("active_task_reference"),
+                BoundaryStringKind::Reference,
+            );
+        }
+        if self.session_binding.is_none() {
+            self.session_binding =
+                boundary_string_field(model.get("session_binding"), BoundaryStringKind::Reference);
+        }
+        if self.safety_budget_hint.is_none() {
+            self.safety_budget_hint = boundary_string_field(
+                model.get("safety_budget_hint"),
+                BoundaryStringKind::Reference,
+            );
+        }
+        self
+    }
+
     pub(crate) fn compact_prompt_line(&self) -> String {
         let schedule_kind = self
             .schedule_intent
@@ -119,6 +160,48 @@ impl IntentNormalizerOutput {
     pub(crate) fn boundary_envelope(&self) -> BoundaryEnvelope {
         self.boundary_envelope.clone()
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BoundaryStringKind {
+    Locator,
+    Reference,
+}
+
+fn merge_boundary_string_array(
+    target: &mut Vec<String>,
+    value: Option<&serde_json::Value>,
+    kind: BoundaryStringKind,
+) {
+    let Some(items) = value.and_then(serde_json::Value::as_array) else {
+        return;
+    };
+    for item in items {
+        let Some(text) = boundary_string_field(Some(item), kind) else {
+            continue;
+        };
+        if !target.iter().any(|existing| existing == &text) {
+            target.push(text);
+        }
+    }
+}
+
+fn boundary_string_field(
+    value: Option<&serde_json::Value>,
+    kind: BoundaryStringKind,
+) -> Option<String> {
+    let text = value?.as_str()?.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let max_len = match kind {
+        BoundaryStringKind::Locator => 1024,
+        BoundaryStringKind::Reference => 128,
+    };
+    if text.chars().count() > max_len || text.chars().any(|ch| ch.is_control()) {
+        return None;
+    }
+    Some(text.to_string())
 }
 
 fn non_empty_token(value: &str) -> &str {

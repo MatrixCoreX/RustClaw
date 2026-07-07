@@ -990,6 +990,7 @@ pub(crate) async fn run_intent_normalizer(
             turn_analysis,
             turn_type,
             target_task_policy,
+            out.boundary_envelope.as_ref(),
             &contract_repair_report,
             &[
                 structural_contract_repair,
