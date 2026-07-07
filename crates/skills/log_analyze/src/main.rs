@@ -21,6 +21,8 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<Value>,
     error_text: Option<String>,
 }
 
@@ -45,16 +47,18 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => match execute(req.args) {
-                Ok(text) => Resp {
+                Ok((text, extra)) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
                     text,
+                    extra: Some(extra),
                     error_text: None,
                 },
                 Err(err) => Resp {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
+                    extra: None,
                     error_text: Some(err),
                 },
             },
@@ -62,6 +66,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: None,
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -71,7 +76,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value) -> Result<String, String> {
+fn execute(args: Value) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
@@ -116,7 +121,13 @@ fn execute(args: Value) -> Result<String, String> {
         .unwrap_or_else(|| default_keywords.iter().map(|s| s.to_string()).collect());
 
     let analysis = analyze_log_target(&path, &keywords, max_matches)?;
-    Ok(json!({
+    let extra = log_analysis_extra(analysis);
+    Ok((extra.to_string(), extra))
+}
+
+fn log_analysis_extra(analysis: LogAnalysis) -> Value {
+    json!({
+        "action": "analyze_log",
         "requested_path": analysis.requested_path,
         "path": analysis.path,
         "total_lines": analysis.total_lines,
@@ -127,7 +138,6 @@ fn execute(args: Value) -> Result<String, String> {
         "recovery_counts": analysis.recovery_counts,
         "recent_recovery_lines": analysis.recent_recovery_lines
     })
-    .to_string())
 }
 
 fn resolve_log_path(path: &PathBuf) -> Result<PathBuf, String> {
