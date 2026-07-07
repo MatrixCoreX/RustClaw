@@ -39,6 +39,21 @@ DEFAULT_EXCLUDED_TAGS = {
     "skill:image_generate",
     "skill:image_vision",
 }
+MEDIA_PRESENTATION_EXCLUDED_TAGS = {
+    "audio",
+    "image",
+    "voice",
+    "skill:audio_synthesize",
+    "skill:image_edit",
+    "skill:image_generate",
+    "skill:image_vision",
+}
+SAFE_DRY_RUN_MEDIA_CAPABILITY_TAGS = {
+    "audio_synthesize",
+    "image_generate",
+    "music_generate",
+    "video_generate",
+}
 GROUP_PRESERVE_TAGS = {
     "alias",
     "clarify_chain",
@@ -113,6 +128,19 @@ def split_tags(raw: str) -> tuple[str, ...]:
     return tuple(tags)
 
 
+def policy_tags_for(row: CaseRow) -> set[str]:
+    tags: set[str] = set()
+    for tag in row.tags:
+        lowered = tag.lower()
+        tags.add(lowered)
+        if lowered.startswith("covers:"):
+            tags.add(lowered[len("covers:") :])
+        if "=" in lowered:
+            key, value = lowered.split("=", 1)
+            tags.add(value if key in {"tool", "skill", "route", "capability"} else key)
+    return tags
+
+
 def explicit_group_from_tags(tags: tuple[str, ...]) -> str:
     for token in tags:
         if token.startswith("group:"):
@@ -167,14 +195,25 @@ def read_rows(path: Path) -> list[CaseRow]:
     return rows
 
 
-def excluded_by_tag(row: CaseRow, excluded_tags: set[str]) -> bool:
-    lower_tags = {tag.lower() for tag in row.tags}
-    return bool(lower_tags & excluded_tags)
+def safe_dry_run_media_row(row: CaseRow) -> bool:
+    lower_tags = policy_tags_for(row)
+    return (
+        "dry_run" in lower_tags
+        and "no_external_side_effect" in lower_tags
+        and bool(lower_tags & SAFE_DRY_RUN_MEDIA_CAPABILITY_TAGS)
+    )
 
 
 def excluded_tag_hits(row: CaseRow, excluded_tags: set[str]) -> list[str]:
-    lower_tags = {tag.lower() for tag in row.tags}
-    return sorted(lower_tags & excluded_tags)
+    lower_tags = policy_tags_for(row)
+    hits = lower_tags & excluded_tags
+    if safe_dry_run_media_row(row):
+        hits -= MEDIA_PRESENTATION_EXCLUDED_TAGS
+    return sorted(hits)
+
+
+def excluded_by_tag(row: CaseRow, excluded_tags: set[str]) -> bool:
+    return bool(excluded_tag_hits(row, excluded_tags))
 
 
 def coverage_categories(row: CaseRow) -> set[str]:
@@ -311,7 +350,7 @@ def write_subset(path: Path, rows: list[CaseRow], report: dict[str, object], inp
         f"# source={rel(input_path)}",
         f"# selected_rows={report['selected_rows']} coverage_categories={report['coverage_categories']} missing_categories={len(report['missing_categories'])}",
         "# Run:",
-        f"#   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file {rel(path)} --skip-smoke --prompt-reply-only --quality-guard --exclude-case-tag image --exclude-case-tag audio --exclude-case-tag voice --exclude-case-tag x --exclude-case-tag twitter --exclude-case-tag tweet --exclude-case-tag x_api --exclude-case-tag post_tweet --exclude-case-tag publish_tweet",
+        f"#   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file {rel(path)} --skip-smoke --prompt-reply-only --quality-guard --exclude-case-tag x --exclude-case-tag twitter --exclude-case-tag tweet --exclude-case-tag x_api --exclude-case-tag post_tweet --exclude-case-tag publish_tweet",
         "# Format: suite|name|tags|prompt|expect=optional substring",
         "",
     ]
@@ -341,6 +380,7 @@ def run_self_test() -> int:
                     "safe|block_tweet|client_like,post_tweet|dry run tweet",
                     "safe|block_skill_x|client_like,skill:x|dry run x skill",
                     "safe|block_media|client_like,image|dry run image",
+                    "safe|keep_media_dry_run|client_like,image,image_generate,dry_run,no_external_side_effect|dry run image",
                 ]
             )
             + "\n",
@@ -360,7 +400,11 @@ def run_self_test() -> int:
         rows = [row for row in rows_all if not excluded_by_tag(row, excluded_tags)]
         selected, report = build_subset(rows, target_cases=2)
         assert report["missing_categories"] == [], report
-        assert [row.name for row in selected] == ["keep_fs", "keep_chat"], selected
+        assert [row.name for row in selected] == [
+            "keep_fs",
+            "keep_chat",
+            "keep_media_dry_run",
+        ], selected
         unexpected = {
             row.name: excluded_tag_hits(row, excluded_tags)
             for row in selected
