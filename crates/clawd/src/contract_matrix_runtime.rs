@@ -1,14 +1,15 @@
 #[cfg(test)]
 use super::MatchedContract;
 use super::{
-    ActionPolicyDecision, ActionRef, ArgPolicyDecision, BUNDLED_CONTRACT_MATRIX, ContractMatrix,
-    EvidenceExpression, FinalAnswerShape, FinalAnswerShapeClass, IntentOutputContract,
-    ObservationExtractor, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
+    ActionPolicyDecision, ActionRef, ArgPolicyDecision, ContractMatrix, EvidenceExpression,
+    FinalAnswerShape, FinalAnswerShapeClass, IntentOutputContract, ObservationExtractor,
+    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
+    BUNDLED_CONTRACT_MATRIX,
 };
 #[cfg(test)]
 use claw_core::skill_registry::SkillKind;
 use claw_core::skill_registry::SkillsRegistry;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
@@ -119,7 +120,7 @@ fn compact_prompt_line_for_route_capability_ref(route: &RouteResult) -> Option<S
         return None;
     }
     let capability_refs = capability_refs.join(",");
-    let required_evidence = crate::task_contract::required_evidence_fields_for_route(route);
+    let required_evidence = crate::evidence_policy::required_evidence_fields_for_route(route);
     let required_evidence = if required_evidence.is_empty() {
         "none".to_string()
     } else {
@@ -528,7 +529,7 @@ fn capability_ref_action_trace(route: &RouteResult, action: &ActionRef) -> Value
     let action_key = action.as_key();
     let final_answer_shape_kind =
         final_answer_shape_for_route_capability_ref(route).unwrap_or(FinalAnswerShape::Free);
-    let required_evidence = crate::task_contract::required_evidence_fields_for_route(route);
+    let required_evidence = crate::evidence_policy::required_evidence_fields_for_route(route);
     let evidence_expression = EvidenceExpression::default().to_trace_json(&required_evidence);
     let observation_extractor = ObservationExtractor::from_source(&action_key);
     json!({
@@ -889,7 +890,7 @@ fn route_capability_ref_action_policy(
         contract_repair_source: "capability_ref_route_policy".to_string(),
         preferred_replacement_reason_code: action.replacement_reason_code.map(str::to_string),
         contract_match: "capability_ref".to_string(),
-        required_evidence: crate::task_contract::required_evidence_fields_for_route(route),
+        required_evidence: crate::evidence_policy::required_evidence_fields_for_route(route),
         preferred_actions,
         final_answer_shape_kind,
         final_answer_shape: final_answer_shape_kind.as_str().to_string(),
@@ -1055,7 +1056,7 @@ fn route_capability_ref_arg_policy(
         decision,
         action_key: action.effective.as_key(),
         contract_match: "capability_ref".to_string(),
-        required_evidence: crate::task_contract::required_evidence_fields_for_route(route),
+        required_evidence: crate::evidence_policy::required_evidence_fields_for_route(route),
         missing_target_args: missing,
         deferred_target_args: deferred,
         expected_target_args: expected,
@@ -1331,12 +1332,10 @@ pub(super) fn observation_extractors_for_sources(
 }
 
 fn observation_extractors_trace_json(extractors: &[ObservationExtractor]) -> Value {
-    json!(
-        extractors
-            .iter()
-            .map(ObservationExtractor::to_trace_json)
-            .collect::<Vec<_>>()
-    )
+    json!(extractors
+        .iter()
+        .map(ObservationExtractor::to_trace_json)
+        .collect::<Vec<_>>())
 }
 
 pub(super) fn observation_extractors_stable_key(extractors: &[ObservationExtractor]) -> String {
