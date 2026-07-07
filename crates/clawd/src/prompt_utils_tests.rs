@@ -24,6 +24,49 @@ fn validate_against_schema_drops_legacy_intent_decision_extra() {
             .expect("legacy decision field should be dropped during boundary canonicalization");
     assert!(validated.schema_normalized);
     assert!(validated.value.get("decision").is_none());
+    assert_eq!(
+        validated
+            .value
+            .pointer("/boundary_envelope/schema_version")
+            .and_then(|value| value.as_u64()),
+        Some(crate::intent_router::BOUNDARY_ENVELOPE_SCHEMA_VERSION as u64)
+    );
+    assert_eq!(
+        validated
+            .value
+            .pointer("/boundary_envelope/raw_chars")
+            .and_then(|value| value.as_u64()),
+        Some(0)
+    );
+}
+
+#[test]
+fn validate_against_schema_inserts_neutral_boundary_envelope_for_compat_output() {
+    let raw = r#"{
+        "resolved_user_intent":"check workspace",
+        "needs_clarify":false,
+        "reason":"r",
+        "confidence":0.9
+    }"#;
+    let validated =
+        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
+            .expect("compat normalizer output should get neutral boundary envelope");
+    assert!(validated.schema_normalized);
+    assert_eq!(
+        validated
+            .value
+            .pointer("/boundary_envelope/schema_version")
+            .and_then(|value| value.as_u64()),
+        Some(crate::intent_router::BOUNDARY_ENVELOPE_SCHEMA_VERSION as u64)
+    );
+    assert_eq!(
+        validated
+            .value
+            .pointer("/boundary_envelope/raw_chars")
+            .and_then(|value| value.as_u64()),
+        Some(0)
+    );
+    assert!(validated.value.get("output_contract").is_none());
 }
 
 #[test]
