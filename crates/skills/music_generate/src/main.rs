@@ -17,6 +17,7 @@ use async_projection::music_pending_async_job_contract;
 
 const DEFAULT_MODEL: &str = "music-2.6";
 const DEFAULT_FORMAT: &str = "mp3";
+const SKILL_NAME: &str = "music_generate";
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -184,7 +185,7 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    extra: None,
+                    extra: Some(error_extra("execution_failed")),
                     error_text: Some(err),
                 },
             },
@@ -192,7 +193,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
-                extra: None,
+                extra: Some(error_extra("invalid_input")),
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -201,6 +202,17 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn error_extra(error_kind: &str) -> Value {
+    json!({
+        "schema_version": 1,
+        "source_skill": SKILL_NAME,
+        "status": "error",
+        "error_kind": error_kind,
+        "message_key": format!("skill.{}.{}", SKILL_NAME, error_kind),
+        "retryable": false,
+    })
 }
 
 fn execute(

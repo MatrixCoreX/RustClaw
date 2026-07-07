@@ -1,6 +1,21 @@
 use super::*;
 
 #[test]
+fn error_extra_exposes_machine_contract() {
+    let extra = error_extra("execution_failed");
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(
+        extra["message_key"],
+        "skill.music_generate.execution_failed"
+    );
+    assert_eq!(extra["retryable"], false);
+}
+
+#[test]
 fn normalize_format_defaults_to_mp3() {
     assert_eq!(normalize_format("wav"), "wav");
     assert_eq!(normalize_format("unknown"), "mp3");

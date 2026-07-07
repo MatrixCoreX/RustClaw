@@ -1,6 +1,21 @@
 use super::*;
 
 #[test]
+fn error_extra_exposes_machine_contract() {
+    let extra = error_extra("execution_failed");
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "execution_failed");
+    assert_eq!(
+        extra["message_key"],
+        "skill.video_generate.execution_failed"
+    );
+    assert_eq!(extra["retryable"], false);
+}
+
+#[test]
 fn resolve_output_path_uses_workspace_relative_path() {
     let workspace = PathBuf::from("/tmp/rustclaw-video-test");
     let out = resolve_output_path(&workspace, "video/download", Some("tmp/out.mp4"))
