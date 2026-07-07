@@ -266,11 +266,18 @@ fn answer_verifier_output_contract_exposes_evidence_profile() {
     assert!(block.contains("\"compact_line\""));
     assert!(block.contains("\"evidence_profile\""));
     assert!(block.contains("\"workspace_user_docs_first\""));
+    assert!(output_contract.get("contract_marker").is_none());
     assert_eq!(
         output_contract
-            .get("contract_marker")
+            .get("final_answer_shape")
             .and_then(serde_json::Value::as_str),
-        Some("workspace_project_summary")
+        Some("project_summary_grounded_in_files")
+    );
+    assert_eq!(
+        output_contract
+            .get("final_answer_shape_class")
+            .and_then(serde_json::Value::as_str),
+        Some("grounded_summary")
     );
     assert!(output_contract.get("semantic_kind").is_none());
     assert!(!block.contains("\"observation_extractors\""));
