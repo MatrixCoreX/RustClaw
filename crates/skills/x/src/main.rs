@@ -6,7 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 #[derive(Debug, Deserialize)]
 struct XRequest {
@@ -19,6 +19,8 @@ struct XResponse {
     request_id: String,
     status: String,
     text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<Value>,
     error_text: Option<String>,
 }
 
@@ -27,6 +29,36 @@ struct XActionInput {
     text: String,
     dry_run: bool,
     send: bool,
+}
+
+#[derive(Debug)]
+struct XRunOutput {
+    text: String,
+    extra: Value,
+}
+
+#[derive(Debug)]
+struct XSkillError {
+    kind: &'static str,
+    message: String,
+}
+
+impl XSkillError {
+    fn new(kind: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+
+    fn extra(&self) -> Value {
+        json!({
+            "status": "error",
+            "action": "post",
+            "source_skill": "x",
+            "error_kind": self.kind,
+        })
+    }
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -71,30 +103,36 @@ fn main() -> anyhow::Result<()> {
         let resp = match parsed {
             Ok(req) => match parse_input(req.args) {
                 Ok(input) => match run_x_post(input) {
-                    Ok(text) => XResponse {
+                    Ok(output) => XResponse {
                         request_id: req.request_id,
                         status: "ok".to_string(),
-                        text,
+                        text: output.text,
+                        extra: Some(output.extra),
                         error_text: None,
                     },
                     Err(err) => XResponse {
                         request_id: req.request_id,
                         status: "error".to_string(),
                         text: String::new(),
-                        error_text: Some(err),
+                        extra: Some(err.extra()),
+                        error_text: Some(err.message),
                     },
                 },
                 Err(err) => XResponse {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    error_text: Some(err),
+                    extra: Some(err.extra()),
+                    error_text: Some(err.message),
                 },
             },
             Err(err) => XResponse {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: Some(
+                    XSkillError::new("invalid_input", format!("invalid input: {err}")).extra(),
+                ),
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -106,12 +144,12 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn parse_input(args: Value) -> Result<XActionInput, String> {
+fn parse_input(args: Value) -> Result<XActionInput, XSkillError> {
     match args {
         Value::String(s) => {
             let text = s.trim().to_string();
             if text.is_empty() {
-                return Err("x skill text is empty".to_string());
+                return Err(XSkillError::new("invalid_input", "x skill text is empty"));
             }
             Ok(XActionInput {
                 text,
@@ -123,11 +161,13 @@ fn parse_input(args: Value) -> Result<XActionInput, String> {
             let text = map
                 .get("text")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| "x skill args.text must be string".to_string())?
+                .ok_or_else(|| {
+                    XSkillError::new("invalid_input", "x skill args.text must be string")
+                })?
                 .trim()
                 .to_string();
             if text.is_empty() {
-                return Err("x skill text is empty".to_string());
+                return Err(XSkillError::new("invalid_input", "x skill text is empty"));
             }
 
             let send = map
@@ -140,9 +180,10 @@ fn parse_input(args: Value) -> Result<XActionInput, String> {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(!send);
             if send && dry_run {
-                return Err(
+                return Err(XSkillError::new(
+                    "invalid_input",
                     "x skill args are invalid: send=true conflicts with dry_run=true".to_string(),
-                );
+                ));
             }
             Ok(XActionInput {
                 text,
@@ -150,46 +191,85 @@ fn parse_input(args: Value) -> Result<XActionInput, String> {
                 send,
             })
         }
-        other => Err(format!(
-            "x skill args must be string or object, got {}",
-            other
+        other => Err(XSkillError::new(
+            "invalid_input",
+            format!("x skill args must be string or object, got {}", other),
         )),
     }
 }
 
-fn run_x_post(input: XActionInput) -> Result<String, String> {
+fn run_x_post(input: XActionInput) -> Result<XRunOutput, XSkillError> {
     let runtime_cfg = load_runtime_config()?;
 
     if input.text.chars().count() > runtime_cfg.max_text_chars {
-        return Err(format!(
-            "x skill text exceeds max chars ({}), got {}",
-            runtime_cfg.max_text_chars,
-            input.text.chars().count()
+        return Err(XSkillError::new(
+            "text_too_long",
+            format!(
+                "x skill text exceeds max chars ({}), got {}",
+                runtime_cfg.max_text_chars,
+                input.text.chars().count()
+            ),
         ));
     }
 
     if input.dry_run {
-        return Ok(format!("x skill dry_run=1, preview post: {}", input.text));
+        return Ok(XRunOutput {
+            text: format!("x skill dry_run=1, preview post: {}", input.text),
+            extra: x_post_extra(&input, &runtime_cfg, "dry_run", false),
+        });
     }
 
     if runtime_cfg.require_explicit_send && !input.send {
-        return Ok(format!(
-            "x skill safety: preview only (set send=true to publish). preview post: {}",
-            input.text
-        ));
+        return Ok(XRunOutput {
+            text: format!(
+                "x skill safety: preview only (set send=true to publish). preview post: {}",
+                input.text
+            ),
+            extra: x_post_extra(&input, &runtime_cfg, "explicit_send_required", false),
+        });
     }
 
     if !runtime_cfg.use_xurl {
-        return Err(
-            "x skill publish is disabled because use_xurl=false; non-xurl publish mode is not implemented"
-                .to_string(),
-        );
+        return Err(XSkillError::new(
+            "publish_disabled",
+            "x skill publish is disabled because use_xurl=false; non-xurl publish mode is not implemented",
+        ));
     }
 
-    run_x_post_via_xurl(&input.text, &runtime_cfg)
+    run_x_post_via_xurl(&input, &runtime_cfg)
 }
 
-fn run_x_post_via_xurl(text: &str, runtime_cfg: &XRuntimeConfig) -> Result<String, String> {
+fn x_post_extra(
+    input: &XActionInput,
+    runtime_cfg: &XRuntimeConfig,
+    outcome: &'static str,
+    published: bool,
+) -> Value {
+    json!({
+        "status": "ok",
+        "action": "post",
+        "source_skill": "x",
+        "outcome": outcome,
+        "dry_run": input.dry_run,
+        "send": input.send,
+        "published": published,
+        "text_char_count": input.text.chars().count(),
+        "max_text_chars": runtime_cfg.max_text_chars,
+        "use_xurl": runtime_cfg.use_xurl,
+        "require_explicit_send": runtime_cfg.require_explicit_send,
+        "xurl_configured": {
+            "bin": !runtime_cfg.xurl_bin.trim().is_empty(),
+            "app": non_empty(runtime_cfg.xurl_app.as_deref()).is_some(),
+            "auth": non_empty(runtime_cfg.xurl_auth.as_deref()).is_some(),
+            "username": non_empty(runtime_cfg.xurl_username.as_deref()).is_some(),
+        },
+    })
+}
+
+fn run_x_post_via_xurl(
+    input: &XActionInput,
+    runtime_cfg: &XRuntimeConfig,
+) -> Result<XRunOutput, XSkillError> {
     let mut cmd = Command::new(&runtime_cfg.xurl_bin);
     if let Some(app) = non_empty(runtime_cfg.xurl_app.as_deref()) {
         cmd.arg("--app").arg(app);
@@ -200,7 +280,7 @@ fn run_x_post_via_xurl(text: &str, runtime_cfg: &XRuntimeConfig) -> Result<Strin
     if let Some(username) = non_empty(runtime_cfg.xurl_username.as_deref()) {
         cmd.arg("--username").arg(username);
     }
-    let body = serde_json::json!({ "text": text }).to_string();
+    let body = json!({ "text": &input.text }).to_string();
     cmd.arg("-X")
         .arg("POST")
         .arg("/2/tweets")
@@ -210,9 +290,12 @@ fn run_x_post_via_xurl(text: &str, runtime_cfg: &XRuntimeConfig) -> Result<Strin
         .arg(body);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|err| format!("spawn xurl failed (bin={}): {}", runtime_cfg.xurl_bin, err))?;
+    let mut child = cmd.spawn().map_err(|err| {
+        XSkillError::new(
+            "xurl_spawn_failed",
+            format!("spawn xurl failed (bin={}): {}", runtime_cfg.xurl_bin, err),
+        )
+    })?;
     let output = wait_with_timeout(
         &mut child,
         Duration::from_secs(runtime_cfg.xurl_timeout_seconds),
@@ -236,27 +319,39 @@ fn run_x_post_via_xurl(text: &str, runtime_cfg: &XRuntimeConfig) -> Result<Strin
         } else {
             detail
         };
-        return Err(format!(
-            "xurl post failed. ensure `xurl auth oauth2` is completed with tweet.write scope; detail={}",
-            msg
+        return Err(XSkillError::new(
+            "xurl_failed",
+            format!(
+                "xurl post failed. ensure `xurl auth oauth2` is completed with tweet.write scope; detail={}",
+                msg
+            ),
         ));
     }
 
     if stdout.is_empty() {
-        return Err("xurl returned success exit code but empty response body".to_string());
+        return Err(XSkillError::new(
+            "xurl_empty_response",
+            "xurl returned success exit code but empty response body",
+        ));
     }
 
     let parsed: Value = serde_json::from_str(&stdout).map_err(|err| {
-        format!(
-            "xurl returned non-JSON success response: {} (parse error: {})",
-            truncate_text(&stdout, 300),
-            err
+        XSkillError::new(
+            "xurl_non_json_response",
+            format!(
+                "xurl returned non-JSON success response: {} (parse error: {})",
+                truncate_text(&stdout, 300),
+                err
+            ),
         )
     })?;
     if let Some(errs) = parsed.get("errors") {
-        return Err(format!(
-            "xurl returned API errors: {}",
-            truncate_text(&errs.to_string(), 300)
+        return Err(XSkillError::new(
+            "xurl_api_errors",
+            format!(
+                "xurl returned API errors: {}",
+                truncate_text(&errs.to_string(), 300)
+            ),
         ));
     }
     let id = parsed
@@ -265,26 +360,37 @@ fn run_x_post_via_xurl(text: &str, runtime_cfg: &XRuntimeConfig) -> Result<Strin
         .and_then(|v| v.as_str())
         .unwrap_or_default();
     if id.is_empty() {
-        return Err(format!(
-            "xurl response missing data.id: {}",
-            truncate_text(&stdout, 300)
+        return Err(XSkillError::new(
+            "xurl_missing_id",
+            format!(
+                "xurl response missing data.id: {}",
+                truncate_text(&stdout, 300)
+            ),
         ));
     }
     let posted_text = parsed
         .get("data")
         .and_then(|d| d.get("text"))
         .and_then(|v| v.as_str())
-        .unwrap_or(text);
-    Ok(format!(
-        "x post success via xurl: id={} text={}",
-        id, posted_text
-    ))
+        .unwrap_or(&input.text);
+    let mut extra = x_post_extra(input, runtime_cfg, "published", true);
+    if let Some(obj) = extra.as_object_mut() {
+        obj.insert("post_id".to_string(), json!(id));
+        obj.insert(
+            "posted_text_char_count".to_string(),
+            json!(posted_text.chars().count()),
+        );
+    }
+    Ok(XRunOutput {
+        text: format!("x post success via xurl: id={} text={}", id, posted_text),
+        extra,
+    })
 }
 
 fn wait_with_timeout(
     child: &mut std::process::Child,
     timeout: Duration,
-) -> Result<ChildOutput, String> {
+) -> Result<ChildOutput, XSkillError> {
     let start = Instant::now();
     loop {
         match child.try_wait() {
@@ -295,32 +401,47 @@ fn wait_with_timeout(
                 if start.elapsed() >= timeout {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!(
-                        "xurl timed out after {} seconds",
-                        timeout.as_secs().max(1)
+                    return Err(XSkillError::new(
+                        "xurl_timeout",
+                        format!("xurl timed out after {} seconds", timeout.as_secs().max(1)),
                     ));
                 }
                 thread::sleep(Duration::from_millis(50));
             }
-            Err(err) => return Err(format!("wait xurl process failed: {err}")),
+            Err(err) => {
+                return Err(XSkillError::new(
+                    "xurl_wait_failed",
+                    format!("wait xurl process failed: {err}"),
+                ));
+            }
         }
     }
 }
 
-fn collect_child_output(child: &mut std::process::Child) -> Result<ChildOutput, String> {
-    let status = child
-        .wait()
-        .map_err(|err| format!("wait xurl process failed: {err}"))?;
+fn collect_child_output(child: &mut std::process::Child) -> Result<ChildOutput, XSkillError> {
+    let status = child.wait().map_err(|err| {
+        XSkillError::new(
+            "xurl_wait_failed",
+            format!("wait xurl process failed: {err}"),
+        )
+    })?;
     let mut stdout = Vec::new();
     if let Some(mut out) = child.stdout.take() {
-        out.read_to_end(&mut stdout)
-            .map_err(|err| format!("read xurl stdout failed: {err}"))?;
+        out.read_to_end(&mut stdout).map_err(|err| {
+            XSkillError::new(
+                "xurl_stdout_read_failed",
+                format!("read xurl stdout failed: {err}"),
+            )
+        })?;
     }
     let mut stderr = Vec::new();
     if let Some(mut err_out) = child.stderr.take() {
-        err_out
-            .read_to_end(&mut stderr)
-            .map_err(|err| format!("read xurl stderr failed: {err}"))?;
+        err_out.read_to_end(&mut stderr).map_err(|err| {
+            XSkillError::new(
+                "xurl_stderr_read_failed",
+                format!("read xurl stderr failed: {err}"),
+            )
+        })?;
     }
     Ok(ChildOutput {
         status,
@@ -337,7 +458,7 @@ fn truncate_text(text: &str, max_chars: usize) -> String {
     format!("{trimmed}...")
 }
 
-fn load_runtime_config() -> Result<XRuntimeConfig, String> {
+fn load_runtime_config() -> Result<XRuntimeConfig, XSkillError> {
     let file_cfg = load_file_config()?;
     let use_xurl = env_bool("X_USE_XURL").or(file_cfg.use_xurl).unwrap_or(true);
     let xurl_bin = std::env::var("XURL_BIN")
@@ -377,15 +498,23 @@ fn load_runtime_config() -> Result<XRuntimeConfig, String> {
     })
 }
 
-fn load_file_config() -> Result<XFileConfig, String> {
+fn load_file_config() -> Result<XFileConfig, XSkillError> {
     let path = std::env::var("X_CONFIG_PATH").unwrap_or_else(|_| "configs/x.toml".to_string());
     if !Path::new(&path).exists() {
         return Ok(XFileConfig::default());
     }
-    let content = std::fs::read_to_string(&path)
-        .map_err(|err| format!("read x config file failed ({path}): {err}"))?;
-    toml::from_str::<XFileConfig>(&content)
-        .map_err(|err| format!("parse x config file failed ({path}): {err}"))
+    let content = std::fs::read_to_string(&path).map_err(|err| {
+        XSkillError::new(
+            "config_read_failed",
+            format!("read x config file failed ({path}): {err}"),
+        )
+    })?;
+    toml::from_str::<XFileConfig>(&content).map_err(|err| {
+        XSkillError::new(
+            "config_parse_failed",
+            format!("parse x config file failed ({path}): {err}"),
+        )
+    })
 }
 
 fn env_bool(key: &str) -> Option<bool> {
@@ -408,3 +537,7 @@ fn non_empty(v: Option<&str>) -> Option<&str> {
         Some(s)
     }
 }
+
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;
