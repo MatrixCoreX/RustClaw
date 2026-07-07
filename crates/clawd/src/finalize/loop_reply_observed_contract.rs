@@ -638,10 +638,9 @@ pub(super) fn replace_delivery_with_direct_structured_observed_answer(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    if !route.output_contract_marker_is_any(&[
-        crate::OutputSemanticKind::ServiceStatus,
-        crate::OutputSemanticKind::RawCommandOutput,
-    ]) {
+    if !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+        && !crate::finalize::route_matches_service_status_output_contract(route)
+    {
         return false;
     }
     let projected = if route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
@@ -1124,7 +1123,7 @@ fn direct_structured_observed_answer_impl(
         && route.effective_output_contract().requires_content_evidence
         && latest_plan_requested_synthesis(loop_state)
         && !route.output_contract_marker_is(crate::OutputSemanticKind::GitRepositoryState)
-        && !route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
+        && !crate::finalize::route_matches_service_status_output_contract(route)
     {
         return None;
     }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::finalize::loop_reply::replace_delivery_with_direct_structured_observed_answer;
 
 #[tokio::test]
 async fn finalize_loop_reply_preserves_health_check_summary_synthesis() {
@@ -720,6 +721,94 @@ async fn finalize_loop_reply_uses_wrapped_system_basic_info_for_service_status()
     assert!(reply.text.contains("linux"));
     assert!(reply.text.contains("pid=2268074"));
     assert!(reply.text.contains("/home/guagua/rustclaw"));
+}
+
+#[test]
+fn direct_structured_service_status_uses_capability_shape_without_semantic_kind() {
+    let mut route = free_route_result();
+    route.route_reason = "capability_ref=service.status".to_string();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_hint.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "service_control",
+        r#"{"extra":{"service_name":"clawd","post_state":"running","status":"active","verified":true,"manager_type":"systemd"}}"#,
+    ));
+    push_raw_plan_text(
+        &mut loop_state,
+        r#"{"steps":[{"action":"synthesize_answer"},{"action":"respond"}]}"#,
+    );
+
+    let (answer, summary) =
+        direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
+            .expect("status_with_source capability shape should allow service status projection");
+
+    assert_eq!(
+        answer,
+        "target=clawd service_name=clawd post_state=running status=active verified=true manager_type=systemd source=service_control"
+    );
+    assert!(summary.contract_ok);
+}
+
+#[test]
+fn replace_delivery_with_structured_service_status_uses_capability_shape() {
+    let state = test_state();
+    let task = claimed_task("task-service-status-capability-shape-replace");
+    let mut route = free_route_result();
+    route.route_reason = "capability_ref=service.status".to_string();
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_hint.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "service_control",
+        r#"{"extra":{"service_name":"clawd","post_state":"running","status":"active","verified":true,"manager_type":"systemd"}}"#,
+    ));
+    loop_state
+        .delivery_messages
+        .push("service.status".to_string());
+    loop_state.last_user_visible_respond = Some("service.status".to_string());
+    let mut finalizer_summary = None;
+    let (projected, _summary) =
+        direct_structured_observed_answer(Some(&state), &loop_state, Some(&agent_run_context))
+            .expect("status_with_source capability shape should project before replacement");
+    assert_eq!(
+        projected,
+        "target=clawd service_name=clawd post_state=running status=active verified=true manager_type=systemd source=service_control"
+    );
+
+    assert!(replace_delivery_with_direct_structured_observed_answer(
+        &state,
+        &task,
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+    ));
+
+    assert_eq!(
+        loop_state.delivery_messages,
+        vec![
+            "target=clawd service_name=clawd post_state=running status=active verified=true manager_type=systemd source=service_control"
+                .to_string()
+        ]
+    );
+    assert!(finalizer_summary.is_some());
 }
 
 #[test]
