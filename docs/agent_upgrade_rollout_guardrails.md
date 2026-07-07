@@ -63,8 +63,10 @@ Required fields for rollout comparison:
 - `route_result.initial_hint_ref`
 - `route_result.legacy_first_layer_decision` only as legacy compatibility attribution
 - `route_result.route_reason`
-- `output_contract.semantic_kind`
+- `final_answer_shape`
+- `final_answer_shape_class`
 - `output_contract.response_shape`
+- `output_contract.semantic_kind` only when reviewing normalizer/schema compatibility trace, not as a current capability selector
 - `answer_verifier_summary.pass`
 - `answer_verifier_summary.missing_evidence_fields`
 - `final_failure_attribution`
