@@ -493,6 +493,49 @@ fn created_archive_path_capability_requires_observed_projection_without_semantic
 }
 
 #[test]
+fn key_list_capability_shape_builds_observed_list_without_semantic_kind() {
+    let state = test_state();
+    let task = claimed_task("task-config-key-list-capability-shape");
+    let mut route = free_route_result();
+    route.route_reason = "capability_ref=config.list_keys".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_basic",
+        r#"{"action":"list_keys","keys":["model","skills","runtime"]}"#,
+    ));
+    let mut delivery = vec!["config has several sections".to_string()];
+    let mut finalizer_summary = None;
+
+    assert!(
+        super::super::replace_delivery_with_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "list config keys",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        )
+    );
+
+    assert_eq!(delivery, vec!["model\nruntime\nskills"]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("model\nruntime\nskills")
+    );
+    assert!(finalizer_summary.is_some());
+}
+
+#[test]
 fn matrix_archive_member_list_filters_file_entries_from_structured_kinds() {
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;
