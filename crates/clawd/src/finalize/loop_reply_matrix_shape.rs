@@ -68,10 +68,15 @@ pub(super) fn route_requires_observed_output_projection(route: &crate::RouteResu
     if crate::finalize::route_matches_service_status_output_contract(route) {
         return true;
     }
-    if route_requests_name_list(route) {
-        return true;
-    }
-    if route_requests_filesystem_path_list(route) {
+    if matches!(
+        evidence_policy_final_answer_shape_class(route),
+        Some(
+            crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact
+                | crate::evidence_policy::FinalAnswerShapeClass::SinglePath
+                | crate::evidence_policy::FinalAnswerShapeClass::StrictList
+                | crate::evidence_policy::FinalAnswerShapeClass::Table
+        )
+    ) {
         return true;
     }
     matches!(
