@@ -1,5 +1,25 @@
 use super::*;
 
+#[test]
+fn error_extra_merges_machine_contract_and_details() {
+    let extra = error_extra_with_details(
+        "sqlite_open_failed",
+        Some(json!({
+            "path": "/tmp/missing.sqlite",
+            "source": "sqlite"
+        })),
+    );
+
+    assert_eq!(extra["schema_version"], 1);
+    assert_eq!(extra["source_skill"], SKILL_NAME);
+    assert_eq!(extra["status"], "error");
+    assert_eq!(extra["error_kind"], "sqlite_open_failed");
+    assert_eq!(extra["message_key"], "skill.db_basic.sqlite_open_failed");
+    assert_eq!(extra["retryable"], false);
+    assert_eq!(extra["path"], "/tmp/missing.sqlite");
+    assert_eq!(extra["source"], "sqlite");
+}
+
 fn temp_db_path(name: &str) -> String {
     let path = std::env::temp_dir().join(format!(
         "rustclaw-db-basic-{name}-{}.sqlite",
