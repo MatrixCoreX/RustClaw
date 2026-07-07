@@ -97,9 +97,7 @@ pub(super) fn directory_entry_groups_prefers_observed_groups(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> bool {
-    crate::evidence_policy::final_answer_shape_for_route(route)
-        == Some(crate::evidence_policy::FinalAnswerShape::GroupedNameList)
-        && route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryEntryGroups)
+    crate::finalize::route_prefers_grouped_name_list_output(route)
         && loop_has_structured_listing_observation(loop_state)
         && !loop_state
             .executed_step_results

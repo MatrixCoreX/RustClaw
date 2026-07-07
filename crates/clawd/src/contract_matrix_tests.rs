@@ -721,6 +721,22 @@ fn filesystem_count_entries_capability_ref_supplies_scalar_shape_without_semanti
 }
 
 #[test]
+fn filesystem_list_entries_capability_ref_supplies_grouped_name_shape_without_semantic_kind() {
+    for capability_ref in [
+        "capability_ref=filesystem.list_entries",
+        "capability_ref=filesystem.list_dir",
+    ] {
+        let route = route_with_machine_capability_ref(capability_ref);
+
+        assert_eq!(
+            final_answer_shape_for_route(&route),
+            Some(FinalAnswerShape::GroupedNameList),
+            "{capability_ref}"
+        );
+    }
+}
+
+#[test]
 fn system_runtime_status_capability_ref_supplies_scalar_shape_only_for_scalar_contract() {
     let mut route = route_with_machine_capability_ref("capability_ref=system.runtime_status");
     route.output_contract.response_shape = OutputResponseShape::Scalar;
