@@ -923,6 +923,7 @@ pub(crate) async fn run_intent_normalizer(
         );
         let route_trace_label =
             route_trace_label_from_decision(derived_route_trace_decision, execution_finalize_style);
+        let boundary_envelope_from_model = out.boundary_envelope.as_ref().is_some();
         if route_trace_label != synced_route_label {
             info!(
                 "{} intent_normalizer task_id={} route_trace_label_override={} -> {} reason=content_evidence_requires_execution locator_kind={:?} shape={:?}",
@@ -935,7 +936,7 @@ pub(crate) async fn run_intent_normalizer(
             );
         }
         info!(
-            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} route_trace_decision={:?} route_trace_label={} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} contract_repair_source={} contract_repair_detail={} contract_repair_class={} turn_analysis={}",
+            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} route_trace_decision={:?} route_trace_label={} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} boundary_envelope_from_model={} contract_repair_source={} contract_repair_detail={} contract_repair_class={} turn_analysis={}",
             crate::highlight_tag("routing"),
             task.task_id,
             crate::truncate_for_log(req),
@@ -960,6 +961,7 @@ pub(crate) async fn run_intent_normalizer(
                     spec.target_scope.as_str()
                 ))
                 .unwrap_or_else(|| "none".to_string()),
+            boundary_envelope_from_model,
             contract_repair_report.source_csv(),
             contract_repair_report.detail_csv(),
             contract_repair_report.class_csv(),

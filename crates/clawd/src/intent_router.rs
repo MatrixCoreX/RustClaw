@@ -56,7 +56,7 @@ pub(crate) use turn_analysis::{TargetTaskPolicy, TurnAnalysis, TurnType};
 mod output_types;
 pub(crate) use output_types::{
     BoundaryEnvelope, ClarifyQuestionPolicy, ContextResolution, ExecutionRecipePlanHint,
-    IntentNormalizerOutput,
+    IntentNormalizerOutput, BOUNDARY_ENVELOPE_SCHEMA_VERSION,
 };
 
 #[path = "intent_router_clarify.rs"]
@@ -375,6 +375,8 @@ struct RouteDecision {
 
 #[derive(Debug, Deserialize)]
 struct IntentNormalizerOut {
+    #[serde(default)]
+    boundary_envelope: Option<Value>,
     #[serde(default)]
     resolved_user_intent: String,
     #[serde(default)]

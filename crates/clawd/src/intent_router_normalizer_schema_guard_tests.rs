@@ -89,6 +89,75 @@ fn normalizer_schema_normalization_drops_unknown_top_level_fields() {
 }
 
 #[test]
+fn normalizer_schema_normalization_generates_boundary_envelope_without_raw_text() {
+    let request = "请读取 configs/config.toml，并只告诉我路径是否存在";
+    let raw = r#"{
+          "resolved_user_intent":"读取 configs/config.toml 并报告路径是否存在",
+          "resume_behavior":"resume_execute",
+          "schedule_kind":"none",
+          "schedule_intent":null,
+          "wants_file_delivery":false,
+          "should_refresh_long_term_memory":false,
+          "agent_display_name_hint":"",
+          "needs_clarify":false,
+          "clarify_question":"",
+          "reason":"boundary_only",
+          "confidence":0.8,
+          "output_contract":{"response_shape":"strict","contract_marker":"none","locator_kind":"path","locator_hint":"configs/config.toml"},
+          "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"},
+          "turn_type":"task_request",
+          "target_task_policy":"standalone",
+          "should_interrupt_active_run":false,
+          "state_patch":null,
+          "attachment_processing_required":false
+        }"#;
+
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, request);
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+    let envelope = value
+        .get("boundary_envelope")
+        .and_then(|value| value.as_object())
+        .expect("boundary envelope object");
+
+    assert_eq!(
+        envelope
+            .get("schema_version")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        envelope.get("raw_chars").and_then(|value| value.as_u64()),
+        Some(request.chars().count() as u64)
+    );
+    assert_eq!(
+        envelope
+            .get("explicit_locators")
+            .and_then(|value| value.as_array())
+            .and_then(|values| values.first())
+            .and_then(|value| value.as_str()),
+        Some("configs/config.toml")
+    );
+    assert_eq!(
+        envelope
+            .get("active_task_reference")
+            .and_then(|value| value.as_str()),
+        Some("standalone")
+    );
+    assert_eq!(
+        envelope
+            .get("session_binding")
+            .and_then(|value| value.as_str()),
+        Some("resume_execute")
+    );
+    assert!(!serde_json::to_string(envelope).unwrap().contains(request));
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
+}
+
+#[test]
 fn normalizer_schema_normalization_does_not_infer_malformed_recipe_array() {
     let raw = r#"{
           "resolved_user_intent":"用户请求读取 README 文件的开头内容，并用通俗易懂的非技术语言进行一句话总结",
