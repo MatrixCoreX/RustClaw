@@ -409,6 +409,7 @@ pub(super) fn matrix_strict_list_observed_answer(
 
 fn route_supports_matrix_strict_list_observed_answer(route: &crate::RouteResult) -> bool {
     route_requests_archive_list(route)
+        || route_requests_name_list(route)
         || route_requests_filesystem_path_list(route)
         || matches!(
             route.effective_output_contract_semantic_kind(),
@@ -419,6 +420,11 @@ fn route_supports_matrix_strict_list_observed_answer(route: &crate::RouteResult)
                 | crate::OutputSemanticKind::StructuredKeys
                 | crate::OutputSemanticKind::SqliteTableNamesOnly
         )
+}
+
+fn route_requests_name_list(route: &crate::RouteResult) -> bool {
+    crate::evidence_policy::final_answer_shape_for_route(route)
+        == Some(crate::evidence_policy::FinalAnswerShape::NameList)
 }
 
 fn route_requests_filesystem_path_list(route: &crate::RouteResult) -> bool {
@@ -864,8 +870,12 @@ fn collect_matrix_strict_list_items(
         collect_matrix_archive_member_items(route, value, items);
         return;
     }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryNames) {
+    if route_requests_directory_name_list(route) {
         collect_matrix_directory_name_items(route, value, items);
+        return;
+    }
+    if route_requests_file_name_list(route) {
+        collect_matrix_file_name_items(route, value, items);
         return;
     }
     push_matrix_string_arrays(
@@ -897,6 +907,89 @@ fn collect_matrix_strict_list_items(
             for row in rows {
                 collect_matrix_list_object_fields(route, row, items);
             }
+        }
+    }
+}
+
+fn route_requests_file_name_list(route: &crate::RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::FileNames)
+        || route
+            .output_contract
+            .self_extension
+            .list_selector
+            .target_kind
+            == crate::OutputScalarCountTargetKind::File
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["filesystem"],
+            &["list_file_names"],
+        )
+}
+
+fn route_requests_directory_name_list(route: &crate::RouteResult) -> bool {
+    route.output_contract_marker_is(crate::OutputSemanticKind::DirectoryNames)
+        || route
+            .output_contract
+            .self_extension
+            .list_selector
+            .target_kind
+            == crate::OutputScalarCountTargetKind::Dir
+        || crate::machine_capability_ref::route_has_capability_action_name(
+            route,
+            &["filesystem"],
+            &["list_directory_names"],
+        )
+}
+
+fn collect_matrix_file_name_items(
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+    items: &mut BTreeMap<String, String>,
+) {
+    if let Some(names_by_kind) = value
+        .get("names_by_kind")
+        .and_then(serde_json::Value::as_object)
+    {
+        push_matrix_array_items(
+            route,
+            names_by_kind
+                .get("files")
+                .unwrap_or(&serde_json::Value::Null),
+            items,
+        );
+    }
+    push_matrix_string_arrays(route, value, items, &["files"]);
+    push_matrix_string_arrays(route, value, items, &["names", "results", "paths"]);
+    for key in ["entries", "items", "rows"] {
+        let Some(rows) = value.get(key).and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        for row in rows {
+            collect_matrix_file_name_object(route, row, items);
+        }
+    }
+}
+
+fn collect_matrix_file_name_object(
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+    items: &mut BTreeMap<String, String>,
+) {
+    let Some(map) = value.as_object() else {
+        return;
+    };
+    let kind = map
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if !matches!(kind, "file" | "") {
+        return;
+    }
+    for key in ["name", "path", "resolved_path"] {
+        if let Some(text) = map.get(key).and_then(serde_json::Value::as_str) {
+            push_matrix_list_item(route, text, items);
+            return;
         }
     }
 }
@@ -1131,10 +1224,12 @@ fn matrix_list_display_item(route: &crate::RouteResult, raw: &str) -> Option<Str
     if item.is_empty() {
         return None;
     }
-    if matches!(
-        route.effective_output_contract_semantic_kind(),
-        crate::OutputSemanticKind::FileNames | crate::OutputSemanticKind::DirectoryNames
-    ) {
+    if route_requests_name_list(route)
+        || matches!(
+            route.effective_output_contract_semantic_kind(),
+            crate::OutputSemanticKind::FileNames | crate::OutputSemanticKind::DirectoryNames
+        )
+    {
         return std::path::Path::new(item)
             .file_name()
             .and_then(|value| value.to_str())
