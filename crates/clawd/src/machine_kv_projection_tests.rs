@@ -347,6 +347,45 @@ fn machine_summary_projects_read_range_path_and_total_lines_markers() {
 }
 
 #[test]
+fn machine_summary_projects_grep_match_line_markers() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"action":"grep_text","match_count":1,"matches":[{"path":"docs/service_notes.md","line":5,"text":"status=ready"}]}"#,
+        &mut observed,
+    );
+    observed.sort();
+    observed.dedup();
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Return path, line, line_number.",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some("path=docs/service_notes.md line=5 line_number=5")
+    );
+}
+
+#[test]
+fn machine_summary_requires_exact_line_pair_evidence() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"action":"grep_text","match_count":1,"matches":[{"path":"docs/service5_notes.md","line":7,"text":"status=ready"}]}"#,
+        &mut observed,
+    );
+    observed.sort();
+    observed.dedup();
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Return exact machine pair line=5.",
+        &observed,
+    );
+
+    assert!(summary.is_none());
+}
+
+#[test]
 fn machine_summary_requires_value_projection_for_single_field_marker() {
     let mut observed = Vec::new();
     collect_machine_text_fragments_from_output(
