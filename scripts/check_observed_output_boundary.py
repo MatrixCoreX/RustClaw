@@ -18,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OBSERVED_ROOT = ROOT / "crates/clawd/src/agent_engine"
+SRC_ROOT = ROOT / "crates/clawd/src"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -91,6 +92,13 @@ RULES: tuple[BoundaryRule, ...] = (
     ),
 )
 
+OLD_DIRECT_ANSWER_API_PATTERN = re.compile(
+    r"\b("
+    r"extract_direct_answer_from_generic_output(?:_i18n)?"
+    r"|answer_is_direct_observation_passthrough"
+    r")\b"
+)
+
 
 def rel(path: Path) -> str:
     return path.resolve().relative_to(ROOT).as_posix()
@@ -103,12 +111,42 @@ def is_test_path(path: Path) -> bool:
     )
 
 
+def has_cfg_test_near(lines: list[str], index: int) -> bool:
+    return any(
+        lines[candidate].strip() == "#[cfg(test)]"
+        for candidate in range(max(0, index - 6), index + 1)
+    )
+
+
 def observed_output_files() -> list[Path]:
     return sorted(
         path
         for path in OBSERVED_ROOT.glob("observed_output*.rs")
         if path.is_file() and not is_test_path(path)
     )
+
+
+def rust_source_files() -> list[Path]:
+    return sorted(
+        path for path in SRC_ROOT.rglob("*.rs") if path.is_file() and not is_test_path(path)
+    )
+
+
+def scan_old_direct_answer_api_names() -> list[str]:
+    findings: list[str] = []
+    for path in rust_source_files():
+        rel_path = rel(path)
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for index, line in enumerate(lines):
+            if not OLD_DIRECT_ANSWER_API_PATTERN.search(line):
+                continue
+            stripped = line.strip()
+            if stripped.startswith("//") or has_cfg_test_near(lines, index):
+                continue
+            findings.append(
+                f"{rel_path}:{index + 1}: old_direct_answer_api_outside_test_compat: {stripped}"
+            )
+    return findings
 
 
 def scan_repo() -> list[str]:
@@ -125,11 +163,13 @@ def scan_repo() -> list[str]:
                 findings.append(
                     f"{rel_path}:{line_no}: {rule.name}_outside_allowlist: {line.strip()}"
                 )
+    findings.extend(scan_old_direct_answer_api_names())
     return findings
 
 
 def print_summary() -> None:
     print(f"observed_output_files={len(observed_output_files())}")
+    print(f"rust_source_files={len(rust_source_files())}")
     for rule in RULES:
         print(f"{rule.name} allowed_files={len(rule.allowed_files)}")
 
@@ -141,6 +181,8 @@ def run_self_test() -> int:
     assert llm_rule.pattern.search("run_with_fallback_with_prompt_source(")
     assert blocked not in llm_rule.allowed_files
     assert allowed in llm_rule.allowed_files
+    assert OLD_DIRECT_ANSWER_API_PATTERN.search("extract_direct_answer_from_generic_output(")
+    assert OLD_DIRECT_ANSWER_API_PATTERN.search("answer_is_direct_observation_passthrough(")
     print("SELF_TEST_OK")
     return 0
 
@@ -162,7 +204,7 @@ def main(argv: list[str]) -> int:
         return 1
     print(
         "OBSERVED_OUTPUT_BOUNDARY_CHECK ok "
-        f"files={len(observed_output_files())} rules={len(RULES)}"
+        f"files={len(observed_output_files())} rules={len(RULES) + 1}"
     )
     return 0
 
