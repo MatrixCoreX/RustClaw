@@ -6,7 +6,7 @@ use crate::{
 
 fn route_result() -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "test".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -42,7 +42,7 @@ fn fuzzy_candidates_record_boundary_clarify_for_locator_requests() {
     );
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
     assert!(result.execution_route_result.needs_clarify);
     assert_eq!(result.fuzzy_locator_suggestions.len(), 2);
@@ -62,7 +62,7 @@ fn missing_locator_records_boundary_clarify_candidate() {
     let result = apply_post_route_policy(route_result(), LocatorResolution::None);
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
     assert!(result.execution_route_result.needs_clarify);
     assert!(result.missing_locator_for_path_scoped_content);
@@ -95,7 +95,7 @@ fn generated_file_delivery_without_locator_hint_can_execute() {
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert!(!result.missing_locator_for_path_scoped_content);
@@ -121,7 +121,7 @@ fn generated_file_delivery_misclassified_as_path_without_hint_can_execute() {
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert!(!result.missing_locator_for_path_scoped_content);
@@ -147,7 +147,7 @@ fn existing_file_delivery_with_locator_hint_executes_for_runtime_not_found() {
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert!(!result.missing_locator_for_path_scoped_content);
@@ -237,7 +237,7 @@ fn generated_file_delivery_current_workspace_without_hint_can_execute() {
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert!(!result.missing_locator_for_path_scoped_content);
@@ -282,7 +282,7 @@ fn sqlite_schema_version_current_workspace_directory_auto_locator_requires_clari
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
     assert!(result.execution_route_result.needs_clarify);
     assert!(result.missing_locator_for_path_scoped_content);
@@ -298,7 +298,7 @@ fn sqlite_schema_version_current_workspace_directory_auto_locator_requires_clari
 #[test]
 fn current_workspace_content_excerpt_without_direct_locator_requires_clarify() {
     let mut route = route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.route_reason = "content_excerpt_summary".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
@@ -309,7 +309,7 @@ fn current_workspace_content_excerpt_without_direct_locator_requires_clarify() {
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_with_chat_finalizer()
+        crate::AskMode::act_with_chat_finalizer()
     );
     assert!(result.execution_route_result.needs_clarify);
     assert!(result.missing_locator_for_path_scoped_content);
@@ -326,7 +326,7 @@ fn current_workspace_content_excerpt_without_direct_locator_requires_clarify() {
 #[test]
 fn service_status_locator_hint_does_not_force_path_clarify() {
     let mut route = route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.route_reason = "service_status".to_string();
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
@@ -335,7 +335,7 @@ fn service_status_locator_hint_does_not_force_path_clarify() {
     let result = apply_post_route_policy(route, LocatorResolution::None);
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_with_chat_finalizer()
+        crate::AskMode::act_with_chat_finalizer()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert!(!result.missing_locator_for_path_scoped_content);
@@ -424,7 +424,7 @@ fn filename_scope_with_direct_auto_locator_rescues_clarify() {
     );
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/README.md"));
@@ -451,7 +451,7 @@ fn background_locator_clarify_is_satisfied_by_direct_auto_locator() {
     );
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/README.md"));
@@ -509,7 +509,7 @@ fn mutation_missing_source_is_not_satisfied_by_output_auto_locator() {
 #[test]
 fn non_boundary_clarify_defers_to_agent_loop() {
     let mut route = route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.route_reason = "background_locator_requires_clarify".to_string();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = OutputLocatorKind::None;
@@ -519,7 +519,7 @@ fn non_boundary_clarify_defers_to_agent_loop() {
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_with_chat_finalizer()
+        crate::AskMode::act_with_chat_finalizer()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(result.gate_record.reason_code, "post_route_no_change");
@@ -542,7 +542,7 @@ fn locatorless_capability_evidence_clarify_defers_to_agent_loop() {
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_with_chat_finalizer()
+        crate::AskMode::act_with_chat_finalizer()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert!(!result.missing_locator_for_path_scoped_content);
@@ -582,7 +582,7 @@ fn filesystem_mutation_with_matching_locator_hint_executes_despite_deictic_marke
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_with_chat_finalizer()
+        crate::AskMode::act_with_chat_finalizer()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(
@@ -648,7 +648,7 @@ fn document_heading_missing_read_target_with_matching_locator_hint_executes() {
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(
@@ -707,7 +707,7 @@ fn deictic_bare_locator_marker_no_longer_blocks_direct_auto_locator() {
 
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_with_chat_finalizer()
+        crate::AskMode::act_with_chat_finalizer()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/document"));
@@ -737,7 +737,7 @@ fn background_content_summary_with_direct_file_auto_locator_executes() {
     );
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_with_chat_finalizer()
+        crate::AskMode::act_with_chat_finalizer()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/README.md"));
@@ -781,7 +781,7 @@ fn current_workspace_auto_locator_rescues_clarify() {
     );
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_with_chat_finalizer()
+        crate::AskMode::act_with_chat_finalizer()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/workspace"));
@@ -799,7 +799,7 @@ fn inherited_operation_without_boundary_contract_defers_to_agent_loop_even_with_
     );
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/document"));
@@ -820,7 +820,7 @@ fn explicit_relative_path_without_locator_hint_does_not_rescue_clarify_back_to_e
     assert!(result.execution_route_result.needs_clarify);
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
 }
 
@@ -834,7 +834,7 @@ fn explicit_relative_path_followup_without_locator_hint_stays_clarify() {
     assert!(result.execution_route_result.needs_clarify);
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
 }
 
@@ -851,7 +851,7 @@ fn inherited_operation_without_boundary_contract_defers_to_agent_loop_without_pr
     assert!(!result.execution_route_result.needs_clarify);
     assert_eq!(
         result.execution_route_result.ask_mode,
-        crate::AskMode::planner_execute_plain()
+        crate::AskMode::act_plain()
     );
     assert_eq!(
         result.gate_record.reason_code,
@@ -1303,7 +1303,7 @@ fn scalar_path_only_contract_stays_for_workspace_scope_without_locator() {
 #[test]
 fn one_sentence_command_summary_keeps_raw_command_output() {
     let mut route = route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "执行 pwd 命令获取当前工作目录路径，然后用一句话简要解释这个路径大概是什么（只输出一句话）"
             .to_string();
@@ -1322,7 +1322,7 @@ fn one_sentence_command_summary_keeps_raw_command_output() {
 #[test]
 fn direct_scalar_command_result_keeps_raw_command_output() {
     let mut route = route_result();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.resolved_intent = "执行 pwd，只输出当前路径，不要解释".to_string();
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
@@ -1338,7 +1338,7 @@ fn direct_scalar_command_result_keeps_raw_command_output() {
 #[test]
 fn brief_command_explanation_no_longer_uses_surface_shape_to_clear_raw_output() {
     let mut route = route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = "run pwd, then briefly explain what this path is".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;

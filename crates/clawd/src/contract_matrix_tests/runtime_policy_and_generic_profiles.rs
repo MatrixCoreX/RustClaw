@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn runtime_contract_snapshot_for_route_uses_route_trace_evidence() {
     let route = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -287,7 +287,7 @@ fn route_specific_evidence_augments_matrix_base_contract() {
 #[test]
 fn route_marker_quantity_comparison_augments_trace_evidence_without_semantic_enum() {
     let route = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -327,7 +327,7 @@ fn route_marker_quantity_comparison_augments_trace_evidence_without_semantic_enu
 #[test]
 fn action_trace_for_route_uses_route_trace_evidence() {
     let route = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -402,7 +402,7 @@ fn action_trace_for_archive_capability_ref_supplies_structured_extractor() {
 #[test]
 fn route_effective_contract_marker_prevents_stale_raw_semantic_action_lock() {
     let route = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),

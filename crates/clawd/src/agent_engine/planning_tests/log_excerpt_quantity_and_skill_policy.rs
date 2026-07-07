@@ -7,7 +7,7 @@ fn contract_rejected_log_analyze_rewrites_to_preferred_excerpt_read() {
     fs::write(&log_path, "{\"level\":\"info\",\"event\":\"ok\"}\n").expect("write fixture log");
     let log_path = log_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -61,7 +61,7 @@ fn excerpt_contract_keeps_preferred_log_read_when_synthesizing() {
     fs::write(&log_path, "{\"level\":\"info\",\"event\":\"ok\"}\n").expect("write fixture log");
     let log_path = log_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -112,7 +112,7 @@ fn excerpt_contract_keeps_preferred_log_read_when_synthesizing() {
 #[test]
 fn raw_command_output_preserves_fs_basic_grep_text_plan() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -154,7 +154,7 @@ fn raw_command_output_preserves_fs_basic_grep_text_plan() {
 fn structured_tool_output_placeholder_is_synthesized_before_respond() {
     let loop_state = LoopState::new(1);
     let route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -209,7 +209,7 @@ fn fs_basic_append_text_aliases_text_to_content_before_verify() {
 #[test]
 fn structured_scalar_compare_accepts_fs_basic_count_entries_pair() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -243,7 +243,7 @@ fn structured_scalar_compare_accepts_fs_basic_count_entries_pair() {
 #[test]
 fn quantity_comparison_route_accepts_single_count_entries_scalar_plan() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -274,7 +274,7 @@ fn quantity_comparison_route_accepts_single_count_entries_scalar_plan() {
 fn command_output_summary_keeps_planned_fs_count_entries_actions() {
     let state = test_state_with_enabled_skills(&["fs_basic", "process_basic"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -323,7 +323,7 @@ fn command_output_summary_keeps_planned_fs_count_entries_actions() {
 fn command_output_summary_replaces_non_recipe_mutation_with_preferred_observation() {
     let state = test_state_with_registry();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -368,7 +368,7 @@ fn command_output_summary_replaces_non_recipe_mutation_with_preferred_observatio
 fn command_output_summary_keeps_scratch_filesystem_lifecycle_mutation_plan() {
     let state = test_state_with_registry();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -462,7 +462,7 @@ fn command_output_summary_keeps_scratch_filesystem_lifecycle_mutation_plan() {
 fn scratch_filesystem_lifecycle_plan_upgrades_effective_contract() {
     let state = test_state_with_registry();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -532,7 +532,7 @@ fn scratch_filesystem_lifecycle_plan_upgrades_effective_contract() {
 fn command_output_summary_keeps_scratch_cleanup_recovery_after_prior_write() {
     let state = test_state_with_registry();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -645,7 +645,7 @@ fn command_output_summary_keeps_scratch_cleanup_recovery_after_prior_write() {
 fn command_output_summary_keeps_archive_pack_cleanup_recovery() {
     let state = test_state_with_registry();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -735,7 +735,7 @@ fn command_output_summary_keeps_archive_pack_cleanup_recovery() {
 fn command_output_summary_keeps_registry_non_mutating_config_preview_actions() {
     let state = test_state_with_registry();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -795,7 +795,7 @@ fn command_output_summary_keeps_registry_non_mutating_config_preview_actions() {
 fn active_ops_apply_keeps_mutation_despite_summary_contract_hint() {
     let state = test_state_with_registry();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -849,7 +849,7 @@ fn unavailable_skill_plan_forces_repair() {
         args: json!({ "path": "out.txt" }),
     }];
     let route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         false,
         OutputResponseShape::Free,
     );
@@ -871,7 +871,7 @@ fn preferred_registry_skill_route_forces_repair_but_can_fallback_to_safe_run_cmd
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -913,7 +913,7 @@ fn preferred_registry_skill_route_does_not_fallback_to_mutating_run_cmd() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -942,7 +942,7 @@ fn preferred_registry_skill_route_does_not_force_repair_from_structured_tool() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -978,7 +978,7 @@ fn log_content_summary_route_forces_repair_from_generic_fs_read() {
     fs::write(&log_path, "INFO ok\nWARN cache miss\n").expect("write fixture log");
     let log_path = log_path.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1028,7 +1028,7 @@ fn fs_basic_directory_names_route_forces_repair_from_run_cmd() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1058,7 +1058,7 @@ fn explicit_literal_run_cmd_marker_skips_preferred_skill_repair() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1099,7 +1099,7 @@ fn runtime_async_job_marker_skips_preferred_skill_repair() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1140,7 +1140,7 @@ fn explicit_literal_existing_run_cmd_is_marked_before_repair_checks() {
     state.policy.command_intent.execute_prefixes = vec!["执行命令 ".to_string()];
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1186,7 +1186,7 @@ fn explicit_literal_scalar_route_marks_failure_repairable() {
     state.policy.command_intent.execute_prefixes = vec!["执行 ".to_string()];
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1231,7 +1231,7 @@ fn file_paths_route_marks_missing_target_repairable() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1264,7 +1264,7 @@ fn raw_command_output_route_does_not_force_preferred_skill_repair() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1291,7 +1291,7 @@ fn repair_failure_does_not_fallback_to_unavailable_skill_plan() {
         args: json!({ "path": "README.md" }),
     }];
     let route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         false,
         OutputResponseShape::Free,
     );
@@ -1313,7 +1313,7 @@ fn actionable_route_allows_respond_only_after_observation_exists() {
     }];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_with_chat_finalizer(),
+            crate::AskMode::act_with_chat_finalizer(),
             false,
             OutputResponseShape::Free,
         )),
@@ -1331,7 +1331,7 @@ fn content_evidence_route_keeps_observation_only_plan_for_observed_finalize() {
     }];
     assert!(!should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_with_chat_finalizer(),
+            crate::AskMode::act_with_chat_finalizer(),
             true,
             OutputResponseShape::Free,
         )),
@@ -1353,7 +1353,7 @@ fn lightweight_act_route_keeps_observation_only_plan_without_repair() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1381,7 +1381,7 @@ fn lightweight_route_rejects_unavailable_followup_skill() {
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1405,7 +1405,7 @@ fn lightweight_route_rejects_unavailable_followup_skill() {
 fn clarify_followup_tail_request_does_not_rewrite_single_read_file_from_text() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1442,7 +1442,7 @@ fn clarify_followup_tail_request_does_not_rewrite_single_read_file_from_text() {
 fn non_range_single_read_keeps_read_file_plan() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1483,7 +1483,7 @@ fn single_target_read_file_prefers_auto_locator_file_over_stale_existing_path() 
     let current_path = current.display().to_string();
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1528,7 +1528,7 @@ fn single_target_read_range_prefers_auto_locator_file_over_stale_existing_path()
     let current_path = current.display().to_string();
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1578,7 +1578,7 @@ fn single_target_call_tool_system_basic_read_range_prefers_auto_locator_file() {
     let current_path = current.display().to_string();
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1625,7 +1625,7 @@ fn single_target_file_read_falls_back_to_route_locator_when_auto_locator_suppres
     let current_path = current.display().to_string();
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1671,7 +1671,7 @@ fn route_target_file_content_plan_collapses_placeholder_read_chain() {
     let logs_path = logs.display().to_string();
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1737,7 +1737,7 @@ fn single_target_fs_basic_read_text_range_prefers_auto_locator_file_over_stale_e
     let current_path = current.display().to_string();
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1782,7 +1782,7 @@ fn auto_locator_file_does_not_collapse_multi_read_plan() {
     let beta_path = beta.display().to_string();
 
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );

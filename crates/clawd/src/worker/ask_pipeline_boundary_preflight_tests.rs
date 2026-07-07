@@ -2,7 +2,7 @@ use super::defer_locator_binding_to_agent_loop;
 
 fn executable_route_with_semantic(kind: crate::OutputSemanticKind) -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "planner boundary test".to_string(),
         needs_clarify: false,
         route_reason: String::new(),

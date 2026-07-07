@@ -605,7 +605,7 @@ fn direct_structured_observed_answer_skips_raw_passthrough_for_strict_exact_sent
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.exact_sentence_count = Some(1);
     route.output_contract.requires_content_evidence = true;
@@ -637,7 +637,7 @@ fn direct_non_builtin_raw_answer_skips_synthesized_delivery_contract() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.exact_sentence_count = Some(1);
     route.output_contract.requires_content_evidence = true;
@@ -1465,7 +1465,7 @@ fn archive_exit_zero_passthrough_is_dropped_when_structured_answer_exists() {
         finished_at: 0,
     });
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功"
                 .to_string(),

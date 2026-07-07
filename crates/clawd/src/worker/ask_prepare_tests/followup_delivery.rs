@@ -4,7 +4,7 @@ use crate::worker::ask_prepare::repair_structural_file_delivery_resolution_for_t
 #[test]
 fn file_delivery_with_structured_locator_is_preserved() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "send the routed file".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -66,7 +66,7 @@ fn file_delivery_with_structured_locator_is_preserved() {
 #[test]
 fn unresolved_file_delivery_without_locator_defers_to_loop() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "send the file".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -122,7 +122,7 @@ fn unresolved_file_delivery_without_locator_defers_to_loop() {
 #[test]
 fn generated_file_delivery_without_locator_can_choose_runtime_target() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "create a shell script, save it, and deliver the generated file"
             .to_string(),
         needs_clarify: true,
@@ -179,7 +179,7 @@ fn generated_file_delivery_without_locator_can_choose_runtime_target() {
 #[test]
 fn generated_file_delivery_with_filename_locator_stays_existing_file_delivery() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "deliver a filename-scoped file target".to_string(),
         needs_clarify: false,
         route_reason:
@@ -243,7 +243,7 @@ fn generated_file_delivery_with_filename_locator_stays_existing_file_delivery() 
 #[test]
 fn generated_file_delivery_current_workspace_without_locator_can_choose_runtime_target() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "deliver unresolved workspace file target".to_string(),
         needs_clarify: false,
         route_reason: "semantic_contract_requires_evidence; generated_file_delivery".to_string(),
@@ -297,7 +297,7 @@ fn generated_file_delivery_current_workspace_without_locator_can_choose_runtime_
 #[test]
 fn generated_file_delivery_path_kind_without_locator_defers_to_loop() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "deliver unresolved existing file target".to_string(),
         needs_clarify: false,
         route_reason: "semantic_contract_requires_evidence".to_string(),
@@ -354,7 +354,7 @@ fn generated_file_delivery_existing_directory_locator_defers_to_loop() {
     std::fs::write(root.join("service_notes.md"), "service notes").expect("fixture");
     std::fs::write(root.join("release_checklist.md"), "release").expect("fixture");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "deliver one selected file from a directory".to_string(),
         needs_clarify: false,
         route_reason: "semantic_contract_requires_evidence".to_string(),
@@ -413,7 +413,7 @@ fn generated_file_delivery_existing_directory_locator_defers_to_loop() {
 #[test]
 fn structurally_resolved_file_delivery_defers_recent_read_target_to_loop() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "deliver the active file target".to_string(),
         needs_clarify: false,
         route_reason: "normalizer resolved delivery from immediate context".to_string(),
@@ -671,7 +671,7 @@ fn directory_selection_clarify_marker_blocks_stale_read_target_rebind() {
 #[test]
 fn structurally_resolved_file_delivery_defers_active_delivery_target_to_loop() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "deliver the active file target again".to_string(),
         needs_clarify: false,
         route_reason: "normalizer resolved delivery from immediate context".to_string(),
@@ -740,7 +740,7 @@ fn structurally_resolved_file_delivery_defers_active_observed_target_to_loop() {
     let target =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/case_only/Report.MD";
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "deliver the active file target".to_string(),
         needs_clarify: false,
         route_reason: "normalizer resolved delivery from immediate context".to_string(),
@@ -800,7 +800,7 @@ fn structurally_resolved_file_delivery_defers_active_observed_target_to_loop() {
 #[test]
 fn ordered_entry_reference_binds_third_delivery_from_active_frame() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "deliver the third listed file".to_string(),
         needs_clarify: false,
         route_reason: "normalizer selected an ordinal follow-up".to_string(),
@@ -871,7 +871,7 @@ fn ordered_entry_reference_binds_third_delivery_from_active_frame() {
 #[test]
 fn ordered_entry_reference_repairs_conflicting_index_from_route_path_token() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "deliver selected path /home/guagua/rustclaw/logs/clawd.codex.nltest.log"
             .to_string(),
         needs_clarify: false,
@@ -946,7 +946,7 @@ fn ordered_entry_reference_repairs_conflicting_index_from_route_path_token() {
 #[test]
 fn ordered_entry_reference_binds_previous_from_selected_entry() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "read previous selected file tail".to_string(),
         needs_clarify: false,
         route_reason: "normalizer selected a relative ordinal follow-up".to_string(),
@@ -1015,7 +1015,7 @@ fn ordered_entry_reference_binds_previous_from_selected_entry() {
 #[test]
 fn ordered_entry_reference_binds_scalar_path_from_active_frame() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "return only the selected path".to_string(),
         needs_clarify: false,
         route_reason: "normalizer selected an active ordered entry; scalar_path_only".to_string(),
@@ -1093,7 +1093,7 @@ fn ordered_entry_reference_binds_scalar_path_from_active_frame() {
 fn content_read_followup_reuses_active_delivery_target_without_prompt_locator() {
     let target = "/home/guagua/rustclaw/logs/clawd.codex.nltest.log";
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "Read the last line of the file clawd-dev.log (slice_mode=tail, slice_n=1)".to_string(),
         needs_clarify: false,
@@ -1162,7 +1162,7 @@ fn content_read_followup_reuses_active_delivery_target_without_prompt_locator() 
 fn content_read_followup_keeps_explicit_current_prompt_locator() {
     let target = "/home/guagua/rustclaw/logs/clawd.codex.nltest.log";
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Read clawd-dev.log tail 1".to_string(),
         needs_clarify: false,
         route_reason: "current prompt supplied concrete filename".to_string(),
@@ -1221,7 +1221,7 @@ fn content_read_followup_repaired_active_task_binding_overrides_ordered_entry() 
     let target = "/home/guagua/rustclaw/logs/clawd.codex.nltest.log";
     let stale = "/home/guagua/rustclaw/logs/clawd-dev.log";
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: format!(
             "Read ordered entry index 2 last line\nordered_entry_target: {stale}"
         ),
@@ -1300,7 +1300,7 @@ fn content_read_followup_rewrites_only_structural_route_reason_locator() {
     let stale = "/home/guagua/rustclaw/logs/clawd-dev.log";
     let stale_with_suffix = format!("{stale}.backup");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: format!("Read selected log\nordered_entry_target: {stale}"),
         needs_clarify: false,
         route_reason: format!(
@@ -1365,7 +1365,7 @@ fn content_read_followup_rewrites_only_structural_resolved_intent_locator() {
     let stale = "/home/guagua/rustclaw/logs/clawd-dev.log";
     let stale_with_suffix = format!("{stale}.backup");
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: format!(
             "Read selected log\nordered_entry_target: {stale}\nunrelated_path_token: {stale_with_suffix}"
         ),
@@ -1433,7 +1433,7 @@ fn content_read_followup_rewrites_only_structural_resolved_intent_locator() {
 fn active_delivery_content_target_token_survives_task_turn_merge_prompt() {
     let target = "/home/guagua/rustclaw/logs/clawd.codex.nltest.log";
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         route_reason: "semantic_contract_requires_evidence; active_delivery_content_target_bound"
@@ -1481,7 +1481,7 @@ fn active_delivery_content_target_token_survives_task_turn_merge_prompt() {
 #[test]
 fn ordered_entry_reference_infers_exact_current_prompt_token_from_active_frame() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "List or describe documentation files in the current directory"
             .to_string(),
         needs_clarify: false,
@@ -1555,7 +1555,7 @@ fn ordered_entry_reference_infers_exact_current_prompt_token_from_active_frame()
 #[test]
 fn filename_only_output_patch_clears_file_delivery_contract() {
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "only output the basename of the previously delivered file".to_string(),
         needs_clarify: false,
         route_reason: String::new(),

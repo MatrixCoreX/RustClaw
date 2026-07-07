@@ -342,7 +342,7 @@ fn fs_basic_inventory_names_can_stop_before_synthesis_followup() {
         r#"{"action":"inventory_dir","path":"/tmp/document","resolved_path":"/tmp/document","files_only":true,"names_only":true,"names":["a.txt","b.md","c.png"]}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.resolved_intent = "List file names from a known directory.".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
@@ -377,7 +377,7 @@ fn recent_artifacts_inventory_can_stop_before_content_read_round() {
         r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\"}","error_text":null,"extra":{"action":"inventory_dir","entries":[{"kind":"file","modified_ts":9,"name":"clawd.run.log","path":"logs/clawd.run.log","size_bytes":2300},{"kind":"file","modified_ts":8,"name":"model_io.log","path":"logs/model_io.log","size_bytes":900},{"kind":"file","modified_ts":7,"name":"act_plan.log","path":"logs/act_plan.log","size_bytes":300}],"names":["clawd.run.log","model_io.log","act_plan.log"],"path":"/repo/logs","resolved_path":"/repo/logs","sort_by":"mtime_desc"}}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "logs".to_string();
@@ -418,7 +418,7 @@ fn recent_artifacts_inventory_stop_respects_file_selector() {
         r#"{"action":"inventory_dir","entries":[{"kind":"dir","modified_ts":9,"name":"bundle_unpack","path":"tmp/bundle_unpack"},{"kind":"dir","modified_ts":8,"name":"manual_unpack","path":"tmp/manual_unpack"}],"path":"/repo/tmp","sort_by":"mtime_desc"}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "tmp".to_string();

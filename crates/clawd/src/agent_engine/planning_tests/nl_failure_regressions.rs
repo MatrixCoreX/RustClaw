@@ -400,7 +400,7 @@ fn main_config_content_excerpt_deterministic_fast_path_uses_guard_observation() 
 fn chat_wrapped_text_loop_terminal_respond_does_not_force_plan_repair() {
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         false,
         OutputResponseShape::Free,
     );

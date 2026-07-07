@@ -3,7 +3,7 @@ use serde_json::json;
 
 fn route_with_context(route_reason: &str, resolved_intent: &str) -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: resolved_intent.to_string(),
         needs_clarify: false,
         route_reason: route_reason.to_string(),

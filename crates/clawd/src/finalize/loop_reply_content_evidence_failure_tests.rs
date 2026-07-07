@@ -2,7 +2,7 @@ use super::*;
 
 fn service_capability_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),

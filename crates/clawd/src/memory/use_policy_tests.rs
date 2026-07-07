@@ -105,7 +105,7 @@ fn planner_memory_includes_unfinished_goals_and_stable_context() {
     let decision = decide_planner_memory_use_policy(
         &state,
         ExecutionContextBudgetTier::Full,
-        &crate::AskMode::planner_execute_plain(),
+        &crate::AskMode::act_plain(),
         PlannerMemoryContextHint::Default,
     );
     assert_eq!(decision.profile, MemoryUseProfile::PlannerScoped);

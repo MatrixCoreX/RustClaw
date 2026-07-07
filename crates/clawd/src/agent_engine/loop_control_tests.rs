@@ -55,7 +55,7 @@ fn success_marker_matching_requires_exact_line() {
 
 fn route_result(shape: OutputResponseShape) -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "test".to_string(),
         needs_clarify: false,
         route_reason: String::new(),

@@ -373,7 +373,7 @@ fn test_task() -> ClaimedTask {
 
 fn base_route_result() -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -518,7 +518,7 @@ fn route_result(
 
 fn delivery_route_result() -> RouteResult {
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         false,
         OutputResponseShape::FileToken,
     );

@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn service_control_capability_ref_port_answer_is_grounded_without_semantic_kind() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    let mut route = route_with_mode(crate::AskMode::act_plain());
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.route_reason = "capability_ref=service_control.status".to_string();

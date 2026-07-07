@@ -2,7 +2,7 @@ use super::{append_route_reason, route_reason_has_marker};
 
 fn route_with_reason(route_reason: &str) -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         route_reason: route_reason.to_string(),

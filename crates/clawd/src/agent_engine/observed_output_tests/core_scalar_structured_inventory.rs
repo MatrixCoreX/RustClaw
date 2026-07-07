@@ -233,7 +233,7 @@ fn observed_outputs_keep_latest_content_read_for_same_path() {
 
 fn chat_wrapped_unclassified_route(response_shape: OutputResponseShape) -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "Run an observation, then produce the requested final wording."
             .to_string(),
         needs_clarify: false,
@@ -529,7 +529,7 @@ fn direct_scalar_defers_git_oneline_log_record_to_synthesis() {
         "exit=0\n09342a6a fix: expose nl execution and locator flows\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "查看当前工作区最近一次 git 提交的标题，并简短告诉我。".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -940,7 +940,7 @@ fn direct_scalar_defers_recent_structured_scalar_comparison_to_llm() {
             r#"{"action":"extract_field","path":"crates/clawd/Cargo.toml","resolved_path":"/tmp/crates/clawd/Cargo.toml","field_path":"package.name","exists":true,"value_type":"string","value_text":"clawd","value":"clawd"}"#,
         ));
     let route_result = RouteResult {
-            ask_mode: crate::AskMode::planner_execute_plain(),
+            ask_mode: crate::AskMode::act_plain(),
             resolved_intent:
                 "UI/package.json 里的 name 和 crates/clawd/Cargo.toml 里的 package.name 一样吗？只回答一样或不一样"
                     .to_string(),
@@ -1027,7 +1027,7 @@ fn direct_scalar_formats_recent_structured_scalar_equality() {
             r#"{"action":"extract_field","field_path":"crate_name","exists":true,"value_text":"rustclaw","value":"rustclaw","value_type":"string"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Are those two names the same? Answer same or different".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1077,7 +1077,7 @@ fn direct_scalar_formats_compare_paths_equality_with_explicit_existence_fields()
         r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false,"same_size":false,"size_delta_bytes":119},"field_value":{"left_exists":true,"right_exists":true,"same_path":false,"same_size":false,"size_delta_bytes":119},"left":{"exists":true,"path":"service_notes.md"},"right":{"exists":true,"path":"release_checklist.md"}},"text":"{}"}"#,
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Compare two paths and return same_path plus existence fields."
             .to_string(),
         needs_clarify: false,
@@ -1130,7 +1130,7 @@ fn direct_scalar_equality_ignores_duplicate_structured_source() {
             r#"{"action":"extract_field","path":"/tmp/Cargo.toml","resolved_path":"/tmp/Cargo.toml","field_path":"workspace.package.version","resolved_field_path":"workspace.package.version","exists":true,"value_text":"0.1.7","value":"0.1.7","value_type":"string"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Compare the Cargo.toml version with the version mentioned in README.md."
             .to_string(),
         needs_clarify: false,
@@ -1181,7 +1181,7 @@ fn direct_answer_formats_recent_structured_scalar_equality_for_strict_route() {
             r#"{"action":"extract_field","field_path":"package.name","exists":true,"value_text":"clawd","value":"clawd","value_type":"string"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "Read two names and answer in one line with whether they are the same or different."
                 .to_string(),
@@ -1269,7 +1269,7 @@ fn direct_answer_formats_wrapped_config_basic_structured_scalar_equality() {
         .to_string(),
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Compare two structured field values.".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1328,7 +1328,7 @@ version.workspace = true
 "#,
     ));
     let route_result = RouteResult {
-            ask_mode: crate::AskMode::planner_execute_plain(),
+            ask_mode: crate::AskMode::act_plain(),
             resolved_intent:
                 "读取 UI/package.json 里的 name 字段，再读取 crates/clawd/Cargo.toml 里的 package.name 字段，最后用一行输出：前者、后者、一样或不一样"
                     .to_string(),
@@ -1421,7 +1421,7 @@ fn direct_scalar_missing_field_language_uses_original_request_before_resolved_pr
             r#"{"action":"extract_field","exists":false,"field_path":"name","value_text":"","value":null,"value_type":"null"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "Read the name field from package.json and output only its value."
             .to_string(),
         needs_clarify: false,

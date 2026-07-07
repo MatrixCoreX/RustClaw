@@ -61,7 +61,7 @@ fn rewrite_terminal_placeholder_preserves_mixed_last_output_respond() {
 #[test]
 fn unresolved_template_arg_multi_file_read_plan_uses_direct_file_reads() {
     let route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );

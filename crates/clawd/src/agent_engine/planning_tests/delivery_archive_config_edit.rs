@@ -1060,7 +1060,7 @@ fn config_mutation_without_recipe_does_not_upgrade_readback_to_apply() {
 fn unrequested_config_edit_is_stripped_from_text_rewrite_followup() {
     let state = test_state_with_enabled_skills(&["config_edit", "synthesize_answer"]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1110,7 +1110,7 @@ fn unrequested_config_edit_is_stripped_from_text_rewrite_followup() {
 fn requested_config_edit_plan_is_preserved_by_structural_anchors() {
     let state = test_state_with_enabled_skills(&["config_edit"]);
     let route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1232,7 +1232,7 @@ fn rustclaw_config_syntax_only_validation_keeps_validate_action() {
 fn command_output_summary_preserves_structured_config_validate() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1284,7 +1284,7 @@ fn command_output_summary_preserves_structured_config_validate() {
 fn plain_main_config_validation_rewrites_to_planner_guard_when_contract_allows_guard() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1325,7 +1325,7 @@ fn plain_main_config_validation_rewrites_to_planner_guard_when_contract_allows_g
 fn main_config_content_summary_read_rewrites_to_guard() {
     let state = test_state_with_registry();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1369,7 +1369,7 @@ fn main_config_content_summary_read_rewrites_to_guard() {
 #[test]
 fn guard_config_with_invalid_product_locator_uses_main_config_default() {
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1478,7 +1478,7 @@ fn config_validation_capability_ref_rewrites_broad_read_without_semantic_kind() 
 fn config_validation_contract_normalizes_tool_read_to_validate() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1536,7 +1536,7 @@ fn config_validation_contract_normalizes_tool_read_to_validate() {
 fn config_validation_contract_normalizes_legacy_system_validate_structured_to_validate() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1589,7 +1589,7 @@ fn config_validation_contract_normalizes_legacy_system_validate_structured_to_va
 fn config_validation_contract_normalizes_config_field_read_to_validate() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1646,7 +1646,7 @@ fn unrequested_path_like_config_field_read_rewrites_to_validate() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1697,7 +1697,7 @@ fn explicit_path_like_config_field_read_is_preserved_when_user_mentions_field() 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1733,7 +1733,7 @@ fn explicit_path_like_config_field_read_is_preserved_when_user_mentions_field() 
 fn rustclaw_config_section_header_field_reads_rewrite_to_guard_config() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1788,7 +1788,7 @@ fn rustclaw_config_section_header_field_reads_rewrite_to_guard_config() {
 fn config_risk_assessment_rewrites_key_listing_to_guard_config() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1831,7 +1831,7 @@ fn config_risk_assessment_rewrites_key_listing_to_guard_config() {
 fn config_risk_assessment_rewrites_file_head_read_to_guard_config() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1875,7 +1875,7 @@ fn config_risk_assessment_rewrites_file_head_read_to_guard_config() {
 fn config_risk_assessment_rewrites_config_edit_guard_to_preferred_config_basic_guard() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1913,7 +1913,7 @@ fn config_risk_assessment_rewrites_config_edit_guard_to_preferred_config_basic_g
 fn rustclaw_main_config_content_excerpt_broad_read_rewrites_to_guard_config() {
     let state = test_state();
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );

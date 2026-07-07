@@ -118,7 +118,7 @@ fn multi_session_alias_target_plan_requires_all_targets_before_execution() {
         "/tmp/docs/release_checklist.md",
     ]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -155,7 +155,7 @@ fn multi_session_alias_target_plan_accepts_actions_covering_all_targets() {
         "/tmp/docs/release_checklist.md",
     ]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -200,7 +200,7 @@ fn normalizer_completes_missing_session_alias_file_target_observation() {
         checklist.to_string_lossy().as_ref(),
     ]);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -259,7 +259,7 @@ fn normalizer_recovers_session_alias_targets_from_plan_context_alias_block() {
     state.skill_rt.workspace_root = tmp.path.clone();
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -324,7 +324,7 @@ fn normalizer_recovers_session_alias_targets_from_boundary_observation_block() {
     state.skill_rt.workspace_root = tmp.path.clone();
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -392,7 +392,7 @@ fn normalizer_recovers_session_alias_targets_from_goal_alias_block() {
     state.skill_rt.workspace_root = tmp.path.clone();
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -464,7 +464,7 @@ fn actionable_route_repairs_respond_only_plan_before_any_observation() {
     }];
     assert!(should_force_plan_repair(
         Some(&route_result(
-            crate::AskMode::planner_execute_with_chat_finalizer(),
+            crate::AskMode::act_with_chat_finalizer(),
             false,
             OutputResponseShape::Free,
         )),
@@ -480,7 +480,7 @@ fn pure_chat_agent_loop_submode_allows_respond_only_plan_before_observation() {
         content: "final answer".to_string(),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         false,
         OutputResponseShape::OneSentence,
     );
@@ -503,7 +503,7 @@ fn tool_discovery_route_allows_context_only_respond_plan() {
         content: "capability inventory".to_string(),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         false,
         OutputResponseShape::Free,
     );
@@ -522,7 +522,7 @@ fn tool_discovery_route_allows_context_only_respond_plan() {
 fn plain_act_path_action_rejects_readonly_file_plan_before_execution() {
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -573,7 +573,7 @@ async fn active_task_append_current_locator_reaches_planner_path() {
     };
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -619,7 +619,7 @@ async fn active_task_append_current_locator_reaches_planner_path() {
 fn execute_route_without_content_evidence_rejects_doc_parse_only_file_plan() {
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         false,
         OutputResponseShape::OneSentence,
     );
@@ -663,7 +663,7 @@ fn execute_route_without_content_evidence_rejects_doc_parse_only_file_plan() {
 fn existing_observed_synthesis_read_only_file_plan_does_not_force_repair() {
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         false,
         OutputResponseShape::OneSentence,
     );
@@ -705,7 +705,7 @@ fn existing_observed_synthesis_read_only_file_plan_does_not_force_repair() {
 fn active_anchor_detached_read_only_plan_does_not_force_repair() {
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         false,
         OutputResponseShape::OneSentence,
     );
@@ -747,7 +747,7 @@ fn active_anchor_detached_read_only_plan_does_not_force_repair() {
 fn content_evidence_route_accepts_doc_parse_file_plan() {
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -806,7 +806,7 @@ fn content_evidence_route_repairs_synthesize_only_plan_before_any_observation() 
         },
     ];
     let route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -833,7 +833,7 @@ fn content_evidence_route_repairs_locator_only_observation_plan() {
         }),
     }];
     let route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -870,7 +870,7 @@ fn content_evidence_route_accepts_structured_listing_terminal_plan() {
         },
     ];
     let route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -905,7 +905,7 @@ fn existence_route_accepts_stat_paths_synthesized_metadata_evidence() {
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -933,7 +933,7 @@ fn existence_route_accepts_observation_only_stat_paths_for_runtime_finalizer() {
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         false,
         OutputResponseShape::Strict,
     );
@@ -962,7 +962,7 @@ fn existence_route_accepts_observation_only_stat_paths_even_when_content_evidenc
         }),
     }];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -999,7 +999,7 @@ fn generic_path_route_accepts_stat_paths_synthesized_metadata_evidence() {
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1040,7 +1040,7 @@ fn directory_names_route_accepts_fs_basic_find_entries_evidence() {
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1069,7 +1069,7 @@ fn content_evidence_route_accepts_scoped_grep_observation_plan() {
         }),
     }];
     let route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1102,7 +1102,7 @@ fn content_presence_route_accepts_text_read_observation_plan() {
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -1119,7 +1119,7 @@ fn content_presence_route_accepts_text_read_observation_plan() {
 fn workspace_synthesis_respond_only_plan_gets_default_evidence_actions() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1163,7 +1163,7 @@ fn workspace_synthesis_respond_only_plan_gets_default_evidence_actions() {
 fn workspace_synthesis_plan_adds_missing_text_evidence_and_synthesizes_all_steps() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::Free,
     );
@@ -1234,7 +1234,7 @@ fn workspace_synthesis_plan_adds_missing_text_evidence_and_synthesizes_all_steps
 fn workspace_discovery_only_plan_waits_for_text_evidence_before_synthesis() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1273,7 +1273,7 @@ fn workspace_discovery_only_plan_waits_for_text_evidence_before_synthesis() {
 fn workspace_text_read_observation_can_append_synthesis() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1308,7 +1308,7 @@ fn workspace_text_read_observation_can_append_synthesis() {
 fn workspace_default_evidence_does_not_expand_mixed_last_output_answer() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1357,7 +1357,7 @@ fn workspace_default_evidence_does_not_expand_mixed_last_output_answer() {
 fn listing_grounded_workspace_synthesis_does_not_expand_default_text_evidence() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Free,
     );
@@ -1407,7 +1407,7 @@ fn listing_grounded_workspace_synthesis_does_not_expand_default_text_evidence() 
 fn workspace_default_evidence_does_not_expand_structured_count_answer() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Scalar,
     );
@@ -1454,7 +1454,7 @@ fn workspace_default_evidence_does_not_expand_structured_count_answer() {
 fn workspace_default_evidence_does_not_expand_single_structured_count_answer() {
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_plain(),
+        crate::AskMode::act_plain(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1506,7 +1506,7 @@ fn workspace_default_evidence_does_not_expand_single_structured_count_answer() {
 fn compound_listing_and_content_synthesis_refs_include_both_observations() {
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::OneSentence,
     );
@@ -1561,7 +1561,7 @@ fn compound_listing_and_content_synthesis_refs_include_both_observations() {
 fn content_excerpt_summary_listing_and_content_synthesis_refs_include_both_observations() {
     let loop_state = LoopState::new(1);
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );

@@ -305,7 +305,7 @@ fn route_result_with_semantic(semantic_kind: crate::OutputSemanticKind) -> Route
 
 fn route_result_with_risk(needs_clarify: bool, risk_ceiling: crate::RiskCeiling) -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "test".to_string(),
         needs_clarify,
         route_reason: "test".to_string(),

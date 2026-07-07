@@ -64,7 +64,7 @@ fn test_state_with_root(root: PathBuf) -> AppState {
 
 fn executable_filename_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_with_chat_finalizer(),
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "deliver file".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -330,7 +330,7 @@ fn direct_file_delivery_directory_locator_defers_to_loop_before_deictic_guard() 
     std::fs::create_dir_all(root.join("document")).expect("document dir");
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.resolved_intent =
         "send the last file in the document directory, rejecting the previous file".to_string();
     route.wants_file_delivery = true;
@@ -354,7 +354,7 @@ fn direct_file_delivery_rejects_workspace_root_prebind_before_deictic_guard() {
     let root = make_temp_root("delivery_root_prebind_reject");
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.wants_file_delivery = true;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
     route.output_contract.delivery_required = true;
@@ -372,7 +372,7 @@ fn direct_file_delivery_rejects_workspace_root_prebind_before_deictic_guard() {
     );
     assert!(route.output_contract.locator_hint.is_empty());
     assert!(route.needs_clarify);
-    assert_eq!(route.ask_mode, crate::AskMode::planner_execute_plain());
+    assert_eq!(route.ask_mode, crate::AskMode::act_plain());
     assert!(route
         .route_reason
         .contains("direct_file_delivery_workspace_root_locator_rejected"));
@@ -384,7 +384,7 @@ fn generated_file_delivery_runtime_target_skips_workspace_root_prebind_reject() 
     let root = make_temp_root("generated_delivery_root_prebind_skip");
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.wants_file_delivery = true;
     route.route_reason = "generated_file_delivery_allows_runtime_target".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -403,7 +403,7 @@ fn generated_file_delivery_runtime_target_skips_workspace_root_prebind_reject() 
     );
     assert!(route.output_contract.locator_hint.is_empty());
     assert!(!route.needs_clarify);
-    assert_eq!(route.ask_mode, crate::AskMode::planner_execute_plain());
+    assert_eq!(route.ask_mode, crate::AskMode::act_plain());
     assert!(!route
         .route_reason
         .contains("direct_file_delivery_workspace_root_locator_rejected"));
@@ -426,7 +426,7 @@ fn explicit_missing_filename_delivery_contract_defers_not_found_to_execution() {
         payload_json: "{}".to_string(),
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.wants_file_delivery = true;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = true;
@@ -501,7 +501,7 @@ fn unresolved_file_delivery_current_request_filename_defers_to_loop_evidence() {
         payload_json: "{}".to_string(),
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.needs_clarify = true;
     route.route_reason =
         "clarify_reason_code:missing_delivery_locator; unresolved_file_delivery_requires_locator"
@@ -613,7 +613,7 @@ fn unbound_existing_file_delivery_with_model_locator_defers_to_agent_loop() {
     let root = make_temp_root("unbound_delivery_model_locator");
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.wants_file_delivery = true;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = true;
@@ -638,7 +638,7 @@ fn unbound_existing_file_delivery_allows_current_request_locator() {
     let root = make_temp_root("delivery_current_locator");
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.wants_file_delivery = true;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = true;
@@ -663,7 +663,7 @@ fn unbound_existing_file_delivery_allows_authoritative_anchor() {
     let root = make_temp_root("delivery_authoritative_anchor");
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.wants_file_delivery = true;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = true;
@@ -688,7 +688,7 @@ fn unbound_existing_file_delivery_allows_generated_file_delivery() {
     let root = make_temp_root("delivery_generated_file");
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.wants_file_delivery = true;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = true;
@@ -715,7 +715,7 @@ fn unbound_existing_file_delivery_allows_resolved_workspace_child() {
     std::fs::create_dir_all(root.join("document")).expect("document dir");
     let state = test_state_with_root(root.clone());
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.wants_file_delivery = true;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = true;
@@ -754,7 +754,7 @@ fn directory_file_delivery_without_structured_selection_defers_to_loop_evidence(
         payload_json: "{}".to_string(),
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.route_reason = "generated_file_delivery_allows_runtime_target".to_string();
     route.wants_file_delivery = true;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -850,7 +850,7 @@ fn post_route_directory_file_delivery_marker_defers_to_agent_loop() {
         payload_json: "{}".to_string(),
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.needs_clarify = true;
     route.clarify_question = "select a file".to_string();
     route.route_reason = "directory_file_delivery_requires_structured_selection".to_string();
@@ -929,7 +929,7 @@ fn directory_file_delivery_with_structured_file_selector_stays_executable() {
         payload_json: "{}".to_string(),
     };
     let mut route = executable_filename_route();
-    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.ask_mode = crate::AskMode::act_plain();
     route.route_reason = "normalizer_emitted_directory_file_selector".to_string();
     route.wants_file_delivery = true;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;

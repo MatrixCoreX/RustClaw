@@ -3,7 +3,7 @@ use crate::{AskMode, IntentOutputContract};
 
 fn route_with_capability_ref(capability_ref: &str) -> RouteResult {
     RouteResult {
-        ask_mode: AskMode::planner_execute_plain(),
+        ask_mode: AskMode::act_plain(),
         resolved_intent: capability_ref.to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

@@ -10,7 +10,7 @@ fn grounded_file_token_satisfies_file_delivery_contract_before_llm_verifier() {
     let file = root.join("release_checklist.md");
     std::fs::write(&file, "ok").expect("write temp file");
 
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    let mut route = route_with_mode(crate::AskMode::act_plain());
     route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
@@ -61,7 +61,7 @@ fn grounded_file_token_uses_path_token_from_write_text_output() {
     let file = root.join("contract_matrix_generic_delivery.txt");
     std::fs::write(&file, "generic delivery case").expect("write temp file");
 
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    let mut route = route_with_mode(crate::AskMode::act_plain());
     route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
@@ -93,7 +93,7 @@ fn grounded_file_token_uses_path_token_from_write_text_output() {
 
 #[test]
 fn confirmed_missing_file_delivery_skips_model_verifier() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    let mut route = route_with_mode(crate::AskMode::act_plain());
     route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
@@ -143,7 +143,7 @@ fn confirmed_missing_file_delivery_skips_model_verifier() {
 
 #[test]
 fn matrix_delivery_artifact_shape_rejects_raw_command_summary_answer() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    let mut route = route_with_mode(crate::AskMode::act_plain());
     route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
@@ -178,7 +178,7 @@ fn matrix_delivery_artifact_shape_accepts_grounded_plain_path() {
     let file = root.join("report.md");
     std::fs::write(&file, "ok").expect("write temp file");
 
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    let mut route = route_with_mode(crate::AskMode::act_plain());
     route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
@@ -221,7 +221,7 @@ fn matrix_delivery_artifact_shape_accepts_grounded_plain_path() {
 
 #[test]
 fn scalar_answer_grounded_in_plain_observation_skips_llm_verifier() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    let mut route = route_with_mode(crate::AskMode::act_plain());
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
     let mut journal =
@@ -247,7 +247,7 @@ fn scalar_answer_grounded_in_plain_observation_skips_llm_verifier() {
 
 #[test]
 fn scalar_answer_grounded_in_json_observation_skips_llm_verifier() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    let mut route = route_with_mode(crate::AskMode::act_plain());
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     let mut journal =
@@ -271,7 +271,7 @@ fn scalar_answer_grounded_in_json_observation_skips_llm_verifier() {
 
 #[test]
 fn quantity_comparison_size_answer_grounded_in_total_size_bytes_skips_llm_verifier() {
-    let mut route = route_with_mode(crate::AskMode::planner_execute_with_chat_finalizer());
+    let mut route = route_with_mode(crate::AskMode::act_with_chat_finalizer());
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;

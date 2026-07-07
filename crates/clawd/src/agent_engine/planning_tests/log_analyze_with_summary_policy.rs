@@ -9,7 +9,7 @@ fn content_excerpt_with_summary_single_log_file_allows_log_analyze_evidence() {
     fs::write(&log, "INFO ok\nWARN slow\nERROR old failure\n").expect("write log");
     let log_path = log.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
@@ -42,7 +42,7 @@ fn content_excerpt_with_summary_single_log_file_with_slice_allows_bounded_read_e
     fs::write(&log, "INFO ok\nWARN slow\nERROR old failure\n").expect("write log");
     let log_path = log.display().to_string();
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );

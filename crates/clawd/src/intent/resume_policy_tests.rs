@@ -33,7 +33,7 @@ fn test_task() -> crate::ClaimedTask {
 
 fn route_with_resume_behavior(resume_behavior: crate::ResumeBehavior) -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "continue".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -108,7 +108,7 @@ fn binding_context_marks_active_checkpoint_candidate() {
 #[test]
 fn runtime_resume_binding_is_disabled_when_normalizer_rejects_resume() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "list current workspace".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -186,7 +186,7 @@ fn explicit_continue_prefers_payload_resume_prompt() {
         "resume_steps": ["step-a"]
     });
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "continue".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -226,7 +226,7 @@ fn explicit_continue_falls_back_to_resolved_intent_when_prompt_missing() {
         "resume_steps": ["step-a"]
     });
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
+        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "continue".to_string(),
         needs_clarify: false,
         route_reason: String::new(),

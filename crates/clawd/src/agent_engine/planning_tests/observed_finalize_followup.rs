@@ -19,7 +19,7 @@ fn content_evidence_route_keeps_terminal_discussion_followup_for_planned_synthes
     ];
     let kept = strip_terminal_discussion_for_observed_finalize(
         Some(&route_result(
-            crate::AskMode::planner_execute_with_chat_finalizer(),
+            crate::AskMode::act_with_chat_finalizer(),
             true,
             OutputResponseShape::Free,
         )),
@@ -56,7 +56,7 @@ fn content_evidence_route_keeps_terminal_synthesize_followup_for_planned_synthes
     ];
     let kept = strip_terminal_discussion_for_observed_finalize(
         Some(&route_result(
-            crate::AskMode::planner_execute_with_chat_finalizer(),
+            crate::AskMode::act_with_chat_finalizer(),
             true,
             OutputResponseShape::Free,
         )),
@@ -101,7 +101,7 @@ fn content_evidence_route_keeps_multi_evidence_synthesize_followup() {
     ];
     let kept = strip_terminal_discussion_for_observed_finalize(
         Some(&route_result(
-            crate::AskMode::planner_execute_with_chat_finalizer(),
+            crate::AskMode::act_with_chat_finalizer(),
             true,
             OutputResponseShape::Free,
         )),
@@ -156,7 +156,7 @@ fn recent_scalar_pair_strips_terminal_synthesis_for_runtime_finalizer() {
         },
     ];
     let mut route = route_result(
-        crate::AskMode::planner_execute_with_chat_finalizer(),
+        crate::AskMode::act_with_chat_finalizer(),
         true,
         OutputResponseShape::Strict,
     );
