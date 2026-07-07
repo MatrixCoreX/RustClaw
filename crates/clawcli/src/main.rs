@@ -177,7 +177,7 @@ enum Command {
         json: bool,
     },
 
-    /// Read-only terminal task console.
+    /// Terminal task console.
     Tui {
         #[arg(long)]
         user_id: i64,
@@ -193,6 +193,10 @@ enum Command {
         interval_ms: u64,
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        interactive: bool,
+        #[arg(long)]
+        export_path: Option<PathBuf>,
     },
 
     /// Inspect structured permission and policy machine fields.
@@ -610,6 +614,8 @@ fn main() -> Result<()> {
             once,
             interval_ms,
             json,
+            interactive,
+            export_path,
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_tui(
@@ -622,6 +628,8 @@ fn main() -> Result<()> {
                 *once,
                 *interval_ms,
                 *json,
+                *interactive,
+                export_path.as_deref(),
             )
         }
         Command::Permission { command } => match command {

@@ -2,8 +2,8 @@ use super::{
     automation_runs_request_payload, coding_review_json, exec_effective_options, exec_exit_class,
     exec_failure_class_from_machine_tokens, exec_summary_json, permission_report_json, run_exec,
     subagent_report_json, task_event_output_lines, task_report_json, task_report_text_lines,
-    tui_snapshot_json, wait_until_matches, watch_progress_json, write_exec_artifacts,
-    ExecExitClass, ExecWaitOutcome,
+    tui_command_from_input, tui_export_json, tui_snapshot_json, wait_until_matches,
+    watch_progress_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome, TuiCommand,
 };
 
 #[test]
@@ -317,6 +317,56 @@ fn tui_snapshot_json_wraps_active_and_selected_task() {
     assert_eq!(
         snapshot["selected_task"]["task_lifecycle"]["checkpoint_id"],
         "ckpt-tui"
+    );
+}
+
+#[test]
+fn tui_command_parser_accepts_basic_key_tokens() {
+    assert_eq!(tui_command_from_input(""), Some(TuiCommand::Refresh));
+    assert_eq!(tui_command_from_input(" r "), Some(TuiCommand::Refresh));
+    assert_eq!(tui_command_from_input("W"), Some(TuiCommand::Watch));
+    assert_eq!(tui_command_from_input("c"), Some(TuiCommand::Cancel));
+    assert_eq!(tui_command_from_input("u"), Some(TuiCommand::Resume));
+    assert_eq!(tui_command_from_input("e"), Some(TuiCommand::Export));
+    assert_eq!(tui_command_from_input("q"), Some(TuiCommand::Quit));
+    assert_eq!(tui_command_from_input("watch"), None);
+}
+
+#[test]
+fn tui_export_json_wraps_snapshot_and_selected_task_id() {
+    let active = serde_json::json!({
+        "data": {
+            "tasks": [
+                {
+                    "task_id": "task-tui-export",
+                    "status": "running"
+                }
+            ]
+        }
+    });
+    let selected = crate::task::TaskStatusView {
+        task_id: "task-tui-export".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({
+            "task_id": "task-tui-export",
+            "status": "running",
+            "task_lifecycle": {
+                "state": "background",
+                "can_cancel": true
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let export = tui_export_json(&active, Some(&selected));
+
+    assert_eq!(export["export_kind"], "rustclaw_cli_tui_export");
+    assert_eq!(export["selected_task_id"], "task-tui-export");
+    assert_eq!(
+        export["snapshot"]["selected_task"]["task_lifecycle"]["can_cancel"],
+        true
     );
 }
 

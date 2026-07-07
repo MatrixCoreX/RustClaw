@@ -1,8 +1,21 @@
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
+use std::fs;
+use std::io::{self, Write};
+use std::path::Path;
 use std::time::Duration;
 
 use crate::{client, events::EventFilters, output, task};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TuiCommand {
+    Refresh,
+    Watch,
+    Cancel,
+    Resume,
+    Export,
+    Quit,
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_tui(
@@ -15,6 +28,8 @@ pub(crate) fn run_tui(
     once: bool,
     interval_ms: u64,
     json_output: bool,
+    interactive: bool,
+    export_path: Option<&Path>,
 ) -> Result<()> {
     let interval = Duration::from_millis(interval_ms.max(250));
     loop {
@@ -31,9 +46,48 @@ pub(crate) fn run_tui(
                 println!();
                 output::print_task_status(selected, include_events, &EventFilters::default());
             }
+            if interactive {
+                print_tui_command_help();
+            }
         }
         if once {
             return Ok(());
+        }
+        if interactive && !json_output {
+            match read_tui_command()? {
+                TuiCommand::Refresh => continue,
+                TuiCommand::Quit => return Ok(()),
+                TuiCommand::Watch => {
+                    let task_id = selected_task_id.context("selected_task_required_for_watch")?;
+                    watch_selected_task(base_url, key, task_id, include_events, interval)?;
+                }
+                TuiCommand::Cancel => {
+                    let task_id = selected_task_id.context("selected_task_required_for_cancel")?;
+                    output::print_json_pretty(&task::cancel_task_by_id(base_url, key, task_id)?);
+                }
+                TuiCommand::Resume => {
+                    let task_id = selected_task_id.context("selected_task_required_for_resume")?;
+                    output::print_json_pretty(&task::resume_task_by_id(
+                        base_url,
+                        key,
+                        task_id,
+                        None,
+                        Some("operator_tui"),
+                        None,
+                        None,
+                    )?);
+                }
+                TuiCommand::Export => {
+                    let export = tui_export_json(&active, selected.as_ref());
+                    if let Some(path) = export_path {
+                        write_tui_export(path, &export)?;
+                        println!("export_path: {}", path.display());
+                    } else {
+                        output::print_json_pretty(&export);
+                    }
+                }
+            }
+            continue;
         }
         std::thread::sleep(interval);
     }
@@ -45,6 +99,69 @@ pub(super) fn tui_snapshot_json(active: &Value, selected: Option<&task::TaskStat
         "active": active,
         "selected_task": selected.map(|task| task.raw_data.clone()).unwrap_or(Value::Null),
     })
+}
+
+pub(super) fn tui_export_json(active: &Value, selected: Option<&task::TaskStatusView>) -> Value {
+    json!({
+        "export_kind": "rustclaw_cli_tui_export",
+        "snapshot": tui_snapshot_json(active, selected),
+        "selected_task_id": selected.map(|task| task.task_id.clone()).unwrap_or_default(),
+    })
+}
+
+pub(super) fn tui_command_from_input(input: &str) -> Option<TuiCommand> {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "" | "r" => Some(TuiCommand::Refresh),
+        "w" => Some(TuiCommand::Watch),
+        "c" => Some(TuiCommand::Cancel),
+        "u" => Some(TuiCommand::Resume),
+        "e" => Some(TuiCommand::Export),
+        "q" => Some(TuiCommand::Quit),
+        _ => None,
+    }
+}
+
+fn print_tui_command_help() {
+    println!();
+    println!("keys: r refresh | w watch | c cancel | u resume | e export | q quit");
+}
+
+fn read_tui_command() -> Result<TuiCommand> {
+    loop {
+        print!("clawcli-tui> ");
+        io::stdout().flush().context("flush tui prompt")?;
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .context("read tui command")?;
+        if let Some(command) = tui_command_from_input(&input) {
+            return Ok(command);
+        }
+        println!("unknown_key");
+    }
+}
+
+fn watch_selected_task(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    include_events: bool,
+    interval: Duration,
+) -> Result<()> {
+    loop {
+        let task = task::get_task_status(base_url, key, task_id)?;
+        print!("\x1b[2J\x1b[H");
+        output::print_task_status(&task, include_events, &EventFilters::default());
+        if task.is_terminal() {
+            return Ok(());
+        }
+        std::thread::sleep(interval);
+    }
+}
+
+fn write_tui_export(path: &Path, value: &Value) -> Result<()> {
+    let body = serde_json::to_string_pretty(value).context("serialize tui export")?;
+    fs::write(path, body).with_context(|| format!("write tui export {}", path.display()))
 }
 
 fn active_tasks(base_url: &str, key: &str, user_id: i64, chat_id: i64) -> Result<Value> {
