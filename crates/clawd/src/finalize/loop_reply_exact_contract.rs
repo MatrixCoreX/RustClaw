@@ -12,7 +12,7 @@ use super::{
     direct_scalar_observed_answer, direct_structured_observed_answer,
     directory_entry_groups_prefers_observed_groups,
     evidence_policy_candidate_satisfies_final_shape,
-    latest_grounded_synthesis_for_mixed_listing_contract,
+    latest_grounded_synthesis_for_mixed_listing_contract, latest_publishable_respond_step_output,
     latest_publishable_synthesis_matches_written_file_path,
     latest_publishable_synthesis_step_matches, latest_successful_observation_body,
     log_deterministic_delivery_record, looks_like_raw_command_snapshot,
@@ -552,6 +552,27 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
         && current_delivery_is_publishable_synthesis;
     if !current_delivery_is_replaceable_status_synthesis
         && delivery_messages.last().is_some_and(|message| {
+            should_keep_latest_publishable_terminal_delivery_over_observed_projection(
+                route, loop_state, message, answer,
+            )
+        })
+    {
+        info!(
+            "delivery exact_contract_keep_publishable_terminal_delivery task_id={} observed={}",
+            task_id,
+            crate::truncate_for_log(answer)
+        );
+        log_deterministic_delivery_record(
+            task_id,
+            "exact_contract_keep_publishable_terminal_delivery",
+            "preserved",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return;
+    }
+    if !current_delivery_is_replaceable_status_synthesis
+        && delivery_messages.last().is_some_and(|message| {
             should_keep_planned_delivery_over_observed_answer(route, message, answer)
         })
     {
@@ -592,6 +613,77 @@ pub(super) fn prefer_observed_answer_for_exact_contract(
     delivery_messages.push(answer.to_string());
     loop_state.last_user_visible_respond = Some(answer.to_string());
     *finalizer_summary = Some(summary);
+}
+
+fn should_keep_latest_publishable_terminal_delivery_over_observed_projection(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    delivery: &str,
+    observed: &str,
+) -> bool {
+    let delivery = delivery.trim();
+    if delivery.is_empty()
+        || crate::finalize::parse_delivery_token(delivery).is_some()
+        || crate::finalize::looks_like_planner_artifact(delivery)
+        || crate::finalize::looks_like_internal_trace_artifact(delivery)
+    {
+        return false;
+    }
+    if route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+        || route.output_contract_marker_is_any(&[
+            crate::OutputSemanticKind::RawCommandOutput,
+            crate::OutputSemanticKind::CommandOutputSummary,
+        ])
+        || command_output_summary_allows_exact_observed_output(route)
+        || route_requires_observed_semantic_projection(route)
+    {
+        return false;
+    }
+    if !planned_delivery_is_publishable_model_language_answer(delivery)
+        || !delivery_is_structurally_richer_than_observed_projection(delivery, observed)
+        || !delivery_matches_latest_publishable_terminal(loop_state, delivery)
+    {
+        return false;
+    }
+    !route.output_contract.requires_content_evidence
+        || loop_has_structured_tool_evidence(loop_state)
+}
+
+fn loop_has_structured_tool_evidence(loop_state: &LoopState) -> bool {
+    loop_state.executed_step_results.iter().any(|step| {
+        step.is_ok()
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+            && step
+                .output
+                .as_deref()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .is_some_and(|output| serde_json::from_str::<serde_json::Value>(output).is_ok())
+    })
+}
+
+fn delivery_matches_latest_publishable_terminal(loop_state: &LoopState, delivery: &str) -> bool {
+    let delivery = delivery.trim();
+    if delivery.is_empty() {
+        return false;
+    }
+    let synthesis_matches = loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|synthesis| synthesis == delivery)
+        && latest_publishable_synthesis_step_matches(loop_state);
+    let respond_matches = latest_publishable_respond_step_output(loop_state)
+        .map(str::trim)
+        .is_some_and(|respond| respond == delivery);
+    synthesis_matches || respond_matches
 }
 
 fn exact_contract_fallback_observed_answer(

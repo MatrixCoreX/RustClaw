@@ -39,6 +39,67 @@ fn exact_contract_does_not_keep_rich_delivery_when_exact_delivery_is_required() 
 }
 
 #[test]
+fn exact_contract_keeps_latest_terminal_table_over_short_observed_projection() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(6);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"path_batch_facts","facts":[{"exists":true,"path":"README.md"}]}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","names":["archive","release_checklist.md","service_notes.md"],"path":"scripts/nl_tests/fixtures/device_local/docs"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_3",
+        "fs_basic",
+        r#"{"extra":{"action":"count_entries","count":2,"path":"scripts/nl_tests/fixtures/device_local/logs"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_4",
+        "config_basic",
+        r#"{"extra":{"action":"extract_field","field_path":"skills[?(@.name=='fs_basic')].planner_kind","path":"configs/skills_registry.toml","value":"tool","value_text":"tool"}}"#,
+    ));
+    let table = "```markdown\n| check | result |\n|---|---|\n| README.md | exists |\n| docs names | archive, release_checklist.md, service_notes.md |\n| logs child count | 2 |\n| fs_basic planner_kind | `tool` |\n```\n\nreadonly evidence summary";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_5", "synthesize_answer", table));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_6", "respond", table));
+    loop_state.last_user_visible_respond = Some(table.to_string());
+    loop_state.last_publishable_synthesis_output = Some(table.to_string());
+    let mut delivery_messages = vec![table.to_string()];
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_with_chat_finalizer();
+    route.resolved_intent = "multi target readonly inspection".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = "README.md; scripts/nl_tests/fixtures/device_local/docs; scripts/nl_tests/fixtures/device_local/logs; configs/skills_registry.toml".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    prefer_observed_answer_for_exact_contract(
+        &state,
+        "task-terminal-table-over-short-observed",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut delivery_messages,
+        &mut finalizer_summary,
+    );
+
+    assert_eq!(delivery_messages, vec![table]);
+    assert_eq!(loop_state.last_user_visible_respond.as_deref(), Some(table));
+}
+
+#[test]
 fn exact_contract_replaces_incomplete_directory_groups_synthesis_with_observed_groups() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(3);
