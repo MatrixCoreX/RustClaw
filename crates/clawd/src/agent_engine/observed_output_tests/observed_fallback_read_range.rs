@@ -89,6 +89,10 @@ fn observed_answer_language_compatibility_rejects_clear_request_language_mismatc
         "/home/guagua/rustclaw",
         "en",
     ));
+    assert!(observed_answer_language_compatible(
+        "model_io.log 122500780\nmodel_io.log.2026-07-07 110353651\nmodel_io.log.2026-07-02 70101903",
+        "zh-CN",
+    ));
 }
 
 #[test]

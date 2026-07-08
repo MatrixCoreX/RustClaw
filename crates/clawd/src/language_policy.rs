@@ -172,22 +172,45 @@ fn looks_like_language_neutral_artifact_token(token: &str) -> bool {
             .all(|ch| ch.is_ascii_uppercase())
 }
 
+fn looks_like_language_neutral_scalar_token(token: &str) -> bool {
+    let token = trim_language_neutral_token_edges(token);
+    if token.is_empty() {
+        return false;
+    }
+    let mut saw_digit = false;
+    for ch in token.chars() {
+        if ch.is_ascii_digit() {
+            saw_digit = true;
+            continue;
+        }
+        if !matches!(ch, '.' | ',' | ':' | '+' | '-' | '%' | '=') {
+            return false;
+        }
+    }
+    saw_digit
+}
+
 pub(crate) fn text_is_language_neutral_artifact_only(text: &str) -> bool {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return false;
     }
     let mut saw_token = false;
+    let mut saw_artifact = false;
     for token in trimmed.split_whitespace() {
         if token.trim().is_empty() {
             continue;
         }
         saw_token = true;
-        if !looks_like_language_neutral_artifact_token(token) {
+        if looks_like_language_neutral_artifact_token(token) {
+            saw_artifact = true;
+            continue;
+        }
+        if !looks_like_language_neutral_scalar_token(token) {
             return false;
         }
     }
-    saw_token
+    saw_token && saw_artifact
 }
 
 fn text_language_counts_without_neutral_artifacts(text: &str) -> TextLanguageCounts {
@@ -204,6 +227,9 @@ fn text_language_counts_without_neutral_artifacts(text: &str) -> TextLanguageCou
 }
 
 pub(crate) fn text_language_conflicts_with_hint(text: &str, language_hint: &str) -> bool {
+    if text_is_language_neutral_artifact_only(text) {
+        return false;
+    }
     let counts = text_language_counts(text);
     let hint = language_hint.trim().to_ascii_lowercase();
     if hint.starts_with("en") {
