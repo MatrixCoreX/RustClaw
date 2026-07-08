@@ -79,6 +79,10 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
     answer_messages: &mut Vec<String>,
     force_structured: bool,
 ) -> bool {
+    if final_answer_preserves_delivery_artifact(route_result, answer_text, answer_messages) {
+        journal.record_final_answer(answer_text.as_str());
+        return false;
+    }
     if route_preserves_generated_file_machine_report(route_result, answer_text, answer_messages) {
         journal.record_final_answer(answer_text.as_str());
         return false;
@@ -163,6 +167,30 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         ..Default::default()
     });
     true
+}
+
+fn final_answer_preserves_delivery_artifact(
+    route_result: &crate::RouteResult,
+    answer_text: &str,
+    answer_messages: &[String],
+) -> bool {
+    route_expects_delivery_artifact(route_result)
+        && (!crate::extract_delivery_file_tokens(answer_text).is_empty()
+            || answer_messages
+                .iter()
+                .any(|message| !crate::extract_delivery_file_tokens(message).is_empty()))
+}
+
+fn route_expects_delivery_artifact(route_result: &crate::RouteResult) -> bool {
+    route_result.wants_file_delivery
+        || route_result.output_contract.delivery_required
+        || matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+        || crate::evidence_policy::final_answer_shape_for_route(route_result).is_some_and(|shape| {
+            shape.class() == crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact
+        })
 }
 
 fn final_answer_preserves_weather_query_machine_report(
