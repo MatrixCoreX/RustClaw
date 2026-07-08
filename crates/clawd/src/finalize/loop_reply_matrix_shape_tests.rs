@@ -316,6 +316,31 @@ fn matrix_filesystem_find_entries_capability_ref_builds_path_list_without_semant
 }
 
 #[test]
+fn matrix_path_list_collects_grep_text_name_results_from_wrapped_extra() {
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"grep_text","query":"abcd","count":0,"match_count":0,"matches":[],"name_count":4,"name_results":["scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md","scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt","scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt","scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"]}}"#,
+    ));
+
+    let (answer, summary) = super::super::matrix_strict_list_observed_answer(&route, &loop_state)
+        .expect("path list should collect grep_text name_results");
+
+    assert_eq!(
+        answer,
+        "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"
+    );
+    assert_eq!(summary.format_ok, Some(true));
+    assert_eq!(summary.grounded_ok, Some(true));
+}
+
+#[test]
 fn matrix_file_name_list_prefers_wrapped_names_over_size_summary_synthesis() {
     let state = test_state();
     let task = claimed_task("task-matrix-file-name-list-wrapped-names");

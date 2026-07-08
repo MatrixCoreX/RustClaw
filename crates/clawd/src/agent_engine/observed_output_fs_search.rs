@@ -519,7 +519,7 @@ fn fs_search_grep_text_direct_answer_candidate(
                 return allow_multi_result_list.then(|| {
                     name_results
                         .into_iter()
-                        .take(3)
+                        .take(16)
                         .collect::<Vec<_>>()
                         .join("\n")
                 });

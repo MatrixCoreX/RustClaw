@@ -702,6 +702,7 @@ pub(super) fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<S
                 "files",
                 "entries",
                 "results",
+                "name_results",
                 "facts",
                 "rows",
                 "tables",
@@ -902,7 +903,7 @@ pub(super) fn canonical_evidence_fields_for_observed_item(
         field
             .split_once('[')
             .map(|(prefix, _)| normalized_field_leaf(prefix)),
-        Some("results" | "paths" | "candidates" | "entries")
+        Some("results" | "name_results" | "paths" | "candidates" | "entries")
     ) && item
         .get("excerpt")
         .and_then(Value::as_str)

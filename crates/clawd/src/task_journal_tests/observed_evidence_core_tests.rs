@@ -990,6 +990,59 @@ fn generic_path_content_wrapped_find_name_result_path_satisfies_path_evidence() 
 }
 
 #[test]
+fn generic_path_content_name_results_paths_satisfy_path_evidence() {
+    let mut journal = TaskJournal::for_task(
+        "task-generic-path-name-results",
+        "ask",
+        "return paths matched by structured name search",
+    );
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    journal.record_route_result(&route);
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "grep_text",
+                    "root": "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3",
+                    "query": "abcd",
+                    "match_count": 0,
+                    "matches": [],
+                    "name_count": 4,
+                    "name_patterns": ["abcd"],
+                    "name_results": [
+                        "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md",
+                        "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt",
+                        "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt",
+                        "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"
+                    ]
+                }
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let coverage = evidence_coverage_for_route(&route, &journal);
+
+    assert!(coverage.is_complete(), "coverage: {coverage:?}");
+    assert!(coverage.observed_canonical.contains("path"));
+    assert!(coverage.observed_canonical.contains("candidates"));
+    assert!(!coverage
+        .missing_evidence
+        .iter()
+        .any(|field| field == "path"));
+}
+
+#[test]
 fn file_names_content_search_paths_satisfy_candidate_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-file-names-grep-candidates",
