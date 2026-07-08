@@ -847,7 +847,10 @@ fn inventory_dir_can_use_direct_names(
     {
         return true;
     }
-    if has_machine_names && latest_plan_requests_names_only_listing(loop_state) {
+    if has_machine_names
+        && route_allows_latest_plan_names_direct(route)
+        && latest_plan_requests_names_only_listing(loop_state)
+    {
         return true;
     }
     (is_plain_act
@@ -858,6 +861,16 @@ fn inventory_dir_can_use_direct_names(
             )
         }))
         && allow_raw_listing_direct_answer
+}
+
+fn route_allows_latest_plan_names_direct(route: Option<&crate::RouteResult>) -> bool {
+    let Some(route) = route else {
+        return false;
+    };
+    matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Strict | crate::OutputResponseShape::Scalar
+    )
 }
 
 fn latest_plan_requests_names_only_listing(loop_state: &LoopState) -> bool {

@@ -1,4 +1,8 @@
-use super::{normalize_skill_arg_aliases, resolve_arg_string, rewrite_args_with_auto_locator_path};
+use super::{
+    normalize_skill_arg_aliases, resolve_arg_string, resolve_arg_value,
+    rewrite_args_with_auto_locator_path,
+};
+use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{agent_engine::LoopState, IntentOutputContract, OutputLocatorKind};
 use serde_json::json;
 use std::fs;
@@ -32,6 +36,18 @@ impl Drop for TempDirGuard {
     }
 }
 
+fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
+    StepExecutionResult {
+        step_id: step_id.to_string(),
+        skill: skill.to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(output.to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    }
+}
+
 #[test]
 fn resolve_arg_string_replaces_trimmed_double_brace_placeholders() {
     let mut loop_state = LoopState::new(1);
@@ -50,6 +66,57 @@ fn resolve_arg_string_replaces_trimmed_double_brace_placeholders() {
         resolve_arg_string("/logs/{{last_output.0}}", &loop_state),
         "/logs/act_plan.log"
     );
+}
+
+#[test]
+fn resolve_arg_value_maps_file_placeholder_path_segment_from_latest_listing() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","path":"logs","resolved_path":"/workspace/logs","entries":[{"name":"clawd.run.log","path":"logs/clawd.run.log"},{"name":"model_io.log","path":"logs/model_io.log"}]}"#,
+    ));
+    let args = json!({
+        "action": "read_text_range",
+        "path": "/workspace/logs/<file2>",
+        "note": "keep <file1> as prose"
+    });
+
+    let resolved = resolve_arg_value(&args, &loop_state);
+
+    assert_eq!(
+        resolved.get("path").and_then(|value| value.as_str()),
+        Some("logs/model_io.log")
+    );
+    assert_eq!(
+        resolved.get("note").and_then(|value| value.as_str()),
+        Some("keep <file1> as prose")
+    );
+}
+
+#[test]
+fn resolve_arg_value_maps_file_placeholder_array_items_from_latest_listing_names() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "system_basic",
+        r#"{"action":"inventory_dir","path":"document","resolved_path":"/workspace/document","names":["a.md","b.md"]}"#,
+    ));
+    let args = json!({
+        "paths": ["<file1>", "<file2>"],
+        "labels": ["<file1>", "<file2>"]
+    });
+
+    let resolved = resolve_arg_value(&args, &loop_state);
+
+    assert_eq!(
+        resolved.get("paths"),
+        Some(&json!([
+            "/workspace/document/a.md",
+            "/workspace/document/b.md"
+        ]))
+    );
+    assert_eq!(resolved.get("labels"), Some(&json!(["<file1>", "<file2>"])));
 }
 
 #[test]
