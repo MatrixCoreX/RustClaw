@@ -139,6 +139,9 @@ pub(crate) fn should_verify_answer(
     if terminal_answer_only_can_skip_answer_verifier(route_result, journal) {
         return false;
     }
+    if structured_machine_projection_can_skip_answer_verifier(route_result, journal, candidate) {
+        return false;
+    }
     if pure_chat_agent_loop_submode_can_skip_answer_verifier(route_result, journal) {
         return false;
     }

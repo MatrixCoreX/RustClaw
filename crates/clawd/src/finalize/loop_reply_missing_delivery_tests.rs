@@ -82,6 +82,66 @@ async fn observed_execution_without_delivery_reply_omits_raw_summary() {
 }
 
 #[tokio::test]
+async fn observed_execution_without_delivery_uses_structured_dry_run_projection() {
+    let state = test_state();
+    let task = claimed_task("task-missing-delivery-dry-run-projection");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "audio_synthesize",
+        r#"{"text":"AUDIO_SYNTHESIZE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"speech-2.8-turbo","model_kind":"dry_run","output_path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"}],"outputs":[]}}"#,
+    ));
+    let mut route = free_route_result();
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = observed_execution_without_publishable_delivery_reply(
+        &state,
+        &task,
+        "plan dry-run audio output",
+        &loop_state,
+        Some(&ctx),
+        None,
+        "no publishable final answer was produced",
+    )
+    .await
+    .expect("observed execution reply");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert!(reply.text.contains("dry_run=true"), "reply: {}", reply.text);
+    assert!(
+        reply.text.contains("provider=minimax"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("model=speech-2.8-turbo"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply
+            .text
+            .contains("output_path=/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains(
+            r#"planned_outputs=[{"path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3","type":"audio_file"}]"#
+        ),
+        "reply: {}",
+        reply.text
+    );
+}
+
+#[tokio::test]
 async fn observed_execution_without_delivery_prefers_finalizer_clarify_question() {
     let state = test_state();
     let task = claimed_task("task-missing-delivery-clarify");

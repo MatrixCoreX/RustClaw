@@ -391,6 +391,19 @@ pub(super) fn backfill_delivery_from_last_outputs(
         }
     }
 
+    if loop_state.delivery_messages.is_empty()
+        && structured_dry_run_generated_output_present(loop_state)
+    {
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "final_result_defer_structured_dry_run_projection",
+            "deferred",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return;
+    }
+
     if loop_state.delivery_messages.is_empty() {
         if backfill_synthesis_for_content_evidence_delivery(task, loop_state, agent_run_context) {
             return;
@@ -506,6 +519,49 @@ pub(super) fn backfill_delivery_from_last_outputs(
             }
         }
     }
+}
+
+fn structured_dry_run_generated_output_present(loop_state: &LoopState) -> bool {
+    loop_state.executed_step_results.iter().rev().any(|step| {
+        if !step.is_ok()
+            || matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+        {
+            return false;
+        }
+        let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            return false;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+            return false;
+        };
+        let extra = value.get("extra").unwrap_or(&value);
+        extra.get("dry_run").and_then(serde_json::Value::as_bool) == Some(true)
+            && (json_string_field_present(extra.get("output_path"))
+                || planned_output_path_present(extra.get("planned_outputs")))
+    })
+}
+
+fn json_string_field_present(value: Option<&serde_json::Value>) -> bool {
+    value
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+}
+
+fn planned_output_path_present(value: Option<&serde_json::Value>) -> bool {
+    value
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|item| json_string_field_present(item.get("path")))
 }
 
 fn backfill_synthesis_for_content_evidence_delivery(
