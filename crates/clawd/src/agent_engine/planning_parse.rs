@@ -192,8 +192,8 @@ pub(super) async fn parse_single_plan_actions(
         step_values.extend(extract_xml_tool_call_steps(raw));
     }
     if step_values.is_empty() {
-        if let Some(action) = recover_malformed_respond_action(raw) {
-            return Some(vec![action]);
+        if let Some(actions) = recover_malformed_terminal_actions(raw) {
+            return Some(actions);
         }
     }
     if step_values.is_empty() {
@@ -223,32 +223,65 @@ pub(super) async fn parse_single_plan_actions(
     }
 }
 
-fn recover_malformed_respond_action(raw: &str) -> Option<AgentAction> {
+fn recover_malformed_terminal_actions(raw: &str) -> Option<Vec<AgentAction>> {
+    let (respond_type_start, respond) = recover_malformed_respond_action(raw)?;
+    let mut actions = Vec::new();
+    if let Some(synthesize) = recover_malformed_synthesize_answer_before(raw, respond_type_start) {
+        actions.push(synthesize);
+    }
+    actions.push(respond);
+    Some(actions)
+}
+
+fn recover_malformed_respond_action(raw: &str) -> Option<(usize, AgentAction)> {
     if !raw.contains("\"steps\"") && !raw.contains("\"actions\"") {
         return None;
     }
-    if !json_string_field_equals(raw, "type", "respond") {
-        return None;
+    let mut respond_type_start = None;
+    let mut cursor = 0usize;
+    while let Some(start) = json_string_field_value_start_from(raw, "type", cursor) {
+        let value = recover_json_string_until_next_quote(&raw[start..])?;
+        let next_cursor = start.saturating_add(value.len()).saturating_add(1);
+        if value.trim().eq_ignore_ascii_case("respond") {
+            respond_type_start = Some(start);
+        }
+        cursor = next_cursor;
     }
-    let content_start = json_string_field_value_start(raw, "content")?;
+    let respond_type_start = respond_type_start?;
+    let content_start = json_string_field_value_start_from(raw, "content", respond_type_start)?;
     let content = recover_malformed_json_tail_string(&raw[content_start..])?;
     let content = decode_json_like_string(&content);
-    (!content.trim().is_empty()).then_some(AgentAction::Respond { content })
+    (!content.trim().is_empty()).then_some((respond_type_start, AgentAction::Respond { content }))
 }
 
-fn json_string_field_equals(raw: &str, field: &str, expected: &str) -> bool {
-    let Some(start) = json_string_field_value_start(raw, field) else {
-        return false;
-    };
-    let Some(value) = recover_json_string_until_next_quote(&raw[start..]) else {
-        return false;
-    };
-    value.trim().eq_ignore_ascii_case(expected)
+fn recover_malformed_synthesize_answer_before(raw: &str, end: usize) -> Option<AgentAction> {
+    let mut synthesize_type_start = None;
+    let mut cursor = 0usize;
+    while let Some(start) = json_string_field_value_start_from(raw, "type", cursor) {
+        if start >= end {
+            break;
+        }
+        let value = recover_json_string_until_next_quote(&raw[start..])?;
+        let next_cursor = start.saturating_add(value.len()).saturating_add(1);
+        if value.trim().eq_ignore_ascii_case("synthesize_answer") {
+            synthesize_type_start = Some(start);
+        }
+        cursor = next_cursor;
+    }
+    let synthesize_type_start = synthesize_type_start?;
+    let refs_start =
+        json_array_field_value_start_from(raw, "evidence_refs", synthesize_type_start, end)?;
+    let refs_raw = recover_json_array_slice(&raw[refs_start..end])?;
+    let refs = serde_json::from_str::<Vec<String>>(refs_raw).ok()?;
+    Some(AgentAction::SynthesizeAnswer {
+        evidence_refs: refs,
+    })
 }
 
-fn json_string_field_value_start(raw: &str, field: &str) -> Option<usize> {
+fn json_string_field_value_start_from(raw: &str, field: &str, from: usize) -> Option<usize> {
     let marker = format!("\"{field}\"");
-    for (idx, _) in raw.match_indices(&marker) {
+    for (rel_idx, _) in raw[from..].match_indices(&marker) {
+        let idx = from + rel_idx;
         let mut cursor = idx + marker.len();
         cursor = skip_ascii_ws(raw, cursor);
         if raw[cursor..].chars().next()? != ':' {
@@ -258,6 +291,30 @@ fn json_string_field_value_start(raw: &str, field: &str) -> Option<usize> {
         cursor = skip_ascii_ws(raw, cursor);
         if raw[cursor..].chars().next()? == '"' {
             return Some(cursor + '"'.len_utf8());
+        }
+    }
+    None
+}
+
+fn json_array_field_value_start_from(
+    raw: &str,
+    field: &str,
+    from: usize,
+    to: usize,
+) -> Option<usize> {
+    let marker = format!("\"{field}\"");
+    let search_end = to.min(raw.len());
+    for (rel_idx, _) in raw[from..search_end].match_indices(&marker) {
+        let idx = from + rel_idx;
+        let mut cursor = idx + marker.len();
+        cursor = skip_ascii_ws(raw, cursor);
+        if raw[cursor..].chars().next()? != ':' {
+            continue;
+        }
+        cursor += ':'.len_utf8();
+        cursor = skip_ascii_ws(raw, cursor);
+        if cursor < search_end && raw[cursor..].chars().next()? == '[' {
+            return Some(cursor);
         }
     }
     None
@@ -286,6 +343,39 @@ fn recover_json_string_until_next_quote(raw: &str) -> Option<String> {
         }
         if ch == '"' {
             return Some(raw[..idx].to_string());
+        }
+    }
+    None
+}
+
+fn recover_json_array_slice(raw: &str) -> Option<&str> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (idx, ch) in raw.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '[' => depth += 1,
+            ']' => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&raw[..=idx]);
+                }
+            }
+            _ => {}
         }
     }
     None
