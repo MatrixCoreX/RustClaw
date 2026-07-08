@@ -887,6 +887,72 @@ planner_kind = "tool"
 }
 
 #[test]
+fn content_excerpt_structured_scalar_field_rewrites_broad_read_to_read_field() {
+    let root = TempDirGuard::new("content_excerpt_structured_scalar_broad_read");
+    let registry = root.path.join("skills_registry.toml");
+    fs::write(
+        &registry,
+        r#"[[skills]]
+name = "run_cmd"
+group = "system"
+planner_kind = "tool"
+
+[[skills]]
+name = "fs_basic"
+group = "filesystem"
+planner_kind = "tool"
+"#,
+    )
+    .expect("write registry");
+    let registry_path = registry.display().to_string();
+    let mut state = test_state_with_enabled_skills(&["config_basic", "fs_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = registry_path.clone();
+    route.resolved_intent =
+        "Locate the run_cmd configuration in skills_registry.toml and report planner_kind."
+            .to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": registry_path,
+                "mode": "head",
+                "n": 500,
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "Find run_cmd planner_kind in configs/skills_registry.toml.",
+        None,
+        actions,
+    );
+
+    let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
+    assert_eq!(
+        args.get("field_path").and_then(Value::as_str),
+        Some("run_cmd.planner_kind")
+    );
+    assert!(
+        normalized
+            .iter()
+            .all(|action| !planned_call_is(action, "fs_basic", "read_text_range")),
+        "normalized actions: {normalized:?}"
+    );
+}
+
+#[test]
 fn rustclaw_config_validation_without_profile_keeps_validate_action() {
     let mut route = base_route_result();
     route.resolved_intent =

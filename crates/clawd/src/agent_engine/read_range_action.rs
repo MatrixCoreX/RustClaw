@@ -1215,22 +1215,37 @@ pub(super) fn rewrite_structured_scalar_field_read_plan_to_read_field(
     }) else {
         return actions;
     };
+    let (path, field_path) =
+        resolve_structured_scalar_read_target_and_field(state, route, &path, &field_path);
+    let selector_resolves_scalar =
+        structured_field_selector_resolves_scalar_value(state, &path, &field_path);
     if !matches!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
     ) && !actions.iter().any(action_is_readonly_config_observation)
+        && !selector_resolves_scalar
     {
         return actions;
     }
 
-    let (path, field_path) =
-        resolve_structured_scalar_read_target_and_field(state, route, &path, &field_path);
     info!(
         "plan_rewrite_structured_scalar_field_read_to_config_basic path={} field={}",
         crate::truncate_for_log(&path),
         crate::truncate_for_log(&field_path)
     );
     vec![config_basic_read_field_action(path, field_path)]
+}
+
+pub(super) fn structured_field_selector_resolves_scalar_value(
+    state: &AppState,
+    path: &str,
+    field_path: &str,
+) -> bool {
+    if structured_field_path_resolves_scalar_value(path, field_path) {
+        return true;
+    }
+    let resolved = resolve_workspace_path(&state.skill_rt.workspace_root, path);
+    structured_field_path_resolves_scalar_value(resolved.to_string_lossy().as_ref(), field_path)
 }
 
 pub(super) fn rewrite_scalar_candidate_respond_to_structured_field_read(
