@@ -24,8 +24,9 @@ use super::{
     structured_field_value_contract_from_quantity_comparison,
     structured_identifier_presence_contract_from_surface,
     surface_has_directory_scoped_filename_lookup, workspace_direct_child_stem_locator_from_text,
-    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputScalarCountTargetKind, OutputSemanticKind, ScheduleKind, TargetTaskPolicy, TurnType,
+    workspace_root_name_token_present_in_text, IntentOutputContract, OutputDeliveryIntent,
+    OutputLocatorKind, OutputResponseShape, OutputScalarCountTargetKind, OutputSemanticKind,
+    ScheduleKind, TargetTaskPolicy, TurnType,
 };
 
 const FRESH_EVIDENCE_CONTRACT_MARKERS: &[&str] = &[
@@ -661,6 +662,16 @@ pub(super) fn apply_current_turn_structural_contract_repair(
             output_contract.locator_kind = locator.locator_kind;
             output_contract.locator_hint = locator.locator_hint;
             reason = reason.or(Some("structured_locator_contract_repair"));
+        } else if workspace_root_name_summary_contract_from_surface(
+            output_contract,
+            req,
+            req_surface,
+            workspace_root,
+        ) {
+            output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+            output_contract.locator_hint = workspace_root.display().to_string();
+            output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+            reason = reason.or(Some("current_workspace_root_name_summary_contract_repair"));
         } else if let Some(locator_hint) =
             workspace_direct_child_stem_locator_from_text(req, workspace_root)
         {
@@ -695,6 +706,28 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     }
 
     reason
+}
+
+fn workspace_root_name_summary_contract_from_surface(
+    output_contract: &IntentOutputContract,
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
+) -> bool {
+    output_contract.requires_content_evidence
+        && !output_contract.delivery_required
+        && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        && output_contract.semantic_kind_is_unclassified()
+        && matches!(
+            output_contract.response_shape,
+            OutputResponseShape::Free | OutputResponseShape::OneSentence
+        )
+        && req_surface.inline_json_shape.is_none()
+        && !req_surface.has_explicit_path_or_url()
+        && req_surface.locator_target_pair.is_none()
+        && !req_surface.has_delivery_token_reference()
+        && !req_surface.has_structured_target_refinement()
+        && workspace_root_name_token_present_in_text(req, workspace_root)
 }
 
 pub(super) fn apply_fs_basic_lifecycle_machine_contract_repair(

@@ -19,6 +19,16 @@ pub(super) fn workspace_direct_child_stem_locator_from_text(
     selected.map(|path| path.display().to_string())
 }
 
+pub(super) fn workspace_root_name_token_present_in_text(text: &str, workspace_root: &Path) -> bool {
+    let Some(root_name) = workspace_root.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    if root_name.trim().is_empty() {
+        return false;
+    }
+    bare_stem_tokens(text).any(|token| token.eq_ignore_ascii_case(root_name))
+}
+
 fn bare_stem_tokens(text: &str) -> impl Iterator<Item = &str> {
     text.split_whitespace()
         .flat_map(|token| token.split(is_stem_delimiter))

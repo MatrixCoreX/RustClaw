@@ -22,7 +22,9 @@ use scalar_count_filter::normalize_scalar_count_filter_contract_field;
 
 #[path = "intent_router_workspace_locator.rs"]
 mod workspace_locator;
-use workspace_locator::workspace_direct_child_stem_locator_from_text;
+use workspace_locator::{
+    workspace_direct_child_stem_locator_from_text, workspace_root_name_token_present_in_text,
+};
 
 #[path = "intent_router_missing_target.rs"]
 mod missing_target;

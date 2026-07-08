@@ -267,6 +267,56 @@ fn structural_contract_repair_keeps_workspace_summary_on_workspace_root_name() {
 }
 
 #[test]
+fn structural_contract_repair_keeps_root_name_summary_off_same_name_child_file() {
+    let parent = std::env::temp_dir().join(format!(
+        "rustclaw_structural_root_name_summary_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+    let workspace_root = parent.join("rustclaw");
+    std::fs::create_dir_all(&workspace_root).expect("workspace root");
+    std::fs::write(workspace_root.join("rustclaw"), "#!/usr/bin/env bash\n")
+        .expect("same-name child file");
+    let req = "把 RustClaw 当成当前项目来介绍，先查证项目 README 和工作区配置，再写三句话";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::None,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::None,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
+    };
+    let reason = super::apply_current_turn_structural_contract_repair(
+        "",
+        &mut contract,
+        req,
+        &surface,
+        &workspace_root,
+        None,
+        None,
+    );
+
+    assert_eq!(
+        reason,
+        Some("current_workspace_root_name_summary_contract_repair")
+    );
+    assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+    assert_eq!(contract.locator_hint, workspace_root.display().to_string());
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::WorkspaceProjectSummary
+    );
+    std::fs::remove_dir_all(parent).ok();
+}
+
+#[test]
 fn structural_contract_repair_preserves_chat_workspace_name_without_evidence() {
     let req = "用一句话介绍 RustClaw 是什么，不要查询文件";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
