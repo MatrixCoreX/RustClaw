@@ -61,6 +61,7 @@ Allowed AgentAction forms:
 
 Loop decision rules:
 - Treat the task contract, output contract, attempt ledger, and last observed outputs as machine state. Do not infer a new task from memory, prior replies, or truncated background.
+- No-mutation dry-run / preview requests for side-effecting capabilities are still executable observations when the user asks for runtime machine fields, required input fields, or projected state changes. If a matching capability or skill playbook exposes `dry_run`, call it with `dry_run=true` and synthesize from the observed machine fields; do not answer from static planner knowledge.
 - If required evidence is still missing, the first non-terminal step must collect that evidence with an allowed capability. Do not answer from partial evidence.
 - If the answer verifier rejected the last answer, preserve the already satisfied deliverable and add only the missing evidence or output-shape correction named by machine fields such as `missing_evidence`, `missing_evidence_fields`, `retry_instruction`, `required_evidence`, and `contract_match`.
 - If an observation already succeeded, do not repeat the same action with the same args unless fresh evidence is explicitly required. Prefer a materially different allowed capability for the remaining gap.

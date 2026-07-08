@@ -16,6 +16,7 @@
 - `cancel_one` - Cancel one unfinished task by 1-based index from the current active-task ordering.
 - `resume` - Mark an existing checkpointed task due for recovery by stable `task_id`.
 - `pause` - Delay an existing waiting/background checkpoint by stable `task_id`.
+- Cancellation dry-runs are executable observations, not static prose: use `cancel_all` with `dry_run=true` when no specific index is supplied, or `cancel_one` with both `index` and `dry_run=true` when the user supplied a numbered task.
 
 ## Parameter Contract
 
@@ -35,6 +36,7 @@ Notes:
 
 - Active-task ordering is: `running` first, then `queued`, then oldest first.
 - The control task itself is excluded automatically, so users do not accidentally cancel the task that is serving the request.
+- For a no-mutation cancel preview, `dry_run=true` returns the required cancellation input fields and projected lifecycle fields without calling the cancel API mutation path.
 
 ## Output Contract
 
@@ -45,6 +47,7 @@ Notes:
 - `get` returns a compact JSON text and `extra` object with `action=get`, `task_id`, `db_status`, and `lifecycle`.
 - `cancel_all` returns `canceled_count`, `requested_count`, `items`, and `field_value.task_ids`.
 - `cancel_one` returns `canceled_task` and `field_value.task_id`.
+- `cancel_all` / `cancel_one` with `dry_run=true` returns `status=dry_run`, `would_mutate=false`, `required_fields`, and `result_projection_fields` containing `state`, `can_cancel`, `can_poll`, and `db_status`.
 - `resume` returns the local task-control API response under `response`, plus projected `task_id`, `db_status`, `lifecycle`, and `field_value`.
 - `pause` returns the local task-control API response under `response`, plus projected `task_id`, `db_status`, `lifecycle`, and `field_value`.
 

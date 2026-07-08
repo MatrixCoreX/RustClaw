@@ -649,16 +649,19 @@ Skill behavior notes (file/path):
 - Forbid unsupported bulk/global service operations.
 
 ### task_control
-- action: `list|list_with_first_detail|get|cancel_all|cancel_one`
+- action: `list|list_with_first_detail|get|cancel_all|cancel_one|resume|pause`
 - required by action:
   - `list`: none
   - `list_with_first_detail`: none
   - `get`: `task_id`
   - `cancel_all`: none
   - `cancel_one`: `index` (1-based positive integer)
+  - `resume`: `task_id`
+  - `pause`: `task_id`
 - scope: only the current user's unfinished tasks in the current chat (`running` + `queued`)
 - use this skill when the user asks to view current tasks, running tasks, queued tasks, task lifecycle fields, or asks to cancel/end current tasks
 - prefer `list_with_first_detail` when the user asks whether lifecycle fields such as `state`, `can_poll`, `can_cancel`, `checkpoint_id`, `last_heartbeat_ts`, or `db_status` exist
+- for no-mutation cancellation previews, field-contract checks, or dry-run cancellation boundary checks, call `task_control.cancel_dry_run` (or direct `task_control` with `action="cancel_all", dry_run=true` when using a concrete skill envelope) and synthesize from the observed `status=dry_run`, `would_mutate=false`, `required_fields`, and `result_projection_fields`; do not answer these from static planner knowledge
 - use `get` when a stable `task_id` is already known and the user asks for that task's status/detail/lifecycle fields
 - use `cancel_one` when the user explicitly references a numbered task like "task 2" / "the second task"
 - do not use `health_check` or `service_control` for chat task listing/canceling
@@ -667,6 +670,7 @@ Skill behavior notes (file/path):
 - Base shape: `{"type":"call_skill","skill":"task_control","args":{"action":"..."}}`
 - `cancel_one` requires `index >= 1`
 - Prefer `list` for simple readonly queue queries and `list_with_first_detail` for lifecycle field visibility queries
+- For cancel dry-runs, set `dry_run=true`; no specific task index means `cancel_all` dry-run, not a real cancellation
 - For cancel requests without a specific number, prefer `cancel_all`
 
 ### system_basic (supplementary — runtime/system facts and compatibility backing)
