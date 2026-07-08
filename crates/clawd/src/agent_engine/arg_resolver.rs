@@ -183,6 +183,7 @@ pub(super) fn normalize_skill_arg_aliases(normalized_skill: &str, args: &mut Val
     }
     match normalized_skill {
         "audio_synthesize" => normalize_audio_synthesize_arg_aliases(args),
+        "browser_web" => normalize_browser_web_arg_aliases(args),
         "config_edit" => normalize_config_edit_arg_aliases(args),
         "fs_search" => normalize_fs_search_arg_aliases(args),
         "image_generate" => normalize_image_generate_arg_aliases(args),
@@ -270,6 +271,108 @@ fn normalize_audio_synthesize_arg_aliases(args: &mut Value) -> bool {
         return false;
     };
     move_string_alias_if_missing(obj, "text", &["input", "prompt", "content"])
+}
+
+fn normalize_browser_web_arg_aliases(args: &mut Value) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    let action = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    let mut changed = false;
+    if matches!(action.as_str(), "search_page" | "search_extract") {
+        changed |= move_value_alias_if_missing(obj, "top_k", &["max_results"]);
+        changed |= normalize_integer_range_field(obj, "top_k", 1, 20);
+    }
+    if action == "search_extract" {
+        changed |= move_value_alias_if_missing(obj, "extract_top_n", &["max_pages"]);
+        changed |= normalize_integer_range_field(obj, "extract_top_n", 1, 10);
+    }
+    if action == "open_extract" {
+        changed |= normalize_integer_range_field(obj, "max_pages", 1, 10);
+    }
+    if matches!(action.as_str(), "open_extract" | "search_extract") {
+        changed |= normalize_integer_range_field(obj, "max_text_chars", 100, 200_000);
+        changed |= normalize_integer_range_field(obj, "min_content_chars", 20, 10_000);
+        changed |= normalize_browser_web_content_mode(obj);
+        changed |= normalize_browser_web_wait_until(obj);
+    }
+    changed
+}
+
+fn normalize_browser_web_content_mode(obj: &mut serde_json::Map<String, Value>) -> bool {
+    let Some(value) = obj.get("content_mode").and_then(Value::as_str) else {
+        return false;
+    };
+    let token = value.trim().to_ascii_lowercase().replace('-', "_");
+    let normalized = match token.as_str() {
+        "clean" => "clean",
+        "raw" | "html" | "source" => "raw",
+        _ => "clean",
+    };
+    if value == normalized {
+        return false;
+    }
+    obj.insert(
+        "content_mode".to_string(),
+        Value::String(normalized.to_string()),
+    );
+    true
+}
+
+fn normalize_browser_web_wait_until(obj: &mut serde_json::Map<String, Value>) -> bool {
+    let Some(value) = obj.get("wait_until").and_then(Value::as_str) else {
+        return false;
+    };
+    let token = value.trim().to_ascii_lowercase().replace(['-', '_'], "");
+    let normalized = match token.as_str() {
+        "domcontentloaded" => "domcontentloaded",
+        "load" | "loaded" | "pageload" => "load",
+        "networkidle" | "networkidled" | "idle" => "networkidle",
+        _ => "domcontentloaded",
+    };
+    if value == normalized {
+        return false;
+    }
+    obj.insert(
+        "wait_until".to_string(),
+        Value::String(normalized.to_string()),
+    );
+    true
+}
+
+fn normalize_integer_range_field(
+    obj: &mut serde_json::Map<String, Value>,
+    field: &str,
+    min: i64,
+    max: i64,
+) -> bool {
+    let Some(value) = obj.get(field).and_then(integer_value) else {
+        return false;
+    };
+    let normalized = value.clamp(min, max);
+    if normalized == value {
+        return false;
+    }
+    obj.insert(
+        field.to_string(),
+        Value::Number(serde_json::Number::from(normalized)),
+    );
+    true
+}
+
+fn integer_value(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok())),
+        Value::String(value) => value.trim().parse::<i64>().ok(),
+        _ => None,
+    }
 }
 
 fn normalize_video_generate_arg_aliases(args: &mut Value) -> bool {

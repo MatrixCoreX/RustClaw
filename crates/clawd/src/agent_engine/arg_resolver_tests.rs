@@ -222,6 +222,80 @@ fn fs_search_aliases_normalize_to_supported_contract() {
 }
 
 #[test]
+fn browser_web_open_extract_numeric_ranges_normalize_to_skill_contract() {
+    let mut args = json!({
+        "action": "open_extract",
+        "url": "https://example.com",
+        "max_pages": 0,
+        "max_text_chars": 0,
+        "min_content_chars": 0,
+        "content_mode": "title",
+        "wait_until": "network_idle"
+    });
+
+    assert!(normalize_skill_arg_aliases("browser_web", &mut args));
+
+    assert_eq!(args.get("max_pages").and_then(|v| v.as_i64()), Some(1));
+    assert_eq!(
+        args.get("max_text_chars").and_then(|v| v.as_i64()),
+        Some(100)
+    );
+    assert_eq!(
+        args.get("min_content_chars").and_then(|v| v.as_i64()),
+        Some(20)
+    );
+    assert_eq!(
+        args.get("content_mode").and_then(|v| v.as_str()),
+        Some("clean")
+    );
+    assert_eq!(
+        args.get("wait_until").and_then(|v| v.as_str()),
+        Some("networkidle")
+    );
+}
+
+#[test]
+fn browser_web_search_aliases_normalize_to_skill_contract() {
+    let mut args = json!({
+        "action": "search_extract",
+        "query": "rustclaw",
+        "max_results": 0,
+        "max_pages": 99,
+        "min_content_chars": "0"
+    });
+
+    assert!(normalize_skill_arg_aliases("browser_web", &mut args));
+
+    assert_eq!(args.get("top_k").and_then(|v| v.as_i64()), Some(1));
+    assert_eq!(args.get("extract_top_n").and_then(|v| v.as_i64()), Some(10));
+    assert_eq!(
+        args.get("min_content_chars").and_then(|v| v.as_i64()),
+        Some(20)
+    );
+}
+
+#[test]
+fn browser_web_open_extract_raw_mode_alias_normalizes_to_skill_contract() {
+    let mut args = json!({
+        "action": "open_extract",
+        "url": "https://example.com",
+        "content_mode": "html",
+        "wait_until": "page-load"
+    });
+
+    assert!(normalize_skill_arg_aliases("browser_web", &mut args));
+
+    assert_eq!(
+        args.get("content_mode").and_then(|v| v.as_str()),
+        Some("raw")
+    );
+    assert_eq!(
+        args.get("wait_until").and_then(|v| v.as_str()),
+        Some("load")
+    );
+}
+
+#[test]
 fn image_edit_prompt_alias_normalizes_to_instruction() {
     let mut args = json!({
         "image": "https://example.test/rust.png",
