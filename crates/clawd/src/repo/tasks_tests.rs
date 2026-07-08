@@ -845,7 +845,8 @@ fn get_task_query_record_exposes_lifecycle_projection() {
             "resume_reason": "provider_gap_retry_window",
             "next_check_after": 1781800300,
             "checkpoint_id": "ckpt-query"
-        }
+        },
+        "task_checkpoint": checkpoint_json("ckpt-query", vec!["write_file:tmp/a.txt"])
     });
     insert_task(
         &state,
@@ -897,11 +898,26 @@ fn get_task_query_record_exposes_lifecycle_projection() {
     assert_eq!(lifecycle["claim_attempt"], 2);
     assert_eq!(lifecycle["attempt_id"], 2);
     assert_eq!(lifecycle["claimed_at"], 1200);
+    assert_eq!(lifecycle["resume_directive"], "run_next_planner_round");
+    let directive_payload = &lifecycle["resume_directive_payload"];
+    assert_eq!(directive_payload["checkpoint_id"], "ckpt-query");
+    assert_eq!(directive_payload["completed_side_effect_count"], 1);
+    assert_eq!(directive_payload["requires_idempotency_guard"], true);
 }
 
 #[test]
 fn list_active_tasks_exposes_lifecycle_projection() {
     let state = state_with_tasks_table();
+    let mut checkpoint = checkpoint_json("ckpt-active", vec![]);
+    checkpoint["resume_entrypoint"] = json!("poll_async_job");
+    checkpoint["pending_async_job"] = json!({
+        "job_id": "job-17",
+        "status": "running",
+        "poll_after_seconds": 9,
+        "expires_at": 4102444800_i64,
+        "cancel_ref": "cancel:job-17",
+        "message_key": "tool.job.running"
+    });
     let progress = json!({
         "task_lifecycle": {
             "state": "background",
@@ -909,7 +925,8 @@ fn list_active_tasks_exposes_lifecycle_projection() {
             "next_check_after": 1781800400,
             "checkpoint_id": "ckpt-active",
             "pending_job_ref": "job-17"
-        }
+        },
+        "task_checkpoint": checkpoint
     });
     insert_task(&state, "task-active-1", "running", Some(&progress), 2222);
     set_task_lease(&state, "task-active-1", "worker:test-active", 2400, 3, 2200);
@@ -926,6 +943,12 @@ fn list_active_tasks_exposes_lifecycle_projection() {
     assert_eq!(lifecycle["resume_reason"], "async_job_poll");
     assert_eq!(lifecycle["reason_code"], "async_job_poll");
     assert_eq!(lifecycle["pending_job_ref"], "job-17");
+    assert_eq!(lifecycle["poll_ref"], "job-17");
+    assert_eq!(lifecycle["resume_directive"], "poll_async_job");
+    let directive_payload = &lifecycle["resume_directive_payload"];
+    assert_eq!(directive_payload["checkpoint_id"], "ckpt-active");
+    assert_eq!(directive_payload["job_id"], "job-17");
+    assert_eq!(directive_payload["cancel_ref"], "cancel:job-17");
     assert_eq!(lifecycle["last_heartbeat_ts"], 2222);
     assert_eq!(lifecycle["heartbeat_at"], 2222);
     assert_eq!(lifecycle["lease_owner"], "worker:test-active");

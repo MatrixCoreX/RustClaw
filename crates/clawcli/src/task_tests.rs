@@ -10,6 +10,7 @@ fn lifecycle_summary_tokens_include_budget_snapshot() {
                 "state": "waiting",
                 "execution_state": "waiting",
                 "checkpoint_id": "ckpt-budget",
+                "resume_directive": "run_next_planner_round",
                 "heartbeat_at": 1781800000,
                 "attempt_id": 2,
                 "reason_code": "agent_loop_max_rounds",
@@ -42,6 +43,9 @@ fn lifecycle_summary_tokens_include_budget_snapshot() {
     assert!(tokens
         .iter()
         .any(|token| token == "reason_code=agent_loop_max_rounds"));
+    assert!(tokens
+        .iter()
+        .any(|token| token == "resume_directive=run_next_planner_round"));
     assert!(tokens.iter().any(|token| token == "budget.round=2"));
     assert!(tokens.iter().any(|token| token == "budget.llm_calls=4"));
     assert!(tokens
