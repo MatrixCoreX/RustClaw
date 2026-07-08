@@ -228,23 +228,10 @@ fn output_contract_requires_quantity_path_metadata(
     route_reason: Option<&str>,
 ) -> bool {
     output_contract.semantic_kind_is(OutputSemanticKind::QuantityComparison)
-        || route_reason_has_machine_marker(
-            route_reason,
-            OutputSemanticKind::QuantityComparison.as_str(),
-        )
-        || route_reason_has_machine_marker(route_reason, "quantity_compare")
-}
-
-fn route_reason_has_machine_marker(route_reason: Option<&str>, marker: &str) -> bool {
-    route_reason
-        .unwrap_or_default()
-        .split(';')
-        .map(str::trim)
-        .any(|part| {
-            part == marker
-                || part
-                    .rsplit_once(':')
-                    .is_some_and(|(_, suffix)| suffix.trim() == marker)
+        || route_reason.is_some_and(|route_reason| {
+            let markers = crate::RouteReasonMarkers::new(route_reason);
+            markers.has_machine_marker(OutputSemanticKind::QuantityComparison.as_str())
+                || markers.has_machine_marker("quantity_compare")
         })
 }
 

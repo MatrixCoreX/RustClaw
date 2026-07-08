@@ -52,19 +52,8 @@ const EXISTING_OBSERVED_CONTEXT_MARKERS: &[&str] = &[
     "execution_failed_step",
 ];
 
-fn route_reason_has_machine_marker(route_reason: &str, marker: &str) -> bool {
-    route_reason.split(';').map(str::trim).any(|part| {
-        part == marker
-            || part
-                .rsplit_once(':')
-                .is_some_and(|(_, suffix)| suffix.trim() == marker)
-    })
-}
-
 fn route_reason_has_any_machine_marker(route_reason: &str, markers: &[&str]) -> bool {
-    markers
-        .iter()
-        .any(|marker| route_reason_has_machine_marker(route_reason, marker))
+    crate::RouteReasonMarkers::new(route_reason).has_any_machine_marker(markers)
 }
 
 pub(super) fn unresolved_deictic_observable_target_should_clarify(

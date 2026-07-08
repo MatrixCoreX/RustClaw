@@ -132,17 +132,6 @@ fn raw_normalizer_output_uses_existing_observed_context_contract(
         )
 }
 
-fn route_reason_has_machine_marker(route_reason: &str, marker: &str) -> bool {
-    route_reason.split(';').map(str::trim).any(|part| {
-        part == marker
-            || part
-                .rsplit_once(':')
-                .is_some_and(|(_, suffix)| suffix.trim() == marker)
-    })
-}
-
 fn route_reason_has_any_machine_marker(route_reason: &str, markers: &[&str]) -> bool {
-    markers
-        .iter()
-        .any(|marker| route_reason_has_machine_marker(route_reason, marker))
+    crate::RouteReasonMarkers::new(route_reason).has_any_machine_marker(markers)
 }

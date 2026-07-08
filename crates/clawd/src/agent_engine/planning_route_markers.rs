@@ -4,12 +4,7 @@ pub(in crate::agent_engine) fn route_reason_has_structural_marker(
     route: &RouteResult,
     marker: &str,
 ) -> bool {
-    route.route_reason.split(';').map(str::trim).any(|part| {
-        part == marker
-            || part
-                .rsplit_once(':')
-                .is_some_and(|(_, suffix)| suffix.trim() == marker)
-    })
+    route.has_route_reason_machine_marker(marker)
 }
 
 pub(in crate::agent_engine) fn route_allows_structured_candidate_read_target_repair(
@@ -31,11 +26,12 @@ pub(in crate::agent_engine) fn route_has_unresolved_clarify_or_locator_marker(
     if route.needs_clarify {
         return true;
     }
-    let has_unresolved_machine_token = route.route_reason.split(';').map(str::trim).any(|part| {
-        part.starts_with("clarify_reason_code:missing_")
-            || part.contains("needs_clarify=true")
-            || part.contains("missing_locator")
-    });
+    let has_unresolved_machine_token =
+        crate::RouteReasonMarkers::new(&route.route_reason).any_part(|part| {
+            part.starts_with("clarify_reason_code:missing_")
+                || part.contains("needs_clarify=true")
+                || part.contains("missing_locator")
+        });
     has_unresolved_machine_token
         || ["locator_required_for_path_scoped_content"]
             .iter()
