@@ -1,6 +1,6 @@
 use super::super::{
-    loop_state_has_recoverable_checkpoint_state, soft_budget_checkpoint_resume_reason,
-    worker_soft_checkpoint_after_seconds,
+    loop_state_has_recoverable_checkpoint_state, recoverable_provider_blocker_resume_reason,
+    soft_budget_checkpoint_resume_reason, worker_soft_checkpoint_after_seconds,
 };
 use super::{test_policy, LoopState, RoundOutcome};
 
@@ -61,6 +61,45 @@ fn soft_budget_checkpoint_reason_only_marks_budget_stops() {
     assert_eq!(
         soft_budget_checkpoint_resume_reason(&no_progress_state, &policy, &error_outcome),
         None
+    );
+
+    let mut provider_blocker_state = LoopState::new(1);
+    provider_blocker_state.round_no = 1;
+    provider_blocker_state.max_rounds = 1;
+    crate::agent_engine::attempt_ledger::record_attempt(
+        &mut provider_blocker_state,
+        "image_generate",
+        "action=generate",
+        crate::executor::StepExecutionStatus::Error,
+        "",
+        None,
+        &crate::skills::structured_skill_error_from_parts(
+            "image_generate",
+            "provider_retryable_response",
+            "provider retryable response",
+            None,
+            Some(serde_json::json!({
+                "provider": "minimax",
+                "provider_error_class": "rate_limited",
+                "external_provider_blocked": true,
+                "retry_after_seconds": 60
+            })),
+        ),
+    );
+    let provider_outcome = RoundOutcome {
+        executed_actions: 1,
+        had_error: false,
+        stop_signal: Some("recoverable_failure_continue_round".to_string()),
+        next_goal_hint: None,
+        no_progress: false,
+    };
+    assert_eq!(
+        recoverable_provider_blocker_resume_reason(&provider_blocker_state),
+        Some("provider_blocker_wait_background")
+    );
+    assert_eq!(
+        soft_budget_checkpoint_resume_reason(&provider_blocker_state, &policy, &provider_outcome),
+        Some("provider_blocker_wait_background")
     );
 }
 
