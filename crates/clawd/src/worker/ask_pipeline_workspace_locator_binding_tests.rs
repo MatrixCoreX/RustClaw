@@ -8,6 +8,7 @@ use super::{
     implicit_workspace_file_locator_route_should_defer_to_agent_loop,
     model_completed_workspace_file_locator_hint_should_defer_to_agent_loop,
     path_scoped_locator_guard_can_defer_to_prompt_targets, workspace_root_name_token_present,
+    workspace_root_topic_route_should_require_evidence,
 };
 use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
 use claw_core::config::{AgentConfig, ToolsConfig};
@@ -30,6 +31,12 @@ fn make_temp_root(label: &str) -> PathBuf {
     ));
     std::fs::create_dir_all(&path).expect("temp root");
     path
+}
+
+fn make_named_workspace_root(label: &str, name: &str) -> PathBuf {
+    let root = make_temp_root(label).join(name);
+    std::fs::create_dir_all(&root).expect("named workspace root");
+    root
 }
 
 fn test_state_with_root(root: PathBuf) -> AppState {
@@ -89,6 +96,62 @@ fn executable_filename_route() -> crate::RouteResult {
             ..Default::default()
         },
     }
+}
+
+fn executionless_free_route() -> crate::RouteResult {
+    let mut route = executable_filename_route();
+    route.ask_mode = crate::AskMode::act_plain();
+    route.route_reason = "executionless_finalize_trace_plain".to_string();
+    route.wants_file_delivery = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.delivery_required = false;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    route
+}
+
+#[test]
+fn workspace_root_topic_free_route_requires_workspace_summary_evidence() {
+    let root = make_named_workspace_root("workspace_root_topic_requires_evidence", "rustclaw");
+    std::fs::write(root.join("rustclaw"), "#!/usr/bin/env bash\n").expect("project-name script");
+    let state = test_state_with_root(root);
+    let route = executionless_free_route();
+
+    assert!(workspace_root_topic_route_should_require_evidence(
+        &state.skill_rt.workspace_root,
+        "Introduce RustClaw",
+        &route,
+    ));
+}
+
+#[test]
+fn workspace_root_topic_with_explicit_file_locator_stays_specific_locator_route() {
+    let root = make_named_workspace_root("workspace_root_topic_explicit_locator", "rustclaw");
+    std::fs::write(root.join("README.md"), "# Demo\n").expect("readme");
+    let state = test_state_with_root(root);
+    let route = executionless_free_route();
+
+    assert!(!workspace_root_topic_route_should_require_evidence(
+        &state.skill_rt.workspace_root,
+        "Introduce RustClaw README.md",
+        &route,
+    ));
+}
+
+#[test]
+fn generic_free_route_without_workspace_root_token_stays_executionless() {
+    let root = make_named_workspace_root("workspace_root_topic_absent", "rustclaw");
+    let state = test_state_with_root(root);
+    let route = executionless_free_route();
+
+    assert!(!workspace_root_topic_route_should_require_evidence(
+        &state.skill_rt.workspace_root,
+        "Write a two-line poem",
+        &route,
+    ));
 }
 
 #[test]
