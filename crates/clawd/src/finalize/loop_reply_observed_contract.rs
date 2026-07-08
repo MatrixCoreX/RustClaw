@@ -1124,6 +1124,7 @@ fn direct_structured_observed_answer_impl(
         && latest_plan_requested_synthesis(loop_state)
         && !route.output_contract_marker_is(crate::OutputSemanticKind::GitRepositoryState)
         && !crate::finalize::route_matches_service_status_output_contract(route)
+        && latest_successful_names_only_inventory_answer(loop_state).is_none()
     {
         return None;
     }
@@ -1185,6 +1186,22 @@ fn direct_structured_observed_answer_impl(
     {
         return None;
     }
+    if let Some(answer) = latest_successful_names_only_inventory_answer(loop_state) {
+        return Some((
+            answer,
+            crate::task_journal::TaskJournalFinalizerSummary {
+                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                contract_ok: true,
+                completion_ok: Some(true),
+                grounded_ok: Some(true),
+                format_ok: Some(true),
+                needs_clarify: Some(false),
+                used_evidence_ids_count: 1,
+                ..Default::default()
+            },
+        ));
+    }
     let answer = state
         .and_then(|state| {
             crate::agent_engine::observed_output::extract_answer_from_observed_output_i18n(
@@ -1230,6 +1247,64 @@ fn direct_structured_observed_answer_impl(
             ..Default::default()
         },
     ))
+}
+
+fn latest_successful_names_only_inventory_answer(loop_state: &LoopState) -> Option<String> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find_map(|step| {
+            if !step.is_ok()
+                || matches!(
+                    step.skill.as_str(),
+                    "respond" | "synthesize_answer" | "think"
+                )
+            {
+                return None;
+            }
+            let Some(output) = step
+                .output
+                .as_deref()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+            else {
+                return None;
+            };
+            let output =
+                crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
+                    output,
+                );
+            serde_json::from_str::<serde_json::Value>(&output)
+                .ok()
+                .and_then(|value| names_only_inventory_answer_from_value(&value))
+        })
+}
+
+fn names_only_inventory_answer_from_value(value: &serde_json::Value) -> Option<String> {
+    if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
+        if let Some(answer) = names_only_inventory_answer_from_value(extra) {
+            return Some(answer);
+        }
+    }
+    if value.get("action").and_then(serde_json::Value::as_str) != Some("inventory_dir")
+        || !value
+            .get("names_only")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    {
+        return None;
+    }
+    let names = value
+        .get("names")
+        .and_then(serde_json::Value::as_array)?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    (!names.is_empty()).then(|| names.join("\n"))
 }
 
 pub(super) fn direct_non_builtin_skill_raw_answer(
