@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildTaskKindLabel, buildTaskLifecycleView, buildTaskPollingView, buildTaskStatusSummary } from "./task-lifecycle.ts";
+import {
+  buildTaskKindLabel,
+  buildTaskLifecycleView,
+  buildTaskPollingView,
+  buildTaskStatusSummary,
+  canCancelTaskControl,
+  canPauseTaskControl,
+  canResumeTaskControl,
+} from "./task-lifecycle.ts";
 
 test("builds a pollable running lifecycle view", () => {
   const view = buildTaskLifecycleView(
@@ -10,6 +18,9 @@ test("builds a pollable running lifecycle view", () => {
       can_poll: true,
       can_cancel: true,
       last_heartbeat_ts: 1781796641,
+      lease_owner: "worker-a",
+      claim_attempt: 2,
+      resume_directive: "run_next_planner_round",
     },
     "running",
     "en",
@@ -23,6 +34,9 @@ test("builds a pollable running lifecycle view", () => {
   assert.ok(view.meta.some((item) => item === "Pollable: Yes"));
   assert.ok(view.meta.some((item) => item === "Cancelable: Yes"));
   assert.ok(view.meta.some((item) => item.startsWith("Last heartbeat:")));
+  assert.ok(view.meta.some((item) => item === "Worker: worker-a"));
+  assert.ok(view.meta.some((item) => item === "Claim attempts: 2"));
+  assert.ok(view.meta.some((item) => item === "Resume directive: run_next_planner_round"));
 });
 
 test("surfaces waiting checkpoint details without raw json", () => {
@@ -172,4 +186,36 @@ test("builds async polling hints from machine lifecycle fields", () => {
   assert.ok(view.meta.includes("Pollable: Yes"));
   assert.ok(view.meta.includes("Cancelable: Yes"));
   assert.ok(view.meta.includes("Cancel ref: cancel-123"));
+});
+
+test("task control helpers derive actions from machine lifecycle fields", () => {
+  const checkpoint = {
+    state: "background",
+    can_poll: true,
+    can_cancel: true,
+    resume_due: true,
+    checkpoint_id: "ckpt-ready",
+    resume_directive: "run_next_planner_round",
+  };
+
+  assert.equal(canPauseTaskControl(checkpoint, "running"), true);
+  assert.equal(canResumeTaskControl(checkpoint, "running"), true);
+  assert.equal(canCancelTaskControl(checkpoint, "running"), true);
+
+  assert.equal(
+    canPauseTaskControl({ state: "running", can_cancel: true }, "running"),
+    false,
+  );
+  assert.equal(
+    canResumeTaskControl({ state: "background", can_poll: false, checkpoint_id: "ckpt-held" }, "running"),
+    false,
+  );
+  assert.equal(
+    canCancelTaskControl({ state: "background", can_cancel: false }, "running"),
+    false,
+  );
+  assert.equal(
+    canCancelTaskControl({ state: "succeeded", can_cancel: true }, "succeeded"),
+    false,
+  );
 });

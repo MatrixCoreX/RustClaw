@@ -12,6 +12,7 @@ export interface TaskLifecycleProjection {
   resume_due?: boolean;
   resume_wait_seconds?: number;
   resume_reason?: string;
+  resume_directive?: string;
   waiting_reason_code?: string;
   checkpoint_id?: string;
   pending_job_ref?: string;
@@ -20,6 +21,11 @@ export interface TaskLifecycleProjection {
   next_action_kind?: string;
   next_action_ref?: string | number | boolean;
   next_poll_after?: number;
+  lease_owner?: string;
+  lease_expires_at?: number;
+  claim_attempt?: number;
+  claimed_at?: number;
+  attempt_id?: number;
   resume_owner?: string;
   resume_entrypoint?: string;
   last_safe_step_id?: string;
@@ -142,12 +148,15 @@ export function buildTaskLifecycleView(
     `${t(lang, "可取消", "Cancelable")}: ${boolLabel(lang, lifecycle?.can_cancel)}`,
   );
   if (heartbeat) meta.push(`${t(lang, "最近心跳", "Last heartbeat")}: ${heartbeat}`);
+  if (lifecycle?.lease_owner) meta.push(`${t(lang, "执行者", "Worker")}: ${lifecycle.lease_owner}`);
+  if (Number.isFinite(lifecycle?.claim_attempt)) meta.push(`${t(lang, "尝试次数", "Claim attempts")}: ${Number(lifecycle?.claim_attempt)}`);
   if (nextCheck) meta.push(`${t(lang, "下次检查", "Next check")}: ${nextCheck}`);
   if (lifecycle?.state_source) meta.push(`${t(lang, "状态来源", "State source")}: ${lifecycle.state_source}`);
   if (lifecycle?.poll_ref) meta.push(`${t(lang, "轮询引用", "Poll ref")}: ${lifecycle.poll_ref}`);
   if (lifecycle?.cancel_ref) meta.push(`${t(lang, "取消引用", "Cancel ref")}: ${lifecycle.cancel_ref}`);
   if (lifecycle?.resume_owner) meta.push(`${t(lang, "恢复执行者", "Resume owner")}: ${lifecycle.resume_owner}`);
   if (lifecycle?.resume_entrypoint) meta.push(`${t(lang, "恢复入口", "Resume entrypoint")}: ${lifecycle.resume_entrypoint}`);
+  if (lifecycle?.resume_directive) meta.push(`${t(lang, "恢复指令", "Resume directive")}: ${lifecycle.resume_directive}`);
   if (lifecycle?.last_safe_step_id) meta.push(`${t(lang, "安全步骤", "Safe step")}: ${lifecycle.last_safe_step_id}`);
   if (lifecycle?.terminal_reason) meta.push(`${t(lang, "结束原因", "Terminal reason")}: ${lifecycle.terminal_reason}`);
 
@@ -339,4 +348,35 @@ export function buildTaskStatusSummary(
       tone: "failed",
     },
   ];
+}
+
+export function canCancelTaskControl(
+  lifecycle: TaskLifecycleProjection | null | undefined,
+  dbStatus: string,
+): boolean {
+  const state = stateToken(lifecycle, dbStatus);
+  if (["succeeded", "failed", "cancelled", "canceled", "timeout"].includes(state)) return false;
+  if (lifecycle?.can_cancel === false) return false;
+  if (lifecycle?.can_cancel === true) return true;
+  return ["queued", "running", "waiting", "background", "needs_user"].includes(state);
+}
+
+export function canPauseTaskControl(
+  lifecycle: TaskLifecycleProjection | null | undefined,
+  dbStatus: string,
+): boolean {
+  const state = stateToken(lifecycle, dbStatus);
+  if (!(state === "waiting" || state === "background")) return false;
+  if (lifecycle?.can_cancel === false) return false;
+  return Boolean(lifecycle?.checkpoint_id || lifecycle?.resume_directive);
+}
+
+export function canResumeTaskControl(
+  lifecycle: TaskLifecycleProjection | null | undefined,
+  dbStatus: string,
+): boolean {
+  const state = stateToken(lifecycle, dbStatus);
+  if (!(state === "waiting" || state === "background")) return false;
+  if (lifecycle?.can_poll === false) return false;
+  return lifecycle?.resume_due === true || Boolean(lifecycle?.resume_directive || lifecycle?.checkpoint_id);
 }
