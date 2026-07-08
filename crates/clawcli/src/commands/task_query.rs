@@ -120,11 +120,17 @@ pub(super) fn watch_progress_json(task: &task::TaskStatusView) -> serde_json::Va
     json!({
         "execution_state": task.execution_state(),
         "lifecycle_state": task.lifecycle_state(),
+        "db_status": lifecycle_field(lifecycle, "db_status"),
         "checkpoint_id": lifecycle_field(lifecycle, "checkpoint_id"),
         "can_poll": lifecycle_field(lifecycle, "can_poll"),
         "can_cancel": lifecycle_field(lifecycle, "can_cancel"),
+        "resume_entrypoint": lifecycle_field(lifecycle, "resume_entrypoint"),
+        "resume_directive": lifecycle_field(lifecycle, "resume_directive"),
+        "resume_reason": lifecycle_field(lifecycle, "resume_reason"),
         "resume_due": lifecycle_field(lifecycle, "resume_due"),
         "resume_wait_seconds": lifecycle_field(lifecycle, "resume_wait_seconds"),
+        "next_action_kind": lifecycle_field(lifecycle, "next_action_kind"),
+        "reason_code": lifecycle_field(lifecycle, "reason_code"),
         "next_poll_after": lifecycle_field(lifecycle, "next_poll_after"),
         "poll_after_seconds": lifecycle_field(lifecycle, "poll_after_seconds"),
         "poll_ref": lifecycle_field(lifecycle, "poll_ref"),
@@ -135,6 +141,9 @@ pub(super) fn watch_progress_json(task: &task::TaskStatusView) -> serde_json::Va
         "last_heartbeat_ts": lifecycle_field(lifecycle, "last_heartbeat_ts"),
         "lease_owner": lifecycle_field(lifecycle, "lease_owner"),
         "lease_expires_at": lifecycle_field(lifecycle, "lease_expires_at"),
+        "claim_attempt": lifecycle_field(lifecycle, "claim_attempt"),
+        "attempt_id": lifecycle_field(lifecycle, "attempt_id"),
+        "claimed_at": lifecycle_field(lifecycle, "claimed_at"),
     })
 }
 

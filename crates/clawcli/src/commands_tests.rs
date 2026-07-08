@@ -807,14 +807,25 @@ fn watch_progress_json_exposes_compact_lifecycle_machine_fields() {
             "execution_state": "background",
             "task_lifecycle": {
                 "state": "background",
+                "db_status": "running",
                 "checkpoint_id": "ckpt-watch",
                 "can_poll": true,
                 "can_cancel": true,
+                "resume_entrypoint": "next_planner_round",
+                "resume_directive": "run_next_planner_round",
+                "resume_reason": "agent_loop_soft_budget",
                 "resume_due": false,
+                "resume_wait_seconds": 17,
+                "next_action_kind": "resume_checkpoint",
+                "reason_code": "agent_loop_max_rounds",
                 "next_poll_after": "2030-01-01T00:00:00Z",
                 "poll_ref": "poll:watch",
                 "last_heartbeat_ts": 1781800000,
-                "lease_owner": "worker-a"
+                "lease_owner": "worker-a",
+                "lease_expires_at": 1781800060,
+                "claim_attempt": 3,
+                "attempt_id": 3,
+                "claimed_at": 1781799990
             }
         }),
         result_text: None,
@@ -826,11 +837,23 @@ fn watch_progress_json_exposes_compact_lifecycle_machine_fields() {
 
     assert_eq!(progress["execution_state"], "background");
     assert_eq!(progress["lifecycle_state"], "background");
+    assert_eq!(progress["db_status"], "running");
     assert_eq!(progress["checkpoint_id"], "ckpt-watch");
     assert_eq!(progress["can_poll"], true);
+    assert_eq!(progress["can_cancel"], true);
+    assert_eq!(progress["resume_entrypoint"], "next_planner_round");
+    assert_eq!(progress["resume_directive"], "run_next_planner_round");
+    assert_eq!(progress["resume_reason"], "agent_loop_soft_budget");
+    assert_eq!(progress["resume_wait_seconds"], 17);
+    assert_eq!(progress["next_action_kind"], "resume_checkpoint");
+    assert_eq!(progress["reason_code"], "agent_loop_max_rounds");
     assert_eq!(progress["poll_ref"], "poll:watch");
     assert_eq!(progress["last_heartbeat_ts"], 1781800000);
     assert_eq!(progress["lease_owner"], "worker-a");
+    assert_eq!(progress["lease_expires_at"], 1781800060);
+    assert_eq!(progress["claim_attempt"], 3);
+    assert_eq!(progress["attempt_id"], 3);
+    assert_eq!(progress["claimed_at"], 1781799990);
 }
 
 #[test]

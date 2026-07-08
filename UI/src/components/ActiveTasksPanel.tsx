@@ -6,6 +6,9 @@ import {
   buildTaskLifecycleView,
   buildTaskPollingView,
   buildTaskStatusSummary,
+  canCancelTaskControl,
+  canPauseTaskControl,
+  canResumeTaskControl,
   type TaskStatusSummaryKind,
 } from "../lib/task-lifecycle";
 import type { ActiveTaskItem } from "../types/api";
@@ -158,6 +161,7 @@ export function ActiveTasksPanel({
             const taskKindLabel = buildTaskKindLabel(item.kind, lang);
             const canPause = canPauseTask(item);
             const canResume = canResumeTask(item);
+            const canCancel = canCancelTask(item);
             const pauseSubmitting = taskControlSubmittingId === `pause:${item.task_id}`;
             const resumeSubmitting = taskControlSubmittingId === `resume:${item.task_id}`;
             return (
@@ -259,7 +263,7 @@ export function ActiveTasksPanel({
                     <button
                       type="button"
                       onClick={() => void onCancelTask(item)}
-                      disabled={cancelingTaskIndex === item.index || !canUseInteractionContext || item.lifecycle?.can_cancel === false}
+                      disabled={cancelingTaskIndex === item.index || !canUseInteractionContext || !canCancel}
                       className="inline-flex items-center gap-1.5 rounded-md border border-rose-300/35 bg-rose-500/15 px-3 py-2 text-xs font-medium text-rose-50 transition hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {cancelingTaskIndex === item.index ? (
@@ -335,13 +339,15 @@ async function copyTaskId(taskId: string): Promise<void> {
 }
 
 function canPauseTask(item: ActiveTaskItem): boolean {
-  const state = (item.lifecycle?.state || item.status || "").toLowerCase();
-  return !["succeeded", "failed", "cancelled", "canceled", "timeout", "needs_user"].includes(state);
+  return canPauseTaskControl(item.lifecycle, item.status);
 }
 
 function canResumeTask(item: ActiveTaskItem): boolean {
-  const state = (item.lifecycle?.state || item.status || "").toLowerCase();
-  return state === "waiting" || state === "background";
+  return canResumeTaskControl(item.lifecycle, item.status);
+}
+
+function canCancelTask(item: ActiveTaskItem): boolean {
+  return canCancelTaskControl(item.lifecycle, item.status);
 }
 
 function buildChildTaskView(item: ActiveTaskItem): { meta: string[] } | null {
