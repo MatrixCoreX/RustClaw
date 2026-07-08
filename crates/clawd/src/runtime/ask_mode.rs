@@ -25,6 +25,8 @@ pub(crate) enum RespondEntryStrategy {
     /// Clarification compatibility trace.
     #[cfg(test)]
     ClarifyTrace,
+    /// Structured state patch acknowledgement.
+    StatePatchAck,
     /// Resume context and continue discussion.
     ResumeFollowupDiscussion,
 }
@@ -58,6 +60,12 @@ impl AskMode {
     pub(crate) fn act_plain() -> Self {
         AskMode::Act {
             finalize: ActFinalizeStyle::Plain,
+        }
+    }
+
+    pub(crate) fn state_patch_ack() -> Self {
+        AskMode::Respond {
+            entry: RespondEntryStrategy::StatePatchAck,
         }
     }
 
@@ -98,6 +106,9 @@ impl AskMode {
             AskMode::Respond {
                 entry: RespondEntryStrategy::ClarifyTrace,
             } => "clarify",
+            AskMode::Respond {
+                entry: RespondEntryStrategy::StatePatchAck,
+            } => "state_patch_ack",
             AskMode::Respond {
                 entry: RespondEntryStrategy::ResumeFollowupDiscussion,
             } => "respond_resume_discussion",
@@ -240,6 +251,9 @@ impl AskMode {
             AskMode::Respond {
                 entry: RespondEntryStrategy::ClarifyTrace,
             } => "respond:clarify_trace",
+            AskMode::Respond {
+                entry: RespondEntryStrategy::StatePatchAck,
+            } => "respond:state_patch_ack",
             AskMode::Respond {
                 entry: RespondEntryStrategy::ResumeFollowupDiscussion,
             } => "respond:resume_followup_discussion",
