@@ -25,6 +25,7 @@ mod planning_registry_preference;
 mod planning_route_markers;
 mod planning_structured_field_exact;
 mod prepare_round;
+pub(crate) mod service_probe_contract;
 mod skill_execution;
 mod skill_quick_index;
 mod subagent_runtime;
@@ -1328,10 +1329,8 @@ pub(crate) struct AgentRunContext {
     pub(crate) auto_locator_path: Option<String>,
     pub(crate) original_user_request: Option<String>,
     pub(crate) user_request: Option<String>,
-    /// Cross-turn recent execution context (rendered by routing_context::build_recent_execution_context).
-    /// Used by runtime synthesis/planning so the LLM can see prior turns' outputs (file content,
-    /// list_dir results, alias bindings, etc.) when the current turn references "上一个文件 / 上上个 /
-    /// 那个文件 / 甲 / 乙" or asks to compare/relate prior outputs.
+    /// Cross-turn recent execution context for planner access to prior observed outputs,
+    /// aliases, and targets when the current turn references previous turns.
     pub(crate) cross_turn_recent_execution_context: Option<String>,
 }
 

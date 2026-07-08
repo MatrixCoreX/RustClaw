@@ -1,11 +1,11 @@
 use super::{
-    answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_budget_available,
-    answer_verifier_retry_summary, apply_structured_respond_clarify_to_loop_state,
-    evaluate_round_outcome, initial_execution_recipe_spec,
-    machine_status_visible_output_format_gap, mark_reply_failed_after_answer_verifier_exhausted,
-    parse_log_analyze_finding, record_agent_loop_decision_envelope_output_vars,
-    selected_contract_structured_evidence_gap, should_stop_for_observed_finalize,
-    structured_respond_terminal_intent_from_plan,
+    answer_contract_route_result_for_reply, answer_verifier_output_format_machine_payload_gap,
+    answer_verifier_retry_budget_available, answer_verifier_retry_summary,
+    apply_structured_respond_clarify_to_loop_state, evaluate_round_outcome,
+    initial_execution_recipe_spec, machine_status_visible_output_format_gap,
+    mark_reply_failed_after_answer_verifier_exhausted, parse_log_analyze_finding,
+    record_agent_loop_decision_envelope_output_vars, selected_contract_structured_evidence_gap,
+    should_stop_for_observed_finalize, structured_respond_terminal_intent_from_plan,
     structured_respond_terminal_intent_from_route_owned_clarify,
     suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
     suppress_answer_verifier_retry_if_structurally_satisfied,
@@ -83,6 +83,47 @@ fn route_result(shape: OutputResponseShape) -> RouteResult {
             self_extension: crate::SelfExtensionContract::default(),
         },
     }
+}
+
+#[test]
+fn answer_contract_route_result_prefers_journal_effective_route() {
+    let original_route = route_result(OutputResponseShape::Free);
+    let mut effective_route = original_route.clone();
+    effective_route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    effective_route.output_contract.locator_kind = OutputLocatorKind::None;
+    effective_route.output_contract.locator_hint.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(original_route),
+        execution_recipe_hint: None,
+        execution_recipe_plan_hint: None,
+        turn_analysis: None,
+        boundary_envelope: None,
+        context_bundle_summary: None,
+        session_alias_bindings: Vec::new(),
+        auto_locator_path: None,
+        original_user_request: None,
+        user_request: None,
+        cross_turn_recent_execution_context: None,
+    };
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-effective-route",
+        "ask",
+        "probe service status",
+    );
+    journal.record_route_result(&effective_route);
+    let reply = AskReply::non_llm("ok".to_string()).with_task_journal(journal);
+
+    let selected = answer_contract_route_result_for_reply(Some(&agent_run_context), &reply)
+        .expect("selected route");
+
+    assert_eq!(
+        selected.effective_output_contract_semantic_kind(),
+        OutputSemanticKind::ServiceStatus
+    );
+    assert_eq!(
+        crate::evidence_policy::required_evidence_fields_for_route(&selected),
+        vec!["field_value".to_string()]
+    );
 }
 
 fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
