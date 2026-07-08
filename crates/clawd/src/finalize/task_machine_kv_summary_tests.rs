@@ -69,6 +69,69 @@ fn service_status_final_guard_preserves_observed_one_sentence_status_summary() {
     assert_eq!(answer_messages, vec![expected_answer]);
 }
 
+#[test]
+fn generic_route_preserves_structured_media_dry_run_report_over_short_machine_summary() {
+    let prompt = "return dry_run=true provider/model planned_outputs and output_path";
+    let route = generic_free_route(prompt);
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-generic-media-dry-run-kv-preserve",
+        "ask",
+        prompt,
+    );
+    journal.record_route_result(&route);
+    let expected_answer = concat!(
+        "dry_run=true\n",
+        "provider=minimax\n",
+        "model=image-01\n",
+        "model_kind=dry_run\n",
+        "output_path=/home/guagua/rustclaw/document/media_dry_run/image_status_card.png\n",
+        "planned_outputs=[{\"path\":\"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png\",\"type\":\"image_file\"}]\n",
+        "pending_async_job_contract={\"job_id\":\"provider:image_generate:minimax:dry_run\",\"status\":\"accepted\"}"
+    );
+    let mut answer_text = expected_answer.to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+    assert_eq!(answer_text, expected_answer);
+    assert_eq!(answer_messages, vec![expected_answer.to_string()]);
+}
+
+fn generic_free_route(prompt: &str) -> RouteResult {
+    RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: prompt.to_string(),
+        needs_clarify: false,
+        route_reason: "agent_loop_default_entry".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Medium,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: false,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::None,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    }
+}
+
 fn service_status_one_sentence_route() -> RouteResult {
     RouteResult {
         ask_mode: crate::AskMode::act_with_chat_finalizer(),

@@ -98,6 +98,26 @@ fn package_manager_dry_run_install_is_observe_effect() {
 }
 
 #[test]
+fn media_generation_dry_run_is_observe_effect() {
+    let state = test_state();
+    for skill in [
+        "image_generate",
+        "image_edit",
+        "audio_synthesize",
+        "video_generate",
+        "music_generate",
+    ] {
+        let effect = classify_skill_action_effect(
+            &state,
+            skill,
+            &json!({"action":"generate","dry_run":true}),
+        );
+        assert!(effect.observes, "skill={skill}");
+        assert!(!effect.mutates, "skill={skill}");
+    }
+}
+
+#[test]
 fn goal_overlay_includes_skill_authoring_and_greenfield_guidance() {
     let overlay = ExecutionRecipeRuntimeState::from_spec(ExecutionRecipeSpec {
         kind: ExecutionRecipeKind::OpsClosedLoop,

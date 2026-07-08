@@ -1000,6 +1000,23 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     if loop_state.delivery_messages.is_empty() {
+        if let Some((answer, summary)) =
+            direct_generated_file_path_report_from_dry_run_payload(&loop_state, agent_run_context)
+        {
+            finalizer_summary = Some(summary);
+            loop_state.last_user_visible_respond = Some(answer.clone());
+            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+            log_deterministic_delivery_record(
+                &task.task_id,
+                "fallback_from_dry_run_generated_file_payload",
+                "attached",
+                agent_run_context,
+                loop_state.executed_step_results.len(),
+            );
+        }
+    }
+
+    if loop_state.delivery_messages.is_empty() {
         if let Some((answer, summary)) = direct_quantity_comparison_from_compare_paths(
             state,
             user_text,

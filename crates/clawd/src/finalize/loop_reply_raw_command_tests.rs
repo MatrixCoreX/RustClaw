@@ -935,6 +935,14 @@ fn raw_publishable_guard_rejects_structured_json_payloads() {
     assert!(looks_like_structured_machine_output(
         "git.branch=main\ngit.clean=true"
     ));
+    assert!(looks_like_structured_machine_output(concat!(
+        "dry_run=true\n",
+        "provider=minimax\n",
+        "model=image-01\n",
+        "model_kind=dry_run\n",
+        "output_path=/home/guagua/rustclaw/document/media_dry_run/image_status_card.png\n",
+        "planned_outputs=[{\"path\":\"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png\",\"type\":\"image_file\"}]"
+    )));
 }
 
 #[test]

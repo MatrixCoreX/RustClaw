@@ -298,7 +298,13 @@ fn matrix_observed_answer_candidate_for_shape(
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     match shape_class {
         crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact => {
-            direct_file_token_from_observed_auto_locator_filename(loop_state, agent_run_context)
+            direct_generated_file_path_report_from_dry_run_payload(loop_state, agent_run_context)
+                .or_else(|| {
+                    direct_file_token_from_observed_auto_locator_filename(
+                        loop_state,
+                        agent_run_context,
+                    )
+                })
                 .or_else(|| {
                     direct_file_token_from_observed_find_entries(
                         state,

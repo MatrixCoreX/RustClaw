@@ -13,6 +13,7 @@ pub(super) fn looks_like_structured_machine_output(answer: &str) -> bool {
         .unwrap_or(false)
         || looks_like_contract_evidence_projection(trimmed)
         || looks_like_structured_key_path_projection(trimmed)
+        || looks_like_multiline_machine_field_projection(trimmed)
 }
 
 fn looks_like_contract_evidence_projection(answer: &str) -> bool {
@@ -66,6 +67,57 @@ fn looks_like_structured_key_path_projection(answer: &str) -> bool {
         }
     }
     assignment_count == lines.len() && key_path_assignment_count > 0
+}
+
+fn looks_like_multiline_machine_field_projection(answer: &str) -> bool {
+    let lines = answer
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if lines.len() < 2 {
+        return false;
+    }
+    let mut anchored = false;
+    for line in &lines {
+        let Some((key, value)) = line.split_once('=') else {
+            return false;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if !valid_machine_projection_key(key) || value.is_empty() {
+            return false;
+        }
+        if key.contains('.')
+            || key.contains('[')
+            || key.contains(']')
+            || value.starts_with('{')
+            || value.starts_with('[')
+            || matches!(
+                key,
+                "async_poll_adapter_result"
+                    | "dry_run"
+                    | "job_id"
+                    | "model"
+                    | "model_kind"
+                    | "output_path"
+                    | "planned_outputs"
+                    | "provider"
+                    | "status"
+                    | "task_id"
+            )
+        {
+            anchored = true;
+        }
+    }
+    anchored
+}
+
+fn valid_machine_projection_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '[' | ']'))
 }
 
 pub(super) fn looks_like_raw_command_snapshot(answer: &str) -> bool {

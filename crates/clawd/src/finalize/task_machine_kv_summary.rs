@@ -124,6 +124,11 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         journal.record_final_answer(answer_text.as_str());
         return false;
     }
+    if final_answer_preserves_structured_machine_projection(answer_text, answer_messages, &summary)
+    {
+        journal.record_final_answer(answer_text.as_str());
+        return false;
+    }
     if !force_structured
         && final_answer_preserves_publishable_evidence_summary(
             route_result,
@@ -761,6 +766,75 @@ fn text_is_machine_kv_only(text: &str) -> bool {
         }
     }
     saw_line
+}
+
+fn final_answer_preserves_structured_machine_projection(
+    answer_text: &str,
+    answer_messages: &[String],
+    requested_summary: &str,
+) -> bool {
+    std::iter::once(answer_text)
+        .chain(answer_messages.iter().map(String::as_str))
+        .any(|candidate| {
+            let candidate = candidate.trim();
+            text_is_structured_machine_field_projection(candidate)
+                && machine_projection_covers_requested_summary(candidate, requested_summary)
+        })
+}
+
+fn text_is_structured_machine_field_projection(text: &str) -> bool {
+    let lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if lines.len() < 2 {
+        return false;
+    }
+    let mut anchored = false;
+    for line in &lines {
+        let Some((key, value)) = line.split_once('=') else {
+            return false;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if !valid_machine_marker_key(key) || value.is_empty() {
+            return false;
+        }
+        if key.contains('.')
+            || value.starts_with('{')
+            || value.starts_with('[')
+            || matches!(
+                key,
+                "async_poll_adapter_result"
+                    | "dry_run"
+                    | "job_id"
+                    | "model"
+                    | "model_kind"
+                    | "output_path"
+                    | "planned_outputs"
+                    | "provider"
+                    | "status"
+                    | "task_id"
+            )
+        {
+            anchored = true;
+        }
+    }
+    anchored
+}
+
+fn machine_projection_covers_requested_summary(candidate: &str, requested_summary: &str) -> bool {
+    let requested_units = machine_kv_units(requested_summary);
+    if requested_units.is_empty() {
+        return true;
+    }
+    let current_units = machine_kv_units(candidate);
+    !current_units.is_empty()
+        && current_units.len() >= requested_units.len()
+        && requested_units
+            .iter()
+            .all(|unit| current_units.iter().any(|current| current == unit))
 }
 
 fn machine_kv_units(text: &str) -> Vec<String> {

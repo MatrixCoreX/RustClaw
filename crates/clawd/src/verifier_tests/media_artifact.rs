@@ -50,6 +50,48 @@ fn generated_file_path_report_does_not_repair_media_artifact_output_with_text_wr
 }
 
 #[test]
+fn media_generate_dry_run_does_not_exceed_medium_risk_ceiling() {
+    let state = test_state();
+    let task = test_task();
+    let mut route = route_result_with_semantic(crate::OutputSemanticKind::GeneratedFilePathReport);
+    route.risk_ceiling = crate::RiskCeiling::Medium;
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "image_generate".to_string(),
+                args: json!({
+                    "action": "generate",
+                    "prompt": "status card",
+                    "output_path": "document/media_dry_run/image_status_card.png",
+                    "dry_run": true
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(
+        !result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::RiskBudgetExceeded)),
+        "issues: {:?}",
+        result.issues
+    );
+}
+
+#[test]
 fn generated_file_path_report_does_not_write_stat_json_over_media_path() {
     let state = test_state();
     let task = test_task();
