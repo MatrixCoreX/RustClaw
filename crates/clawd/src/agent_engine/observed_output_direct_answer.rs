@@ -443,14 +443,13 @@ pub(super) fn extract_answer_from_observed_output_impl(
                                     )
                             })
                     } else if action == Some("inventory_dir")
-                        && (is_plain_act
-                            || route.is_some_and(|route| {
-                                super::output_route_policy::route_contract_marker_is(
-                                    route,
-                                    crate::OutputSemanticKind::DirectoryEntryGroups,
-                                )
-                            }))
-                        && allow_raw_listing_direct_answer
+                        && inventory_dir_can_use_direct_names(
+                            route,
+                            &value,
+                            loop_state,
+                            is_plain_act,
+                            allow_raw_listing_direct_answer,
+                        )
                     {
                         inventory_dir_direct_answer_candidate(
                             state,
@@ -819,6 +818,102 @@ fn route_requests_browser_page_body(route: &crate::RouteResult) -> bool {
         &["browser", "web"],
         &["search"],
     )
+}
+
+fn inventory_dir_can_use_direct_names(
+    route: Option<&crate::RouteResult>,
+    value: &serde_json::Value,
+    loop_state: &LoopState,
+    is_plain_act: bool,
+    allow_raw_listing_direct_answer: bool,
+) -> bool {
+    let has_machine_names = value
+        .get("names_only")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        && inventory_dir_names(value).is_some();
+    if has_machine_names
+        && route.is_some_and(|route| {
+            super::output_route_policy::route_contract_marker_is_any(
+                route,
+                &[
+                    crate::OutputSemanticKind::FileNames,
+                    crate::OutputSemanticKind::DirectoryNames,
+                    crate::OutputSemanticKind::DirectoryEntryGroups,
+                    crate::OutputSemanticKind::FilePaths,
+                ],
+            )
+        })
+    {
+        return true;
+    }
+    if has_machine_names && latest_plan_requests_names_only_listing(loop_state) {
+        return true;
+    }
+    (is_plain_act
+        || route.is_some_and(|route| {
+            super::output_route_policy::route_contract_marker_is(
+                route,
+                crate::OutputSemanticKind::DirectoryEntryGroups,
+            )
+        }))
+        && allow_raw_listing_direct_answer
+}
+
+fn latest_plan_requests_names_only_listing(loop_state: &LoopState) -> bool {
+    let Some(plan) = loop_state
+        .round_traces
+        .iter()
+        .rev()
+        .find_map(|round| round.plan_result.as_ref())
+    else {
+        return false;
+    };
+    let executable_steps = plan
+        .steps
+        .iter()
+        .filter(|step| {
+            matches!(
+                step.action_type.as_str(),
+                "call_capability" | "call_tool" | "call_skill"
+            )
+        })
+        .collect::<Vec<_>>();
+    if executable_steps.len() != 1 {
+        return false;
+    }
+    let step = executable_steps[0];
+    match step.action_type.as_str() {
+        "call_capability" => {
+            matches!(
+                step.skill.as_str(),
+                "filesystem.list_names"
+                    | "filesystem.list_dir"
+                    | "filesystem.list_entries"
+                    | "fs.list_names"
+                    | "fs.list_dir"
+                    | "fs.list_entries"
+            ) && step
+                .args
+                .get("names_only")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true)
+        }
+        "call_tool" | "call_skill" => {
+            matches!(
+                step.skill.as_str(),
+                "fs_basic" | "system_basic" | "list_dir"
+            ) && matches!(
+                step.args.get("action").and_then(|v| v.as_str()),
+                Some("inventory_dir" | "list_dir") | None
+            ) && step
+                .args
+                .get("names_only")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        }
+        _ => false,
+    }
 }
 
 pub(crate) fn extract_answer_from_observed_output(
