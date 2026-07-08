@@ -42,6 +42,41 @@ fn requested_machine_kv_summary_final_guard_preserves_terminal_scalar_respond() 
 }
 
 #[test]
+fn requested_machine_kv_summary_final_guard_preserves_observed_empty_string_scalar() {
+    let prompt = "Read ./Cargo.toml workspace.package.repository and output only the value.";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.resolved_intent =
+        "Read ./Cargo.toml workspace.package.repository and output only the value.".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "./Cargo.toml".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-machine-kv-empty-scalar", "ask", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "config_basic",
+            r#"{"extra":{"action":"extract_field","exists":true,"field_path":"workspace.package.repository","path":"/home/guagua/rustclaw/Cargo.toml","resolved_field_path":"workspace.package.repository","value":"","value_text":"","value_type":"string"},"text":"{\"action\":\"extract_field\"}"}"#,
+        ));
+    let mut answer_text = "\"\"".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert_eq!(answer_text, "\"\"");
+    assert_eq!(answer_messages, vec!["\"\"".to_string()]);
+    assert_eq!(journal.final_answer.as_deref(), Some("\"\""));
+}
+
+#[test]
 fn requested_machine_kv_summary_final_guard_preserves_transform_markdown_table() {
     let prompt = r#"Sort [{"name":"alpha","score":7},{"name":"beta","score":12}] by score and return a markdown table."#;
     let mut route = route_result(crate::AskMode::act_plain());
