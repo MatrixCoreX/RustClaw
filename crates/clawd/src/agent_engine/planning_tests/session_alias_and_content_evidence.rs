@@ -660,6 +660,47 @@ fn execute_route_without_content_evidence_rejects_doc_parse_only_file_plan() {
 }
 
 #[test]
+fn execute_route_without_content_evidence_allows_direct_text_read_terminal_answer() {
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::act_with_chat_finalizer(),
+        false,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "document/nl_tool200/group_02/memo.txt".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt",
+                "mode": "head",
+                "n": 5
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    assert!(!should_force_plan_repair(
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+    assert!(can_fallback_to_initial_plan_after_repair_failure(
+        &test_state(),
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+}
+
+#[test]
 fn existing_observed_synthesis_read_only_file_plan_does_not_force_repair() {
     let loop_state = LoopState::new(1);
     let mut route = route_result(

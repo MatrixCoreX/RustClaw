@@ -112,6 +112,7 @@ pub(crate) fn session_alias_bindings_from_state_patch(
         for item in alias_bindings {
             let Some(alias) = item
                 .get("alias")
+                .or_else(|| item.get("surface"))
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
@@ -120,6 +121,8 @@ pub(crate) fn session_alias_bindings_from_state_patch(
             };
             let Some(target) = item
                 .get("target")
+                .or_else(|| item.get("path"))
+                .or_else(|| item.get("value"))
                 .and_then(|value| value.as_str())
                 .and_then(normalize_alias_target)
             else {
@@ -194,11 +197,14 @@ pub(crate) fn state_patch_is_alias_bindings_only(state_patch: &Value) -> bool {
                         && items.iter().all(|item| {
                             let alias = item
                                 .get("alias")
+                                .or_else(|| item.get("surface"))
                                 .and_then(Value::as_str)
                                 .map(str::trim)
                                 .filter(|alias| !alias.is_empty());
                             let target = item
                                 .get("target")
+                                .or_else(|| item.get("path"))
+                                .or_else(|| item.get("value"))
                                 .and_then(Value::as_str)
                                 .map(str::trim)
                                 .filter(|target| !target.is_empty());
