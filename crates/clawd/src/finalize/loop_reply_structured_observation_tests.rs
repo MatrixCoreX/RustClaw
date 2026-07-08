@@ -205,6 +205,42 @@ fn direct_structured_observed_answer_defers_when_plan_requested_synthesis() {
 }
 
 #[test]
+fn direct_structured_observed_answer_uses_names_only_inventory_despite_synthesis_plan() {
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","counts":{"files":3,"total":3},"entries":[],"files_only":true,"names":["alpha.txt","beta.txt","gamma.txt"],"names_only":true,"path":"/tmp/docs","resolved_path":"/tmp/docs","sort_by":"name"},"text":"{}"}"#,
+    ));
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: "list_names".to_string(),
+            execution_recipe_summary: None,
+            plan_result: Some(plan_result_with_raw_text(
+                r#"{"steps":[{"type":"call_tool","tool":"fs_basic"},{"type":"synthesize_answer","evidence_refs":["last_output"]}]}"#,
+            )),
+            verify_result: None,
+        });
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/tmp/docs".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let (answer, summary) = direct_structured_observed_answer(None, &loop_state, Some(&ctx))
+        .expect("names-only inventory should be a complete structured answer");
+
+    assert_eq!(answer, "alpha.txt\nbeta.txt\ngamma.txt");
+    assert_eq!(summary.contract_ok, true);
+}
+
+#[test]
 fn direct_structured_observed_answer_keeps_passthrough_without_synthesis_plan() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
