@@ -60,7 +60,7 @@ codex_task_resume_release_smoke|install_module_no_install_dry_run_zh|covers:inst
 
 codex_task_resume_release_smoke|checkpoint_resume_machine_fields_zh|covers:agent_loop,checkpoint,resume;requires_tool_call=true;local_readonly|根据 README.md 和 docs/task_lifecycle_lease_model.md 说明 soft budget 后的 checkpoint/resume 机器字段链路：checkpoint_id、resume_entrypoint、resume_work_item、resume_executor、dispatch_state、result_projection_state；不要新增任务。|expect=checkpoint_id
 
-codex_task_resume_release_smoke|async_job_poll_contract_dry_run_zh|covers:async_poll,checkpoint,resume,dry_run;requires_tool_call=true;dry_run,no_external_side_effect|只做 dry-run：说明一个长尾工具应如何返回 pending_async_job，并由 worker 通过 poll_async_job、next_check_after、expires_at、message_key 继续轮询；不要启动真实长任务。|expect=poll_async_job
+codex_task_resume_release_smoke|async_job_poll_contract_dry_run_zh|covers:async_poll,checkpoint,resume,dry_run;requires_tool_call=false;dry_run,no_external_side_effect|只做 dry-run：说明一个长尾工具应如何返回 pending_async_job，并由 worker 通过 poll_async_job、next_check_after、expires_at、message_key 继续轮询；不要启动真实长任务。|expect=poll_async_job
 
 codex_task_resume_release_smoke|provider_blocker_recording_zh|covers:provider_blocker,lifecycle;dry_run|如果模型 provider 额度不足或窗口暂时不可用，请说明测试记录应该落成 external blocker，而不是把路由或代码判失败；回答里保留 provider_blocker 这个机器 token。|expect=provider_blocker
 
