@@ -278,6 +278,85 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
 }
 
 #[test]
+fn provider_blocker_checkpoint_payload_records_background_resume_contract() {
+    let task = support_test_task();
+    let mut loop_state = LoopState::new(3);
+    loop_state.round_no = 2;
+    loop_state.last_stop_signal = Some("recoverable_failure_continue_round".to_string());
+    let err = crate::skills::structured_skill_error_from_parts(
+        "image_generate",
+        "provider_retryable_response",
+        "provider retryable response",
+        None,
+        Some(serde_json::json!({
+            "provider": "minimax",
+            "provider_error_class": "rate_limited",
+            "external_provider_blocked": true,
+            "retry_after_seconds": 60
+        })),
+    );
+    crate::agent_engine::attempt_ledger::record_attempt(
+        &mut loop_state,
+        "image_generate",
+        "action=generate",
+        crate::executor::StepExecutionStatus::Error,
+        "",
+        None,
+        &err,
+    );
+
+    let payload = build_agent_loop_checkpoint_progress_payload(
+        &task,
+        &loop_state,
+        "provider_blocker_wait_background",
+        1_781_800_000,
+        1_781_800_060,
+    );
+
+    assert_eq!(payload["task_lifecycle"]["state"], "waiting");
+    assert_eq!(
+        payload["task_lifecycle"]["resume_reason"],
+        "provider_blocker_wait_background"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["boundary_context"]["resume_reason"],
+        "provider_blocker_wait_background"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["resume_entrypoint"],
+        "next_planner_round"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["stop_reason_code"],
+        "recoverable_failure_continue_round"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["attempt_ledger"][0]["recovery_action"],
+        "wait_background"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["attempt_ledger"][0]["repair_signal"]["repair_envelope"]
+            ["next_recovery_kind"],
+        "wait_background"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["attempt_ledger"][0]["repair_signal"]["repair_envelope"]
+            ["provider_status"]["provider"],
+        "minimax"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["attempt_ledger"][0]["repair_signal"]["repair_envelope"]
+            ["provider_status"]["status_code"],
+        "rate_limited"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["attempt_ledger"][0]["repair_signal"]["repair_envelope"]
+            ["provider_status"]["retry_after_seconds"],
+        60
+    );
+}
+
+#[test]
 fn user_input_checkpoint_payload_records_hook_confirmation_state() {
     let task = support_test_task();
     let mut loop_state = LoopState::new(2);
