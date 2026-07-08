@@ -2,6 +2,7 @@ use serde_json::Value;
 use std::path::Path;
 
 use crate::ActFinalizeStyle;
+use crate::pipeline_types::OutputContractRef;
 
 use super::{
     active_primary_task_prompt, archive_list_contract_from_surface,
@@ -549,7 +550,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
             req,
             req_surface,
         ) {
-            output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+            output_contract.apply_output_contract_ref(OutputContractRef::file_paths());
             output_contract.response_shape = OutputResponseShape::Strict;
             output_contract.requires_content_evidence = true;
             output_contract.delivery_required = false;
@@ -563,7 +564,8 @@ pub(super) fn apply_current_turn_structural_contract_repair(
             }
             reason = Some("current_workspace_extension_file_paths_contract_repair");
         } else {
-            output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+            output_contract
+                .apply_output_contract_ref(OutputContractRef::workspace_project_summary());
             if output_contract.locator_hint.trim().is_empty() {
                 output_contract.locator_hint = workspace_root.display().to_string();
             }
@@ -663,7 +665,8 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         ) {
             output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
             output_contract.locator_hint = workspace_root.display().to_string();
-            output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+            output_contract
+                .apply_output_contract_ref(OutputContractRef::workspace_project_summary());
             reason = reason.or(Some("current_workspace_root_name_summary_contract_repair"));
         } else if let Some(locator_hint) =
             workspace_direct_child_stem_locator_from_text(req, workspace_root)
