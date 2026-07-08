@@ -339,7 +339,7 @@ fn fs_search_grep_text_direct_answer_uses_name_matches_when_content_empty() {
 
     assert_eq!(
         super::fs_search_direct_answer_candidate(None, &value, None, false, true, false).as_deref(),
-        Some("abcd_report.md\nmy_abcd.txt\nx_abcd_log.txt")
+        Some("abcd_report.md\nmy_abcd.txt\nx_abcd_log.txt\nzz_abcd_backup.log")
     );
 }
 

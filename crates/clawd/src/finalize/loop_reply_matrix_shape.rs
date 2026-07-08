@@ -905,6 +905,7 @@ fn collect_matrix_strict_list_items(
             "keys",
             "identity_values",
             "names",
+            "name_results",
             "paths",
             "files",
             "dirs",
