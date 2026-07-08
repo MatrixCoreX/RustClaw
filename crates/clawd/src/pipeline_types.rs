@@ -392,6 +392,10 @@ pub(crate) struct IntentOutputContract {
 }
 
 impl IntentOutputContract {
+    pub(crate) fn apply_output_contract_ref(&mut self, contract_ref: OutputContractRef) {
+        self.semantic_kind = contract_ref.semantic_kind();
+    }
+
     pub(crate) fn semantic_kind_is(&self, semantic_kind: OutputSemanticKind) -> bool {
         self.semantic_kind == semantic_kind
     }
@@ -416,6 +420,14 @@ pub(crate) struct OutputContractRef {
 impl OutputContractRef {
     pub(crate) fn new(semantic_kind: OutputSemanticKind) -> Self {
         Self { semantic_kind }
+    }
+
+    pub(crate) fn file_paths() -> Self {
+        Self::new(OutputSemanticKind::FilePaths)
+    }
+
+    pub(crate) fn workspace_project_summary() -> Self {
+        Self::new(OutputSemanticKind::WorkspaceProjectSummary)
     }
 
     pub(crate) fn semantic_kind(self) -> OutputSemanticKind {

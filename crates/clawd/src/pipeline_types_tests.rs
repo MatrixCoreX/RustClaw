@@ -1,6 +1,6 @@
 use super::{
     plan_step_from_agent_action, AgentAction, AskMode, IntentOutputContract, PlanStep,
-    ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
+    OutputContractRef, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
 };
 use serde_json::json;
 
@@ -210,6 +210,20 @@ fn output_contract_ref_wraps_effective_contract_kind() {
         contract_ref.semantic_kind(),
         crate::OutputSemanticKind::WorkspaceProjectSummary
     );
+}
+
+#[test]
+fn output_contract_ref_named_constructors_apply_to_contract() {
+    let mut contract = IntentOutputContract::default();
+
+    contract.apply_output_contract_ref(OutputContractRef::workspace_project_summary());
+    assert_eq!(
+        contract.semantic_kind,
+        crate::OutputSemanticKind::WorkspaceProjectSummary
+    );
+
+    contract.apply_output_contract_ref(OutputContractRef::file_paths());
+    assert_eq!(contract.semantic_kind, crate::OutputSemanticKind::FilePaths);
 }
 
 #[test]
