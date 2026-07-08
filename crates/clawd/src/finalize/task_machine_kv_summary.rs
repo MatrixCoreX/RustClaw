@@ -208,6 +208,7 @@ fn final_answer_preserves_terminal_scalar_contract(
         .filter_map(|step| step.output_excerpt.as_deref())
         .map(str::trim)
         .any(|respond| respond == candidate)
+        || journal_observed_scalar_matches_candidate(journal, candidate)
 }
 
 fn task_final_scalar_candidate_matches_route(
@@ -237,6 +238,64 @@ fn task_final_scalar_candidate_matches_route(
             || candidate.contains('/');
     }
     true
+}
+
+fn journal_observed_scalar_matches_candidate(
+    journal: &crate::task_journal::TaskJournal,
+    candidate: &str,
+) -> bool {
+    journal.step_results.iter().rev().any(|step| {
+        if step.status != crate::executor::StepExecutionStatus::Ok
+            || matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+        {
+            return false;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            return false;
+        };
+        serde_json::from_str::<serde_json::Value>(output.trim())
+            .ok()
+            .and_then(|value| task_observed_scalar_from_json(&value))
+            .is_some_and(|observed| observed.trim() == candidate)
+    })
+}
+
+fn task_observed_scalar_from_json(value: &serde_json::Value) -> Option<String> {
+    if let Some(answer) = value.get("extra").and_then(task_observed_scalar_from_json) {
+        return Some(answer);
+    }
+    if let Some(value_text) = value.get("value_text").and_then(serde_json::Value::as_str) {
+        let value_text = value_text.trim();
+        if !value_text.is_empty() {
+            return Some(value_text.to_string());
+        }
+        if value.get("value").and_then(serde_json::Value::as_str) == Some("") {
+            return Some("\"\"".to_string());
+        }
+    }
+    for key in ["value", "field_value", "count", "total", "schema_version"] {
+        let Some(child) = value.get(key) else {
+            continue;
+        };
+        match child {
+            serde_json::Value::String(text) => {
+                let text = text.trim();
+                if !text.is_empty() {
+                    return Some(text.to_string());
+                }
+                if key == "value" {
+                    return serde_json::to_string(text).ok();
+                }
+            }
+            serde_json::Value::Number(number) => return Some(number.to_string()),
+            serde_json::Value::Bool(value) => return Some(value.to_string()),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn final_answer_preserves_delivery_artifact(
