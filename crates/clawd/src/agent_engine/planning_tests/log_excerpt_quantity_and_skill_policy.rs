@@ -579,6 +579,67 @@ fn generic_path_content_scratch_lifecycle_plan_upgrades_effective_contract() {
 }
 
 #[test]
+fn generic_path_content_package_docker_probe_plan_upgrades_to_service_status_contract() {
+    let state = test_state_with_registry();
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "docker".to_string();
+    let steps = vec![
+        crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "package_manager".to_string(),
+            args: json!({"action": "detect"}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        crate::PlanStep {
+            step_id: "step_2".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "docker_basic".to_string(),
+            args: json!({"action": "version"}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        crate::PlanStep {
+            step_id: "step_3".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "docker_basic".to_string(),
+            args: json!({"action": "ps"}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        crate::PlanStep {
+            step_id: "step_4".to_string(),
+            action_type: "synthesize_answer".to_string(),
+            skill: String::new(),
+            args: json!({}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+    ];
+
+    let effective = crate::agent_engine::service_probe_contract::effective_service_probe_output_contract_for_plan_steps(
+        &state, &route, &steps,
+    )
+    .expect("read-only service probes should upgrade effective contract");
+
+    assert_eq!(effective.semantic_kind, OutputSemanticKind::ServiceStatus);
+    assert_eq!(effective.locator_kind, OutputLocatorKind::None);
+    assert!(effective.locator_hint.is_empty());
+    assert_eq!(
+        crate::evidence_policy::required_evidence_fields_for_output_contract(&effective),
+        vec!["field_value".to_string()]
+    );
+    assert_eq!(
+        crate::evidence_policy::final_answer_shape_for_output_contract(&effective)
+            .map(|shape| shape.as_str()),
+        Some("status_with_source")
+    );
+}
+
+#[test]
 fn command_output_summary_keeps_scratch_cleanup_recovery_after_prior_write() {
     let state = test_state_with_registry();
     let mut route = route_result(

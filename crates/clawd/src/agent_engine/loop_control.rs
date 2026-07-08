@@ -1119,7 +1119,10 @@ async fn run_agent_round(
     )
     .await?;
     push_round_trace(loop_state, goal, &prepared_round);
-    let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let route_result = prepared_round
+        .effective_route_result
+        .as_ref()
+        .or_else(|| agent_run_context.and_then(|ctx| ctx.route_result.as_ref()));
     record_agent_loop_decision_envelope_output_vars(
         loop_state,
         route_result,
@@ -1355,16 +1358,18 @@ pub(super) async fn run_agent_with_loop_seeded(
             agent_run_context,
         )
         .await?;
+        let answer_contract_route_result =
+            answer_contract_route_result_for_reply(agent_run_context, &reply);
         attach_answer_verifier_if_missing(
             state,
             task,
             user_text,
             &policy,
-            agent_run_context,
+            answer_contract_route_result.as_ref(),
             &mut reply,
         )
         .await;
-        let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+        let route_result = answer_contract_route_result.as_ref();
         suppress_answer_verifier_retry_if_structurally_satisfied(&mut reply, route_result);
         suppress_answer_verifier_retry_if_user_locator_disambiguation(&mut reply, route_result);
         suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(&mut reply, route_result);
@@ -1569,13 +1574,13 @@ async fn attach_answer_verifier_if_missing(
     task: &ClaimedTask,
     user_text: &str,
     policy: &AgentLoopGuardPolicy,
-    agent_run_context: Option<&AgentRunContext>,
+    route_result: Option<&RouteResult>,
     reply: &mut AskReply,
 ) {
     if reply.should_fail_task || reply_final_status_is_clarify(reply) {
         return;
     }
-    let Some(route_result) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route_result) = route_result else {
         return;
     };
     let Some(journal) = reply.task_journal.as_mut() else {
@@ -1615,6 +1620,17 @@ async fn attach_answer_verifier_if_missing(
     {
         journal.record_answer_verifier_summary(answer_verifier);
     }
+}
+
+fn answer_contract_route_result_for_reply(
+    agent_run_context: Option<&AgentRunContext>,
+    reply: &AskReply,
+) -> Option<RouteResult> {
+    reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.route_result.clone())
+        .or_else(|| agent_run_context.and_then(|ctx| ctx.route_result.clone()))
 }
 
 fn selected_contract_structured_evidence_gap(

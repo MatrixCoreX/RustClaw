@@ -8,6 +8,7 @@ pub(super) struct PreparedRoundActions {
     pub(super) plan_result: PlanResult,
     pub(super) verify_result: crate::verifier::VerifyResult,
     pub(super) effective_output_contract: Option<crate::IntentOutputContract>,
+    pub(super) effective_route_result: Option<crate::RouteResult>,
 }
 
 fn build_round_verify_summary(
@@ -197,11 +198,18 @@ pub(super) async fn prepare_round_actions(
     );
     let original_route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     let effective_output_contract = original_route_result.and_then(|route| {
-        crate::agent_engine::effective_filesystem_lifecycle_output_contract_for_plan_steps(
+        crate::agent_engine::service_probe_contract::effective_service_probe_output_contract_for_plan_steps(
             state,
             route,
             &plan_result.steps,
         )
+        .or_else(|| {
+            crate::agent_engine::effective_filesystem_lifecycle_output_contract_for_plan_steps(
+                state,
+                route,
+                &plan_result.steps,
+            )
+        })
         .or_else(|| {
             crate::agent_engine::effective_filesystem_cleanup_recovery_output_contract_for_plan_steps(
                 state,
@@ -255,7 +263,7 @@ pub(super) async fn prepare_round_actions(
         );
     }
     let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", user_text);
-    if let Some(route_result) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
+    if let Some(route_result) = verify_route_result {
         journal.record_route_result(route_result);
     }
     journal.record_plan_result(&plan_result);
@@ -312,6 +320,7 @@ pub(super) async fn prepare_round_actions(
         plan_result,
         verify_result,
         effective_output_contract,
+        effective_route_result,
     })
 }
 
