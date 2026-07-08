@@ -380,6 +380,7 @@ fn agent_loop_boundary_observations_block(
     let file_delivery_target_candidates =
         file_delivery_target_candidate_observations(route, session_snapshot);
     let current_workspace_scope = current_workspace_scope_observation(state, route);
+    let active_plan_files = active_plan_file_observations(state);
     let default_main_config_contract =
         default_main_config_contract_observation(state, prompt, route);
     let current_request_locator = if default_main_config_contract.is_some() {
@@ -410,6 +411,7 @@ fn agent_loop_boundary_observations_block(
         && active_bound_targets.is_empty()
         && file_delivery_target_candidates.is_empty()
         && current_workspace_scope.is_none()
+        && active_plan_files.is_empty()
         && current_request_locator.is_none()
         && default_main_config_contract.is_none()
         && registry_capability_contract.is_none()
@@ -442,6 +444,7 @@ fn agent_loop_boundary_observations_block(
         "active_bound_targets": active_bound_targets,
         "file_delivery_target_candidates": file_delivery_target_candidates,
         "current_workspace_scope": current_workspace_scope,
+        "active_plan_files": active_plan_files,
         "current_request_locator": current_request_locator,
         "default_main_config_contract": default_main_config_contract,
         "registry_capability_contract": registry_capability_contract,
@@ -611,6 +614,43 @@ fn current_workspace_scope_has_count_shape(route: &crate::RouteResult) -> bool {
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::OneSentence
     ) || (route.output_contract.response_shape == crate::OutputResponseShape::Strict
         && route.output_contract.exact_sentence_count == Some(1))
+}
+
+fn active_plan_file_observations(state: &AppState) -> Vec<serde_json::Value> {
+    let plan_root = state.skill_rt.workspace_root.join("plan");
+    let Ok(entries) = std::fs::read_dir(&plan_root) else {
+        return Vec::new();
+    };
+    let mut files = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            let metadata = entry.metadata().ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
+            let file_name = path.file_name()?.to_str()?.trim();
+            if file_name.is_empty() || file_name.starts_with('.') {
+                return None;
+            }
+            let logical_path = path
+                .strip_prefix(&state.skill_rt.workspace_root)
+                .ok()
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.display().to_string());
+            Some((
+                logical_path.clone(),
+                serde_json::json!({
+                    "source": "workspace_plan_directory",
+                    "logical_path": logical_path,
+                    "workspace_path": path.display().to_string(),
+                    "bytes": metadata.len(),
+                }),
+            ))
+        })
+        .collect::<Vec<_>>();
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    files.into_iter().take(8).map(|(_, value)| value).collect()
 }
 
 fn session_alias_binding_observations(

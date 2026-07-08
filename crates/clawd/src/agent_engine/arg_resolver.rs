@@ -77,6 +77,11 @@ fn rewrite_path_field(
             if !trimmed.is_empty() && Path::new(trimmed).exists() {
                 return false;
             }
+            if !trimmed.is_empty()
+                && missing_file_name_conflicts_with_auto_locator(trimmed, auto_locator_path)
+            {
+                return false;
+            }
             if !trimmed.is_empty() && !allow_missing_rewrite {
                 return false;
             }
@@ -88,6 +93,44 @@ fn rewrite_path_field(
         }
         None => false,
     }
+}
+
+fn missing_file_name_conflicts_with_auto_locator(current: &str, auto_locator_path: &str) -> bool {
+    let current_path = Path::new(current);
+    let auto_path = Path::new(auto_locator_path);
+    if current_path.exists() || !auto_path.is_file() {
+        return false;
+    }
+    let Some(current_name) = current_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(normalize_file_name_token)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    if !current_name.contains('.') {
+        return false;
+    }
+    let auto_name = auto_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(normalize_file_name_token)
+        .unwrap_or_default();
+    let auto_stem = auto_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(normalize_file_name_token)
+        .unwrap_or_default();
+    if auto_name.is_empty() {
+        return false;
+    }
+    !(current_name == auto_name
+        || (!auto_stem.is_empty() && current_name.contains(auto_stem.as_str())))
+}
+
+fn normalize_file_name_token(value: &str) -> String {
+    value.trim().replace('-', "_").to_ascii_lowercase()
 }
 
 fn rewrite_root_field(

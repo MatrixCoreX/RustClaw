@@ -1615,6 +1615,7 @@ fn workspace_summary_default_text_evidence_uses_contract_without_execute_gate() 
     ];
 
     let normalized = ensure_workspace_synthesis_has_default_text_evidence(
+        &test_state(),
         Some(&route),
         &LoopState::new(1),
         actions,
