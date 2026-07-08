@@ -714,6 +714,45 @@ fn direct_structured_observed_answer_skips_multi_evidence_content_routes() {
 }
 
 #[test]
+fn direct_structured_observed_answer_preserves_publishable_respond_for_content_routes() {
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "system_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(
+            r#"{"action":"inventory_dir","names_only":true,"names":["clawd.run.log"],"names_by_kind":{"files":["clawd.run.log"],"dirs":[],"other":[]}}"#
+                .to_string(),
+        ),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "respond".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some("更像正常启动，没有遇到报错。".to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    assert!(
+        direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context)).is_none(),
+        "content-evidence routes should preserve the publishable respond instead of projecting a names_only inventory item"
+    );
+}
+
+#[test]
 fn direct_structured_observed_answer_skips_raw_passthrough_for_strict_exact_sentence() {
     let raw_snapshot = "exit=0\nState  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787      0.0.0.0:*    users:((\"clawd\",pid=117002,fd=31))";
     let mut loop_state = crate::agent_engine::LoopState::new(2);

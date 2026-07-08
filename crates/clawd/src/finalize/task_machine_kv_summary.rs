@@ -99,6 +99,17 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         journal.record_final_answer(answer_text.as_str());
         return false;
     }
+    if !force_structured
+        && final_answer_preserves_grounded_summary_delivery(
+            route_result,
+            journal,
+            answer_text,
+            answer_messages,
+        )
+    {
+        journal.record_final_answer(answer_text.as_str());
+        return false;
+    }
     let Some(summary) = requested_machine_kv_summary_from_task_final_answer(
         prompt,
         route_result,
@@ -673,6 +684,32 @@ fn route_allows_model_language_delivery(
             response_shape,
             crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
         )
+}
+
+fn final_answer_preserves_grounded_summary_delivery(
+    route_result: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    answer_text: &str,
+    answer_messages: &[String],
+) -> bool {
+    let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route_result) else {
+        return false;
+    };
+    let contract = route_result.effective_output_contract();
+    if shape.class() != crate::evidence_policy::FinalAnswerShapeClass::GroundedSummary
+        || contract.delivery_required
+        || matches!(
+            contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+        || !shape.allows_model_language()
+        || !journal_has_observed_tool_evidence(journal)
+    {
+        return false;
+    }
+    std::iter::once(answer_text)
+        .chain(answer_messages.iter().map(String::as_str))
+        .any(|candidate| candidate_is_publishable_evidence_summary(candidate, ""))
 }
 
 fn candidate_is_publishable_evidence_summary(candidate: &str, requested_summary: &str) -> bool {

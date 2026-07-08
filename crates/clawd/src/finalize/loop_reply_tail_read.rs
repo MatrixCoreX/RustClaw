@@ -318,6 +318,45 @@ pub(super) fn current_user_visible_delivery_text(loop_state: &LoopState) -> Opti
         })
 }
 
+fn latest_publishable_terminal_summary_output(loop_state: &LoopState) -> Option<&str> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| {
+            step.is_ok() && matches!(step.skill.as_str(), "respond" | "synthesize_answer")
+        })
+        .filter_map(|step| step.output.as_deref())
+        .map(str::trim)
+        .find(|output| {
+            super::planned_delivery_is_publishable_model_language_answer(output)
+                && !crate::finalize::is_execution_summary_message(output)
+        })
+}
+
+fn route_prefers_publishable_summary_over_tail_read(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> Option<String> {
+    let contract = route.effective_output_contract();
+    if !contract.requires_content_evidence
+        || contract.delivery_required
+        || matches!(
+            contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+        || route_requires_raw_tail_read_passthrough(Some(route))
+        || route_prefers_deterministic_tail_line(Some(route))
+        || !matches!(
+            crate::evidence_policy::final_answer_shape_for_route(route),
+            Some(crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence)
+        )
+    {
+        return None;
+    }
+    latest_publishable_terminal_summary_output(loop_state).map(ToString::to_string)
+}
+
 fn latest_tail_replacement_can_recover_stale_synthesis(
     loop_state: &LoopState,
     current_delivery: &str,
@@ -468,6 +507,38 @@ pub(super) fn replace_delivery_with_latest_tail_read_range_answer(
         return false;
     };
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    if let Some(summary) = route
+        .and_then(|route| route_prefers_publishable_summary_over_tail_read(route, loop_state))
+        .filter(|summary| summary.trim() != answer.trim())
+    {
+        loop_state.delivery_messages.clear();
+        append_delivery_message(
+            &task.task_id,
+            &mut loop_state.delivery_messages,
+            summary.clone(),
+        );
+        loop_state.last_user_visible_respond = Some(summary);
+        *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: loop_state.executed_step_results.len().max(1),
+            ..Default::default()
+        });
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "preserve_publishable_summary_over_tail_read",
+            "preserved",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return true;
+    }
     if latest_tail_read_range_should_preserve_current_delivery(route, loop_state, &answer) {
         info!(
             "delivery keep_current_summary_over_tail_read_range task_id={}",
