@@ -28,7 +28,7 @@ pub(super) fn apply_alias_state_patch_ack_route(
     route_result.wants_file_delivery = false;
     route_result.output_contract = crate::IntentOutputContract::default();
     route_result.set_ask_mode(crate::AskMode::state_patch_ack());
-    if !route_result.route_reason.contains("alias_state_patch_ack") {
+    if !route_result.has_route_reason_machine_marker("alias_state_patch_ack") {
         if !route_result.route_reason.trim().is_empty() {
             route_result.route_reason.push_str("; ");
         }

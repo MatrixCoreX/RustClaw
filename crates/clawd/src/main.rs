@@ -128,7 +128,8 @@ pub(crate) use pipeline_types::{
     plan_step_from_agent_action, IntentOutputContract, OutputDeliveryIntent, OutputListSelector,
     OutputLocatorKind, OutputResponseShape, OutputScalarCountFilter, OutputScalarCountTargetKind,
     OutputSemanticKind, PlanKind, PlanResult, PlanStep, ResumeBehavior, RiskCeiling, RouteResult,
-    ScheduleKind, SelfExtensionContract, SelfExtensionMode, SelfExtensionTrigger,
+    RouteReasonMarkers, ScheduleKind, SelfExtensionContract, SelfExtensionMode,
+    SelfExtensionTrigger,
 };
 pub(crate) use prompt_utils::{
     extract_first_json_value_any, log_prompt_render, log_prompt_render_with_version,

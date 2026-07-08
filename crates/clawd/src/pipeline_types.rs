@@ -409,6 +409,74 @@ impl IntentOutputContract {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OutputContractRef {
+    semantic_kind: OutputSemanticKind,
+}
+
+impl OutputContractRef {
+    pub(crate) fn new(semantic_kind: OutputSemanticKind) -> Self {
+        Self { semantic_kind }
+    }
+
+    pub(crate) fn semantic_kind(self) -> OutputSemanticKind {
+        self.semantic_kind
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RouteReasonMarkers<'a> {
+    route_reason: &'a str,
+}
+
+impl<'a> RouteReasonMarkers<'a> {
+    pub(crate) fn new(route_reason: &'a str) -> Self {
+        Self { route_reason }
+    }
+
+    pub(crate) fn has_machine_marker(self, marker: &str) -> bool {
+        self.route_reason.split(';').map(str::trim).any(|part| {
+            part == marker
+                || part
+                    .rsplit_once(':')
+                    .is_some_and(|(_, suffix)| suffix.trim() == marker)
+        })
+    }
+
+    pub(crate) fn has_any_machine_marker(self, markers: &[&str]) -> bool {
+        markers
+            .iter()
+            .any(|marker| self.has_machine_marker(marker))
+    }
+
+    pub(crate) fn any_part(self, mut predicate: impl FnMut(&str) -> bool) -> bool {
+        self.route_reason
+            .split(';')
+            .map(str::trim)
+            .any(|part| predicate(part))
+    }
+
+    pub(crate) fn explicit_output_contract_marker_kind(self) -> Option<OutputSemanticKind> {
+        self.route_reason
+            .split(';')
+            .map(str::trim)
+            .rev()
+            .find_map(|part| {
+                let marker = part
+                    .strip_prefix("output_contract_kind=")
+                    .or_else(|| part.strip_prefix("contract:"))?
+                    .trim();
+                OutputSemanticKind::ALL
+                    .iter()
+                    .copied()
+                    .find(|semantic_kind| {
+                        *semantic_kind != OutputSemanticKind::None
+                            && semantic_kind.as_str() == marker
+                    })
+            })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResumeBehavior {
     None,
     ResumeExecute,
@@ -543,12 +611,7 @@ impl RouteResult {
     }
 
     pub(crate) fn has_route_reason_machine_marker(&self, marker: &str) -> bool {
-        self.route_reason.split(';').map(str::trim).any(|part| {
-            part == marker
-                || part
-                    .rsplit_once(':')
-                    .is_some_and(|(_, suffix)| suffix.trim() == marker)
-        })
+        RouteReasonMarkers::new(&self.route_reason).has_machine_marker(marker)
     }
 
     pub(crate) fn output_contract_marker_is(&self, semantic_kind: OutputSemanticKind) -> bool {
@@ -605,28 +668,18 @@ impl RouteResult {
     }
 
     fn explicit_output_contract_marker_kind(&self) -> Option<OutputSemanticKind> {
-        self.route_reason
-            .split(';')
-            .map(str::trim)
-            .rev()
-            .find_map(|part| {
-                let marker = part
-                    .strip_prefix("output_contract_kind=")
-                    .or_else(|| part.strip_prefix("contract:"))?
-                    .trim();
-                OutputSemanticKind::ALL
-                    .iter()
-                    .copied()
-                    .find(|semantic_kind| {
-                        *semantic_kind != OutputSemanticKind::None
-                            && semantic_kind.as_str() == marker
-                    })
-            })
+        RouteReasonMarkers::new(&self.route_reason).explicit_output_contract_marker_kind()
+    }
+
+    pub(crate) fn effective_output_contract_ref(&self) -> OutputContractRef {
+        OutputContractRef::new(
+            self.output_contract_marker_kind()
+                .unwrap_or(OutputSemanticKind::None),
+        )
     }
 
     pub(crate) fn effective_output_contract_semantic_kind(&self) -> OutputSemanticKind {
-        self.output_contract_marker_kind()
-            .unwrap_or(OutputSemanticKind::None)
+        self.effective_output_contract_ref().semantic_kind()
     }
 
     pub(crate) fn effective_output_contract(&self) -> IntentOutputContract {

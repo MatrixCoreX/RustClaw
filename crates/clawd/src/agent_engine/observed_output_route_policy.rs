@@ -75,7 +75,7 @@ pub(crate) const QUANTITY_COMPARISON_MODEL_LANGUAGE_SYNTHESIS_MARKER: &str =
     "quantity_comparison_requires_model_language_synthesis";
 
 fn route_reason_has_marker(route: &crate::RouteResult, marker: &str) -> bool {
-    route.route_reason.split(';').map(str::trim).any(|part| {
+    crate::RouteReasonMarkers::new(&route.route_reason).any_part(|part| {
         part == marker
             || part.starts_with(&format!("{marker}:"))
             || machine_marker_token_present(part, marker)

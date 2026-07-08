@@ -174,6 +174,45 @@ fn route_result_effective_output_contract_uses_route_reason_marker() {
 }
 
 #[test]
+fn route_reason_marker_facade_parses_machine_tokens_without_call_site_splitting() {
+    let markers = crate::RouteReasonMarkers::new(
+        "normalizer_hint; contract:scalar_count; mode:pure_chat_agent_loop_submode",
+    );
+
+    assert!(markers.has_machine_marker("pure_chat_agent_loop_submode"));
+    assert!(markers.has_any_machine_marker(&[
+        "workspace_project_summary",
+        "scalar_count",
+    ]));
+    assert_eq!(
+        markers.explicit_output_contract_marker_kind(),
+        Some(crate::OutputSemanticKind::ScalarCount)
+    );
+}
+
+#[test]
+fn route_reason_marker_facade_parses_explicit_output_contract_kind() {
+    let markers = crate::RouteReasonMarkers::new("output_contract_kind=scalar_count");
+
+    assert_eq!(
+        markers.explicit_output_contract_marker_kind(),
+        Some(crate::OutputSemanticKind::ScalarCount)
+    );
+}
+
+#[test]
+fn output_contract_ref_wraps_effective_contract_kind() {
+    let mut route = route_result_with_mode(crate::AskMode::act_plain());
+    route.route_reason = "contract:workspace_project_summary".to_string();
+    let contract_ref = route.effective_output_contract_ref();
+
+    assert_eq!(
+        contract_ref.semantic_kind(),
+        crate::OutputSemanticKind::WorkspaceProjectSummary
+    );
+}
+
+#[test]
 fn route_result_explicit_contract_marker_overrides_legacy_raw_semantic() {
     let mut route = route_result_with_mode(crate::AskMode::act_plain());
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;

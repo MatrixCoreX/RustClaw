@@ -59,12 +59,7 @@ fn clarify_state_has_known_semantic_marker(state: &crate::clarify_state::Clarify
 }
 
 fn route_reason_has_contract_marker(route_reason: &str, marker: &str) -> bool {
-    route_reason.split(';').map(str::trim).any(|part| {
-        part == marker
-            || part
-                .rsplit_once(':')
-                .is_some_and(|(_, suffix)| suffix.trim() == marker)
-    })
+    crate::RouteReasonMarkers::new(route_reason).has_machine_marker(marker)
 }
 
 fn route_reason_has_any_active_observation_contract_marker(route_reason: &str) -> bool {

@@ -20,19 +20,11 @@ const CURRENT_ANCHOR_CONFIG_MARKERS: &[&str] = &[
 ];
 
 fn route_reason_has_machine_marker(route_reason: &str, marker: &str) -> bool {
-    route_reason.split(';').any(|entry| {
-        let entry = entry.trim();
-        entry == marker
-            || entry
-                .rsplit_once(':')
-                .is_some_and(|(_, suffix)| suffix == marker)
-    })
+    crate::RouteReasonMarkers::new(route_reason).has_machine_marker(marker)
 }
 
 fn route_reason_has_any_machine_marker(route_reason: &str, markers: &[&str]) -> bool {
-    markers
-        .iter()
-        .any(|marker| route_reason_has_machine_marker(route_reason, marker))
+    crate::RouteReasonMarkers::new(route_reason).has_any_machine_marker(markers)
 }
 
 fn output_contract_has_file_delivery_signal(

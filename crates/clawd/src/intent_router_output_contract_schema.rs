@@ -19,10 +19,8 @@ pub(super) fn apply_raw_output_explicit_locator_repair(
 ) -> Option<&'static str> {
     if !output_contract.requires_content_evidence
         || output_contract.delivery_required
-        || !route_reason_has_machine_marker(
-            route_reason,
-            OutputSemanticKind::RawCommandOutput.as_str(),
-        )
+        || !crate::RouteReasonMarkers::new(route_reason)
+            .has_machine_marker(OutputSemanticKind::RawCommandOutput.as_str())
         || output_contract.locator_kind != OutputLocatorKind::None
         || !output_contract.locator_hint.trim().is_empty()
         || crate::agent_engine::explicit_command_segment_for_policy(command_runtime, request)
@@ -40,15 +38,6 @@ pub(super) fn apply_raw_output_explicit_locator_repair(
     output_contract.locator_kind = locator.locator_kind;
     output_contract.locator_hint = locator.locator_hint;
     Some("raw_output_explicit_locator_contract_repair")
-}
-
-fn route_reason_has_machine_marker(route_reason: &str, marker: &str) -> bool {
-    route_reason.split(';').map(str::trim).any(|part| {
-        part == marker
-            || part
-                .rsplit_once(':')
-                .is_some_and(|(_, suffix)| suffix.trim() == marker)
-    })
 }
 
 pub(super) fn coerce_output_contract_value_for_schema(value: &mut Value) {
