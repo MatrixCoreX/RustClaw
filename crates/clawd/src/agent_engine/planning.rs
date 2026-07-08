@@ -116,7 +116,18 @@ impl<'a> PlannerToolLibrary<'a> {
                 self.state,
                 AGENT_TOOL_SPEC_PATH,
             )
-            .map(|resolved| resolved.0)
+            .map(|resolved| {
+                let capability_map =
+                    crate::capability_map::build_capability_map_for_task(self.state, self.task);
+                let mut spec = String::new();
+                spec.push_str("runtime_capability_map_v1");
+                spec.push('\n');
+                spec.push_str(&capability_map);
+                spec.push('\n');
+                spec.push('\n');
+                spec.push_str(&resolved.0);
+                spec
+            })
             .map_err(|err| err.to_string())
         } else {
             Ok(build_lightweight_tool_spec(

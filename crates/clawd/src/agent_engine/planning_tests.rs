@@ -14,7 +14,8 @@ use super::{
     build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
     can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
     compact_lightweight_incremental_goal_context, compact_skill_playbook_from_prompt,
-    contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
+    contains_unavailable_skill_action, contract_scoped_lightweight_planner_skill_scope,
+    contract_scoped_planner_skill_scope,
     directory_purpose_representative_read_actions_after_find_result,
     enforce_output_contract_tool_args, ensure_content_excerpt_summary_has_bounded_content,
     ensure_required_contract_block_present, ensure_workspace_synthesis_has_default_text_evidence,
@@ -68,7 +69,7 @@ use super::{
     strip_terminal_discussion_for_scalar_path_observation,
     strip_terminal_placeholder_respond_for_exact_listing_contract,
     strip_unresolved_template_reads_after_inventory_dir, structured_field_selectors, LoopState,
-    PlanningPromptClass,
+    PlannerToolLibrary, PlanningPromptClass,
 };
 use crate::agent_engine::{
     CLAWD_CONTINUE_ON_ERROR_ARG, CLAWD_LITERAL_COMMAND_ARG, CLAWD_RUNTIME_ASYNC_JOB_START_ARG,

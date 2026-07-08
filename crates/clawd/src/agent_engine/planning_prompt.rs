@@ -228,6 +228,8 @@ pub(super) fn build_lightweight_tool_spec(
         "- Do not inspect unrelated files, repository history, or extra skills unless the user explicitly asks for that scope.".to_string(),
         "- Preserve user-supplied concrete shell/system commands as run_cmd; do not replace explicit commands with semantic shortcut skills.".to_string(),
         "- Prefer the most specific enabled skill whose interface covers the request; use generic filesystem/system skills only when no dedicated skill fits.".to_string(),
+        crate::agent_runtime_contract::runtime_protocol_hint_line(),
+        crate::async_job_contract::async_job_protocol_hint_line(),
     ];
     if let Some(route) = route_result {
         lines.push(crate::evidence_policy::evidence_policy_context_prompt_line_for_route(route));
