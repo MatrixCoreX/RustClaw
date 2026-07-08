@@ -24,7 +24,8 @@ use super::{
     try_recover_structured_count_answer_verifier_gap,
     try_recover_structured_evidence_table_answer_verifier_gap,
     try_recover_structured_scalar_output_format_answer_verifier_gap,
-    try_recover_structured_search_answer_verifier_gap, AgentLoopGuardPolicy, RoundOutcome,
+    try_recover_structured_search_answer_verifier_gap,
+    try_replan_avoidable_low_risk_freeform_clarify, AgentLoopGuardPolicy, RoundOutcome,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
@@ -221,6 +222,89 @@ fn route_owned_respond_only_clarify_marks_loop_pending_user_input() {
             .map(String::as_str),
         Some("path")
     );
+}
+
+#[test]
+fn low_risk_freeform_topic_clarify_replans_without_publishing_question() {
+    let plan = plan_result_with_raw_and_steps(
+        "{}",
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "Please provide more details.",
+                "terminal_intent": "clarify",
+                "clarify_reason_code": "missing_topic_scope",
+                "missing_slot": "topic_scope"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
+    let mut route = route_result(OutputResponseShape::Free);
+    route.risk_ceiling = RiskCeiling::Low;
+    route.route_reason = "standalone_freeform_clarify_loop_context".to_string();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let mut loop_state = LoopState::new(2);
+
+    let outcome =
+        try_replan_avoidable_low_risk_freeform_clarify(&mut loop_state, Some(&route), &intent)
+            .expect("low-risk freeform clarify should be recoverable");
+
+    assert_eq!(
+        outcome.stop_signal.as_deref(),
+        Some("recoverable_failure_continue_round")
+    );
+    assert!(!loop_state.pending_user_input_required);
+    assert!(loop_state.delivery_messages.is_empty());
+    assert!(loop_state.last_user_visible_respond.is_none());
+    assert!(loop_state.has_recoverable_failure_context);
+    assert_eq!(loop_state.attempt_ledger_entries.len(), 1);
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.avoidable_clarify_replan_used")
+            .map(String::as_str),
+        Some("true")
+    );
+}
+
+#[test]
+fn locator_clarify_does_not_low_risk_freeform_replan() {
+    let plan = plan_result_with_raw_and_steps(
+        "{}",
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "Which file should I read?",
+                "terminal_intent": "clarify",
+                "clarify_reason_code": "missing_locator",
+                "missing_slot": "locator",
+                "locator_kind": "path"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
+    let mut route = route_result(OutputResponseShape::OneSentence);
+    route.risk_ceiling = RiskCeiling::Low;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    let mut loop_state = LoopState::new(2);
+
+    assert!(
+        try_replan_avoidable_low_risk_freeform_clarify(&mut loop_state, Some(&route), &intent)
+            .is_none()
+    );
+    assert!(loop_state.attempt_ledger_entries.is_empty());
 }
 
 #[test]

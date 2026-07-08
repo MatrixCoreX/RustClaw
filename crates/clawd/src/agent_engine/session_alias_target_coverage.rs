@@ -532,6 +532,9 @@ pub(super) fn no_content_evidence_execute_route_read_only_file_plan_requires_rep
     if existing_observed_synthesis_read_only_plan_can_execute(state, route, actions) {
         return false;
     }
+    if direct_text_range_read_plan_has_terminal_answer(state, actions) {
+        return false;
+    }
     let executable_actions = actions.iter().filter(|action| {
         matches!(
             action,
@@ -544,6 +547,61 @@ pub(super) fn no_content_evidence_execute_route_read_only_file_plan_requires_rep
             return false;
         }
         saw_read = true;
+    }
+    saw_read
+}
+
+fn action_is_direct_text_range_read_observation(state: &AppState, action: &AgentAction) -> bool {
+    let (skill, args) = match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            (skill, args)
+        }
+        AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::CallCapability { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::Think { .. } => {
+            return false;
+        }
+    };
+    let canonical = state.resolve_canonical_skill_name(skill);
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(|action| action.trim().to_ascii_lowercase());
+    match (canonical.as_str(), action.as_deref()) {
+        ("read_file", _) => true,
+        ("fs_basic", Some("read_text_range")) => true,
+        ("system_basic", Some("read_range")) => true,
+        _ => false,
+    }
+}
+
+fn direct_text_range_read_plan_has_terminal_answer(
+    state: &AppState,
+    actions: &[AgentAction],
+) -> bool {
+    let has_synthesis = actions
+        .iter()
+        .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. }));
+    let has_respond = actions
+        .iter()
+        .any(|action| matches!(action, AgentAction::Respond { .. }));
+    if !has_synthesis || !has_respond {
+        return false;
+    }
+
+    let mut saw_read = false;
+    for action in actions {
+        match action {
+            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. } => {
+                if !action_is_direct_text_range_read_observation(state, action) {
+                    return false;
+                }
+                saw_read = true;
+            }
+            AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. } => {}
+            AgentAction::CallCapability { .. } | AgentAction::Think { .. } => return false,
+        }
     }
     saw_read
 }

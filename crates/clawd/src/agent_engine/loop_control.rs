@@ -507,6 +507,113 @@ fn apply_structured_respond_clarify_to_loop_state(
     }
 }
 
+fn machine_slot_is_nonblocking_freeform_slot(slot: Option<&str>) -> bool {
+    let Some(slot) = slot.map(str::trim).filter(|slot| !slot.is_empty()) else {
+        return false;
+    };
+    slot.split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .any(|part| {
+            matches!(
+                part,
+                "topic"
+                    | "scope"
+                    | "audience"
+                    | "style"
+                    | "format"
+                    | "detail"
+                    | "details"
+                    | "section"
+                    | "sections"
+                    | "context"
+                    | "goal"
+                    | "goals"
+            )
+        })
+}
+
+fn route_allows_low_risk_freeform_clarify_replan(route: &RouteResult) -> bool {
+    if route.needs_clarify || route.wants_file_delivery {
+        return false;
+    }
+    if route.risk_ceiling != crate::RiskCeiling::Low {
+        return false;
+    }
+    let contract = &route.output_contract;
+    !contract.delivery_required
+        && contract.delivery_intent == crate::OutputDeliveryIntent::None
+        && contract.locator_kind == crate::OutputLocatorKind::None
+        && !contract.requires_content_evidence
+        && contract.semantic_kind == crate::OutputSemanticKind::None
+        && matches!(
+            contract.response_shape,
+            crate::OutputResponseShape::Free
+                | crate::OutputResponseShape::Strict
+                | crate::OutputResponseShape::OneSentence
+        )
+}
+
+fn try_replan_avoidable_low_risk_freeform_clarify(
+    loop_state: &mut LoopState,
+    route: Option<&RouteResult>,
+    intent: &StructuredRespondTerminalIntent,
+) -> Option<RoundOutcome> {
+    let route = route?;
+    if loop_state
+        .output_vars
+        .contains_key("agent_loop.avoidable_clarify_replan_used")
+    {
+        return None;
+    }
+    if !route_allows_low_risk_freeform_clarify_replan(route) {
+        return None;
+    }
+    if !machine_slot_is_nonblocking_freeform_slot(intent.missing_slot.as_deref()) {
+        return None;
+    }
+
+    loop_state.has_recoverable_failure_context = true;
+    loop_state.output_vars.insert(
+        "agent_loop.avoidable_clarify_replan_used".to_string(),
+        "true".to_string(),
+    );
+    loop_state.history_compact.push(format!(
+        "round={} recoverable_clarify=low_risk_freeform missing_slot={}",
+        loop_state.round_no,
+        intent.missing_slot.as_deref().unwrap_or("")
+    ));
+    attempt_ledger::record_attempt_with_retry_instruction(
+        loop_state,
+        "planner_clarify",
+        &format!(
+            "terminal_intent=clarify missing_slot={} route_risk={} locator_kind={} delivery_required={}",
+            intent.missing_slot.as_deref().unwrap_or(""),
+            route.risk_ceiling.as_str(),
+            route.output_contract.locator_kind.as_str(),
+            route.output_contract.delivery_required
+        ),
+        crate::executor::StepExecutionStatus::Error,
+        intent.clarify_reason_code.as_deref().unwrap_or(""),
+        Some("avoidable_clarify"),
+        "recoverable_clarify_low_risk_freeform",
+        Some(
+            "The previous planner step asked for optional drafting details, but the route is low-risk chat-only freeform with no required evidence, locator, delivery, credential, or confirmation boundary. Replan with a useful best-effort draft/outline using neutral assumptions unless a real boundary slot is missing.",
+        ),
+    );
+    info!(
+        "low_risk_freeform_clarify_replan round={} missing_slot={}",
+        loop_state.round_no,
+        intent.missing_slot.as_deref().unwrap_or("")
+    );
+    Some(RoundOutcome {
+        executed_actions: 0,
+        had_error: false,
+        stop_signal: Some("recoverable_failure_continue_round".to_string()),
+        next_goal_hint: None,
+        no_progress: false,
+    })
+}
+
 fn record_agent_loop_decision_envelope_output_vars(
     loop_state: &mut LoopState,
     route: Option<&RouteResult>,
@@ -1031,6 +1138,20 @@ async fn run_agent_round(
             )
         })
     {
+        if let Some(outcome) =
+            try_replan_avoidable_low_risk_freeform_clarify(loop_state, route_result, &intent)
+        {
+            info!(
+                "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
+                task.task_id,
+                loop_state.round_no,
+                outcome.executed_actions,
+                outcome.no_progress,
+                outcome.stop_signal.as_deref().unwrap_or(""),
+                crate::truncate_for_log(outcome.next_goal_hint.as_deref().unwrap_or(""))
+            );
+            return Ok(outcome);
+        }
         let outcome = apply_structured_respond_clarify_to_loop_state(loop_state, &intent);
         info!(
             "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
