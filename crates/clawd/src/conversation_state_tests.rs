@@ -1581,6 +1581,149 @@ fn state_patch_accepts_alias_bindings_array_surface_value_fields() {
 }
 
 #[test]
+fn state_patch_accepts_alias_bindings_array_target_value_field() {
+    let patch = json!({
+        "alias_bindings": [{
+            "alias": "甲文件",
+            "target_kind": "path",
+            "target_value": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+            "scope": "session"
+        }]
+    });
+
+    assert!(super::state_patch_is_alias_bindings_only(&patch));
+    let bindings = super::session_alias_bindings_from_state_patch(Some(&patch));
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].alias, "甲文件");
+    assert_eq!(
+        bindings[0].target,
+        "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+    );
+}
+
+#[test]
+fn state_patch_accepts_alias_bindings_array_locator_field() {
+    let patch = json!({
+        "alias_bindings": [{
+            "alias": "甲文件",
+            "locator": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+            "locator_kind": "path",
+            "scope": "session"
+        }]
+    });
+
+    assert!(super::state_patch_is_alias_bindings_only(&patch));
+    let bindings = super::session_alias_bindings_from_state_patch(Some(&patch));
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].alias, "甲文件");
+    assert_eq!(
+        bindings[0].target,
+        "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+    );
+}
+
+#[test]
+fn state_patch_accepts_alias_bindings_array_locator_value_field() {
+    let patch = json!({
+        "alias_bindings": [{
+            "alias": "甲文件",
+            "locator_kind": "path",
+            "locator_value": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+            "scope": "session"
+        }]
+    });
+
+    assert!(super::state_patch_is_alias_bindings_only(&patch));
+    let bindings = super::session_alias_bindings_from_state_patch(Some(&patch));
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].alias, "甲文件");
+    assert_eq!(
+        bindings[0].target,
+        "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+    );
+}
+
+#[test]
+fn state_patch_accepts_alias_bindings_object_map() {
+    let patch = json!({
+        "alias_bindings": {
+            "甲": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+            "ALPHA_DOC": {
+                "target_value": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+            }
+        }
+    });
+
+    assert!(super::state_patch_is_alias_bindings_only(&patch));
+    let bindings = super::session_alias_bindings_from_state_patch(Some(&patch));
+    assert_eq!(bindings.len(), 2);
+    assert!(bindings.iter().any(|binding| {
+        binding.alias == "甲"
+            && binding.target == "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+    }));
+    assert!(bindings.iter().any(|binding| {
+        binding.alias == "ALPHA_DOC"
+            && binding.target == "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+    }));
+}
+
+#[test]
+fn state_patch_accepts_alias_bindings_record_object() {
+    let patch = json!({
+        "alias_bindings": {
+            "action": "replace",
+            "name": "甲文件",
+            "target": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+            "target_abs": "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+        }
+    });
+
+    assert!(super::state_patch_is_alias_bindings_only(&patch));
+    let bindings = super::session_alias_bindings_from_state_patch(Some(&patch));
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].alias, "甲文件");
+    assert_eq!(
+        bindings[0].target,
+        "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+    );
+}
+
+#[test]
+fn state_patch_alias_bindings_allow_visibility_constraint_metadata() {
+    let patch = json!({
+        "alias_bindings": [{
+            "alias": "甲文件",
+            "target": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+        }],
+        "forbidden_visible_literals": ["scripts/nl_tests/fixtures/device_local/docs/service_notes.md"],
+        "required_visible_literals": ["ack-token"],
+        "primary_task_update": {"new_task": false}
+    });
+
+    assert!(super::state_patch_is_alias_bindings_only(&patch));
+    let bindings = super::session_alias_bindings_from_state_patch(Some(&patch));
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].alias, "甲文件");
+    assert_eq!(
+        bindings[0].target,
+        "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+    );
+}
+
+#[test]
+fn state_patch_alias_bindings_reject_active_primary_task_update() {
+    let patch = json!({
+        "alias_bindings": [{
+            "alias": "甲文件",
+            "target": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+        }],
+        "primary_task_update": {"new_task": true}
+    });
+
+    assert!(!super::state_patch_is_alias_bindings_only(&patch));
+}
+
+#[test]
 fn state_patch_rejects_non_locator_direct_alias_map() {
     let patch = json!({
         "甲文件": "the checklist from before"

@@ -40,6 +40,8 @@ mod post_route_refinement;
 mod quantity_pair_binding;
 #[path = "ask_pipeline_runtime_status.rs"]
 mod runtime_status;
+#[path = "ask_pipeline_state_patch_ack.rs"]
+mod state_patch_ack;
 #[path = "ask_pipeline_structured_anchor_guard.rs"]
 mod structured_anchor_guard;
 #[path = "ask_pipeline_unbound_context_guard.rs"]
@@ -116,6 +118,7 @@ use quantity_pair_binding::{
 use runtime_status::{
     append_runtime_status_capability_context, turn_analysis_has_runtime_status_query,
 };
+use state_patch_ack::{alias_state_patch_ack_reply, apply_alias_state_patch_ack_route};
 use structured_anchor_guard::{
     active_session_has_structured_observation_anchor, apply_structured_anchor_evidence_repair,
     followup_frame_has_matching_target, observed_facts_have_matching_target,
@@ -1236,7 +1239,7 @@ pub(super) async fn prepare_ask_flow(
         prepared_routing.turn_analysis.as_ref(),
     )
     .await?;
-    let loop_context = build_loop_context_after_boundary_preflight(
+    let mut loop_context = build_loop_context_after_boundary_preflight(
         state,
         task,
         prompt,
@@ -1246,6 +1249,10 @@ pub(super) async fn prepare_ask_flow(
         prepared_routing.route_result,
         prepared_execution.resolved_prompt_for_execution,
         prepared_execution.prompt_with_memory_for_execution,
+    );
+    apply_alias_state_patch_ack_route(
+        &mut loop_context.execution_route_result,
+        prepared_routing.turn_analysis.as_ref(),
     );
     let has_schedule_intent =
         loop_context.execution_route_result.schedule_kind != crate::ScheduleKind::None;
@@ -1284,6 +1291,7 @@ pub(super) async fn execute_ask_dispatch(
     ask_mode: &crate::AskMode,
     should_route_schedule_direct: bool,
     agent_run_context: Option<crate::agent_engine::AgentRunContext>,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> Result<Option<Result<crate::AskReply, String>>> {
     let execution_user_request = execution_user_request(prompt, resolved_prompt_for_execution);
     if should_route_schedule_direct {
@@ -1318,6 +1326,19 @@ pub(super) async fn execute_ask_dispatch(
     .await
     .map_err(anyhow::Error::msg)?
     {
+        return Ok(Some(Ok(reply)));
+    }
+    if let Some(reply) =
+        alias_state_patch_ack_reply(state, task, prompt, route_result, turn_analysis)
+    {
+        crate::log_ask_transition(
+            state,
+            &task.task_id,
+            Some(crate::AskState::Routing),
+            crate::AskState::Finalizing,
+            "alias_state_patch_ack",
+            None,
+        );
         return Ok(Some(Ok(reply)));
     }
     let loop_ctx = agent_loop_default_context(agent_run_context);

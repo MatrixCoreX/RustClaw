@@ -113,18 +113,58 @@ pub(crate) fn session_alias_bindings_from_state_patch(
             let Some(alias) = item
                 .get("alias")
                 .or_else(|| item.get("surface"))
+                .or_else(|| item.get("name"))
+                .or_else(|| item.get("alias_name"))
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
             else {
                 continue;
             };
-            let Some(target) = item
-                .get("target")
-                .or_else(|| item.get("path"))
-                .or_else(|| item.get("value"))
-                .and_then(|value| value.as_str())
-                .and_then(normalize_alias_target)
+            let Some(target) = alias_binding_target_value(item).and_then(normalize_alias_target)
+            else {
+                continue;
+            };
+            if out
+                .iter()
+                .any(|existing: &SessionAliasBinding| existing.alias.eq_ignore_ascii_case(alias))
+            {
+                continue;
+            }
+            out.push(SessionAliasBinding {
+                alias: alias.to_string(),
+                target,
+                updated_at_ts: now_ts,
+            });
+            if out.len() >= MAX_SESSION_ALIAS_BINDINGS {
+                return out;
+            }
+        }
+    }
+    if let Some(alias_bindings) = state_patch
+        .get("alias_bindings")
+        .and_then(|value| value.as_object())
+    {
+        if alias_binding_record_map_present(alias_bindings) {
+            if let Some((alias, target)) = alias_binding_record_from_map(alias_bindings) {
+                if !out.iter().any(|existing: &SessionAliasBinding| {
+                    existing.alias.eq_ignore_ascii_case(&alias)
+                }) {
+                    out.push(SessionAliasBinding {
+                        alias,
+                        target,
+                        updated_at_ts: now_ts,
+                    });
+                }
+            }
+            return out;
+        }
+        for (alias, value) in alias_bindings {
+            let alias = alias.trim();
+            if alias.is_empty() {
+                continue;
+            }
+            let Some(target) = compatibility_alias_target(value).and_then(normalize_alias_target)
             else {
                 continue;
             };
@@ -192,25 +232,10 @@ pub(crate) fn state_patch_is_alias_bindings_only(state_patch: &Value) -> bool {
                 return true;
             }
             if key == "alias_bindings" {
-                return value.as_array().is_some_and(|items| {
-                    !items.is_empty()
-                        && items.iter().all(|item| {
-                            let alias = item
-                                .get("alias")
-                                .or_else(|| item.get("surface"))
-                                .and_then(Value::as_str)
-                                .map(str::trim)
-                                .filter(|alias| !alias.is_empty());
-                            let target = item
-                                .get("target")
-                                .or_else(|| item.get("path"))
-                                .or_else(|| item.get("value"))
-                                .and_then(Value::as_str)
-                                .map(str::trim)
-                                .filter(|target| !target.is_empty());
-                            alias.is_some() && target.is_some()
-                        })
-                });
+                return alias_bindings_value_is_well_formed(value);
+            }
+            if alias_bindings_metadata_is_ignorable(key, value) {
+                return true;
             }
             compatibility_alias_key(key).is_some()
                 && compatibility_alias_target(value)
@@ -221,6 +246,98 @@ pub(crate) fn state_patch_is_alias_bindings_only(state_patch: &Value) -> bool {
                         .and_then(normalize_explicit_alias_target)
                         .is_some()
         })
+}
+
+fn alias_bindings_metadata_is_ignorable(key: &str, value: &Value) -> bool {
+    match key {
+        "forbidden_visible_literals" | "required_visible_literals" => true,
+        "primary_task_update" => primary_task_update_value_is_inactive(value),
+        _ => false,
+    }
+}
+
+fn primary_task_update_value_is_inactive(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Bool(active) => !*active,
+        Value::Object(map) => map.values().all(primary_task_update_value_is_inactive),
+        Value::Array(items) => items.iter().all(primary_task_update_value_is_inactive),
+        Value::String(text) => {
+            let normalized = text.trim().to_ascii_lowercase();
+            normalized.is_empty() || matches!(normalized.as_str(), "false" | "none" | "null")
+        }
+        Value::Number(_) => false,
+    }
+}
+
+fn alias_bindings_value_is_well_formed(value: &Value) -> bool {
+    if let Some(items) = value.as_array() {
+        return !items.is_empty()
+            && items.iter().all(|item| {
+                let alias = item
+                    .get("alias")
+                    .or_else(|| item.get("surface"))
+                    .or_else(|| item.get("name"))
+                    .or_else(|| item.get("alias_name"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|alias| !alias.is_empty());
+                let target = alias_binding_target_value(item)
+                    .map(str::trim)
+                    .filter(|target| !target.is_empty());
+                alias.is_some() && target.is_some()
+            });
+    }
+    value.as_object().is_some_and(|bindings| {
+        if alias_binding_record_map_present(bindings) {
+            return alias_binding_record_from_map(bindings).is_some();
+        }
+        !bindings.is_empty()
+            && bindings.iter().all(|(alias, target)| {
+                !alias.trim().is_empty()
+                    && compatibility_alias_target(target)
+                        .map(str::trim)
+                        .is_some_and(|target| !target.is_empty())
+            })
+    })
+}
+
+fn alias_binding_target_value(item: &Value) -> Option<&str> {
+    item.get("target")
+        .or_else(|| item.get("path"))
+        .or_else(|| item.get("value"))
+        .or_else(|| item.get("locator"))
+        .or_else(|| item.get("locator_value"))
+        .or_else(|| item.get("target_value"))
+        .or_else(|| item.get("target_abs"))
+        .or_else(|| item.get("absolute_path"))
+        .or_else(|| item.get("alias_target_path"))
+        .or_else(|| item.get("alias_target_abs"))
+        .and_then(Value::as_str)
+}
+
+fn alias_binding_record_map_present(map: &serde_json::Map<String, Value>) -> bool {
+    map.contains_key("alias")
+        || map.contains_key("surface")
+        || map.contains_key("name")
+        || map.contains_key("alias_name")
+        || map.contains_key("action")
+        || map.contains_key("target")
+        || map.contains_key("target_abs")
+}
+
+fn alias_binding_record_from_map(map: &serde_json::Map<String, Value>) -> Option<(String, String)> {
+    let alias = map
+        .get("alias")
+        .or_else(|| map.get("surface"))
+        .or_else(|| map.get("name"))
+        .or_else(|| map.get("alias_name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|alias| !alias.is_empty())?;
+    let target =
+        alias_binding_target_value(&Value::Object(map.clone())).and_then(normalize_alias_target)?;
+    Some((alias.to_string(), target))
 }
 
 fn json_value_is_meaningful(value: &Value) -> bool {
@@ -265,8 +382,10 @@ fn state_patch_schema_key(key: &str) -> bool {
             | "ordered_entry_ref"
             | "ordered_entry_reference"
             | "output_format"
+            | "forbidden_visible_literals"
             | "primary_task_update"
             | "quantity_comparison"
+            | "required_visible_literals"
             | "scope"
             | "target"
     )
@@ -278,7 +397,13 @@ fn compatibility_alias_target(value: &Value) -> Option<&str> {
     }
     value
         .as_object()
-        .and_then(|obj| obj.get("target").or_else(|| obj.get("path")))
+        .and_then(|obj| {
+            obj.get("target")
+                .or_else(|| obj.get("path"))
+                .or_else(|| obj.get("locator"))
+                .or_else(|| obj.get("locator_value"))
+                .or_else(|| obj.get("target_value"))
+        })
         .and_then(Value::as_str)
 }
 

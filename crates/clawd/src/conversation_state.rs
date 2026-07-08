@@ -10,7 +10,6 @@ const MAX_SESSION_ALIAS_BINDINGS: usize = 12;
 #[path = "conversation_alias.rs"]
 mod conversation_alias;
 
-#[cfg(test)]
 pub(crate) use conversation_alias::session_alias_bindings_from_state_patch;
 pub(crate) use conversation_alias::{
     alias_bindings_mentioned_in_prompt, alias_surface_matches_prompt,
