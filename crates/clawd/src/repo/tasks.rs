@@ -235,6 +235,35 @@ fn append_task_lease_lifecycle_fields(
     }
 }
 
+fn append_checkpoint_resume_directive_lifecycle_fields(
+    lifecycle: &mut Value,
+    result_json: Option<&Value>,
+) {
+    let Some(result_json) = result_json else {
+        return;
+    };
+    let Some(obj) = lifecycle.as_object_mut() else {
+        return;
+    };
+    let state = obj
+        .get("state")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if !matches!(state, "waiting" | "background" | "needs_user") {
+        return;
+    }
+    let directive =
+        crate::task_lifecycle::checkpoint_resume_directive(result_json, crate::now_ts_u64() as i64);
+    if directive.status_code() == "not_paused" {
+        return;
+    }
+    obj.entry("resume_directive".to_string())
+        .or_insert_with(|| serde_json::json!(directive.status_code()));
+    obj.entry("resume_directive_payload".to_string())
+        .or_insert_with(|| directive.to_machine_json());
+}
+
 fn expired_resume_claim_recovery_metadata(
     lifecycle: &Value,
     checkpoint_id: &str,
@@ -725,6 +754,7 @@ pub(crate) fn list_active_tasks_internal(
             claim_attempt,
             claimed_at,
         );
+        append_checkpoint_resume_directive_lifecycle_fields(&mut lifecycle, result_json.as_ref());
         let execution_state =
             crate::task_lifecycle::task_execution_state_from_lifecycle(&lifecycle);
         out.push(ActiveTaskItem {
@@ -1782,6 +1812,10 @@ pub(crate) fn get_task_query_record(
                 lease_expires_at,
                 claim_attempt,
                 claimed_at,
+            );
+            append_checkpoint_resume_directive_lifecycle_fields(
+                &mut lifecycle,
+                result_json.as_ref(),
             );
             let execution_state =
                 crate::task_lifecycle::task_execution_state_from_lifecycle(&lifecycle);

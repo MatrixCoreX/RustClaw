@@ -80,6 +80,7 @@ impl TaskStatusView {
             "attempt_id",
             "claimed_at",
             "resume_entrypoint",
+            "resume_directive",
             "resume_reason",
             "waiting_reason_code",
             "reason_code",
