@@ -213,7 +213,7 @@ fn compound_listing_content_delivery_guard_lists_observed_names() {
 #[test]
 fn names_only_inventory_direct_answer_does_not_need_llm_synthesis() {
     let state = AppState::test_default_with_fixture_provider();
-    let route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
+    let route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     let agent_run_context = AgentRunContext {
         route_result: Some(route),
         ..AgentRunContext::default()
@@ -270,6 +270,65 @@ fn names_only_inventory_direct_answer_does_not_need_llm_synthesis() {
         Some(
             "full_suite_trace_note.txt\ngen-1778122040.png\ngen-1778122536.png\nhello.sh\nhello_from_manual_test.sh"
         )
+    );
+}
+
+#[test]
+fn names_only_inventory_free_shape_defers_to_llm_synthesis() {
+    let state = AppState::test_default_with_fixture_provider();
+    let route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(2);
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: String::new(),
+            execution_recipe_summary: None,
+            plan_result: Some(crate::PlanResult {
+                goal: String::new(),
+                missing_slots: Vec::new(),
+                needs_confirmation: false,
+                steps: vec![
+                    crate::PlanStep {
+                        step_id: "step_1".to_string(),
+                        action_type: "call_capability".to_string(),
+                        skill: "filesystem.list_names".to_string(),
+                        args: serde_json::json!({
+                            "path": "logs",
+                            "names_only": true,
+                            "max_entries": 2,
+                        }),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    crate::PlanStep {
+                        step_id: "step_2".to_string(),
+                        action_type: "synthesize_answer".to_string(),
+                        skill: String::new(),
+                        args: serde_json::json!({}),
+                        depends_on: vec!["step_1".to_string()],
+                        why: String::new(),
+                    },
+                ],
+                planner_notes: String::new(),
+                plan_kind: crate::PlanKind::Single,
+                raw_plan_text: String::new(),
+            }),
+            verify_result: None,
+        });
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","names_only":true,"names":["clawd.run.log","model_io.log"],"path":"logs","resolved_path":"/workspace/logs"}"#,
+    ));
+
+    assert!(
+        extract_direct_answer_from_generic_output_i18n(&loop_state, &state, Some(&agent_run_context))
+            .is_none()
     );
 }
 

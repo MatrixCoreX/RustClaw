@@ -646,19 +646,186 @@ pub(super) fn resolve_arg_string(input: &str, loop_state: &LoopState) -> String 
     replaced
 }
 
+fn path_arg_key_allows_listing_placeholder(key: Option<&str>) -> bool {
+    let Some(key) = key else {
+        return false;
+    };
+    matches!(
+        key,
+        "path" | "paths" | "file_path" | "file_paths" | "source_path" | "target_path"
+    )
+}
+
+fn listing_placeholder_index(input: &str) -> Option<usize> {
+    let trimmed = input.trim();
+    let key = if let Some(key) = angle_bracket_key(trimmed) {
+        key
+    } else {
+        let tail = trimmed
+            .rsplit_once('/')
+            .map(|(_, tail)| tail)
+            .or_else(|| trimmed.rsplit_once('\\').map(|(_, tail)| tail))?;
+        angle_bracket_key(tail)?
+    };
+    let normalized = key.trim().to_ascii_lowercase();
+    let digits = normalized
+        .strip_prefix("file")
+        .or_else(|| normalized.strip_prefix("path"))
+        .or_else(|| normalized.strip_prefix("entry"))?;
+    if digits.is_empty() || !digits.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    let parsed = digits.parse::<usize>().ok()?;
+    Some(parsed.saturating_sub(1))
+}
+
+fn resolve_listing_placeholder_path(input: &str, loop_state: &LoopState) -> Option<String> {
+    let index = listing_placeholder_index(input)?;
+    latest_structured_listing_paths(loop_state)
+        .get(index)
+        .cloned()
+}
+
+fn latest_structured_listing_paths(loop_state: &LoopState) -> Vec<String> {
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok() {
+            continue;
+        }
+        let Some(output) = step.output.as_deref() else {
+            continue;
+        };
+        let Some(paths) = structured_listing_paths_from_output(output) else {
+            continue;
+        };
+        if !paths.is_empty() {
+            return paths;
+        }
+    }
+    Vec::new()
+}
+
+fn structured_listing_paths_from_output(output: &str) -> Option<Vec<String>> {
+    let value = serde_json::from_str::<Value>(output).ok()?;
+    structured_listing_paths_from_value(&value).or_else(|| {
+        ["extra", "data", "result"].iter().find_map(|key| {
+            value
+                .get(*key)
+                .and_then(structured_listing_paths_from_value)
+        })
+    })
+}
+
+fn structured_listing_paths_from_value(value: &Value) -> Option<Vec<String>> {
+    if !looks_like_structured_listing(value) {
+        return None;
+    }
+    let base = value
+        .get("resolved_path")
+        .or_else(|| value.get("path"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty());
+    let mut paths = Vec::new();
+    if let Some(entries) = value.get("entries").and_then(Value::as_array) {
+        for entry in entries {
+            if let Some(path) = entry_listing_path(entry, base) {
+                paths.push(path);
+            }
+        }
+    }
+    if paths.is_empty() {
+        if let Some(names) = value.get("names").and_then(Value::as_array) {
+            paths.extend(
+                names
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(|name| join_listing_base(base, name)),
+            );
+        }
+    }
+    (!paths.is_empty()).then_some(paths)
+}
+
+fn looks_like_structured_listing(value: &Value) -> bool {
+    let action_matches = value
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|action| {
+            matches!(
+                action,
+                "inventory_dir" | "list_dir" | "list_names" | "list_entries"
+            )
+        });
+    action_matches || value.get("entries").is_some() || value.get("names").is_some()
+}
+
+fn entry_listing_path(entry: &Value, base: Option<&str>) -> Option<String> {
+    for key in ["path", "resolved_path", "relative_path"] {
+        if let Some(path) = entry
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        {
+            if Path::new(path).is_absolute() || path.contains('/') || path.contains('\\') {
+                return Some(path.to_string());
+            }
+            return Some(join_listing_base(base, path));
+        }
+    }
+    entry
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| join_listing_base(base, name))
+}
+
+fn join_listing_base(base: Option<&str>, name: &str) -> String {
+    if Path::new(name).is_absolute() {
+        return name.to_string();
+    }
+    let Some(base) = base else {
+        return name.to_string();
+    };
+    let base = base.trim().trim_end_matches(['/', '\\']);
+    if base.is_empty() {
+        return name.to_string();
+    }
+    format!("{base}/{}", name.trim_start_matches(['/', '\\']))
+}
+
 pub(super) fn resolve_arg_value(value: &Value, loop_state: &LoopState) -> Value {
+    resolve_arg_value_with_key(value, None, loop_state)
+}
+
+fn resolve_arg_value_with_key(value: &Value, key: Option<&str>, loop_state: &LoopState) -> Value {
     match value {
-        Value::String(s) => Value::String(resolve_arg_string(s, loop_state)),
+        Value::String(s) => {
+            let resolved = resolve_arg_string(s, loop_state);
+            let resolved = if path_arg_key_allows_listing_placeholder(key) {
+                resolve_listing_placeholder_path(&resolved, loop_state).unwrap_or(resolved)
+            } else {
+                resolved
+            };
+            Value::String(resolved)
+        }
         Value::Array(items) => Value::Array(
             items
                 .iter()
-                .map(|v| resolve_arg_value(v, loop_state))
+                .map(|v| resolve_arg_value_with_key(v, key, loop_state))
                 .collect(),
         ),
         Value::Object(map) => {
             let mut out = serde_json::Map::new();
             for (k, v) in map {
-                out.insert(k.clone(), resolve_arg_value(v, loop_state));
+                out.insert(
+                    k.clone(),
+                    resolve_arg_value_with_key(v, Some(k), loop_state),
+                );
             }
             Value::Object(out)
         }
