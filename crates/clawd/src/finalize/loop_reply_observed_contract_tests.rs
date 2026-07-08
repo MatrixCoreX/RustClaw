@@ -599,6 +599,42 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
             .expect("free dry_run payload should project planned output");
     assert_eq!(free_answer, answer);
     assert!(free_summary.contract_ok);
+
+    let mut audio_loop_state = crate::agent_engine::LoopState::new(3);
+    audio_loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "audio_synthesize",
+        r#"{"text":"AUDIO_SYNTHESIZE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"speech-2.8-turbo","model_kind":"dry_run","output_path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"}],"outputs":[],"response_format":"mp3","voice":"male-qn-qingse"}}"#,
+    ));
+    let (audio_answer, audio_summary) = direct_generated_file_path_report_from_dry_run_payload(
+        &audio_loop_state,
+        Some(&free_context),
+    )
+    .expect("audio dry_run payload should project planned output");
+    assert!(
+        audio_answer.contains("dry_run=true"),
+        "answer: {audio_answer}"
+    );
+    assert!(
+        audio_answer.contains("provider=minimax"),
+        "answer: {audio_answer}"
+    );
+    assert!(
+        audio_answer.contains("model=speech-2.8-turbo"),
+        "answer: {audio_answer}"
+    );
+    assert!(
+        audio_answer
+            .contains("output_path=/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"),
+        "answer: {audio_answer}"
+    );
+    assert!(
+        audio_answer.contains(
+            r#"planned_outputs=[{"path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3","type":"audio_file"}]"#
+        ),
+        "answer: {audio_answer}"
+    );
+    assert!(audio_summary.contract_ok);
 }
 
 #[test]

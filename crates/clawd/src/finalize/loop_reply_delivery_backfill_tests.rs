@@ -87,6 +87,39 @@ fn backfill_delivery_uses_free_answer_respond_step() {
 }
 
 #[test]
+fn backfill_delivery_defers_structured_dry_run_payload_to_finalizer_projection() {
+    let task = claimed_task("task-dry-run-projection-defer");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.last_publishable_synthesis_output = Some(
+        "Dry-run summary: provider minimax, model speech-2.8-turbo, output path present."
+            .to_string(),
+    );
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "audio_synthesize",
+        r#"{"text":"AUDIO_SYNTHESIZE_DRY_RUN","extra":{"dry_run":true,"provider":"minimax","model":"speech-2.8-turbo","model_kind":"dry_run","output_path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3"}],"outputs":[]}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        "Dry-run summary: provider minimax, model speech-2.8-turbo, output path present.",
+    ));
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.delivery_required = false;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    backfill_delivery_from_last_outputs(&task, &mut loop_state, Some(&ctx));
+
+    assert!(loop_state.delivery_messages.is_empty());
+}
+
+#[test]
 fn backfill_delivery_uses_terminal_contract_respond_without_observed_execution() {
     let task = claimed_task("task-terminal-contract-respond-no-observed-execution");
     let answer = r#"Dry-run async_start contract shape:

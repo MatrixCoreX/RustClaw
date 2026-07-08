@@ -1126,6 +1126,43 @@ fn should_verify_answer_skips_permission_denied_terminal_finalizer() {
 }
 
 #[test]
+fn should_verify_answer_skips_grounded_structured_machine_projection() {
+    let mut route = route_with_mode(crate::AskMode::act_plain());
+    route.route_reason = "generated_file_path_report".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-machine-projection", "ask", "generate");
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+
+    assert!(should_verify_answer(&route, &journal, "provider=minimax"));
+    assert!(!should_verify_answer(
+        &route,
+        &journal,
+        concat!(
+            "dry_run=true\n",
+            "provider=minimax\n",
+            "model=speech-2.8-turbo\n",
+            "model_kind=dry_run\n",
+            "output_path=/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3\n",
+            "planned_outputs=[{\"path\":\"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3\",\"type\":\"audio_file\"}]",
+        )
+    ));
+}
+
+#[test]
 fn local_missing_evidence_gap_skips_crypto_account_access_terminal_finalizer() {
     let mut route = route_with_mode(crate::AskMode::act_plain());
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;

@@ -589,6 +589,72 @@ fn finalizer_grounded_machine_payload_can_skip_verifier(
         && summary.used_evidence_ids_count > 0
 }
 
+pub(super) fn structured_machine_projection_can_skip_answer_verifier(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    if route_result.needs_clarify {
+        return false;
+    }
+    finalizer_grounded_machine_payload_can_skip_verifier(journal)
+        && is_structured_machine_projection(candidate_answer)
+}
+
+fn is_structured_machine_projection(candidate_answer: &str) -> bool {
+    let mut field_count = 0usize;
+    let mut anchor_count = 0usize;
+    for line in candidate_answer
+        .trim()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        let Some((key, value)) = line.split_once('=') else {
+            return false;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if key.is_empty() || value.is_empty() || !is_machine_projection_key(key) {
+            return false;
+        }
+        field_count += 1;
+        if machine_projection_key_is_anchor(key) || machine_projection_value_is_structured(value) {
+            anchor_count += 1;
+        }
+    }
+    field_count >= 2 && anchor_count > 0
+}
+
+fn is_machine_projection_key(key: &str) -> bool {
+    key.chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '[' | ']'))
+}
+
+fn machine_projection_key_is_anchor(key: &str) -> bool {
+    key.contains('.') || key.contains('[') || key.contains(']') || {
+        matches!(
+            key,
+            "async_cancel_adapter_result"
+                | "async_poll_adapter_result"
+                | "dry_run"
+                | "job_id"
+                | "message_key"
+                | "model"
+                | "model_kind"
+                | "output_path"
+                | "planned_outputs"
+                | "provider"
+                | "status"
+                | "task_id"
+        )
+    }
+}
+
+fn machine_projection_value_is_structured(value: &str) -> bool {
+    value.starts_with('{') || value.starts_with('[')
+}
+
 pub(super) fn missing_target_answer_is_grounded_in_latest_error(
     route: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
