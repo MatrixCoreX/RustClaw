@@ -1336,6 +1336,8 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
         actions,
     );
     let actions =
+        rewrite_readonly_count_run_cmd_to_fs_basic(state, user_text, original_user_text, actions);
+    let actions =
         super::super::planning_recent_artifacts::normalize_recent_artifacts_listing_selectors(
             route_result,
             actions,
