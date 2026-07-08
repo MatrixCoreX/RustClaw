@@ -762,6 +762,13 @@ pub(super) struct ReadonlyFindCommand {
     pub(super) extension: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ReadonlyFindCountCommand {
+    pub(super) root: String,
+    pub(super) kind: ScalarCountInventoryKind,
+    pub(super) recursive: bool,
+}
+
 pub(super) fn filesystem_find_route_prefers_structured_tool(
     route_result: Option<&RouteResult>,
 ) -> bool {
@@ -876,6 +883,124 @@ pub(super) fn readonly_find_extension_from_shell_command(
         root,
         extension: extension?,
     })
+}
+
+pub(super) fn readonly_find_count_from_shell_command(
+    command: &str,
+) -> Option<ReadonlyFindCountCommand> {
+    if command.contains('\n')
+        || command.contains('\r')
+        || command.contains('\0')
+        || command.contains('`')
+        || command.contains('<')
+        || command.contains('>')
+        || command.contains('&')
+    {
+        return None;
+    }
+    let words = shell_like_words(command);
+    let pipe_index = words.iter().position(|word| word == "|")?;
+    if !readonly_find_count_pipeline_suffix_is_supported(&words[pipe_index + 1..]) {
+        return None;
+    }
+    let find_words = &words[..pipe_index];
+    if find_words
+        .first()
+        .map(|word| !command_basename(word).eq_ignore_ascii_case("find"))
+        .unwrap_or(true)
+    {
+        return None;
+    }
+    let mut index = 1usize;
+    let mut root = ".".to_string();
+    if let Some(candidate) = find_words.get(index) {
+        if !candidate.starts_with('-') {
+            if !shell_file_path_token_is_safe(candidate) {
+                return None;
+            }
+            root = candidate.to_string();
+            index += 1;
+        }
+    }
+    let mut kind = ScalarCountInventoryKind::Any;
+    let mut recursive = true;
+    while index < find_words.len() {
+        let word = find_words[index].as_str();
+        match word {
+            "-type" => {
+                kind = match find_words.get(index + 1).map(String::as_str)? {
+                    "f" => ScalarCountInventoryKind::Files,
+                    "d" => ScalarCountInventoryKind::Dirs,
+                    _ => return None,
+                };
+                index += 2;
+            }
+            "-maxdepth" => {
+                let depth = find_words.get(index + 1)?.parse::<u64>().ok()?;
+                recursive = depth > 1;
+                index += 2;
+            }
+            "-mindepth" => {
+                find_words.get(index + 1)?.parse::<u64>().ok()?;
+                index += 2;
+            }
+            "-name" | "-iname" => {
+                find_words.get(index + 1)?;
+                index += 2;
+            }
+            "-print" => {
+                index += 1;
+            }
+            _ => return None,
+        }
+    }
+    Some(ReadonlyFindCountCommand {
+        root,
+        kind,
+        recursive,
+    })
+}
+
+fn readonly_find_count_pipeline_suffix_is_supported(words: &[String]) -> bool {
+    matches!(
+        words,
+        [cmd, flag]
+            if command_basename(cmd).eq_ignore_ascii_case("wc")
+                && matches!(flag.as_str(), "-l" | "--lines")
+    )
+}
+
+fn fs_basic_count_entries_action_from_readonly_find_count(
+    count: ReadonlyFindCountCommand,
+) -> AgentAction {
+    let mut args = serde_json::json!({
+        "action": "count_entries",
+        "path": count.root,
+        "recursive": count.recursive,
+    });
+    if let Some(obj) = args.as_object_mut() {
+        match count.kind {
+            ScalarCountInventoryKind::Any => {}
+            ScalarCountInventoryKind::Files => {
+                obj.insert("kind_filter".to_string(), Value::String("file".to_string()));
+                obj.insert("count_files".to_string(), Value::Bool(true));
+                obj.insert("count_dirs".to_string(), Value::Bool(false));
+                obj.insert("files_only".to_string(), Value::Bool(true));
+                obj.insert("dirs_only".to_string(), Value::Bool(false));
+            }
+            ScalarCountInventoryKind::Dirs => {
+                obj.insert("kind_filter".to_string(), Value::String("dir".to_string()));
+                obj.insert("count_files".to_string(), Value::Bool(false));
+                obj.insert("count_dirs".to_string(), Value::Bool(true));
+                obj.insert("dirs_only".to_string(), Value::Bool(true));
+                obj.insert("files_only".to_string(), Value::Bool(false));
+            }
+        }
+    }
+    AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args,
+    }
 }
 
 pub(super) fn readonly_find_pipeline_suffix_is_supported(words: &[String]) -> bool {
@@ -1066,6 +1191,74 @@ pub(super) fn rewrite_readonly_find_run_cmd_to_fs_basic(
         .collect();
     if changed {
         info!("plan_rewrite_readonly_find_run_cmd_to_fs_basic");
+    }
+    rewritten
+}
+
+pub(super) fn rewrite_readonly_count_run_cmd_to_fs_basic(
+    state: &AppState,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if !fs_basic_read_available_for_plan(state) {
+        return actions;
+    }
+    let mut changed = false;
+    let rewritten = actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallSkill { skill, args }
+                if skill.trim().eq_ignore_ascii_case("run_cmd") =>
+            {
+                let Some(command) = run_cmd_command_from_args(&args) else {
+                    return AgentAction::CallSkill { skill, args };
+                };
+                if args
+                    .get(super::super::CLAWD_LITERAL_COMMAND_ARG)
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    || should_preserve_user_supplied_shell_command(
+                        command,
+                        user_text,
+                        original_user_text,
+                    )
+                {
+                    return AgentAction::CallSkill { skill, args };
+                }
+                let Some(count) = readonly_find_count_from_shell_command(command) else {
+                    return AgentAction::CallSkill { skill, args };
+                };
+                changed = true;
+                fs_basic_count_entries_action_from_readonly_find_count(count)
+            }
+            AgentAction::CallTool { tool, args } if tool.trim().eq_ignore_ascii_case("run_cmd") => {
+                let Some(command) = run_cmd_command_from_args(&args) else {
+                    return AgentAction::CallTool { tool, args };
+                };
+                if args
+                    .get(super::super::CLAWD_LITERAL_COMMAND_ARG)
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    || should_preserve_user_supplied_shell_command(
+                        command,
+                        user_text,
+                        original_user_text,
+                    )
+                {
+                    return AgentAction::CallTool { tool, args };
+                }
+                let Some(count) = readonly_find_count_from_shell_command(command) else {
+                    return AgentAction::CallTool { tool, args };
+                };
+                changed = true;
+                fs_basic_count_entries_action_from_readonly_find_count(count)
+            }
+            other => other,
+        })
+        .collect();
+    if changed {
+        info!("plan_rewrite_readonly_count_run_cmd_to_fs_basic");
     }
     rewritten
 }

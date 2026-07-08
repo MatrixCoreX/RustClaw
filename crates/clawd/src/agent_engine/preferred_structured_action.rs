@@ -293,6 +293,55 @@ pub(super) fn readonly_find_candidate_for_rejected_run_cmd(
     })
 }
 
+pub(super) fn readonly_count_candidate_for_rejected_run_cmd(
+    action: &AgentAction,
+) -> Option<AgentAction> {
+    let (skill, args) = match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            (skill.as_str(), args)
+        }
+        _ => return None,
+    };
+    if !skill.trim().eq_ignore_ascii_case("run_cmd")
+        || args
+            .get(super::super::CLAWD_LITERAL_COMMAND_ARG)
+            .and_then(Value::as_bool)
+            == Some(true)
+    {
+        return None;
+    }
+    let command = run_cmd_command_from_args(args)?;
+    let count = readonly_find_count_from_shell_command(command)?;
+    let mut next_args = serde_json::json!({
+        "action": "count_entries",
+        "path": count.root,
+        "recursive": count.recursive,
+    });
+    if let Some(obj) = next_args.as_object_mut() {
+        match count.kind {
+            ScalarCountInventoryKind::Any => {}
+            ScalarCountInventoryKind::Files => {
+                obj.insert("kind_filter".to_string(), Value::String("file".to_string()));
+                obj.insert("count_files".to_string(), Value::Bool(true));
+                obj.insert("count_dirs".to_string(), Value::Bool(false));
+                obj.insert("files_only".to_string(), Value::Bool(true));
+                obj.insert("dirs_only".to_string(), Value::Bool(false));
+            }
+            ScalarCountInventoryKind::Dirs => {
+                obj.insert("kind_filter".to_string(), Value::String("dir".to_string()));
+                obj.insert("count_files".to_string(), Value::Bool(false));
+                obj.insert("count_dirs".to_string(), Value::Bool(true));
+                obj.insert("dirs_only".to_string(), Value::Bool(true));
+                obj.insert("files_only".to_string(), Value::Bool(false));
+            }
+        }
+    }
+    Some(AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: next_args,
+    })
+}
+
 pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
     state: &AppState,
     route_result: Option<&RouteResult>,
@@ -503,6 +552,27 @@ pub(super) fn replace_contract_rejected_actions_with_preferred_refs(
                     {
                         info!(
                             "plan_replace_contract_rejected_find_run_cmd idx={} contract={} from={} to=fs_basic.find_entries",
+                            idx,
+                            policy.contract_match,
+                            policy.action_key
+                        );
+                        return candidate;
+                    }
+                }
+            }
+            if let Some(candidate) = readonly_count_candidate_for_rejected_run_cmd(&action) {
+                if let Some((candidate_skill, candidate_args)) =
+                    planned_execution_action_ref(&candidate)
+                {
+                    if crate::evidence_policy::capability_ref_action_policy_for_route(
+                        Some(route),
+                        candidate_skill,
+                        candidate_args,
+                    )
+                    .is_some_and(|candidate_policy| candidate_policy.is_allowed())
+                    {
+                        info!(
+                            "plan_replace_contract_rejected_count_run_cmd idx={} contract={} from={} to=fs_basic.count_entries",
                             idx,
                             policy.contract_match,
                             policy.action_key
