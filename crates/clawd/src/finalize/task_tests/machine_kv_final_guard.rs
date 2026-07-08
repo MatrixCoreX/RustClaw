@@ -111,6 +111,53 @@ fn requested_machine_kv_summary_final_guard_preserves_web_search_listing() {
 }
 
 #[test]
+fn requested_machine_kv_summary_final_guard_preserves_delivery_file_token() {
+    let prompt = "Create a text file in tmp/notes.txt, write content, and send the file.";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.resolved_intent =
+        "workspace_root=/home/guagua/rustclaw create tmp/notes.txt delivery_required=true"
+            .to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-delivery-file-token-kv", "ask", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"make_dir","path":"/home/guagua/rustclaw/tmp","resolved_path":"/home/guagua/rustclaw/tmp"},"text":"created directory /home/guagua/rustclaw/tmp"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "run_cmd",
+            "exit=0 command=printf content > tmp/notes.txt",
+        ));
+    let mut answer_text = "FILE:/home/guagua/rustclaw/tmp/notes.txt".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert_eq!(answer_text, "FILE:/home/guagua/rustclaw/tmp/notes.txt");
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
+    assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
+    assert_ne!(
+        journal.final_answer.as_deref(),
+        Some("workspace_root=/home/guagua/rustclaw")
+    );
+}
+
+#[test]
 fn requested_machine_kv_summary_final_guard_preserves_weather_query_fields() {
     let prompt = "查询北京当前天气，只返回 location、temperature、weather_code。";
     let mut route = route_result(crate::AskMode::act_plain());
