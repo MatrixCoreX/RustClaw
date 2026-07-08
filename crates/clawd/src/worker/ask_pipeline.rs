@@ -1224,7 +1224,7 @@ fn apply_workspace_root_topic_evidence_contract(
     route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route_result.output_contract.locator_hint = state.skill_rt.workspace_root.display().to_string();
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+    append_route_reason(route_result, "contract:workspace_project_summary");
     let finalize = crate::post_route_policy::content_evidence_execution_finalize_style(
         &route_result.output_contract,
         false,
