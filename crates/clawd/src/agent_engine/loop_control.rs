@@ -1032,6 +1032,9 @@ fn soft_budget_checkpoint_resume_reason(
         .as_deref()
         .is_some_and(|signal| signal == "recoverable_failure_continue_round")
     {
+        if let Some(reason) = recoverable_provider_blocker_resume_reason(loop_state) {
+            return Some(reason);
+        }
         return None;
     }
     if outcome.stop_signal.is_some() || outcome.executed_actions == 0 {
@@ -1044,6 +1047,20 @@ fn soft_budget_checkpoint_resume_reason(
         return Some("agent_loop_max_rounds");
     }
     None
+}
+
+fn recoverable_provider_blocker_resume_reason(loop_state: &LoopState) -> Option<&'static str> {
+    let latest = loop_state
+        .attempt_ledger_entries
+        .iter()
+        .rev()
+        .find(|entry| {
+            entry.provider_status.is_some()
+                && entry.recovery_action.trim() == "wait_background"
+                && entry.status.trim() != crate::executor::StepExecutionStatus::Ok.as_str()
+        })?;
+    latest.provider_status.as_ref()?;
+    Some("provider_blocker_wait_background")
 }
 
 fn worker_soft_checkpoint_after_seconds(worker_timeout_secs: u64) -> Option<u64> {
