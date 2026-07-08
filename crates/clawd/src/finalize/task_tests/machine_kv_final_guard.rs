@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn requested_machine_kv_summary_final_guard_preserves_terminal_scalar_respond() {
+    let prompt =
+        "Count entries under scripts/nl_tests/fixtures/device_local and return only the digit.";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.resolved_intent =
+        "Count top-level directories under scripts/nl_tests/fixtures/device_local.".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-machine-kv-scalar", "ask", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"inventory_dir","counts":{"dirs":5,"files":0,"total":5},"dirs_only":true,"path":"scripts/nl_tests/fixtures/device_local"},"text":"{\"action\":\"inventory_dir\"}"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2", "respond", "5",
+        ));
+    let mut answer_text = "5".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert_eq!(answer_text, "5");
+    assert_eq!(answer_messages, vec!["5".to_string()]);
+    assert_eq!(journal.final_answer.as_deref(), Some("5"));
+}
+
+#[test]
 fn requested_machine_kv_summary_final_guard_preserves_transform_markdown_table() {
     let prompt = r#"Sort [{"name":"alpha","score":7},{"name":"beta","score":12}] by score and return a markdown table."#;
     let mut route = route_result(crate::AskMode::act_plain());

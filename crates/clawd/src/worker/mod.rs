@@ -416,6 +416,7 @@ pub(crate) async fn process_ask_task(
         prepared_flow.should_route_schedule_direct,
         agent_run_context,
         prepared_flow.turn_analysis.as_ref(),
+        prepared_flow.boundary_envelope.as_ref(),
     )
     .await?
     else {

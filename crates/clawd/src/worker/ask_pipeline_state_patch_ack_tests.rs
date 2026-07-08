@@ -81,7 +81,7 @@ fn alias_only_state_patch_ack_route_clears_execution_contract() {
     );
     let mut route = ack_route_for_test();
 
-    super::apply_alias_state_patch_ack_route(&mut route, Some(&turn_analysis));
+    super::apply_alias_state_patch_ack_route(&mut route, Some(&turn_analysis), None);
 
     assert_eq!(route.ask_mode, crate::AskMode::state_patch_ack());
     assert!(!route.needs_clarify);
@@ -99,7 +99,7 @@ fn alias_only_state_patch_ack_route_accepts_alias_map() {
     );
     let mut route = ack_route_for_test();
 
-    super::apply_alias_state_patch_ack_route(&mut route, Some(&turn_analysis));
+    super::apply_alias_state_patch_ack_route(&mut route, Some(&turn_analysis), None);
 
     assert_eq!(route.ask_mode, crate::AskMode::state_patch_ack());
     assert!(route.route_reason.contains("alias_state_patch_ack"));
@@ -114,7 +114,7 @@ fn alias_only_state_patch_ack_route_allows_locator_kind_without_evidence_contrac
     let mut route = ack_route_for_test();
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
 
-    super::apply_alias_state_patch_ack_route(&mut route, Some(&turn_analysis));
+    super::apply_alias_state_patch_ack_route(&mut route, Some(&turn_analysis), None);
 
     assert_eq!(route.ask_mode, crate::AskMode::state_patch_ack());
     assert!(route.route_reason.contains("alias_state_patch_ack"));
@@ -128,7 +128,24 @@ fn alias_only_state_patch_ack_route_does_not_mask_content_evidence_contract() {
     );
     let mut route = route_for_test();
 
-    super::apply_alias_state_patch_ack_route(&mut route, Some(&turn_analysis));
+    super::apply_alias_state_patch_ack_route(&mut route, Some(&turn_analysis), None);
+
+    assert_eq!(route.ask_mode, crate::AskMode::act_with_chat_finalizer());
+    assert!(!route.route_reason.contains("alias_state_patch_ack"));
+}
+
+#[test]
+fn alias_only_state_patch_ack_route_does_not_mask_agent_loop_execution_boundary() {
+    let turn_analysis =
+        turn_analysis_with_alias_map("DEVICE_LOCAL", "scripts/nl_tests/fixtures/device_local");
+    let mut route = ack_route_for_test();
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    let boundary = crate::intent_router::BoundaryEnvelope {
+        explicit_locators: vec!["scripts/nl_tests/fixtures/device_local".to_string()],
+        ..Default::default()
+    };
+
+    super::apply_alias_state_patch_ack_route(&mut route, Some(&turn_analysis), Some(&boundary));
 
     assert_eq!(route.ask_mode, crate::AskMode::act_with_chat_finalizer());
     assert!(!route.route_reason.contains("alias_state_patch_ack"));
@@ -191,6 +208,7 @@ fn alias_state_patch_ack_payload_marks_update_when_alias_existed() {
         "update alias",
         &route,
         Some(&update_turn),
+        None,
     )
     .expect("ack reply");
 

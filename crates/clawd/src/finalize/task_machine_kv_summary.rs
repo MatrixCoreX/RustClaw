@@ -95,6 +95,10 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         journal.record_final_answer(answer_text.as_str());
         return false;
     }
+    if final_answer_preserves_terminal_scalar_contract(route_result, journal, answer_text) {
+        journal.record_final_answer(answer_text.as_str());
+        return false;
+    }
     let Some(summary) = requested_machine_kv_summary_from_task_final_answer(
         prompt,
         route_result,
@@ -177,6 +181,61 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         used_evidence_ids_count: journal.step_results.len(),
         ..Default::default()
     });
+    true
+}
+
+fn final_answer_preserves_terminal_scalar_contract(
+    route_result: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    answer_text: &str,
+) -> bool {
+    if route_result.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        || route_result.output_contract.delivery_required
+    {
+        return false;
+    }
+    let candidate = answer_text.trim();
+    if !task_final_scalar_candidate_matches_route(route_result, candidate) {
+        return false;
+    }
+    journal
+        .step_results
+        .iter()
+        .rev()
+        .filter(|step| {
+            step.status == crate::executor::StepExecutionStatus::Ok && step.skill == "respond"
+        })
+        .filter_map(|step| step.output_excerpt.as_deref())
+        .map(str::trim)
+        .any(|respond| respond == candidate)
+}
+
+fn task_final_scalar_candidate_matches_route(
+    route_result: &crate::RouteResult,
+    candidate: &str,
+) -> bool {
+    if candidate.is_empty()
+        || candidate
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count()
+            != 1
+        || candidate.starts_with('{')
+        || candidate.starts_with('[')
+        || candidate.contains('=')
+        || crate::finalize::parse_delivery_token(candidate).is_some()
+        || crate::finalize::looks_like_planner_artifact(candidate)
+        || crate::finalize::looks_like_internal_trace_artifact(candidate)
+        || crate::finalize::is_execution_summary_message(candidate)
+    {
+        return false;
+    }
+    if crate::finalize::route_matches_single_path_output_contract(route_result) {
+        return candidate.starts_with('/')
+            || candidate.starts_with("./")
+            || candidate.starts_with("../")
+            || candidate.contains('/');
+    }
     true
 }
 
