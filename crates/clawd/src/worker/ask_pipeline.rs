@@ -1253,6 +1253,7 @@ pub(super) async fn prepare_ask_flow(
     apply_alias_state_patch_ack_route(
         &mut loop_context.execution_route_result,
         prepared_routing.turn_analysis.as_ref(),
+        prepared_routing.boundary_envelope.as_ref(),
     );
     let has_schedule_intent =
         loop_context.execution_route_result.schedule_kind != crate::ScheduleKind::None;
@@ -1292,6 +1293,7 @@ pub(super) async fn execute_ask_dispatch(
     should_route_schedule_direct: bool,
     agent_run_context: Option<crate::agent_engine::AgentRunContext>,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    boundary_envelope: Option<&crate::intent_router::BoundaryEnvelope>,
 ) -> Result<Option<Result<crate::AskReply, String>>> {
     let execution_user_request = execution_user_request(prompt, resolved_prompt_for_execution);
     if should_route_schedule_direct {
@@ -1328,9 +1330,14 @@ pub(super) async fn execute_ask_dispatch(
     {
         return Ok(Some(Ok(reply)));
     }
-    if let Some(reply) =
-        alias_state_patch_ack_reply(state, task, prompt, route_result, turn_analysis)
-    {
+    if let Some(reply) = alias_state_patch_ack_reply(
+        state,
+        task,
+        prompt,
+        route_result,
+        turn_analysis,
+        boundary_envelope,
+    ) {
         crate::log_ask_transition(
             state,
             &task.task_id,

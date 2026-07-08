@@ -310,8 +310,34 @@ fn matrix_observed_answer_candidate_for_shape(
                     direct_file_token_from_observed_inventory(loop_state, agent_run_context)
                 })
         }
-        crate::evidence_policy::FinalAnswerShapeClass::ScalarValue
-        | crate::evidence_policy::FinalAnswerShapeClass::SinglePath => {
+        crate::evidence_policy::FinalAnswerShapeClass::ScalarValue => {
+            direct_scalar_observed_answer(Some(state), loop_state, agent_run_context)
+                .or_else(|| {
+                    direct_generated_file_path_report_from_dry_run_payload(
+                        loop_state,
+                        agent_run_context,
+                    )
+                })
+                .or_else(|| {
+                    direct_generated_file_path_report_from_written_path(
+                        loop_state,
+                        agent_run_context,
+                    )
+                })
+                .or_else(|| {
+                    direct_created_archive_path_from_observed_archive_pack(
+                        loop_state,
+                        agent_run_context,
+                    )
+                })
+                .or_else(|| {
+                    direct_scalar_path_candidate_list_from_observed_outputs(
+                        loop_state,
+                        agent_run_context,
+                    )
+                })
+        }
+        crate::evidence_policy::FinalAnswerShapeClass::SinglePath => {
             direct_generated_file_path_report_from_dry_run_payload(loop_state, agent_run_context)
                 .or_else(|| {
                     direct_generated_file_path_report_from_written_path(

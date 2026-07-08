@@ -15,8 +15,9 @@ fn alias_only_state_patch_bindings(
 pub(super) fn apply_alias_state_patch_ack_route(
     route_result: &mut crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    boundary_envelope: Option<&crate::intent_router::BoundaryEnvelope>,
 ) {
-    if !route_allows_alias_state_patch_ack(route_result) {
+    if !route_allows_alias_state_patch_ack(route_result, boundary_envelope) {
         return;
     }
     if alias_only_state_patch_bindings(turn_analysis).is_empty() {
@@ -41,8 +42,9 @@ pub(super) fn alias_state_patch_ack_reply(
     prompt: &str,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    boundary_envelope: Option<&crate::intent_router::BoundaryEnvelope>,
 ) -> Option<crate::AskReply> {
-    if !route_allows_alias_state_patch_ack(route_result) {
+    if !route_allows_alias_state_patch_ack(route_result, boundary_envelope) {
         return None;
     }
     let bindings = alias_only_state_patch_bindings(turn_analysis);
@@ -103,13 +105,27 @@ fn alias_state_patch_ack_payload(
     })
 }
 
-fn route_allows_alias_state_patch_ack(route_result: &crate::RouteResult) -> bool {
+fn route_allows_alias_state_patch_ack(
+    route_result: &crate::RouteResult,
+    _boundary_envelope: Option<&crate::intent_router::BoundaryEnvelope>,
+) -> bool {
+    if route_has_agent_loop_execution_boundary(route_result) {
+        return false;
+    }
     route_result.schedule_kind == crate::ScheduleKind::None
         && !route_result.needs_clarify
         && !route_result.wants_file_delivery
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && route_result.output_contract.delivery_intent == crate::OutputDeliveryIntent::None
+}
+
+fn route_has_agent_loop_execution_boundary(route_result: &crate::RouteResult) -> bool {
+    route_result
+        .route_reason
+        .split(';')
+        .map(str::trim)
+        .any(|part| part == "executable_contract_preserved_for_agent_loop")
 }
 
 #[cfg(test)]
