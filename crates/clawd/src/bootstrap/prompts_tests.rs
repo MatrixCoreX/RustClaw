@@ -276,3 +276,17 @@ fn visible_response_prompts_keep_agent_identity_boundary() {
         );
     }
 }
+
+#[test]
+fn single_plan_prompt_keeps_low_risk_drafting_nonblocking_rule() {
+    let prompt = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../prompts/layers/overlays/single_plan_execution_prompt.md"),
+    )
+    .expect("read single plan prompt overlay");
+
+    assert!(prompt.contains("low-risk chat-only drafting"));
+    assert!(prompt.contains("do not use a blocking clarification"));
+    assert!(prompt.contains("neutral assumptions"));
+    assert!(prompt.contains("requested output shape"));
+}
