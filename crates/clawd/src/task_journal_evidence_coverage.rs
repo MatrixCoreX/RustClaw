@@ -40,7 +40,10 @@ pub(crate) fn evidence_coverage_for_route(
     route: &crate::RouteResult,
     journal: &TaskJournal,
 ) -> TaskJournalEvidenceCoverage {
-    let required_evidence = crate::evidence_policy::required_evidence_fields_for_route(route);
+    let action_override = successful_action_required_evidence_override(journal);
+    let required_evidence = action_override
+        .clone()
+        .unwrap_or_else(|| crate::evidence_policy::required_evidence_fields_for_route(route));
     let (observed_fields, mut observed_canonical, observed_extractors, observed_evidence_sources) =
         observed_evidence_field_sets(journal);
     augment_route_canonical_evidence(
@@ -50,8 +53,11 @@ pub(crate) fn evidence_coverage_for_route(
         &mut observed_canonical,
     );
     let effective_output_contract = route.effective_output_contract();
-    let evidence_expression =
-        crate::evidence_policy::evidence_expression_for_output_contract(&effective_output_contract);
+    let evidence_expression = if action_override.is_some() {
+        None
+    } else {
+        crate::evidence_policy::evidence_expression_for_output_contract(&effective_output_contract)
+    };
     let missing_evidence = evidence_expression
         .as_ref()
         .filter(|expression| evidence_expression_has_requirements(expression))
@@ -74,6 +80,66 @@ pub(crate) fn evidence_coverage_for_route(
         confidence,
         repair_eligible,
     }
+}
+
+fn successful_action_required_evidence_override(journal: &TaskJournal) -> Option<Vec<String>> {
+    let successful_step_ids = journal
+        .step_results
+        .iter()
+        .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+        .map(|step| step.step_id.as_str())
+        .collect::<BTreeSet<_>>();
+    if successful_step_ids.is_empty() {
+        return None;
+    }
+    journal_planned_steps(journal)
+        .into_iter()
+        .filter(|step| successful_step_ids.contains(step.step_id.as_str()))
+        .find_map(planned_step_required_evidence_override)
+}
+
+fn journal_planned_steps(journal: &TaskJournal) -> Vec<&crate::PlanStep> {
+    let mut steps = Vec::new();
+    if let Some(plan) = journal.plan_result.as_ref() {
+        steps.extend(plan.steps.iter());
+    }
+    for round in &journal.rounds {
+        if let Some(plan) = round.plan_result.as_ref() {
+            steps.extend(plan.steps.iter());
+        }
+    }
+    steps
+}
+
+fn planned_step_required_evidence_override(step: &crate::PlanStep) -> Option<Vec<String>> {
+    let skill = step.skill.trim();
+    let action = step
+        .args
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if matches!(step.action_type.as_str(), "call_tool" | "call_skill")
+        && matches!(skill, "db_basic" | "database" | "db" | "sqlite")
+        && action == "schema_version"
+    {
+        return Some(vec!["field_value".to_string()]);
+    }
+    if step.action_type == "call_capability"
+        && capability_value_has_action_name(skill, &["database", "db", "sqlite"], "schema_version")
+    {
+        return Some(vec!["field_value".to_string()]);
+    }
+    None
+}
+
+fn capability_value_has_action_name(value: &str, namespaces: &[&str], action: &str) -> bool {
+    let Some((namespace, candidate_action)) = value.trim().split_once('.') else {
+        return false;
+    };
+    namespaces
+        .iter()
+        .any(|candidate| namespace == candidate.trim())
+        && candidate_action == action
 }
 
 pub(super) fn source_refs_from_observed_sources(
