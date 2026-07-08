@@ -1,6 +1,6 @@
 use super::{
     filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
-    ok_step,
+    ok_step, test_state_with_registry,
 };
 use crate::agent_engine::{AgentRunContext, LoopState};
 
@@ -42,7 +42,8 @@ fn filesystem_mutation_lifecycle_structured_answer_combines_all_steps() {
         ..AgentRunContext::default()
     };
 
-    let answer = filesystem_mutation_lifecycle_structured_answer(&loop_state, Some(&ctx))
+    let state = test_state_with_registry();
+    let answer = filesystem_mutation_lifecycle_structured_answer(&state, &loop_state, Some(&ctx))
         .expect("filesystem lifecycle answer");
     let value: serde_json::Value = serde_json::from_str(&answer).expect("json answer");
 
@@ -76,6 +77,67 @@ fn filesystem_mutation_lifecycle_structured_answer_combines_all_steps() {
     assert!(answer.contains("alpha"), "answer: {answer}");
     assert!(answer.contains("beta"), "answer: {answer}");
     assert!(answer.contains("remove_path"), "answer: {answer}");
+}
+
+#[test]
+fn filesystem_mutation_lifecycle_structured_answer_uses_observed_scratch_steps_for_generic_route() {
+    let state = test_state_with_registry();
+    let mut loop_state = LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"make_dir","path":"tmp/nl_codex_resume_smoke","resolved_path":"tmp/nl_codex_resume_smoke"},"text":"created directory tmp/nl_codex_resume_smoke"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"write_text","path":"tmp/nl_codex_resume_smoke/note.txt","resolved_path":"tmp/nl_codex_resume_smoke/note.txt","content_bytes":6},"text":"written 6 bytes to tmp/nl_codex_resume_smoke/note.txt"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_3",
+        "fs_basic",
+        r#"{"extra":{"action":"append_text","path":"tmp/nl_codex_resume_smoke/note.txt","resolved_path":"tmp/nl_codex_resume_smoke/note.txt","append":true,"content_bytes":4},"text":"appended 4 bytes to tmp/nl_codex_resume_smoke/note.txt"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_4",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","path":"tmp/nl_codex_resume_smoke/note.txt","resolved_path":"tmp/nl_codex_resume_smoke/note.txt","excerpt":"1|alpha\n2|beta","total_lines":2},"text":"{}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_5",
+        "fs_basic",
+        r#"{"extra":{"action":"remove_path","path":"tmp/nl_codex_resume_smoke","resolved_path":"tmp/nl_codex_resume_smoke","target_kind":"directory","recursive":true},"text":"removed tmp/nl_codex_resume_smoke"}"#,
+    ));
+    let ctx = AgentRunContext {
+        route_result: Some(generic_content_route()),
+        ..AgentRunContext::default()
+    };
+
+    let answer = filesystem_mutation_lifecycle_structured_answer(&state, &loop_state, Some(&ctx))
+        .expect("observed scratch lifecycle answer");
+    let value: serde_json::Value = serde_json::from_str(&answer).expect("json answer");
+
+    assert_eq!(
+        value
+            .pointer("/final_answer_shape")
+            .and_then(serde_json::Value::as_str),
+        Some("lifecycle_result")
+    );
+    assert_eq!(
+        value
+            .pointer("/steps")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(5)
+    );
+    assert_eq!(
+        value
+            .pointer("/final_state/cleanup_observed")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert!(answer.contains("alpha"), "answer: {answer}");
+    assert!(answer.contains("beta"), "answer: {answer}");
 }
 
 #[test]
@@ -206,4 +268,12 @@ fn filesystem_mutation_route() -> crate::RouteResult {
             self_extension: crate::SelfExtensionContract::default(),
         },
     }
+}
+
+fn generic_content_route() -> crate::RouteResult {
+    let mut route = filesystem_mutation_route();
+    route.route_reason = "generic path content".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route
 }

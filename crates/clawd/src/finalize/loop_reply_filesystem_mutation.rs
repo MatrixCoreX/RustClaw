@@ -53,7 +53,8 @@ pub(super) fn filesystem_mutation_synthesis_reply(
 }
 
 fn route_prefers_status_line_for_filesystem_mutation(route: &crate::RouteResult) -> bool {
-    !route.output_contract.delivery_required
+    route.output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult)
+        && !route.output_contract.delivery_required
         && !route.wants_file_delivery
         && matches!(
             route.output_contract.response_shape,

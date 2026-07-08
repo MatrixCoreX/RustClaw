@@ -744,9 +744,32 @@ pub(super) fn latest_publishable_synthesis_step_output(loop_state: &LoopState) -
         .map(str::trim)
         .find(|output| {
             !output.is_empty()
-                && planned_delivery_is_publishable_model_language_answer(output)
+                && (planned_delivery_is_publishable_model_language_answer(output)
+                    || lifecycle_result_synthesis_payload_is_publishable(output))
                 && !crate::finalize::is_execution_summary_message(output)
         })
+}
+
+fn lifecycle_result_synthesis_payload_is_publishable(output: &str) -> bool {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
+        return false;
+    };
+    payload
+        .pointer("/final_answer_shape")
+        .and_then(serde_json::Value::as_str)
+        == Some("lifecycle_result")
+        && payload
+            .pointer("/status")
+            .and_then(serde_json::Value::as_str)
+            == Some("ok")
+        && payload
+            .pointer("/steps")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|steps| !steps.is_empty())
+        && payload
+            .pointer("/final_state/cleanup_observed")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
 }
 
 pub(super) fn latest_contractual_synthesis_output(loop_state: &LoopState) -> Option<&str> {

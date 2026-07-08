@@ -71,8 +71,8 @@ pub(crate) use self::filesystem_lifecycle_contract::{
     effective_filesystem_lifecycle_output_contract_for_plan_steps,
     enrich_scratch_filesystem_cleanup_runtime_args, route_can_upgrade_scratch_filesystem_lifecycle,
     scratch_filesystem_cleanup_recovery_action_allowed,
-    scratch_filesystem_lifecycle_action_allowed, scratch_filesystem_lifecycle_plan_actions_match,
-    scratch_filesystem_lifecycle_plan_steps_match,
+    scratch_filesystem_lifecycle_action_allowed, scratch_filesystem_lifecycle_observed_steps_match,
+    scratch_filesystem_lifecycle_plan_actions_match, scratch_filesystem_lifecycle_plan_steps_match,
 };
 use self::skill_execution::execute_prepared_skill_action;
 pub(crate) use self::support::append_delivery_message;
