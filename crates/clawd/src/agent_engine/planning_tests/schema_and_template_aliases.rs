@@ -287,6 +287,31 @@ async fn parse_single_plan_recovers_malformed_respond_step_with_extra_closer() {
 }
 
 #[tokio::test]
+async fn parse_single_plan_recovers_terminal_steps_with_multiline_respond_content() {
+    let state = test_state_with_registry();
+    let task = test_task();
+    let raw = r#"{"steps":[{"type":"synthesize_answer","evidence_refs":["s1"]},{"type":"respond","content":"logs directory entries:
+1. act_plan.log
+2. agent_rollout_metrics
+3. agent_rollout_metrics.zip
+4. base_skill_contracts_20260516_100540"}]}"#;
+
+    let actions = super::super::parse_single_plan_actions(raw, &state, &task)
+        .await
+        .expect("terminal plan with malformed multiline respond content should recover");
+
+    assert!(matches!(
+        actions.as_slice(),
+        [
+            AgentAction::SynthesizeAnswer { evidence_refs },
+            AgentAction::Respond { content }
+        ] if evidence_refs.as_slice() == ["s1".to_string()].as_slice()
+            && content.contains("act_plan.log")
+            && content.contains("base_skill_contracts_20260516_100540")
+    ));
+}
+
+#[tokio::test]
 async fn parse_single_plan_accepts_synthesize_answer_only_step_with_top_level_refs() {
     let state = test_state_with_registry();
     let task = test_task();
