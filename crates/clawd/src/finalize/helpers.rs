@@ -642,12 +642,13 @@ mod tests {
     }
 
     #[test]
-    fn single_path_output_contract_matches_legacy_single_path_shape() {
-        let mut route = route_with_capability_ref("system.runtime_status");
-        route.route_reason.clear();
-        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
-        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    fn single_path_output_contract_matches_capability_owned_single_path_shape() {
+        let route = route_with_capability_ref("archive.pack");
+
+        assert_eq!(
+            crate::evidence_policy::final_answer_shape_for_route(&route),
+            Some(crate::evidence_policy::FinalAnswerShape::CreatedArchivePath)
+        );
 
         assert!(super::route_matches_single_path_output_contract(&route));
     }
