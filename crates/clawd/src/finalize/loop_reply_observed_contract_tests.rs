@@ -548,6 +548,57 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
     .expect("matrix path should project dry_run payload");
     assert_eq!(matrix_answer, answer);
     assert!(matrix_summary.contract_ok);
+
+    let mut delivery_route = free_route_result();
+    delivery_route.ask_mode = crate::AskMode::act_plain();
+    delivery_route.output_contract.requires_content_evidence = true;
+    delivery_route.output_contract.response_shape = OutputResponseShape::FileToken;
+    delivery_route.output_contract.delivery_required = true;
+    delivery_route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    delivery_route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    delivery_route.output_contract.locator_hint =
+        "document/media_dry_run/image_status_card.png".to_string();
+    let delivery_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(delivery_route),
+        ..Default::default()
+    };
+
+    let (delivery_answer, delivery_summary) =
+        direct_generated_file_path_report_from_dry_run_payload(
+            &loop_state,
+            Some(&delivery_context),
+        )
+        .expect("delivery dry_run payload should project planned output instead of FILE token");
+    assert_eq!(delivery_answer, answer);
+    assert!(delivery_summary.contract_ok);
+
+    let (matrix_delivery_answer, matrix_delivery_summary) =
+        super::deterministic_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "media dry run delivery contract",
+            &loop_state,
+            Some(&delivery_context),
+        )
+        .expect("delivery matrix path should project dry_run payload");
+    assert_eq!(matrix_delivery_answer, answer);
+    assert!(matrix_delivery_summary.contract_ok);
+
+    let mut free_route = free_route_result();
+    free_route.ask_mode = crate::AskMode::act_plain();
+    free_route.output_contract.requires_content_evidence = false;
+    free_route.output_contract.response_shape = OutputResponseShape::Free;
+    free_route.output_contract.delivery_required = false;
+    free_route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    let free_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(free_route),
+        ..Default::default()
+    };
+    let (free_answer, free_summary) =
+        direct_generated_file_path_report_from_dry_run_payload(&loop_state, Some(&free_context))
+            .expect("free dry_run payload should project planned output");
+    assert_eq!(free_answer, answer);
+    assert!(free_summary.contract_ok);
 }
 
 #[test]

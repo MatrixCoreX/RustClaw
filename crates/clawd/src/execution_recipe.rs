@@ -760,10 +760,7 @@ pub(crate) fn classify_skill_action_effect(
     args: &Value,
 ) -> ActionEffect {
     let normalized_skill = state.resolve_canonical_skill_name(skill_name);
-    if package_manager_dry_run_install_action(&normalized_skill, args) {
-        return ActionEffect::observe();
-    }
-    if task_control_lifecycle_dry_run_action(&normalized_skill, args) {
+    if dry_run_observes_only_action(&normalized_skill, args) {
         return ActionEffect::observe();
     }
     if let Some(effect) = args
@@ -891,6 +888,20 @@ pub(crate) fn classify_skill_action_effect(
         _ => ActionEffect::default(),
     };
     merge_structured_validation_effect(&normalized_skill, args, effect)
+}
+
+pub(crate) fn dry_run_observes_only_action(normalized_skill: &str, args: &Value) -> bool {
+    args.get("dry_run").and_then(Value::as_bool) == Some(true)
+        && (package_manager_dry_run_install_action(normalized_skill, args)
+            || task_control_lifecycle_dry_run_action(normalized_skill, args)
+            || media_generation_dry_run_action(normalized_skill))
+}
+
+fn media_generation_dry_run_action(normalized_skill: &str) -> bool {
+    matches!(
+        normalized_skill,
+        "image_generate" | "image_edit" | "audio_synthesize" | "video_generate" | "music_generate"
+    )
 }
 
 fn package_manager_dry_run_install_action(normalized_skill: &str, args: &Value) -> bool {

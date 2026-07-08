@@ -770,19 +770,6 @@ fn push_policy_flag_violation<'a>(
     }
 }
 
-fn package_manager_dry_run_install_action(canonical_skill: &str, args: &Value) -> bool {
-    if canonical_skill != "package_manager" {
-        return false;
-    }
-    if args.get("dry_run").and_then(Value::as_bool) != Some(true) {
-        return false;
-    }
-    matches!(
-        normalized_action_arg(args).as_deref(),
-        Some("install" | "uninstall" | "smart_install")
-    )
-}
-
 pub(super) fn preflight_permission_decision(
     state: &AppState,
     normalized_skill: &str,
@@ -795,9 +782,9 @@ pub(super) fn preflight_permission_decision(
     let effect =
         crate::execution_recipe::classify_skill_action_effect(state, &canonical_skill, args);
     let manifest = state.skill_manifest(&canonical_skill);
-    let risk_level = if package_manager_dry_run_install_action(&canonical_skill, args)
-        || task_control_lifecycle_dry_run_action(&canonical_skill, args)
-    {
+    let dry_run_observe_only =
+        crate::execution_recipe::dry_run_observes_only_action(&canonical_skill, args);
+    let risk_level = if dry_run_observe_only {
         Some(SkillRiskLevel::Low)
     } else {
         action_scoped_risk_level(state, &canonical_skill, action.as_deref())
@@ -806,8 +793,8 @@ pub(super) fn preflight_permission_decision(
     let command_policy = run_cmd_command_policy(&canonical_skill, args, effect);
     let capability_policy =
         action_scoped_capability_policy(state, &canonical_skill, action.as_deref());
-    let needs_confirmation =
-        state.skill_invocation_requires_confirmation_policy(&canonical_skill, Some(args));
+    let needs_confirmation = !dry_run_observe_only
+        && state.skill_invocation_requires_confirmation_policy(&canonical_skill, Some(args));
     let decision = crate::policy_decision::PolicyDecision::from_permission_flags(
         false,
         needs_confirmation,

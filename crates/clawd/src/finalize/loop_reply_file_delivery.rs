@@ -667,6 +667,32 @@ fn route_allows_generated_file_path_report_payload(
         })
 }
 
+fn route_allows_dry_run_generated_file_path_report_payload(
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .is_some_and(|route| {
+            route_allows_generated_file_path_report_payload(agent_run_context)
+                || (route.effective_output_contract().delivery_required
+                    && matches!(
+                        route.effective_output_contract().response_shape,
+                        crate::OutputResponseShape::FileToken
+                    ))
+                || (!route.effective_output_contract().delivery_required
+                    && matches!(
+                        route.effective_output_contract().delivery_intent,
+                        crate::OutputDeliveryIntent::None
+                    )
+                    && matches!(
+                        route.effective_output_contract().response_shape,
+                        crate::OutputResponseShape::Free
+                            | crate::OutputResponseShape::OneSentence
+                            | crate::OutputResponseShape::Strict
+                    ))
+        })
+}
+
 fn compact_machine_json(value: &serde_json::Value) -> Option<String> {
     serde_json::to_string(value)
         .ok()
@@ -846,7 +872,7 @@ pub(super) fn direct_generated_file_path_report_from_dry_run_payload(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route_allows_generated_file_path_report_payload(agent_run_context) {
+    if !route_allows_dry_run_generated_file_path_report_payload(agent_run_context) {
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {

@@ -760,10 +760,7 @@ fn effective_step_risk_level(
     normalized_skill: &str,
     args: &serde_json::Value,
 ) -> SkillRiskLevel {
-    if package_manager_dry_run_install_action(normalized_skill, args) {
-        return SkillRiskLevel::Low;
-    }
-    if task_control_lifecycle_dry_run_action(normalized_skill, args) {
+    if crate::execution_recipe::dry_run_observes_only_action(normalized_skill, args) {
         return SkillRiskLevel::Low;
     }
     if let Some(risk) = action_scoped_risk_level(state, normalized_skill, args) {
@@ -782,41 +779,6 @@ fn effective_step_risk_level(
     } else {
         SkillRiskLevel::Low
     }
-}
-
-fn package_manager_dry_run_install_action(
-    normalized_skill: &str,
-    args: &serde_json::Value,
-) -> bool {
-    if normalized_skill != "package_manager" {
-        return false;
-    }
-    if args.get("dry_run").and_then(serde_json::Value::as_bool) != Some(true) {
-        return false;
-    }
-    let action = args
-        .as_object()
-        .and_then(|obj| obj.get("action"))
-        .and_then(|value| value.as_str())
-        .map(normalize_schema_token)
-        .unwrap_or_default();
-    matches!(action.as_str(), "install" | "uninstall" | "smart_install")
-}
-
-fn task_control_lifecycle_dry_run_action(normalized_skill: &str, args: &serde_json::Value) -> bool {
-    if normalized_skill != "task_control" {
-        return false;
-    }
-    if args.get("dry_run").and_then(serde_json::Value::as_bool) != Some(true) {
-        return false;
-    }
-    let action = args
-        .as_object()
-        .and_then(|obj| obj.get("action"))
-        .and_then(|value| value.as_str())
-        .map(normalize_schema_token)
-        .unwrap_or_default();
-    matches!(action.as_str(), "resume" | "pause")
 }
 
 fn risk_level_token(risk_level: SkillRiskLevel) -> &'static str {
@@ -863,10 +825,13 @@ fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
     let effect =
         crate::execution_recipe::classify_skill_action_effect(state, &normalized_skill, &step.args);
     let risk_level = effective_step_risk_level(state, &normalized_skill, &step.args);
-    let requires_confirmation = state
-        .skill_invocation_requires_confirmation_policy(&normalized_skill, Some(&step.args))
-        || is_confirmation_like_skill(&normalized_skill)
-        || high_risk_side_effect_requires_confirmation(effect, risk_level, &step.args);
+    let dry_run_observe_only =
+        crate::execution_recipe::dry_run_observes_only_action(&normalized_skill, &step.args);
+    let requires_confirmation = !dry_run_observe_only
+        && (state
+            .skill_invocation_requires_confirmation_policy(&normalized_skill, Some(&step.args))
+            || is_confirmation_like_skill(&normalized_skill)
+            || high_risk_side_effect_requires_confirmation(effect, risk_level, &step.args));
     let action = step
         .args
         .as_object()
