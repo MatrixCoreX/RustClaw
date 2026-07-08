@@ -143,6 +143,7 @@ use workspace_locator_binding::{
     path_scoped_locator_guard_can_defer_to_prompt_targets,
     recent_artifacts_judgment_can_use_recent_execution_context,
     structured_field_route_has_current_locator_surface, workspace_root_name_token_present,
+    workspace_root_topic_route_should_require_evidence,
 };
 
 pub(super) struct PreparedAskFlow {
@@ -965,6 +966,22 @@ fn build_loop_context_after_boundary_preflight(
         &mut pre_loop_clarify_candidates,
         &mut route_result,
     );
+    if workspace_root_topic_route_should_require_evidence(
+        &state.skill_rt.workspace_root,
+        prompt,
+        &route_result,
+    ) {
+        let before_gate_kind = route_result.gate_kind();
+        apply_workspace_root_topic_evidence_contract(state, &mut route_result);
+        log_route_guard_record(
+            task,
+            "worker_workspace_scope_guard",
+            "workspace_root_topic_requires_evidence",
+            "repaired",
+            before_gate_kind,
+            &route_result,
+        );
+    }
     if bare_topic_memory_expansion_route_should_defer_to_agent_loop(
         prompt,
         &route_result,
@@ -1195,6 +1212,27 @@ fn build_loop_context_after_boundary_preflight(
             .unwrap_or_default(),
         fuzzy_locator_suggestions: post_route.fuzzy_locator_suggestions,
     }
+}
+
+fn apply_workspace_root_topic_evidence_contract(
+    state: &AppState,
+    route_result: &mut crate::RouteResult,
+) {
+    route_result.output_contract.requires_content_evidence = true;
+    route_result.output_contract.delivery_required = false;
+    route_result.wants_file_delivery = false;
+    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route_result.output_contract.locator_hint = state.skill_rt.workspace_root.display().to_string();
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+    let finalize = crate::post_route_policy::content_evidence_execution_finalize_style(
+        &route_result.output_contract,
+        false,
+    )
+    .unwrap_or(crate::ActFinalizeStyle::ChatWrapped);
+    route_result.set_act_finalize(finalize);
+    append_route_reason(route_result, "current_workspace_scope_from_current_request");
+    append_route_reason(route_result, "workspace_root_topic_requires_evidence");
 }
 
 fn route_reason_has_marker(route_result: &crate::RouteResult, marker: &str) -> bool {

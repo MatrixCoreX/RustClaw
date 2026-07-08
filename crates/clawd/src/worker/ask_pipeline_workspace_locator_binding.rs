@@ -251,6 +251,66 @@ pub(super) fn workspace_root_name_token_present(
         .any(|token| token == normalized_root)
 }
 
+pub(super) fn workspace_root_topic_route_should_require_evidence(
+    workspace_root: &std::path::Path,
+    prompt: &str,
+    route_result: &crate::RouteResult,
+) -> bool {
+    if route_result.needs_clarify
+        || !route_result.is_execute_gate()
+        || route_result.schedule_kind != crate::ScheduleKind::None
+        || route_result.wants_file_delivery
+        || route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.output_contract.delivery_intent != crate::OutputDeliveryIntent::None
+        || !route_result.output_contract.semantic_kind_is_unclassified()
+        || !matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
+        )
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
+        )
+    {
+        return false;
+    }
+    if !workspace_root_name_token_present(workspace_root, prompt) {
+        return false;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
+    if surface_has_concrete_locator_other_than_workspace_root(workspace_root, &surface) {
+        return false;
+    }
+    surface.inline_json_shape.is_none()
+        && !surface.has_structured_target_refinement()
+        && !surface.has_delivery_token_reference()
+        && !surface.has_deictic_reference()
+}
+
+fn surface_has_concrete_locator_other_than_workspace_root(
+    workspace_root: &std::path::Path,
+    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> bool {
+    if surface.has_explicit_path_or_url()
+        || surface.locator_target_pair.is_some()
+        || surface.has_delivery_token_reference()
+    {
+        return true;
+    }
+    let Some(root_name) = workspace_root.file_name().and_then(|value| value.to_str()) else {
+        return surface.has_filename_candidates();
+    };
+    let normalized_root = normalize_locator_identity_token(root_name);
+    if normalized_root.is_empty() {
+        return surface.has_filename_candidates();
+    }
+    surface
+        .filename_candidates_excluding_field_selectors()
+        .into_iter()
+        .any(|candidate| normalize_locator_identity_token(&candidate) != normalized_root)
+}
+
 fn locator_kind_accepts_workspace_child_boundary(kind: crate::OutputLocatorKind) -> bool {
     matches!(
         kind,
