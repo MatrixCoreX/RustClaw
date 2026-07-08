@@ -7,6 +7,8 @@ It supports:
 - open URL(s) and extract readable page content (`open_extract`)
 - browser-based Google result extraction (`search_page`)
 - search first, then extract top result pages (`search_extract`)
+- Use `open_extract` when the task needs a web page title, readable page text, a page summary, browser-rendered content, screenshots, or capture artifacts from an explicit URL.
+- For raw API/HTTP status checks, response preview validation, or downloads without browser extraction, use `http_basic` instead.
 
 This skill is read-only. It does not submit forms, log in, or execute business actions on web pages.
 

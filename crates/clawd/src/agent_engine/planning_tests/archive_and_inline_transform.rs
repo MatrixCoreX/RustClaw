@@ -322,6 +322,61 @@ fn lightweight_prompt_includes_registry_planner_metadata() {
 }
 
 #[test]
+fn lightweight_prompt_distinguishes_raw_http_from_browser_page_extraction() {
+    let state = test_state_with_registry();
+    let registry = state.get_skills_registry().expect("registry loaded");
+    *state
+        .core
+        .skill_views_snapshot
+        .write()
+        .expect("skill snapshot lock") = Arc::new(SkillViewsSnapshot {
+        registry: Some(registry),
+        skills_list: Arc::new(HashSet::from([
+            "browser_web".to_string(),
+            "http_basic".to_string(),
+        ])),
+    });
+    let state = state.with_prompt_layers_installed();
+    let task = test_task();
+    let quick_index = build_lightweight_skill_quick_index_text(&state, &task, None);
+    let playbooks = build_lightweight_skill_playbooks_text(&state, &task, None);
+
+    assert!(quick_index.contains("browser_web"), "{quick_index}");
+    assert!(
+        quick_index.contains("semantic_tags: browser.open_extract"),
+        "{quick_index}"
+    );
+    assert!(quick_index.contains("webpage.title"), "{quick_index}");
+    assert!(
+        quick_index.contains("webpage.readable_text"),
+        "{quick_index}"
+    );
+    assert!(quick_index.contains("webpage.summary"), "{quick_index}");
+    assert!(
+        quick_index.contains("planner_capabilities: browser.open_extract"),
+        "{quick_index}"
+    );
+    assert!(
+        playbooks.contains("browser-rendered page titles"),
+        "{playbooks}"
+    );
+    assert!(playbooks.contains("readable page text"), "{playbooks}");
+
+    assert!(quick_index.contains("http_basic"), "{quick_index}");
+    assert!(quick_index.contains("api.request"), "{quick_index}");
+    assert!(quick_index.contains("http.raw_request"), "{quick_index}");
+    assert!(
+        quick_index.contains("planner_capabilities: http.get"),
+        "{quick_index}"
+    );
+    assert!(
+        playbooks.contains("raw HTTP/API observations"),
+        "{playbooks}"
+    );
+    assert!(playbooks.contains("status validation"), "{playbooks}");
+}
+
+#[test]
 fn lightweight_prompt_respects_contract_skill_scope() {
     let state = test_state_with_enabled_skills(&["fs_basic", "archive_basic", "docker_basic"])
         .with_prompt_layers_installed();
