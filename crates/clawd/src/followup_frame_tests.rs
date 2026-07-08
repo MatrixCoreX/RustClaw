@@ -150,6 +150,26 @@ fn extracts_ordered_entries_from_listing_block_before_summary_paragraph() {
 }
 
 #[test]
+fn extracts_ordered_entries_from_prose_header_plus_path_lines() {
+    let entries = extract_ordered_entries_from_text(
+        "在 scripts/nl_tests/fixtures/locator_smart/fuzzy_top3 中匹配 \"abcd\" 的条目共 4 个：\n\
+scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md\n\
+scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt\n\
+scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt\n\
+scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log",
+    );
+    assert_eq!(
+        entries,
+        vec![
+            "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md",
+            "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt",
+            "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt",
+            "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"
+        ]
+    );
+}
+
+#[test]
 fn extracts_ordered_entries_from_tree_summary_json() {
     let entries = ordered_entries_from_listing_json(&serde_json::json!({
         "action": "tree_summary",
