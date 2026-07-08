@@ -1,11 +1,17 @@
 # Task Lifecycle Lease Model
 
-RustClaw currently uses existing task and checkpoint machine fields for lease and heartbeat behavior. This keeps the runtime compatible with the current SQLite schema while preserving a path to explicit worker leases later.
+RustClaw uses two machine-readable lease layers for durable task execution:
+
+- task-row worker leases in SQLite, used to claim and heartbeat queued/running work;
+- checkpoint resume-executor leases in `result_json`, used to resume paused/background work without replaying completed side effects.
+
+Both layers are structural protocol. Runtime recovery, cancellation, resume, and polling must not parse user-visible `text` or `error_text`.
 
 ## Current Model
 
 - `tasks.status` remains the coarse database state: `queued`, `running`, `succeeded`, `failed`, `canceled`, or `timeout`.
-- `tasks.updated_at` is the coarse heartbeat timestamp for ordinary active tasks. Query projection exposes it as `task_lifecycle.last_heartbeat_ts` for active states.
+- `tasks.lease_owner`, `tasks.lease_expires_at`, `tasks.claim_attempt`, and `tasks.claimed_at` are the task worker lease fields. They are set when a worker claims a queued task and refreshed while the task is running.
+- `tasks.updated_at` is still the coarse heartbeat and ordering timestamp. Query projection exposes it as `task_lifecycle.last_heartbeat_ts` for active states, but it is no longer the only lease signal.
 - `task_lifecycle.state` is the user/operator state projected by `crates/clawd/src/task_lifecycle.rs`: `queued`, `running`, `waiting`, `background`, `needs_user`, `succeeded`, `failed`, or `cancelled`.
 - Paused/background checkpoint recovery uses structured JSON fields in `result_json`, not natural-language text:
   - `task_lifecycle.checkpoint_id`
@@ -15,6 +21,12 @@ RustClaw currently uses existing task and checkpoint machine fields for lease an
   - `task_lifecycle.resume_executor.resume_directive`
   - `task_checkpoint.resume_entrypoint`
   - `task_checkpoint.pending_async_job`
+- Task query/list projections include worker lease fields when present:
+  - `task_lifecycle.lease_owner`
+  - `task_lifecycle.lease_expires_at`
+  - `task_lifecycle.claim_attempt`
+  - `task_lifecycle.claimed_at`
+  - `task_lifecycle.attempt_id`
 
 ## State Vocabulary
 
@@ -37,9 +49,37 @@ RustClaw currently uses existing task and checkpoint machine fields for lease an
 
 `paused` is not a runtime machine state. UI may use it as a friendly label for `waiting` or `background`, but persisted code should keep the explicit lifecycle tokens above.
 
+## Lease Layers
+
+### Task Worker Lease
+
+`claim_next_task()` selects the oldest `queued` row, atomically moves it to `running`, and writes:
+
+- `lease_owner = state.worker.worker_id`
+- `claimed_at = now`
+- `lease_expires_at = now + max(worker_task_heartbeat_seconds * 4, 60)`
+- `claim_attempt = claim_attempt + 1`
+
+`touch_running_task()` refreshes `updated_at`, `lease_owner`, and `lease_expires_at` while the worker still owns a running task. Query/list APIs project these fields into `task_lifecycle` so CLI/UI can display claim state and distinguish an active worker from stale work.
+
+### Checkpoint Resume-Executor Lease
+
+Checkpointed `waiting`, `background`, and `needs_user` work remains in `tasks.status = 'running'` and stores the recoverable state in `result_json`. When a checkpoint is due, the recovery path claims it through `task_lifecycle.resume_executor` and records a bounded claim:
+
+- `executor_state`
+- `previous_executor_state`
+- `executor_state_at`
+- `executor_claim_expires_at`
+- `resume_executor_claim.owner`
+- `resume_executor_claim.checkpoint_id`
+- `resume_executor_claim.claimed_at`
+- `resume_executor_claim.expires_at`
+
+An active resume-executor lease blocks duplicate resume work until it expires. Expired claims become eligible for recovery from the checkpoint and completed side-effect ledger.
+
 ## Recovery Rules
 
-- Ordinary stale `running` tasks can be marked `timeout` from machine timestamps.
+- Ordinary stale `running` tasks can be marked `timeout` from machine timestamps and worker lease state.
 - `waiting`, `background`, and `needs_user` checkpoint states are preserved as `running` in the database so worker recovery can claim the checkpoint by `checkpoint_id`.
 - A resume executor claim is valid only while its `lease_expires_at` is active. Expired claims become eligible for recovery.
 - Direct `run_skill` async starts and planner-triggered async work both converge through `task_checkpoint.pending_async_job` and `resume_entrypoint = "poll_async_job"` when they need background polling.
@@ -54,7 +94,7 @@ RustClaw currently uses existing task and checkpoint machine fields for lease an
 
 ## Decision
 
-No new task lease columns are required for the current single-runtime SQLite deployment. The existing `updated_at` heartbeat plus checkpoint `resume_executor` lease fields are sufficient for:
+Explicit task lease columns are now part of the current SQLite schema. RustClaw does not need a separate distributed worker table yet, but task claiming must use the existing row-level lease fields plus checkpoint resume leases. The current model supports:
 
 - foreground submit-and-return flows,
 - task query lifecycle projection,
@@ -64,11 +104,11 @@ No new task lease columns are required for the current single-runtime SQLite dep
 - direct task-id cancellation.
 - manual checkpoint pause/resume through structured task-control APIs.
 
-Add explicit database columns such as `worker_id`, `lease_owner`, or `lease_expires_at` only when RustClaw supports concurrent durable workers that can claim the same task queue across processes or hosts.
+Future multi-host execution should build on the existing task-row lease columns. Add a dedicated worker registry only when RustClaw needs host health, queue partitioning, or cross-process lease ownership beyond `lease_owner` and `lease_expires_at`.
 
 ## Required Checks
 
-- `cargo test -p clawd task_resume_execution -- --nocapture`
-- `cargo test -p clawd async_poll_executor -- --nocapture`
-- `cargo test -p clawd run_skill_finalize -- --nocapture`
-- focused task-control tests matching `task_by_id`
+- `cargo test -p clawd task_lifecycle -- --quiet`
+- `cargo test -p clawd task_resume_execution -- --quiet`
+- `cargo test -p clawd async_poll_executor -- --quiet`
+- `cargo test -p clawd task_by_id -- --quiet`
