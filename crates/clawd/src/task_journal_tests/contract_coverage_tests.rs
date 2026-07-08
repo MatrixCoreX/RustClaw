@@ -1515,3 +1515,92 @@ fn step_trace_includes_contract_and_action_policy_for_success() {
         .and_then(Value::as_array)
         .is_some_and(|items| !items.is_empty()));
 }
+
+#[test]
+fn db_schema_version_action_evidence_overrides_stale_existence_route_contract() {
+    let mut journal = TaskJournal::for_task(
+        "task-db-schema-version",
+        "ask",
+        "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite",
+    );
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "active_clarify_locator_reply_fast_path; contract:existence_with_path"
+            .to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
+            response_shape: crate::OutputResponseShape::OneSentence,
+            requires_content_evidence: true,
+            locator_kind: crate::OutputLocatorKind::Path,
+            locator_hint: "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
+                .to_string(),
+            ..Default::default()
+        },
+    };
+    journal.record_route_result(&route);
+    journal.record_plan_result(&crate::PlanResult {
+        goal: "read sqlite schema version".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "db_basic".to_string(),
+            args: json!({
+                "action": "schema_version",
+                "db_path": "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: String::new(),
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "db_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "schema_version",
+                    "db_path": "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite",
+                    "field_value": {"schema_version": 3},
+                    "schema_version": 3
+                },
+                "text": "{\"columns\":[\"schema_version\"],\"rows\":[{\"schema_version\":3}]}"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let coverage = evidence_coverage_for_route(&route, &journal);
+
+    assert!(coverage.is_complete(), "coverage: {coverage:?}");
+    assert_eq!(coverage.required_evidence, vec!["field_value"]);
+    assert!(coverage.observed_canonical.contains("field_value"));
+    assert!(coverage.observed_canonical.contains("schema_version"));
+    assert!(coverage.evidence_expression.is_none());
+
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    assert!(
+        crate::answer_verifier::local_missing_evidence_verifier_gap(&route, &journal).is_none(),
+        "schema_version action evidence should not be blocked by stale existence route contract"
+    );
+}
