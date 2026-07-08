@@ -136,7 +136,9 @@ pub(super) fn enforce_output_contract(
         OutputResponseShape::OneSentence => {
             if !output_contract.semantic_kind_is(crate::OutputSemanticKind::DirectoryPurposeSummary)
             {
-                *normalized_text = if output_contract.semantic_kind.is_content_excerpt_summary() {
+                *normalized_text = if output_contract.requires_content_evidence
+                    || output_contract.semantic_kind.is_content_excerpt_summary()
+                {
                     take_tail_sentence(normalized_text)
                         .unwrap_or_else(|| take_first_sentence(normalized_text))
                 } else {

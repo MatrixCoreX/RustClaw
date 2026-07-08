@@ -737,6 +737,68 @@ fn tail_read_range_observed_answer_preserves_latest_registered_respond() {
 }
 
 #[test]
+fn tail_read_range_restores_publishable_summary_when_current_delivery_is_path_projection() {
+    let state = test_state();
+    let task = claimed_task("task-tail-restore-summary-from-path");
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "logs/clawd.run.log".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let summary =
+        "clawd.run.log 的尾部都是 INFO 级 task_call 流转，整体更像服务正常启动而非刚遇到报错。";
+    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .delivery_messages
+        .push("clawd.run.log".to_string());
+    loop_state.last_user_visible_respond = Some("clawd.run.log".to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"read_range","mode":"tail","requested_n":20,"path":"/home/guagua/rustclaw/logs/clawd.run.log","excerpt":"1|INFO task_call verifier_result\n2|INFO task_call task_journal_summary"}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", summary));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "respond", summary));
+    loop_state.executed_step_results.push(err_step_result(
+        "step_4",
+        "synthesize_answer",
+        "synthesis retry failed",
+    ));
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_latest_tail_read_range_answer(
+        &state,
+        &task,
+        "read the latest log tail and provide the requested takeaway",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+    ));
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(summary)
+    );
+    assert_eq!(
+        loop_state.delivery_messages.last().map(String::as_str),
+        Some(summary)
+    );
+    assert_eq!(
+        finalizer_summary.and_then(|summary| summary.disposition),
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
 fn tail_read_range_observed_answer_replaces_synthesis_after_tail_for_strict_raw_output() {
     let state = test_state();
     let task = claimed_task("task-tail-preserve-synthesis-after-tail");

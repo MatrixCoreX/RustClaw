@@ -66,6 +66,31 @@ fn content_excerpt_one_sentence_prefers_tail_summary_over_code_excerpt() {
 }
 
 #[test]
+fn content_evidence_one_sentence_prefers_tail_conclusion_over_inventory_first_line() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::None,
+        ..Default::default()
+    };
+    let mut text = "logs 目录下与 clawd 相关的文件（26 个，按观察顺序）：\nclawd.run.log\nclawd.log\n\nclawd.run.log 最后 20 行均为 INFO task_call 流转。\n\n更像正常启动，没有遇到报错。".to_string();
+    let mut messages = vec![text.clone()];
+
+    enforce_output_contract(
+        &state,
+        "读日志并只用一句中文判断正常启动还是刚遇到报错",
+        &contract,
+        &mut text,
+        &mut messages,
+    );
+
+    assert_eq!(text, "更像正常启动，没有遇到报错。");
+    assert_eq!(messages, vec![text.clone()]);
+}
+
+#[test]
 fn non_file_contract_strips_spurious_leading_file_label_from_prose() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let contract = IntentOutputContract {

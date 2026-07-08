@@ -179,21 +179,33 @@ fn route_allows_publishable_summary_over_observed_projection(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> bool {
+    let contract = route.effective_output_contract();
+    let shape_allows_publishable_summary = !contract.delivery_required
+        && !matches!(
+            contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        );
     if route.output_contract_marker_is_any(&[
         crate::OutputSemanticKind::RawCommandOutput,
         crate::OutputSemanticKind::CommandOutputSummary,
     ]) {
         return publishable_summary_has_multi_source_observation(loop_state);
     }
+    if contract.requires_content_evidence
+        && shape_allows_publishable_summary
+        && matches!(
+            crate::evidence_policy::final_answer_shape_for_route(route),
+            Some(crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence)
+        )
+    {
+        return true;
+    }
     route.output_contract_marker_is_any(&[
         crate::OutputSemanticKind::ContentExcerptSummary,
         crate::OutputSemanticKind::ContentExcerptWithSummary,
         crate::OutputSemanticKind::ExcerptKindJudgment,
         crate::OutputSemanticKind::WorkspaceProjectSummary,
-    ]) && !matches!(
-        route.effective_output_contract().response_shape,
-        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
-    )
+    ]) && shape_allows_publishable_summary
 }
 
 fn publishable_evidence_summary_should_own_scalar_delivery(candidate: &str) -> bool {
@@ -465,6 +477,17 @@ fn current_delivery_is_publishable_terminal_answer(loop_state: &LoopState) -> bo
     .flatten()
     .map(str::trim)
     .any(|terminal| terminal == current)
+}
+
+fn latest_publishable_terminal_respond_should_win_over_observed_projection(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> bool {
+    !route_prefers_observed_answer(route)
+        && latest_publishable_respond_step_output(loop_state).is_some_and(|answer| {
+            !delivery_is_raw_read_observation(answer, loop_state)
+                && !crate::finalize::is_execution_summary_message(answer)
+        })
 }
 
 pub(super) fn replace_delivery_with_direct_scalar_observed_answer(
@@ -757,6 +780,16 @@ pub(super) fn replace_delivery_with_loop_contract_observed_answer(
         .is_some_and(|route| {
             !route_prefers_observed_answer(route)
                 && current_delivery_is_publishable_terminal_answer(loop_state)
+        })
+    {
+        return false;
+    }
+    if agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .is_some_and(|route| {
+            latest_publishable_terminal_respond_should_win_over_observed_projection(
+                route, loop_state,
+            )
         })
     {
         return false;
@@ -1184,6 +1217,9 @@ fn direct_structured_observed_answer_impl(
         && successful_observation_count > 1
         && !route_prefers_observed_answer(route)
     {
+        return None;
+    }
+    if latest_publishable_terminal_respond_should_win_over_observed_projection(route, loop_state) {
         return None;
     }
     if let Some(answer) = latest_successful_inventory_name_list_answer(loop_state) {

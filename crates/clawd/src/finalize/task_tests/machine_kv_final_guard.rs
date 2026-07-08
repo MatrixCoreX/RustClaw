@@ -187,6 +187,48 @@ fn requested_machine_kv_summary_final_guard_preserves_web_search_listing() {
 }
 
 #[test]
+fn requested_machine_kv_summary_final_guard_preserves_workspace_grounded_summary() {
+    let prompt = "List clawd related log files, read clawd.run.log tail, then summarize status.";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+    route.output_contract.locator_hint = "logs/clawd.run.log".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-workspace-grounded-final", "ask", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"inventory_dir","names_by_kind":{"files":["clawd.log","clawd.run.log","clawd.out"]},"path":"/home/guagua/rustclaw/logs"}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "fs_basic",
+            r#"{"extra":{"action":"read_range","mode":"tail","requested_n":20,"path":"/home/guagua/rustclaw/logs/clawd.run.log","excerpt":"468|INFO task_call executor_step_execute\n469|INFO task_call skill_dispatch"}}"#,
+        ));
+    let mut answer_text = "与 clawd 相关的文件包括 clawd.log、clawd.run.log、clawd.out；clawd.run.log 尾部都是 INFO 级 task_call 执行日志，没有 ERROR 或 WARN，服务更像正常启动并持续处理任务。"
+        .to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert!(answer_text.contains("服务更像正常启动"));
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
+    assert!(journal.final_answer.as_deref() != Some("clawd.run.log"));
+}
+
+#[test]
 fn requested_machine_kv_summary_final_guard_preserves_delivery_file_token() {
     let prompt = "Create a text file in tmp/notes.txt, write content, and send the file.";
     let mut route = route_result(crate::AskMode::act_plain());
