@@ -22,7 +22,9 @@ fn web_search_candidate_sources_ignore_visible_text_payload() {
 
 #[test]
 fn service_status_final_guard_preserves_observed_one_sentence_status_summary() {
-    let route = service_status_one_sentence_route();
+    let mut route = service_status_one_sentence_route();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.route_reason = "agent_loop_default_entry".to_string();
     let prompt = ["check", "ssh", "service", "status"].join(" ");
     let service_name = "sshd";
     let observed_state = "active";

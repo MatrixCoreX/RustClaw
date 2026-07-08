@@ -305,8 +305,7 @@ fn final_answer_preserves_service_control_status_summary(
     answer_messages: &[String],
 ) -> bool {
     let contract = route_result.effective_output_contract();
-    if !route_requests_service_status_machine_kv_summary(route_result)
-        || contract.delivery_required
+    if contract.delivery_required
         || matches!(
             contract.response_shape,
             crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Strict
