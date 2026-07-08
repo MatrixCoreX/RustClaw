@@ -1379,7 +1379,7 @@ pub(super) async fn handle_synthesize_answer_action(
                 return Ok(answer);
             }
             if let Some(answer) =
-                filesystem_mutation_lifecycle_structured_answer(loop_state, agent_run_context)
+                filesystem_mutation_lifecycle_structured_answer(state, loop_state, agent_run_context)
             {
                 return Ok(answer);
             }

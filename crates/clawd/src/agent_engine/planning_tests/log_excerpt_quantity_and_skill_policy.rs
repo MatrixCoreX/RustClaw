@@ -513,6 +513,72 @@ fn scratch_filesystem_lifecycle_plan_upgrades_effective_contract() {
 }
 
 #[test]
+fn generic_path_content_scratch_lifecycle_plan_upgrades_effective_contract() {
+    let state = test_state_with_registry();
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "tmp/nl_basic_skill_coverage_case".to_string();
+    let steps = vec![
+        crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "fs_basic".to_string(),
+            args: json!({"action": "make_dir", "path": "tmp/nl_basic_skill_coverage_case"}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        crate::PlanStep {
+            step_id: "step_2".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "write_text",
+                "path": "tmp/nl_basic_skill_coverage_case/note.txt",
+                "content": "alpha\n",
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        crate::PlanStep {
+            step_id: "step_3".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "tmp/nl_basic_skill_coverage_case/note.txt",
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+        crate::PlanStep {
+            step_id: "step_4".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "fs_basic".to_string(),
+            args: json!({
+                "action": "remove_path",
+                "path": "tmp/nl_basic_skill_coverage_case",
+                "target_kind": "directory",
+                "recursive": true,
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        },
+    ];
+
+    let effective =
+        crate::agent_engine::effective_filesystem_lifecycle_output_contract_for_plan_steps(
+            &state, &route, &steps,
+        )
+        .expect("generic scratch lifecycle should upgrade effective contract");
+
+    assert_eq!(
+        effective.semantic_kind,
+        OutputSemanticKind::FilesystemMutationResult
+    );
+}
+
+#[test]
 fn command_output_summary_keeps_scratch_cleanup_recovery_after_prior_write() {
     let state = test_state_with_registry();
     let mut route = route_result(

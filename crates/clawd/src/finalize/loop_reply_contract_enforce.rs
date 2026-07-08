@@ -341,18 +341,33 @@ pub(super) fn route_accepts_filesystem_mutation_synthesis(
     route: &crate::RouteResult,
     synthesis: &str,
 ) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult)
-        && filesystem_mutation_synthesis_payload_is_complete(synthesis)
+    let route_accepts_lifecycle = route
+        .output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult)
+        || (route.is_execute_gate()
+            && !route.output_contract.delivery_required
+            && route.output_contract.requires_content_evidence
+            && matches!(
+                route.effective_output_contract_semantic_kind(),
+                crate::OutputSemanticKind::None
+                    | crate::OutputSemanticKind::CommandOutputSummary
+                    | crate::OutputSemanticKind::ExecutionFailedStep
+            ));
+    route_accepts_lifecycle && filesystem_mutation_synthesis_payload_is_complete(synthesis)
 }
 
 fn filesystem_mutation_synthesis_payload_is_complete(synthesis: &str) -> bool {
     let Ok(payload) = serde_json::from_str::<serde_json::Value>(synthesis.trim()) else {
         return false;
     };
-    payload
+    let contract_marker_matches = payload
         .pointer("/contract_marker")
         .and_then(serde_json::Value::as_str)
-        == Some("filesystem_mutation_result")
+        == Some("filesystem_mutation_result");
+    let lifecycle_shape_matches = payload
+        .pointer("/final_answer_shape")
+        .and_then(serde_json::Value::as_str)
+        == Some("lifecycle_result");
+    (contract_marker_matches || lifecycle_shape_matches)
         && payload
             .pointer("/status")
             .and_then(serde_json::Value::as_str)
@@ -361,6 +376,11 @@ fn filesystem_mutation_synthesis_payload_is_complete(synthesis: &str) -> bool {
             .pointer("/steps")
             .and_then(serde_json::Value::as_array)
             .is_some_and(|steps| !steps.is_empty())
+        && (!lifecycle_shape_matches
+            || payload
+                .pointer("/final_state/cleanup_observed")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false))
 }
 
 pub(super) fn route_prefers_content_evidence_synthesis(

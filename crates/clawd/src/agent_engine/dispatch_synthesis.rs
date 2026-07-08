@@ -244,11 +244,21 @@ pub(super) fn package_docker_probe_structured_answer(loop_state: &LoopState) -> 
 }
 
 pub(super) fn filesystem_mutation_lifecycle_structured_answer(
+    state: &AppState,
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|context| context.route_result.as_ref())?;
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult) {
+    let route_allows = agent_run_context
+        .and_then(|context| context.route_result.as_ref())
+        .is_some_and(|route| {
+            route.output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult)
+        });
+    let effective_contract_allows = loop_state.output_contract.as_ref().is_some_and(|contract| {
+        contract.semantic_kind_is(crate::OutputSemanticKind::FilesystemMutationResult)
+    });
+    let observed_scratch_lifecycle =
+        crate::agent_engine::scratch_filesystem_lifecycle_observed_steps_match(state, loop_state);
+    if !route_allows && !effective_contract_allows && !observed_scratch_lifecycle {
         return None;
     }
 
