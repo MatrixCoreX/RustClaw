@@ -53,7 +53,7 @@ use self::dispatch_support::{classify_skill_failure_recovery, dispatch_round_act
 use self::execution_loop::execute_actions_once;
 use self::loop_control::{run_agent_with_loop, run_agent_with_loop_seeded};
 use self::loop_state_contract_evidence::{
-    contract_repair_candidate_evidence_for_loop_seed,
+    active_plan_file_targets_for_loop_seed, contract_repair_candidate_evidence_for_loop_seed,
     default_main_config_contract_evidence_for_loop_seed, first_string_field,
     pre_loop_clarify_candidates_for_loop_seed, registry_capability_contract_evidence_for_loop_seed,
     registry_capability_contract_refs,
@@ -663,9 +663,6 @@ fn seed_loop_state_from_agent_context(
             "route_locator_kind".to_string(),
             route.output_contract.locator_kind.as_str().to_string(),
         );
-        // §7.1: 把合并 route marker 后的 output_contract 挂到 loop 上，让 synthesis/finalize
-        // 和无 RouteResult 入参的 preflight 都能拿到统一机器合同。
-        // clone 因为 RouteResult 跨 await 共享，loop 内部要独立可写。
         loop_state.output_contract = Some(route.effective_output_contract());
         loop_state.route_policy_context = Some(route.clone());
     }
@@ -742,6 +739,14 @@ fn seed_loop_state_from_agent_context(
                 "current_workspace_scalar_count_targets".to_string(),
                 encoded,
             );
+        }
+    }
+    let active_plan_file_targets = active_plan_file_targets_for_loop_seed(ctx);
+    if !active_plan_file_targets.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(&active_plan_file_targets) {
+            loop_state
+                .output_vars
+                .insert("active_plan_file_targets".to_string(), encoded);
         }
     }
     let current_request_locator_evidence = current_request_locator_evidence_for_loop_seed(ctx);

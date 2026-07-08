@@ -384,11 +384,14 @@ pub(super) fn replace_workspace_synthesis_respond_only_plan(
     }
 
     info!("plan_replace_workspace_synthesis_respond_only_with_default_evidence");
-    workspace_summary_default_evidence_actions()
+    let current_request_text_targets = workspace_synthesis_text_evidence_targets(loop_state);
+    workspace_summary_default_evidence_actions(&current_request_text_targets)
 }
 
-pub(super) fn workspace_summary_default_evidence_actions() -> Vec<AgentAction> {
-    vec![
+pub(super) fn workspace_summary_default_evidence_actions(
+    current_request_text_targets: &[String],
+) -> Vec<AgentAction> {
+    let mut actions = vec![
         AgentAction::CallSkill {
             skill: "system_basic".to_string(),
             args: serde_json::json!({
@@ -420,7 +423,9 @@ pub(super) fn workspace_summary_default_evidence_actions() -> Vec<AgentAction> {
                 "n": 8,
             }),
         },
-        AgentAction::CallTool {
+    ];
+    if current_request_text_targets.is_empty() {
+        actions.push(AgentAction::CallTool {
             tool: "fs_basic".to_string(),
             args: serde_json::json!({
                 "action": "read_text_range",
@@ -428,19 +433,28 @@ pub(super) fn workspace_summary_default_evidence_actions() -> Vec<AgentAction> {
                 "mode": "head",
                 "n": 40,
             }),
-        },
-        AgentAction::SynthesizeAnswer {
-            evidence_refs: vec![
-                "step_1".to_string(),
-                "step_2".to_string(),
-                "step_3".to_string(),
-                "step_4".to_string(),
-            ],
-        },
-        AgentAction::Respond {
-            content: "{{last_output}}".to_string(),
-        },
-    ]
+        });
+    } else {
+        for target in current_request_text_targets {
+            actions.push(AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "read_text_range",
+                    "path": target,
+                    "mode": "head",
+                    "n": 320,
+                }),
+            });
+        }
+    }
+    let evidence_refs = (1..=actions.len())
+        .map(|idx| format!("step_{idx}"))
+        .collect::<Vec<_>>();
+    actions.push(AgentAction::SynthesizeAnswer { evidence_refs });
+    actions.push(AgentAction::Respond {
+        content: "{{last_output}}".to_string(),
+    });
+    actions
 }
 
 pub(super) fn should_prefer_observed_finalize(

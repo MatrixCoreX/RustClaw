@@ -639,6 +639,36 @@ fn seed_loop_state_extracts_current_request_locator_boundary_observation() {
 }
 
 #[test]
+fn seed_loop_state_extracts_active_plan_file_targets_boundary_observation() {
+    let observation = serde_json::json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "active_plan_files": [{
+            "source": "workspace_plan_directory",
+            "logical_path": "plan/active.md",
+            "workspace_path": "/tmp/rustclaw/plan/active.md",
+            "bytes": 128
+        }]
+    });
+    let block = format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS",
+        serde_json::to_string(&observation).expect("observation json")
+    );
+    let ctx = AgentRunContext {
+        user_request: Some(format!("review plan\n{block}")),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(4);
+
+    seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
+
+    assert_eq!(
+        loop_state.output_vars.get("active_plan_file_targets"),
+        Some(&"[\"/tmp/rustclaw/plan/active.md\"]".to_string())
+    );
+}
+
+#[test]
 fn seed_loop_state_extracts_default_main_config_contract_boundary_observation() {
     let observation = serde_json::json!({
         "kind": "agent_loop_boundary_observations",

@@ -145,6 +145,67 @@ pub(super) fn action_reads_workspace_text_content(action: &AgentAction) -> bool 
     }
 }
 
+pub(super) fn current_request_workspace_child_text_evidence_targets(
+    loop_state: &LoopState,
+) -> Vec<String> {
+    output_var_existing_file_targets(
+        loop_state,
+        "current_request_resolved_workspace_child_targets",
+    )
+}
+
+pub(super) fn workspace_synthesis_text_evidence_targets(loop_state: &LoopState) -> Vec<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    current_request_workspace_child_text_evidence_targets(loop_state)
+        .into_iter()
+        .chain(output_var_existing_file_targets(
+            loop_state,
+            "active_plan_file_targets",
+        ))
+        .filter(|path| seen.insert(path.clone()))
+        .take(4)
+        .collect()
+}
+
+fn output_var_existing_file_targets(loop_state: &LoopState, key: &str) -> Vec<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    loop_state
+        .output_vars
+        .get(key)
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|value| value.as_array().cloned())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| {
+            value
+                .as_str()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(ToString::to_string)
+        })
+        .filter(|path| Path::new(path).is_file())
+        .filter(|path| seen.insert(path.clone()))
+        .take(4)
+        .collect()
+}
+
+pub(super) fn action_reads_workspace_text_path(
+    state: &AppState,
+    action: &AgentAction,
+    target_path: &str,
+) -> bool {
+    if !action_reads_workspace_text_content(action) {
+        return false;
+    }
+    let Some(action_path) = action_workspace_summary_path(action) else {
+        return false;
+    };
+    let workspace_root = &state.skill_rt.workspace_root;
+    let action_path = resolve_workspace_path(workspace_root, action_path);
+    let target_path = resolve_workspace_path(workspace_root, target_path);
+    same_existing_or_display_path(&action_path, &target_path)
+}
+
 pub(super) fn action_observes_content_presence_search(action: &AgentAction) -> bool {
     match action {
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
@@ -672,6 +733,7 @@ pub(super) fn action_reads_workspace_summary_readme(action: &AgentAction) -> boo
 }
 
 pub(super) fn ensure_workspace_synthesis_has_default_text_evidence(
+    state: &AppState,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
     actions: Vec<AgentAction>,
@@ -688,7 +750,16 @@ pub(super) fn ensure_workspace_synthesis_has_default_text_evidence(
     {
         return actions;
     }
-    let has_text_evidence = actions.iter().any(action_reads_workspace_summary_readme);
+    let current_request_text_targets = workspace_synthesis_text_evidence_targets(loop_state);
+    let has_text_evidence = if current_request_text_targets.is_empty() {
+        actions.iter().any(action_reads_workspace_summary_readme)
+    } else {
+        current_request_text_targets.iter().all(|target| {
+            actions
+                .iter()
+                .any(|action| action_reads_workspace_text_path(state, action, target))
+        })
+    };
     let has_git_history = actions.iter().any(action_reads_git_history);
     if has_text_evidence && has_git_history {
         return actions;
@@ -709,15 +780,35 @@ pub(super) fn ensure_workspace_synthesis_has_default_text_evidence(
         });
     }
     if !has_text_evidence {
-        rewritten.push(AgentAction::CallTool {
-            tool: "fs_basic".to_string(),
-            args: serde_json::json!({
-                "action": "read_text_range",
-                "path": "README.md",
-                "mode": "head",
-                "n": 40,
-            }),
-        });
+        if current_request_text_targets.is_empty() {
+            rewritten.push(AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "read_text_range",
+                    "path": "README.md",
+                    "mode": "head",
+                    "n": 40,
+                }),
+            });
+        } else {
+            for target in &current_request_text_targets {
+                if actions
+                    .iter()
+                    .any(|action| action_reads_workspace_text_path(state, action, target))
+                {
+                    continue;
+                }
+                rewritten.push(AgentAction::CallTool {
+                    tool: "fs_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": "read_text_range",
+                        "path": target,
+                        "mode": "head",
+                        "n": 320,
+                    }),
+                });
+            }
+        }
     }
     rewritten.extend(actions[insert_idx..].iter().cloned());
     info!(

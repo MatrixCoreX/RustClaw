@@ -2,6 +2,49 @@ use serde_json::Value;
 
 use super::AgentRunContext;
 
+pub(super) fn active_plan_file_targets_for_loop_seed(ctx: &AgentRunContext) -> Vec<String> {
+    let mut targets = Vec::new();
+    for summary in [
+        ctx.user_request.as_deref(),
+        ctx.context_bundle_summary.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        targets.extend(active_plan_file_targets_from_boundary_observation_blocks(
+            summary,
+        ));
+    }
+    targets.sort();
+    targets.dedup();
+    targets
+}
+
+fn active_plan_file_targets_from_boundary_observation_blocks(summary: &str) -> Vec<String> {
+    const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    let mut out = Vec::new();
+    for tail in summary.split(START).skip(1) {
+        let block = tail.split(END).next().unwrap_or(tail).trim();
+        let Ok(value) = serde_json::from_str::<Value>(block) else {
+            continue;
+        };
+        let Some(files) = value.get("active_plan_files").and_then(Value::as_array) else {
+            continue;
+        };
+        out.extend(
+            files
+                .iter()
+                .filter_map(|file| file.get("workspace_path"))
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string),
+        );
+    }
+    out
+}
+
 pub(super) fn default_main_config_contract_evidence_for_loop_seed(
     ctx: &AgentRunContext,
 ) -> Vec<Value> {

@@ -409,8 +409,12 @@ pub(super) fn normalize_evidence_contract_actions(
     let actions = prune_unscoped_workspace_summary_evidence_for_scope(state, route_result, actions);
     let actions =
         strip_unrequested_workspace_artifact_mutations(state, route_result, loop_state, actions);
-    let actions =
-        ensure_workspace_synthesis_has_default_text_evidence(route_result, loop_state, actions);
+    let actions = ensure_workspace_synthesis_has_default_text_evidence(
+        state,
+        route_result,
+        loop_state,
+        actions,
+    );
     let actions =
         append_synthesize_for_unscoped_workspace_text_evidence(route_result, loop_state, actions);
     let actions = rewrite_dir_compare_paths_to_unique_workspace_directories(state, actions);

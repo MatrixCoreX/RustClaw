@@ -1248,6 +1248,200 @@ fn workspace_synthesis_plan_adds_missing_text_evidence_and_synthesizes_all_steps
 }
 
 #[test]
+fn workspace_synthesis_default_text_evidence_prefers_current_request_child() {
+    let root = TempDirGuard::new("workspace_synthesis_current_request_child");
+    let agents = root.path.join("AGENTS.md");
+    fs::write(
+        &agents,
+        "# Repository Rules\n\n- Keep ordinary semantic decisions inside the agent loop.\n",
+    )
+    .expect("write agents");
+    let agents_path = agents.display().to_string();
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "current_request_resolved_workspace_child_targets".to_string(),
+        serde_json::to_string(&vec![agents_path.clone()]).expect("targets json"),
+    );
+    let mut route = route_result(
+        crate::AskMode::act_with_chat_finalizer(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({"action":"workspace_glance","path":"."}),
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        "Review the repository boundary rules.",
+        None,
+        actions,
+    );
+
+    assert!(normalized.iter().any(|action| matches!(
+        action,
+        AgentAction::CallTool { tool, args }
+            if tool == "fs_basic"
+                && args.get("action").and_then(|value| value.as_str())
+                    == Some("read_text_range")
+                && args.get("path").and_then(|value| value.as_str())
+                    == Some(agents_path.as_str())
+                && args.get("n").and_then(|value| value.as_u64()) == Some(320)
+    )));
+    assert!(!normalized.iter().any(|action| matches!(
+        action,
+        AgentAction::CallTool { tool, args }
+            if tool == "fs_basic"
+                && args.get("action").and_then(|value| value.as_str())
+                    == Some("read_text_range")
+                && args.get("path").and_then(|value| value.as_str()) == Some("README.md")
+    )));
+}
+
+#[test]
+fn workspace_synthesis_default_text_evidence_reads_multiple_current_request_children() {
+    let root = TempDirGuard::new("workspace_synthesis_multiple_current_request_children");
+    let agents = root.path.join("AGENTS.md");
+    let plan_dir = root.path.join("plan");
+    fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let active_plan = plan_dir.join("active_plan.md");
+    fs::write(
+        &agents,
+        "# Repository Rules\n\n- Keep ordinary semantic decisions inside the agent loop.\n",
+    )
+    .expect("write agents");
+    fs::write(
+        &active_plan,
+        "# Active Plan\n\n- Use bounded recovery for missing evidence.\n",
+    )
+    .expect("write active plan");
+    let agents_path = agents.display().to_string();
+    let active_plan_path = active_plan.display().to_string();
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "current_request_resolved_workspace_child_targets".to_string(),
+        serde_json::to_string(&vec![agents_path.clone(), active_plan_path.clone()])
+            .expect("targets json"),
+    );
+    let mut route = route_result(
+        crate::AskMode::act_with_chat_finalizer(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({"action":"workspace_glance","path":"."}),
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        "Review repository execution boundaries.",
+        None,
+        actions,
+    );
+
+    let read_paths = normalized
+        .iter()
+        .filter_map(|action| match action {
+            AgentAction::CallTool { tool, args } if tool == "fs_basic" => {
+                (args.get("action").and_then(Value::as_str) == Some("read_text_range"))
+                    .then(|| args.get("path").and_then(Value::as_str))
+                    .flatten()
+                    .map(ToString::to_string)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(read_paths.contains(&agents_path));
+    assert!(read_paths.contains(&active_plan_path));
+    assert!(!read_paths.iter().any(|path| path == "README.md"));
+}
+
+#[test]
+fn workspace_synthesis_default_text_evidence_uses_active_plan_target() {
+    let root = TempDirGuard::new("workspace_synthesis_active_plan_target");
+    let plan_dir = root.path.join("plan");
+    fs::create_dir_all(&plan_dir).expect("create plan dir");
+    let active_plan = plan_dir.join("active_plan.md");
+    fs::write(
+        &active_plan,
+        "# Active Plan\n\n- Keep recovery in the agent loop.\n",
+    )
+    .expect("write active plan");
+    let active_plan_path = active_plan.display().to_string();
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "active_plan_file_targets".to_string(),
+        serde_json::to_string(&vec![active_plan_path.clone()]).expect("targets json"),
+    );
+    let mut route = route_result(
+        crate::AskMode::act_with_chat_finalizer(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({"action":"workspace_glance","path":"."}),
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        "Review active repository boundaries.",
+        None,
+        actions,
+    );
+
+    assert!(normalized.iter().any(|action| matches!(
+        action,
+        AgentAction::CallTool { tool, args }
+            if tool == "fs_basic"
+                && args.get("action").and_then(Value::as_str) == Some("read_text_range")
+                && args.get("path").and_then(Value::as_str) == Some(active_plan_path.as_str())
+    )));
+    assert!(!normalized.iter().any(|action| matches!(
+        action,
+        AgentAction::CallTool { tool, args }
+            if tool == "fs_basic"
+                && args.get("action").and_then(Value::as_str) == Some("read_text_range")
+                && args.get("path").and_then(Value::as_str) == Some("README.md")
+    )));
+}
+
+#[test]
 fn workspace_discovery_only_plan_waits_for_text_evidence_before_synthesis() {
     let loop_state = LoopState::new(2);
     let mut route = route_result(

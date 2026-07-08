@@ -632,6 +632,36 @@ fn auto_locator_preserves_existing_structured_field_path() {
 }
 
 #[test]
+fn auto_locator_preserves_conflicting_missing_file_name() {
+    let root = TempDirGuard::new("auto_locator_conflicting_missing_name");
+    let agents = root.path.join("AGENTS.md");
+    fs::write(&agents, "# rules\n").expect("write agents");
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "auto_locator_path".to_string(),
+        agents.display().to_string(),
+    );
+    let missing_plan = root.path.join("PLAN.md").display().to_string();
+    let mut args = json!({
+        "action": "read_range",
+        "path": missing_plan,
+        "mode": "head",
+        "n": 120
+    });
+
+    let rewritten = rewrite_args_with_auto_locator_path("system_basic", &mut args, &loop_state);
+
+    assert!(
+        !rewritten,
+        "conflicting concrete missing file name must not be rewritten"
+    );
+    assert_eq!(
+        args.get("path").and_then(|value| value.as_str()),
+        Some(missing_plan.as_str())
+    );
+}
+
+#[test]
 fn broad_current_workspace_auto_locator_does_not_overwrite_missing_inventory_path() {
     let root = TempDirGuard::new("broad_current_workspace");
     let root_path = root.path.display().to_string();
