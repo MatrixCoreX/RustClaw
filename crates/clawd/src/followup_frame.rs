@@ -401,6 +401,23 @@ pub(crate) fn ordered_entries_are_structural_tokens(entries: &[String]) -> bool 
             .any(|entry| structural_ordered_entry_has_signal(entry))
 }
 
+fn structural_ordered_entries(entries: &[String]) -> Vec<String> {
+    let structural = entries
+        .iter()
+        .filter(|entry| is_structural_ordered_entry_token(entry))
+        .cloned()
+        .collect::<Vec<_>>();
+    if structural.len() >= 2
+        && structural
+            .iter()
+            .any(|entry| structural_ordered_entry_has_signal(entry))
+    {
+        structural
+    } else {
+        Vec::new()
+    }
+}
+
 fn resolve_ordered_entry_target(frame: &FollowupFrame, entry: &str) -> String {
     let sanitized = sanitize_ordered_entry_text(entry);
     let trimmed = sanitized.trim();
@@ -646,6 +663,10 @@ pub(crate) fn extract_ordered_entries_from_text(text: &str) -> Vec<String> {
         }
     }
     if contiguous_lines.len() >= 2 {
+        let structural_entries = structural_ordered_entries(&contiguous_lines);
+        if structural_entries.len() >= 2 {
+            return dedupe_ordered_entries(structural_entries);
+        }
         return dedupe_ordered_entries(contiguous_lines);
     }
     let simple_lines = text
