@@ -106,6 +106,58 @@ fn subagent_bounded_batch_surface_actions(plan_path: &str) -> Vec<AgentAction> {
     ]
 }
 
+#[test]
+fn open_planning_tool_spec_includes_runtime_protocols() {
+    let mut state = test_state_with_enabled_skills(&["fs_basic"]);
+    state.skill_rt.workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let task = test_task();
+    let library =
+        PlannerToolLibrary::new(&state, &task, PlanningPromptClass::OpenPlanning, None, None);
+
+    let spec = library.tool_spec().expect("open planning tool spec");
+
+    assert!(spec.starts_with("runtime_capability_map_v1"));
+    assert!(spec.contains("agent_runtime_protocols=subagent_roles:"));
+    assert!(spec.contains("subagent_write_enabled:false"));
+    assert!(spec.contains("### Agent runtime protocols"));
+}
+
+#[test]
+fn lightweight_tool_spec_includes_runtime_protocols() {
+    let spec = build_lightweight_tool_spec(None, None);
+
+    assert!(spec.contains("agent_runtime_protocols=subagent_roles:"));
+    assert!(spec.contains("subagent_write_enabled:false"));
+    assert!(spec.contains("async_job_protocol="));
+}
+
+#[test]
+fn subagent_internal_runtime_tool_does_not_require_skill_switch() {
+    let state = test_state_with_enabled_skills(&["fs_basic"]);
+    let actions = vec![AgentAction::CallTool {
+        tool: "subagent".to_string(),
+        args: json!({
+            "children": [
+                {"role": "explorer", "objective": "collect_runtime_surface"},
+                {"role": "verifier", "objective": "verify_runtime_surface"}
+            ]
+        }),
+    }];
+
+    assert!(!contains_unavailable_skill_action(&state, &actions));
+}
+
+#[test]
+fn unknown_runtime_tool_still_requires_skill_switch() {
+    let state = test_state_with_enabled_skills(&["fs_basic"]);
+    let actions = vec![AgentAction::CallTool {
+        tool: "unknown_runtime_tool".to_string(),
+        args: json!({}),
+    }];
+
+    assert!(contains_unavailable_skill_action(&state, &actions));
+}
+
 fn find_planned_call<'a>(actions: &'a [AgentAction], name: &str, action_name: &str) -> &'a Value {
     actions
         .iter()

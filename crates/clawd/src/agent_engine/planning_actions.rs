@@ -67,6 +67,10 @@ pub(super) fn planned_action_skill_name(action: &AgentAction) -> Option<&str> {
     }
 }
 
+fn planner_internal_runtime_tool_is_available(canonical: &str) -> bool {
+    matches!(canonical, "subagent")
+}
+
 pub(super) fn contains_unavailable_skill_action(state: &AppState, actions: &[AgentAction]) -> bool {
     let enabled_skills = state.get_skills_list();
     if enabled_skills.is_empty() {
@@ -77,6 +81,8 @@ pub(super) fn contains_unavailable_skill_action(state: &AppState, actions: &[Age
             return false;
         };
         let canonical = state.resolve_canonical_skill_name(skill);
-        canonical.trim().is_empty() || !enabled_skills.contains(&canonical)
+        canonical.trim().is_empty()
+            || (!planner_internal_runtime_tool_is_available(&canonical)
+                && !enabled_skills.contains(&canonical))
     })
 }
