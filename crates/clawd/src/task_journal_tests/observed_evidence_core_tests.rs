@@ -1043,6 +1043,53 @@ fn generic_path_content_name_results_paths_satisfy_path_evidence() {
 }
 
 #[test]
+fn generic_path_content_db_path_satisfies_path_evidence() {
+    let mut journal = TaskJournal::for_task(
+        "task-generic-path-db-basic",
+        "ask",
+        "read sqlite schema version for selected database",
+    );
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    journal.record_route_result(&route);
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "db_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "schema_version",
+                    "db_path": "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite",
+                    "field_value": {
+                        "schema_version": 3
+                    },
+                    "schema_version": 3
+                },
+                "text": "3"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let coverage = evidence_coverage_for_route(&route, &journal);
+
+    assert!(coverage.is_complete(), "coverage: {coverage:?}");
+    assert!(coverage.observed_canonical.contains("path"));
+    assert!(coverage.observed_canonical.contains("field_value"));
+    assert!(!coverage
+        .missing_evidence
+        .iter()
+        .any(|field| field == "path"));
+}
+
+#[test]
 fn file_names_content_search_paths_satisfy_candidate_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-file-names-grep-candidates",

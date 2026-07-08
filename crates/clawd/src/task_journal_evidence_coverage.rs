@@ -744,6 +744,8 @@ pub(super) fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<S
                 "path",
                 "resolved_path",
                 "file_path",
+                "db_path",
+                "database_path",
                 "target_path",
                 "output_path",
                 "archive",
