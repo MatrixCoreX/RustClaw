@@ -63,7 +63,12 @@ fn language_neutral_artifacts_do_not_force_english() {
         "configs/app_config.toml"
     ));
     assert!(text_is_language_neutral_artifact_only("README.md"));
+    assert!(text_is_language_neutral_artifact_only(
+        "model_io.log 122500780\nmodel_io.log.2026-07-07 110353651"
+    ));
+    assert!(text_is_language_neutral_artifact_only("README.md 1.25 MB"));
     assert!(!text_is_language_neutral_artifact_only("读取 README.md"));
+    assert!(!text_is_language_neutral_artifact_only("12345"));
     assert_eq!(
         first_clear_request_language_hint([
             "/home/guagua/rustclaw/configs/app_config.toml",
@@ -108,6 +113,10 @@ fn generated_text_language_conflict_allows_embedded_names() {
     ));
     assert!(text_language_conflicts_with_hint(
         "I couldn't determine the requested action.",
+        "zh-CN"
+    ));
+    assert!(!text_language_conflicts_with_hint(
+        "model_io.log 122500780\nmodel_io.log.2026-07-07 110353651\nmodel_io.log.2026-07-02 70101903",
         "zh-CN"
     ));
     assert!(text_language_conflicts_with_hint(
