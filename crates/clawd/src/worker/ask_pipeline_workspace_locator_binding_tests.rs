@@ -4,7 +4,7 @@ use super::super::{
     unbound_model_context_target_route_should_defer_to_agent_loop,
 };
 use super::{
-    current_request_resolves_workspace_child_locator,
+    build_loop_context_after_boundary_preflight, current_request_resolves_workspace_child_locator,
     implicit_workspace_file_locator_route_should_defer_to_agent_loop,
     model_completed_workspace_file_locator_hint_should_defer_to_agent_loop,
     path_scoped_locator_guard_can_defer_to_prompt_targets, workspace_root_name_token_present,
@@ -125,6 +125,59 @@ fn workspace_root_topic_free_route_requires_workspace_summary_evidence() {
         "Introduce RustClaw",
         &route,
     ));
+}
+
+#[test]
+fn workspace_root_topic_boundary_uses_output_contract_marker_without_semantic_kind_write() {
+    let root = make_named_workspace_root("workspace_root_topic_output_marker", "rustclaw");
+    std::fs::write(root.join("README.md"), "# RustClaw\n").expect("readme");
+    let state = test_state_with_root(root.clone());
+    let task = crate::ClaimedTask {
+        task_id: "workspace-root-topic-output-marker".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut route = executionless_free_route();
+    route.resolved_intent = "Introduce the current workspace using grounded evidence.".to_string();
+    let resolved_intent = route.resolved_intent.clone();
+
+    let applied = build_loop_context_after_boundary_preflight(
+        &state,
+        &task,
+        "Introduce RustClaw",
+        &resolved_intent,
+        "",
+        None,
+        route,
+        String::new(),
+        String::new(),
+    );
+
+    assert_eq!(
+        applied.execution_route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    );
+    assert!(applied
+        .execution_route_result
+        .route_reason
+        .contains("contract:workspace_project_summary"));
+    assert!(applied
+        .execution_route_result
+        .output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary));
+    assert_eq!(
+        applied.execution_route_result.output_contract.locator_kind,
+        crate::OutputLocatorKind::CurrentWorkspace
+    );
+    assert_eq!(
+        applied.execution_route_result.output_contract.locator_hint,
+        root.display().to_string()
+    );
 }
 
 #[test]
