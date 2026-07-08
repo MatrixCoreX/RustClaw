@@ -29,6 +29,7 @@ Primary output:
 Execution signals:
 - Use execution-signal machine fields when the current request genuinely needs observation, side effects, delivery, scheduling, attachment processing, or background execution.
 - Valid execution signals include `output_contract.requires_content_evidence=true`, `output_contract.delivery_required=true`, `wants_file_delivery=true`, `attachment_processing_required=true`, `schedule_kind != "none"`, `execution_recipe.kind != "none"`, or structured runtime fields in `state_patch`.
+- A no-mutation dry-run / preview for a side-effecting runtime operation is still an execution-signal when the user asks for required machine fields, projected state fields, checkpoint/poll/cancel fields, or other runtime contract evidence. Preserve `dry_run` / no-mutation safety in `safety_budget_hint`, set `output_contract.requires_content_evidence=true`, and use `state_patch.required_machine_fields` for the requested machine-field names; do not choose the concrete capability here.
 - Do not answer observable local/system/workspace questions from model knowledge inside the normalizer. Expose boundary/evidence fields and let the agent loop call tools or capabilities.
 - Do not ask the user to paste local file contents when a local locator is supplied or clearly bound.
 

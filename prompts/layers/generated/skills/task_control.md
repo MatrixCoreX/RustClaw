@@ -24,6 +24,7 @@
 - `cancel_one` - Cancel one unfinished task by 1-based index from the current active-task ordering.
 - `resume` - Mark an existing checkpointed task due for recovery by stable `task_id`.
 - `pause` - Delay an existing waiting/background checkpoint by stable `task_id`.
+- Cancellation dry-runs are executable observations, not static prose: use `cancel_all` with `dry_run=true` when no specific index is supplied, or `cancel_one` with both `index` and `dry_run=true` when the user supplied a numbered task.
 
 ## Parameter Contract (from interface)
 | Param | Required | Type | Default | Description |
@@ -42,6 +43,7 @@ Notes:
 
 - Active-task ordering is: `running` first, then `queued`, then oldest first.
 - The control task itself is excluded automatically, so users do not accidentally cancel the task that is serving the request.
+- For a no-mutation cancel preview, `dry_run=true` returns the required cancellation input fields and projected lifecycle fields without calling the cancel API mutation path.
 
 ## Error Contract (from interface)
 - Unknown action -> `error_text=unsupported_action`.
