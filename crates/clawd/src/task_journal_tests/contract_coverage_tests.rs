@@ -1604,3 +1604,92 @@ fn db_schema_version_action_evidence_overrides_stale_existence_route_contract() 
         "schema_version action evidence should not be blocked by stale existence route contract"
     );
 }
+
+#[test]
+fn runtime_status_action_evidence_overrides_generic_path_route_contract() {
+    let mut journal = TaskJournal::for_task(
+        "task-runtime-status-cwd",
+        "ask",
+        "current working directory",
+    );
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "executable_contract_preserved_for_agent_loop".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            requires_content_evidence: true,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        },
+    };
+    journal.record_route_result(&route);
+    journal.record_plan_result(&crate::PlanResult {
+        goal: "return cwd".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_tool".to_string(),
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "runtime_status",
+                "kind": "current_working_directory"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: String::new(),
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "system_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "runtime_status",
+                    "command_output": "/home/guagua/rustclaw",
+                    "field_value": "/home/guagua/rustclaw",
+                    "kind": "current_working_directory",
+                    "value": "/home/guagua/rustclaw"
+                },
+                "text": "{\"action\":\"runtime_status\",\"command_output\":\"/home/guagua/rustclaw\",\"field_value\":\"/home/guagua/rustclaw\",\"kind\":\"current_working_directory\",\"value\":\"/home/guagua/rustclaw\"}"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let coverage = evidence_coverage_for_route(&route, &journal);
+
+    assert!(coverage.is_complete(), "coverage: {coverage:?}");
+    assert_eq!(coverage.required_evidence, vec!["field_value"]);
+    assert!(coverage.observed_canonical.contains("field_value"));
+    assert!(coverage.evidence_expression.is_none());
+    assert!(
+        crate::answer_verifier::local_missing_evidence_verifier_gap(&route, &journal).is_none(),
+        "runtime_status action evidence should not be blocked by generic path route contract"
+    );
+
+    route.route_reason = "legacy_generic_path_content".to_string();
+    assert!(
+        crate::answer_verifier::local_missing_evidence_verifier_gap(&route, &journal).is_none()
+    );
+}

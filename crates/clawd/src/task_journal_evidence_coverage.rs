@@ -124,8 +124,19 @@ fn planned_step_required_evidence_override(step: &crate::PlanStep) -> Option<Vec
     {
         return Some(vec!["field_value".to_string()]);
     }
+    if matches!(step.action_type.as_str(), "call_tool" | "call_skill")
+        && matches!(skill, "system_basic" | "system")
+        && action == "runtime_status"
+    {
+        return Some(vec!["field_value".to_string()]);
+    }
     if step.action_type == "call_capability"
         && capability_value_has_action_name(skill, &["database", "db", "sqlite"], "schema_version")
+    {
+        return Some(vec!["field_value".to_string()]);
+    }
+    if step.action_type == "call_capability"
+        && capability_value_has_action_name(skill, &["system", "system_basic"], "runtime_status")
     {
         return Some(vec!["field_value".to_string()]);
     }
