@@ -1124,7 +1124,7 @@ fn direct_structured_observed_answer_impl(
         && latest_plan_requested_synthesis(loop_state)
         && !route.output_contract_marker_is(crate::OutputSemanticKind::GitRepositoryState)
         && !crate::finalize::route_matches_service_status_output_contract(route)
-        && latest_successful_names_only_inventory_answer(loop_state).is_none()
+        && latest_successful_inventory_name_list_answer(loop_state).is_none()
     {
         return None;
     }
@@ -1186,7 +1186,7 @@ fn direct_structured_observed_answer_impl(
     {
         return None;
     }
-    if let Some(answer) = latest_successful_names_only_inventory_answer(loop_state) {
+    if let Some(answer) = latest_successful_inventory_name_list_answer(loop_state) {
         return Some((
             answer,
             crate::task_journal::TaskJournalFinalizerSummary {
@@ -1249,7 +1249,7 @@ fn direct_structured_observed_answer_impl(
     ))
 }
 
-fn latest_successful_names_only_inventory_answer(loop_state: &LoopState) -> Option<String> {
+fn latest_successful_inventory_name_list_answer(loop_state: &LoopState) -> Option<String> {
     loop_state
         .executed_step_results
         .iter()
@@ -1277,34 +1277,59 @@ fn latest_successful_names_only_inventory_answer(loop_state: &LoopState) -> Opti
                 );
             serde_json::from_str::<serde_json::Value>(&output)
                 .ok()
-                .and_then(|value| names_only_inventory_answer_from_value(&value))
+                .and_then(|value| inventory_name_list_answer_from_value(&value))
         })
 }
 
-fn names_only_inventory_answer_from_value(value: &serde_json::Value) -> Option<String> {
+fn inventory_name_list_answer_from_value(value: &serde_json::Value) -> Option<String> {
     if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
-        if let Some(answer) = names_only_inventory_answer_from_value(extra) {
+        if let Some(answer) = inventory_name_list_answer_from_value(extra) {
             return Some(answer);
         }
     }
-    if value.get("action").and_then(serde_json::Value::as_str) != Some("inventory_dir")
-        || !value
-            .get("names_only")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-    {
+    if value.get("action").and_then(serde_json::Value::as_str) != Some("inventory_dir") {
         return None;
     }
-    let names = value
-        .get("names")
-        .and_then(serde_json::Value::as_array)?
+    let names = if value
+        .get("names_only")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        inventory_string_array(value.get("names"))?
+    } else if value
+        .get("dirs_only")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        inventory_kind_names(value, "dirs")
+            .or_else(|| inventory_string_array(value.get("names")))?
+    } else if value
+        .get("files_only")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        inventory_kind_names(value, "files")
+            .or_else(|| inventory_string_array(value.get("names")))?
+    } else {
+        return None;
+    };
+    (!names.is_empty()).then(|| names.join("\n"))
+}
+
+fn inventory_kind_names(value: &serde_json::Value, kind: &str) -> Option<Vec<String>> {
+    inventory_string_array(value.pointer(format!("/names_by_kind/{kind}").as_str()))
+}
+
+fn inventory_string_array(value: Option<&serde_json::Value>) -> Option<Vec<String>> {
+    let names = value?
+        .as_array()?
         .iter()
         .filter_map(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(ToString::to_string)
         .collect::<Vec<_>>();
-    (!names.is_empty()).then(|| names.join("\n"))
+    (!names.is_empty()).then_some(names)
 }
 
 pub(super) fn direct_non_builtin_skill_raw_answer(
