@@ -263,7 +263,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
             },
         )
     {
-        output_contract.semantic_kind = semantic_kind;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(semantic_kind));
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = false;
         output_contract.delivery_intent = OutputDeliveryIntent::None;
@@ -291,7 +291,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         output_contract.delivery_intent = OutputDeliveryIntent::None;
         output_contract.locator_kind = OutputLocatorKind::None;
         output_contract.locator_hint.clear();
-        output_contract.semantic_kind = OutputSemanticKind::None;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
         if matches!(
             output_contract.response_shape,
             OutputResponseShape::Free | OutputResponseShape::OneSentence
@@ -307,7 +307,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         output_contract.delivery_intent = OutputDeliveryIntent::None;
         output_contract.locator_kind = OutputLocatorKind::None;
         output_contract.locator_hint.clear();
-        output_contract.semantic_kind = OutputSemanticKind::None;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
         if matches!(
             output_contract.response_shape,
             OutputResponseShape::Free | OutputResponseShape::OneSentence
@@ -331,7 +331,9 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         && output_contract.locator_hint.trim().is_empty()
         && !req_surface.has_delivery_token_reference()
     {
-        output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(
+            OutputSemanticKind::GeneratedFileDelivery,
+        ));
         output_contract.requires_content_evidence = true;
         reason = Some("file_token_delivery_contract_repair");
     }
@@ -341,7 +343,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         req_surface,
         workspace_root,
     ) {
-        output_contract.semantic_kind = OutputSemanticKind::None;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = true;
         output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
@@ -354,7 +356,9 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     if let Some(locator_hint) =
         generated_file_delivery_existing_content_summary_repair(output_contract, workspace_root)
     {
-        output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(
+            OutputSemanticKind::ContentExcerptWithSummary,
+        ));
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = true;
         output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
@@ -367,7 +371,8 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     if let Some(locator_hint) = archive_read_contract_from_surface(output_contract, req_surface)
         .filter(|_| route_reason_has_capability_ref(route_reason, "archive.read"))
     {
-        output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
+        output_contract
+            .apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::ArchiveRead));
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = false;
         output_contract.delivery_intent = OutputDeliveryIntent::None;
@@ -381,7 +386,8 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         .filter(|_| route_reason_has_capability_ref(route_reason, "archive.list"))
     {
         let repaired_from_semantic_kind = output_contract.semantic_kind;
-        output_contract.semantic_kind = OutputSemanticKind::ArchiveList;
+        output_contract
+            .apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::ArchiveList));
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = false;
         output_contract.delivery_intent = OutputDeliveryIntent::None;
@@ -415,7 +421,8 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         config_mutation_contract_from_surface(output_contract, req, req_surface)
             .filter(|_| route_reason_has_capability_ref(route_reason, "config.plan_change"))
     {
-        output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
+        output_contract
+            .apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::ConfigMutation));
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = false;
         output_contract.delivery_intent = OutputDeliveryIntent::None;
@@ -438,7 +445,8 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     }
 
     if let Some(locator_hint) = structured_config_keys_contract_from_surface(output_contract, req) {
-        output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
+        output_contract
+            .apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::StructuredKeys));
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = false;
         output_contract.delivery_intent = OutputDeliveryIntent::None;
@@ -452,7 +460,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         && req_surface.has_structured_target_refinement()
         && !surface_has_directory_scoped_filename_lookup(req, req_surface, workspace_root)
     {
-        output_contract.semantic_kind = OutputSemanticKind::None;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
         output_contract.requires_content_evidence = true;
         reason = Some("structured_file_scalar_repair");
     }
@@ -460,7 +468,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     if route_reason_has_machine_marker(route_reason, "structured_keys")
         && req_surface.dotted_field_selector.is_some()
     {
-        output_contract.semantic_kind = OutputSemanticKind::None;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
         output_contract.response_shape = OutputResponseShape::Scalar;
         output_contract.requires_content_evidence = true;
         reason = Some("structured_field_selector_requires_scalar_value");
@@ -469,7 +477,9 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     if let Some(locator_hint) =
         structured_field_pair_contract_from_quantity_comparison(output_contract, req, req_surface)
     {
-        output_contract.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(
+            OutputSemanticKind::RecentScalarEqualityCheck,
+        ));
         output_contract.response_shape = OutputResponseShape::Strict;
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = false;
@@ -482,7 +492,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     if let Some(locator_hint) =
         structured_field_value_contract_from_quantity_comparison(output_contract, req, req_surface)
     {
-        output_contract.semantic_kind = OutputSemanticKind::None;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
         output_contract.response_shape = OutputResponseShape::Scalar;
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = false;
@@ -498,7 +508,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
             .as_deref()
             .is_some_and(|field_path| !structural_config_value_after_field(req, field_path))
     {
-        output_contract.semantic_kind = OutputSemanticKind::None;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
         output_contract.response_shape = OutputResponseShape::Scalar;
         output_contract.requires_content_evidence = true;
         reason = Some("config_validation_field_selector_requires_scalar_value");
@@ -517,7 +527,8 @@ pub(super) fn apply_current_turn_structural_contract_repair(
             req,
             workspace_root,
         ) {
-            output_contract.semantic_kind = OutputSemanticKind::None;
+            output_contract
+                .apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
             output_contract.requires_content_evidence = true;
             output_contract.delivery_required = false;
             output_contract.delivery_intent = OutputDeliveryIntent::None;
@@ -539,7 +550,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
                 | OutputLocatorKind::CurrentWorkspace
         )
     {
-        output_contract.semantic_kind = OutputSemanticKind::None;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
         output_contract.requires_content_evidence = true;
         reason = Some("structured_keys_scalar_response_requires_field_value");
     }
@@ -597,13 +608,17 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     }
 
     if existence_with_path_mixed_locator_summary_repair(output_contract, req_surface) {
-        output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPathSummary;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(
+            OutputSemanticKind::ExistenceWithPathSummary,
+        ));
         output_contract.requires_content_evidence = true;
         reason = Some("existence_with_path_mixed_locator_summary_repair");
     }
 
     if quoted_literal_content_presence_contract_repair(output_contract, req_surface) {
-        output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(
+            OutputSemanticKind::ContentPresenceCheck,
+        ));
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = false;
         output_contract.delivery_intent = OutputDeliveryIntent::None;
@@ -733,7 +748,9 @@ pub(super) fn apply_fs_basic_lifecycle_machine_contract_repair(
     if !command_summary_declares_fs_basic_lifecycle(output_contract, machine_context) {
         return None;
     }
-    output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
+    output_contract.apply_output_contract_ref(OutputContractRef::new(
+        OutputSemanticKind::FilesystemMutationResult,
+    ));
     output_contract.requires_content_evidence = true;
     output_contract.delivery_required = false;
     output_contract.delivery_intent = OutputDeliveryIntent::None;
@@ -768,7 +785,9 @@ pub(super) fn apply_media_generation_path_report_machine_contract_repair(
     if !generic_contract_declares_media_generation_path_report(output_contract, machine_context) {
         return None;
     }
-    output_contract.semantic_kind = OutputSemanticKind::GeneratedFilePathReport;
+    output_contract.apply_output_contract_ref(OutputContractRef::new(
+        OutputSemanticKind::GeneratedFilePathReport,
+    ));
     output_contract.requires_content_evidence = true;
     output_contract.delivery_required = false;
     output_contract.delivery_intent = OutputDeliveryIntent::None;
