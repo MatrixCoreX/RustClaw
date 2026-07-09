@@ -671,6 +671,49 @@ fn latest_publishable_terminal_language_output(loop_state: &LoopState) -> Option
         })
 }
 
+fn priority_last_respond_for_final_delivery<'a>(
+    loop_state: &'a LoopState,
+    finalizer_summary: Option<&crate::task_journal::TaskJournalFinalizerSummary>,
+    synthesis_is_publishable: bool,
+) -> Option<&'a String> {
+    if synthesis_is_publishable {
+        return None;
+    }
+    let last_respond = loop_state.last_user_visible_respond.as_ref()?;
+    if finalizer_summary.is_some_and(|summary| {
+        matches!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        )
+    }) && !loop_state.delivery_messages.is_empty()
+        && !latest_executed_step_is_respond(loop_state)
+        && !delivery_messages_contain_last_respond(&loop_state.delivery_messages, last_respond)
+    {
+        return None;
+    }
+    Some(last_respond)
+}
+
+fn latest_executed_step_is_respond(loop_state: &LoopState) -> bool {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find(|step| step.is_ok())
+        .is_some_and(|step| step.skill == "respond")
+}
+
+fn delivery_messages_contain_last_respond(
+    delivery_messages: &[String],
+    last_respond: &str,
+) -> bool {
+    let last = crate::finalize::normalize_user_visible_text(last_respond).trim();
+    delivery_messages
+        .iter()
+        .map(|message| crate::finalize::normalize_user_visible_text(message).trim())
+        .any(|message| message == last)
+}
+
 pub(crate) async fn finalize_loop_reply(
     state: &AppState,
     task: &ClaimedTask,
@@ -1524,11 +1567,11 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     let synthesis_is_publishable = valid_publishable_synthesis_output(&loop_state).is_some();
-    let priority_last_respond = if synthesis_is_publishable {
-        None
-    } else {
-        loop_state.last_user_visible_respond.as_ref()
-    };
+    let priority_last_respond = priority_last_respond_for_final_delivery(
+        &loop_state,
+        finalizer_summary.as_ref(),
+        synthesis_is_publishable,
+    );
     let (mut delivery_deduped, _, used_last_respond) =
         crate::finalize::build_final_delivery_with_priority(
             &loop_state.delivery_messages,
