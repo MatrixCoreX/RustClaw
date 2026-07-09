@@ -67,6 +67,69 @@ fn tail_read_range_observed_answer_replaces_failed_synthesis_for_content_excerpt
 }
 
 #[test]
+fn bounded_head_read_range_observed_answer_replaces_failed_synthesis_for_content_excerpt() {
+    let state = test_state();
+    let task = claimed_task("task-head-read");
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/README.md".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let stale_failure =
+        "read_range completed, but final user-facing answer was not produced".to_string();
+    loop_state.delivery_messages.push(stale_failure.clone());
+    loop_state.last_user_visible_respond = Some(stale_failure);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","mode":"head","requested_n":10,"start_line":1,"end_line":9,"total_lines":9,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for RustClaw NL regression tests.\n4|\n5|- `configs/app_config.toml`: sample runtime config\n6|- `docs/`: sample docs and notes\n7|- `logs/`: sample log files\n8|- `data/test_contract.sqlite`: sample SQLite database\n9|- `tmp/test_bundle.zip`: sample archive","path":"scripts/nl_tests/fixtures/device_local/README.md"}}"#,
+    ));
+    loop_state.executed_step_results.push(err_step_result(
+        "step_2",
+        "synthesize_answer",
+        "read_range completed, but final user-facing answer was not produced",
+    ));
+    let mut finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::AllowFallback),
+        parsed: true,
+        contract_ok: false,
+        completion_ok: Some(false),
+        grounded_ok: Some(false),
+        format_ok: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+
+    assert!(replace_delivery_with_latest_tail_read_range_answer(
+        &state,
+        &task,
+        "read the first 10 lines",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+    ));
+
+    let expected = "# Device Local Fixture\n\nThis directory contains stable local files for RustClaw NL regression tests.\n\n- `configs/app_config.toml`: sample runtime config\n- `docs/`: sample docs and notes\n- `logs/`: sample log files\n- `data/test_contract.sqlite`: sample SQLite database\n- `tmp/test_bundle.zip`: sample archive";
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(expected)
+    );
+    assert_eq!(loop_state.delivery_messages, vec![expected.to_string()]);
+    assert_eq!(
+        finalizer_summary.and_then(|summary| summary.disposition),
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
 fn one_sentence_content_excerpt_tail_read_selects_observed_log_line() {
     let state = test_state();
     let task = claimed_task("task-tail-one-sentence");

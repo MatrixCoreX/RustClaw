@@ -80,9 +80,9 @@ pub(super) fn latest_tail_read_range_observed_answer(
         crate::fallback::fallback_prefers_english_for_language_hint(state, &language_hint);
     let answer = if route_prefers_deterministic_tail_line(Some(route)) {
         latest_tail_read_range_selected_line_from_loop(loop_state, prefer_english)
-            .or_else(|| latest_tail_read_range_answer_from_loop(loop_state, prefer_english))?
+            .or_else(|| latest_bounded_read_range_answer_from_loop(loop_state, prefer_english))?
     } else {
-        latest_tail_read_range_answer_from_loop(loop_state, prefer_english)?
+        latest_bounded_read_range_answer_from_loop(loop_state, prefer_english)?
     };
     if answer.trim().is_empty() {
         return None;
@@ -117,7 +117,25 @@ pub(super) fn latest_tail_read_range_answer_from_loop(
         })
 }
 
-fn step_output_is_tail_read_range(step: &crate::executor::StepExecutionResult) -> bool {
+pub(super) fn latest_bounded_read_range_answer_from_loop(
+    loop_state: &LoopState,
+    prefer_english: bool,
+) -> Option<String> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find_map(|step| {
+            if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+                return None;
+            }
+            let output = step.output.as_deref()?.trim();
+            let value = serde_json::from_str::<serde_json::Value>(output).ok()?;
+            bounded_read_range_answer_from_value(&value, prefer_english)
+        })
+}
+
+fn step_output_is_bounded_read_range(step: &crate::executor::StepExecutionResult) -> bool {
     if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
         return false;
     }
@@ -132,14 +150,14 @@ fn step_output_is_tail_read_range(step: &crate::executor::StepExecutionResult) -
     let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
         return false;
     };
-    value_is_tail_read_range(&value)
+    value_is_bounded_read_range(&value)
 }
 
-fn value_is_tail_read_range(value: &serde_json::Value) -> bool {
-    if flat_value_is_tail_read_range(value) {
+fn value_is_bounded_read_range(value: &serde_json::Value) -> bool {
+    if flat_value_is_bounded_read_range(value) {
         return true;
     }
-    value.get("extra").is_some_and(value_is_tail_read_range)
+    value.get("extra").is_some_and(value_is_bounded_read_range)
 }
 
 fn flat_value_is_tail_read_range(value: &serde_json::Value) -> bool {
@@ -155,12 +173,35 @@ fn flat_value_is_tail_read_range(value: &serde_json::Value) -> bool {
             .is_some_and(|excerpt| !excerpt.trim().is_empty())
 }
 
+fn flat_value_is_bounded_read_range(value: &serde_json::Value) -> bool {
+    matches!(
+        value.get("action").and_then(|value| value.as_str()),
+        Some("read_range" | "read_text_range")
+    ) && matches!(
+        value.get("mode").and_then(|value| value.as_str()),
+        Some("head" | "tail" | "range")
+    ) && bounded_read_requested_lines(value)
+        .is_some_and(|requested_n| requested_n > 0 && requested_n <= 100)
+        && value
+            .get("excerpt")
+            .and_then(|value| value.as_str())
+            .is_some_and(|excerpt| !excerpt.trim().is_empty())
+}
+
 fn tail_read_requested_n(value: &serde_json::Value) -> Option<u64> {
     value
         .get("requested_n")
         .or_else(|| value.get("n"))
         .or_else(|| value.get("count"))
         .and_then(|value| value.as_u64())
+}
+
+fn bounded_read_requested_lines(value: &serde_json::Value) -> Option<u64> {
+    tail_read_requested_n(value).or_else(|| {
+        let start = value.get("start_line")?.as_u64()?;
+        let end = value.get("end_line")?.as_u64()?;
+        (end >= start).then_some(end - start + 1)
+    })
 }
 
 fn tail_read_range_answer_from_value(
@@ -173,6 +214,18 @@ fn tail_read_range_answer_from_value(
     value
         .get("extra")
         .and_then(|extra| tail_read_range_answer_from_value(extra, prefer_english))
+}
+
+fn bounded_read_range_answer_from_value(
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<String> {
+    if let Some(answer) = flat_bounded_read_range_answer_from_value(value, prefer_english) {
+        return Some(answer);
+    }
+    value
+        .get("extra")
+        .and_then(|extra| bounded_read_range_answer_from_value(extra, prefer_english))
 }
 
 fn flat_tail_read_range_answer_from_value(
@@ -198,6 +251,24 @@ fn flat_tail_read_range_answer_from_value(
         &candidate.to_string(),
         prefer_english,
     )
+}
+
+fn flat_bounded_read_range_answer_from_value(
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<String> {
+    if flat_value_is_tail_read_range(value) {
+        return flat_tail_read_range_answer_from_value(value, prefer_english);
+    }
+    if !flat_value_is_bounded_read_range(value) {
+        return None;
+    }
+    value
+        .get("excerpt")
+        .and_then(|value| value.as_str())
+        .and_then(crate::agent_engine::observed_output::normalize_read_range_excerpt)
+        .map(|answer| answer.trim().to_string())
+        .filter(|answer| !answer.is_empty())
 }
 
 fn normalized_tail_read_range_lines_from_value(
@@ -375,7 +446,7 @@ fn latest_tail_replacement_can_recover_stale_synthesis(
     loop_state
         .executed_step_results
         .iter()
-        .rposition(step_output_is_tail_read_range)
+        .rposition(step_output_is_bounded_read_range)
         .is_some_and(|tail_idx| tail_idx > synthesis_idx)
 }
 
@@ -397,7 +468,7 @@ fn latest_tail_replacement_was_synthesized_after_tail(
     let Some(tail_idx) = loop_state
         .executed_step_results
         .iter()
-        .rposition(step_output_is_tail_read_range)
+        .rposition(step_output_is_bounded_read_range)
     else {
         return false;
     };
@@ -420,11 +491,15 @@ fn latest_tail_read_range_should_preserve_current_delivery(
     route: Option<&crate::RouteResult>,
     loop_state: &LoopState,
     replacement_answer: &str,
+    finalizer_summary: Option<&crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
     let Some(current_delivery) = current_user_visible_delivery_text(loop_state) else {
         return false;
     };
     if current_delivery.trim() == replacement_answer.trim() {
+        return false;
+    }
+    if finalizer_summary_rejects_current_delivery(finalizer_summary) {
         return false;
     }
     if latest_tail_replacement_can_recover_stale_synthesis(loop_state, current_delivery) {
@@ -453,6 +528,20 @@ fn latest_tail_read_range_should_preserve_current_delivery(
             route.output_contract_marker_is(crate::OutputSemanticKind::ContentExcerptSummary)
         })
         .unwrap_or(false)
+}
+
+fn finalizer_summary_rejects_current_delivery(
+    summary: Option<&crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some(summary) = summary else {
+        return false;
+    };
+    summary.disposition.is_some_and(|disposition| {
+        disposition != crate::finalize::FinalizerDisposition::QualifiedCompletion
+    }) || !summary.contract_ok
+        || summary.completion_ok == Some(false)
+        || summary.grounded_ok == Some(false)
+        || summary.format_ok == Some(false)
 }
 
 fn semantic_kind_prefers_deterministic_tail_line(kind: crate::OutputSemanticKind) -> bool {
@@ -539,7 +628,12 @@ pub(super) fn replace_delivery_with_latest_tail_read_range_answer(
         );
         return true;
     }
-    if latest_tail_read_range_should_preserve_current_delivery(route, loop_state, &answer) {
+    if latest_tail_read_range_should_preserve_current_delivery(
+        route,
+        loop_state,
+        &answer,
+        finalizer_summary.as_ref(),
+    ) {
         info!(
             "delivery keep_current_summary_over_tail_read_range task_id={}",
             task.task_id
