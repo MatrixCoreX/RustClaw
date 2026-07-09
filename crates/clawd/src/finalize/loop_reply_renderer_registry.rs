@@ -94,7 +94,7 @@ pub(super) const FINALIZER_RENDERER_REGISTRY: &[FinalizerRendererDescriptor] = &
     FinalizerRendererDescriptor {
         key: "scalar_placeholder_terminal_direct_answer",
         shape_class: FinalizerRendererShapeClass::CompatibilityFallback,
-        owner_module: "finalize::loop_reply",
+        owner_module: "finalize::loop_reply_scalar_placeholder",
         entrypoint: "replace_scalar_placeholder_delivery_with_direct_scalar_answer",
         summary_contract: "finalizer_summary",
     },

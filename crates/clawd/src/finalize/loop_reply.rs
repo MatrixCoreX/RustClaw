@@ -12,13 +12,16 @@ mod renderer_registry_tests;
 mod task_lifecycle_renderers;
 use task_lifecycle_renderers::run_task_lifecycle_renderer_registry;
 
+#[path = "loop_reply_compatibility_renderers.rs"]
+mod compatibility_renderers;
+use compatibility_renderers::run_compatibility_fallback_renderer_registry;
+
 #[path = "loop_reply_scalar_answer.rs"]
 mod scalar_answer;
 use scalar_answer::scalar_answer_from_json;
 
 #[path = "loop_reply_scalar_placeholder.rs"]
 mod scalar_placeholder;
-use scalar_placeholder::replace_scalar_placeholder_delivery_with_direct_scalar_answer;
 
 #[path = "loop_reply_delivery_record.rs"]
 mod delivery_record;
@@ -1013,14 +1016,13 @@ pub(crate) async fn finalize_loop_reply(
         }
     }
 
-    let replaced_scalar_placeholder_before_failure =
-        replace_scalar_placeholder_delivery_with_direct_scalar_answer(
-            state,
-            task,
-            &mut loop_state,
-            agent_run_context,
-            &mut finalizer_summary,
-        );
+    let replaced_scalar_placeholder_before_failure = run_compatibility_fallback_renderer_registry(
+        state,
+        task,
+        &mut loop_state,
+        agent_run_context,
+        &mut finalizer_summary,
+    );
 
     if !replaced_scalar_placeholder_before_failure {
         if let Some(reply) = content_evidence_step_failure_reply_from_loop(
@@ -1177,7 +1179,7 @@ pub(crate) async fn finalize_loop_reply(
     replace_placeholder_delivery_with_synthesis(task, &mut loop_state);
     replace_raw_read_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
     replace_raw_observation_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
-    let replaced_service_status = replace_scalar_placeholder_delivery_with_direct_scalar_answer(
+    let replaced_service_status = run_compatibility_fallback_renderer_registry(
         state,
         task,
         &mut loop_state,
