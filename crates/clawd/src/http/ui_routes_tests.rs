@@ -70,6 +70,32 @@ fn service_control_error_response_uses_machine_fields() {
 }
 
 #[test]
+fn workspace_update_api_error_uses_machine_token() {
+    let status_snapshot = WorkspaceUpdateStatus {
+        status: "running".to_string(),
+        step: "building_clawd".to_string(),
+        ..WorkspaceUpdateStatus::default()
+    };
+
+    let (status, Json(body)) = workspace_update_api_error(
+        StatusCode::CONFLICT,
+        "workspace_update_already_running",
+        Some(status_snapshot),
+    );
+
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(!body.ok);
+    assert_eq!(
+        body.error.as_deref(),
+        Some("workspace_update_already_running")
+    );
+    assert_eq!(
+        body.data.as_ref().map(|data| data.status.as_str()),
+        Some("running")
+    );
+}
+
+#[test]
 fn update_feishu_config_raw_preserves_template_comments_and_updates_only_keys() {
     let output = update_feishu_config_raw_preserving_format(
         FEISHU_CONFIG_TEMPLATE,

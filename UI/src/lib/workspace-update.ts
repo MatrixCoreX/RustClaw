@@ -70,6 +70,16 @@ export function formatWorkspaceUpdateStatus(
   return copy(lang, "未运行", "Idle");
 }
 
+export function formatWorkspaceUpdateApiError(error: string | null | undefined, lang: UiLanguage): string {
+  const code = error?.trim();
+  const labels: Record<string, string> = {
+    workspace_update_admin_required: copy(lang, "只有管理员可以执行这个操作。", "Only an admin can perform this action."),
+    workspace_update_already_running: copy(lang, "更新已经在进行中。", "An update is already running."),
+    workspace_update_not_running: copy(lang, "当前没有正在运行的更新。", "No update is currently running."),
+  };
+  return code ? labels[code] || code : copy(lang, "未知错误", "Unknown error");
+}
+
 export function formatWorkspaceUpdateTime(ts: number | null | undefined, lang: UiLanguage): string {
   if (!ts) return "--";
   return new Date(ts * 1000).toLocaleString(lang === "zh" ? "zh-CN" : "en-US", {

@@ -33,6 +33,21 @@ fn workspace_update_control_lock(
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn workspace_update_api_error(
+    status: StatusCode,
+    error_code: &'static str,
+    data: Option<WorkspaceUpdateStatus>,
+) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
+    (
+        status,
+        Json(ApiResponse {
+            ok: false,
+            data,
+            error: Some(error_code.to_string()),
+        }),
+    )
+}
+
 async fn get_workspace_update(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -51,13 +66,10 @@ async fn get_workspace_update(
         }
     };
     if !identity.role.eq_ignore_ascii_case("admin") {
-        return (
+        return workspace_update_api_error(
             StatusCode::FORBIDDEN,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("only admin can view update status".to_string()),
-            }),
+            "workspace_update_admin_required",
+            None,
         );
     }
 
@@ -187,13 +199,10 @@ async fn start_workspace_update_with_mode(
         }
     };
     if !identity.role.eq_ignore_ascii_case("admin") {
-        return (
+        return workspace_update_api_error(
             StatusCode::FORBIDDEN,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("only admin can update RustClaw".to_string()),
-            }),
+            "workspace_update_admin_required",
+            None,
         );
     }
 
@@ -202,13 +211,10 @@ async fn start_workspace_update_with_mode(
     let status = {
         let mut guard = workspace_update_status_lock(shared.as_ref());
         if matches!(guard.status.as_str(), "running" | "restarting") {
-            return (
+            return workspace_update_api_error(
                 StatusCode::CONFLICT,
-                Json(ApiResponse {
-                    ok: false,
-                    data: Some(guard.clone()),
-                    error: Some("workspace update is already running".to_string()),
-                }),
+                "workspace_update_already_running",
+                Some(guard.clone()),
             );
         }
         *guard = WorkspaceUpdateStatus {
@@ -262,13 +268,10 @@ async fn cancel_workspace_update(
         }
     };
     if !identity.role.eq_ignore_ascii_case("admin") {
-        return (
+        return workspace_update_api_error(
             StatusCode::FORBIDDEN,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("only admin can cancel workspace update".to_string()),
-            }),
+            "workspace_update_admin_required",
+            None,
         );
     }
 
@@ -278,13 +281,10 @@ async fn cancel_workspace_update(
         let mut control_guard = workspace_update_control_lock(control.as_ref());
         let mut status_guard = workspace_update_status_lock(shared.as_ref());
         if status_guard.status != "running" {
-            return (
+            return workspace_update_api_error(
                 StatusCode::CONFLICT,
-                Json(ApiResponse {
-                    ok: false,
-                    data: Some(status_guard.clone()),
-                    error: Some("workspace update is not running".to_string()),
-                }),
+                "workspace_update_not_running",
+                Some(status_guard.clone()),
             );
         }
         control_guard.cancel_requested = true;

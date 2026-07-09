@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { sleep } from "../lib/display-format";
+import { formatWorkspaceUpdateApiError } from "../lib/workspace-update";
 import type {
   ApiResponse,
   HealthResponse,
@@ -55,6 +56,9 @@ export function useSystemRuntime({
   const [workspaceUpdateLoading, setWorkspaceUpdateLoading] = useState(false);
   const [workspaceUpdateCanceling, setWorkspaceUpdateCanceling] = useState(false);
   const [workspaceUpdateMessage, setWorkspaceUpdateMessage] = useState<string | null>(null);
+  const workspaceUpdateUiLang = (): "zh" | "en" => (t("__zh__", "__en__") === "__zh__" ? "zh" : "en");
+  const workspaceUpdateApiErrorMessage = (error: string | null | undefined): string =>
+    formatWorkspaceUpdateApiError(error, workspaceUpdateUiLang());
 
   const fetchWorkspaceUpdateStatus = async (silent = false): Promise<WorkspaceUpdateStatus | null> => {
     if (!silent) {
@@ -65,7 +69,7 @@ export function useSystemRuntime({
       const res = await apiFetch("/v1/admin/workspace-update");
       const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
       if (!res.ok || !body.ok || !body.data) {
-        throw new Error(body.error || `workspace update status failed (${res.status})`);
+        throw new Error(body.error ? workspaceUpdateApiErrorMessage(body.error) : `workspace update status failed (${res.status})`);
       }
       setWorkspaceUpdateStatus(body.data);
       return body.data;
@@ -133,7 +137,7 @@ export function useSystemRuntime({
           );
           return;
         }
-        throw new Error(body.error || `workspace update start failed (${res.status})`);
+        throw new Error(body.error ? workspaceUpdateApiErrorMessage(body.error) : `workspace update start failed (${res.status})`);
       }
       setWorkspaceUpdateStatus(body.data);
       setWorkspaceUpdateMessage(selectedMode.started);
@@ -164,7 +168,7 @@ export function useSystemRuntime({
       const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
       if (!res.ok || !body.ok || !body.data) {
         if (body.data) setWorkspaceUpdateStatus(body.data);
-        throw new Error(body.error || `workspace update cancel failed (${res.status})`);
+        throw new Error(body.error ? workspaceUpdateApiErrorMessage(body.error) : `workspace update cancel failed (${res.status})`);
       }
       setWorkspaceUpdateStatus(body.data);
       setWorkspaceUpdateMessage(t("已请求停止编译，正在结束当前进程。", "Stop requested. Ending the current build process."));
