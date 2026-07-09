@@ -72,7 +72,7 @@ pub(super) fn test_state() -> AppState {
     }
 }
 
-fn test_task() -> ClaimedTask {
+pub(super) fn test_task() -> ClaimedTask {
     ClaimedTask {
         task_id: "task-skill-exec".to_string(),
         user_id: 1,
@@ -98,7 +98,7 @@ fn insert_auth_key(state: &AppState, user_key: &str, role: &str) {
     .expect("insert auth key");
 }
 
-fn enable_test_skills(state: &AppState, skills: &[&str]) {
+pub(super) fn enable_test_skills(state: &AppState, skills: &[&str]) {
     let set = skills
         .iter()
         .map(|skill| skill.to_string())
@@ -154,7 +154,7 @@ fn admin_task() -> ClaimedTask {
     task
 }
 
-fn test_policy() -> AgentLoopGuardPolicy {
+pub(super) fn test_policy() -> AgentLoopGuardPolicy {
     AgentLoopGuardPolicy {
         max_steps: 16,
         max_rounds: 2,

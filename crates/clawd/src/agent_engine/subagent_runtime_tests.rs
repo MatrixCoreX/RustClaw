@@ -470,3 +470,56 @@ fn subagent_batch_required_child_failure_stops_parent_loop() {
     );
     assert_eq!(observation["failure_isolated"], false);
 }
+
+#[test]
+fn subagent_batch_expected_required_child_failure_dry_run_is_delivered() {
+    let mut loop_state = LoopState::new(2);
+    let args = serde_json::json!({
+        "dry_run": true,
+        "expected_failure": true,
+        "children": [
+            {
+                "role": "explorer",
+                "objective": "readonly_probe"
+            },
+            {
+                "role": "unsupported_required_probe",
+                "objective": "required_failure_probe",
+                "required": true
+            }
+        ]
+    });
+
+    let stop_signal = record_subagent_action_from_args(&mut loop_state, 5, 1, &args);
+
+    assert!(stop_signal.is_none());
+    let observation = &loop_state.task_observations[0];
+    assert_eq!(observation["status"], "accepted");
+    assert_eq!(observation["result_status"], "completed_expected_failure");
+    assert_eq!(
+        observation["outcome_code"],
+        "subagent_expected_required_child_failure_observed"
+    );
+    assert_eq!(observation["dry_run"], true);
+    assert_eq!(observation["expected_failure"], true);
+    assert_eq!(observation["expected_failure_delivery"], true);
+    assert_eq!(observation["actual_required_child_failed"], true);
+    assert_eq!(observation["actual_failure_isolated"], false);
+    assert_eq!(observation["failure_isolated"], true);
+    assert_eq!(
+        observation["aggregation"]["status"],
+        "failed_required_child"
+    );
+    assert_eq!(
+        observation["child_result"]["outcome_code"],
+        "subagent_required_child_failed"
+    );
+    assert_eq!(
+        observation["scheduler"]["status"],
+        "expected_required_child_failure_observed"
+    );
+    assert_eq!(
+        observation["merge_contract"]["parent_result_status"],
+        "completed_expected_failure"
+    );
+}

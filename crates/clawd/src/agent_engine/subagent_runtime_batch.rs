@@ -11,6 +11,7 @@ pub(super) fn record_subagent_batch_action_from_args_with_config(
     args: &Value,
     config: &SubagentRuntimeConfig,
 ) -> Option<Option<&'static str>> {
+    let invocation_policy = SubagentInvocationPolicy::from_args(args);
     let children = subagent_child_actions_from_args(args)?;
     Some(record_subagent_batch_action_with_config(
         loop_state,
@@ -18,6 +19,7 @@ pub(super) fn record_subagent_batch_action_from_args_with_config(
         step_in_round,
         children,
         config,
+        invocation_policy,
     ))
 }
 
@@ -27,6 +29,7 @@ fn record_subagent_batch_action_with_config(
     step_in_round: usize,
     children: Vec<SubagentChildAction>,
     config: &SubagentRuntimeConfig,
+    invocation_policy: SubagentInvocationPolicy,
 ) -> Option<&'static str> {
     let parallel_batch_id = format!("subagent-batch:{}:{}", loop_state.round_no, step_in_round);
     let max_parallel_readonly = config.max_parallel_readonly as usize;
@@ -177,6 +180,33 @@ fn record_subagent_batch_action_with_config(
     } else {
         "bounded_parallel_completed"
     };
+    let expected_failure_delivery =
+        invocation_policy.expected_failure_delivery(required_failed_count);
+    let parent_failure_isolated = expected_failure_delivery || required_failed_count == 0;
+    let parent_status = if required_failed_count > 0 && !expected_failure_delivery {
+        "failed"
+    } else {
+        "accepted"
+    };
+    let parent_result_status = if expected_failure_delivery {
+        "completed_expected_failure"
+    } else {
+        aggregate_status
+    };
+    let parent_outcome_code = if expected_failure_delivery {
+        "subagent_expected_required_child_failure_observed"
+    } else if required_failed_count > 0 {
+        "subagent_required_child_failed"
+    } else if rejected_count > 0 || skipped_count > 0 {
+        "subagent_parallel_partial_completed"
+    } else {
+        "subagent_parallel_readonly_completed"
+    };
+    let parent_scheduler_status = if expected_failure_delivery {
+        "expected_required_child_failure_observed"
+    } else {
+        scheduler_status
+    };
     let child_result = json!({
         "schema_version": 1,
         "status": aggregate_status,
@@ -202,16 +232,23 @@ fn record_subagent_batch_action_with_config(
     loop_state.task_observations.push(json!({
         "schema_version": 1,
         "owner_layer": "subagent_runtime",
-        "status": if required_failed_count > 0 { "failed" } else { "accepted" },
+        "status": parent_status,
+        "result_status": parent_result_status,
+        "outcome_code": parent_outcome_code,
         "execution_mode": "bounded_parallel_readonly_child_runs",
         "parallel_batch_id": parallel_batch_id.as_str(),
         "children_requested": requested_child_count,
         "children_scheduled": completed_count,
         "children_rejected": rejected_count,
         "children_skipped": skipped_count,
+        "dry_run": invocation_policy.dry_run,
+        "expected_failure": invocation_policy.expected_failure,
+        "expected_failure_delivery": expected_failure_delivery,
+        "actual_required_child_failed": required_failed_count > 0,
+        "actual_failure_isolated": required_failed_count == 0,
         "runtime_config": config.trace_summary(),
         "scheduler": {
-            "status": scheduler_status,
+            "status": parent_scheduler_status,
             "reason_code": "bounded_parallel_readonly_execution",
             "lease_required": false,
             "checkpoint_required": false,
@@ -219,13 +256,19 @@ fn record_subagent_batch_action_with_config(
             "requested_child_count": requested_child_count,
             "scheduled_child_count": completed_count,
             "skipped_child_count": skipped_count,
+            "dry_run": invocation_policy.dry_run,
+            "expected_failure": invocation_policy.expected_failure,
+            "expected_failure_delivery": expected_failure_delivery,
         },
         "merge_contract": {
             "strategy": "merge_child_structured_findings",
             "parent_trace_event_type": "subagent",
             "child_trace_merge_status": "merged",
             "result_status": aggregate_status,
-            "failure_isolated": required_failed_count == 0,
+            "parent_result_status": parent_result_status,
+            "failure_isolated": parent_failure_isolated,
+            "actual_failure_isolated": required_failed_count == 0,
+            "expected_failure_delivery": expected_failure_delivery,
         },
         "aggregation": {
             "schema_version": 1,
@@ -239,6 +282,7 @@ fn record_subagent_batch_action_with_config(
             "optional_failed_count": optional_failed_count,
             "evidence_refs": aggregated_evidence_refs,
             "finding_refs": aggregated_finding_refs,
+            "expected_failure_delivery": expected_failure_delivery,
         },
         "child_requests": child_requests,
         "child_run_summaries": child_summaries,
@@ -256,13 +300,33 @@ fn record_subagent_batch_action_with_config(
         "child_result": child_result,
         "write_enabled": false,
         "external_publish_enabled": false,
-        "failure_isolated": required_failed_count == 0,
+        "failure_isolated": parent_failure_isolated,
         "global_step": global_step,
         "step_in_round": step_in_round,
         "round_no": loop_state.round_no,
     }));
 
-    (required_failed_count > 0).then_some(SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED)
+    (required_failed_count > 0 && !expected_failure_delivery)
+        .then_some(SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED)
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SubagentInvocationPolicy {
+    dry_run: bool,
+    expected_failure: bool,
+}
+
+impl SubagentInvocationPolicy {
+    fn from_args(args: &Value) -> Self {
+        Self {
+            dry_run: args.get("dry_run").and_then(Value::as_bool) == Some(true),
+            expected_failure: args.get("expected_failure").and_then(Value::as_bool) == Some(true),
+        }
+    }
+
+    fn expected_failure_delivery(self, required_failed_count: usize) -> bool {
+        self.dry_run && self.expected_failure && required_failed_count > 0
+    }
 }
 
 struct SubagentChildAction {
