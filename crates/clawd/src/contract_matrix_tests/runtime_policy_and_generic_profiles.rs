@@ -706,3 +706,161 @@ fn quantity_comparison_allows_readonly_content_followup() {
     assert_eq!(config_policy.action_key, "config_basic.read_fields");
     assert_eq!(config_policy.contract_match, "quantity_comparison");
 }
+
+#[test]
+fn contract_runtime_fields_are_validated() {
+    let err = parse_contract_matrix_source(
+        r#"
+schema_version = 1
+matrix_version = "invalid-runtime-field"
+failure_attribution = [
+  "model_error",
+  "schema_error",
+  "code_gap",
+  "contract_gap",
+  "tool_gap",
+  "permission_denied",
+  "budget_exhausted",
+  "prompt_budget_error",
+  "delivery_error",
+  "provider_error",
+]
+
+[trace_policy]
+evidence_storage = "redacted_excerpt_hash"
+provider_evidence_view = "provider_safe_redacted"
+raw_excerpt_policy = "no_full_raw_excerpt"
+max_items = 24
+max_excerpt_chars = 240
+
+[contracts.none]
+semantic_kind = "none"
+operation = "unknown"
+target_object = "unknown"
+delivery_shape = "summary"
+policy_mode = "maybe"
+allowed_actions = []
+preferred_actions = []
+forbidden_actions = []
+required_evidence = []
+final_answer_shape = "free"
+none_passthrough = true
+failure_policy = "no_retry"
+"#,
+    )
+    .expect_err("invalid runtime field should fail shape validation");
+
+    assert!(err.contains("invalid policy_mode"));
+}
+
+#[test]
+fn contract_runtime_rejects_natural_language_evidence_profile() {
+    let source = include_str!("../../../../configs/task_contract_matrix.toml").replace(
+        "evidence_profile = \"workspace_user_docs_first\"",
+        "evidence_profile = \"read user setup docs first\"",
+    );
+    let err = parse_contract_matrix_source(&source)
+        .expect_err("natural-language evidence profile should fail shape validation");
+
+    assert!(err.contains("invalid evidence_profile"));
+}
+
+#[test]
+fn configured_observation_extractors_must_exist_in_registry() {
+    let source = format!(
+            "{}\n[[contracts.service_status.observation_extractors]]\nsource = \"run_cmd\"\nextractor_kind = \"structured_json\"\n",
+            include_str!("../../../../configs/task_contract_matrix.toml")
+        );
+    let err = parse_contract_matrix_source(&source)
+        .expect_err("unregistered explicit extractor should fail validation");
+
+    assert!(err.contains(
+            "observation_extractor source `run_cmd` with extractor_kind `structured_json` is not declared in the evidence extractor registry"
+        ));
+}
+
+#[test]
+fn runtime_contract_snapshot_binds_matrix_and_compact_prompt_block() {
+    let snapshot = runtime_contract_snapshot_for_output_contract(&IntentOutputContract {
+        semantic_kind: OutputSemanticKind::FileNames,
+        ..IntentOutputContract::default()
+    })
+    .expect("runtime contract snapshot");
+
+    assert_eq!(
+        snapshot
+            .get("matrix")
+            .and_then(|value| value.get("source"))
+            .and_then(Value::as_str),
+        Some("bundled:configs/task_contract_matrix.toml")
+    );
+    assert!(snapshot
+        .get("matrix")
+        .and_then(|value| value.get("hash"))
+        .and_then(Value::as_str)
+        .is_some_and(|hash| !hash.is_empty()));
+    assert_eq!(
+        snapshot
+            .get("registry")
+            .and_then(|value| value.get("source"))
+            .and_then(Value::as_str),
+        Some("bundled:configs/skills_registry.toml")
+    );
+    assert!(snapshot
+        .get("registry")
+        .and_then(|value| value.get("hash"))
+        .and_then(Value::as_str)
+        .is_some_and(|hash| !hash.is_empty()));
+    assert_eq!(
+        snapshot
+            .get("prompt_layer")
+            .and_then(|value| value.get("source"))
+            .and_then(Value::as_str),
+        Some("bundled:prompts/layers/manifest.toml")
+    );
+    assert!(snapshot
+        .get("prompt_layer")
+        .and_then(|value| value.get("hash"))
+        .and_then(Value::as_str)
+        .is_some_and(|hash| !hash.is_empty()));
+    assert!(snapshot
+        .get("compact_contract_block")
+        .and_then(|value| value.get("hash"))
+        .and_then(Value::as_str)
+        .is_some_and(|hash| !hash.is_empty()));
+    assert_eq!(
+        snapshot
+            .get("contract")
+            .and_then(|value| value.get("contract_match"))
+            .and_then(Value::as_str),
+        Some("file_names")
+    );
+    assert_eq!(
+        snapshot
+            .get("contract")
+            .and_then(|value| value.get("final_answer_shape"))
+            .and_then(Value::as_str),
+        Some("name_list")
+    );
+    assert_eq!(
+        snapshot
+            .get("contract")
+            .and_then(|value| value.get("final_answer_shape_class"))
+            .and_then(Value::as_str),
+        Some("strict_list")
+    );
+    assert_eq!(
+        snapshot
+            .get("contract")
+            .and_then(|value| value.get("coarse_response_shape"))
+            .and_then(Value::as_str),
+        Some("strict")
+    );
+    assert_eq!(
+        snapshot
+            .get("contract")
+            .and_then(|value| value.get("allows_model_language"))
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+}
