@@ -945,6 +945,39 @@ fn requested_machine_kv_summary_projects_git_status_fields_from_user_request() {
 }
 
 #[test]
+fn requested_machine_kv_summary_overrides_scalar_path_when_explicit_pair_is_observed() {
+    let task = claimed_task("task-machine-kv-explicit-pair-over-scalar-path");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"grep_text","matches":[{"line":242,"path":"AGENTS.md","text":"run `python3 scripts/check_no_nl_hardmatch.py` after boundary changes"}],"query":"check_no_nl_hardmatch.py","results":["AGENTS.md"],"root":"AGENTS.md"},"text":"AGENTS.md"}"#,
+    ));
+    let current = "AGENTS.md";
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = Some(current.to_string());
+    let mut finalizer_summary = None;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(scalar_route_result()),
+        ..Default::default()
+    };
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Only keep no_hardmatch_guard=check_no_nl_hardmatch.py.",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec!["no_hardmatch_guard=check_no_nl_hardmatch.py"]
+    );
+}
+
+#[test]
 fn requested_machine_kv_summary_projects_empty_git_paths() {
     let task = claimed_task("task-git-status-empty-paths");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
