@@ -1477,6 +1477,8 @@ fn normalize_run_cmd_call(
             json!(((timeout_ms + 999) / 1000).max(1)),
         );
     }
+    preserve_run_cmd_execution_args(&mut args, raw_args);
+    preserve_run_cmd_execution_args(&mut args, Some(obj));
     if let Some(request_text) = value_for("request_text", &[]) {
         args.insert("request_text".to_string(), request_text);
     }
@@ -1491,11 +1493,44 @@ fn normalize_run_cmd_call(
     }
     preserve_internal_execution_args(&mut args, raw_args);
     preserve_internal_execution_args(&mut args, Some(obj));
+    complete_run_cmd_async_start_contract(&mut args);
     json!({
         "type": "call_skill",
         "skill": "run_cmd",
         "args": Value::Object(args),
     })
+}
+
+fn preserve_run_cmd_execution_args(
+    args: &mut serde_json::Map<String, Value>,
+    source: Option<&serde_json::Map<String, Value>>,
+) {
+    let Some(source) = source else {
+        return;
+    };
+    for key in [
+        "idle_timeout_seconds",
+        "max_output_bytes",
+        "async_start",
+        "poll_after_seconds",
+        "expires_in_seconds",
+    ] {
+        if let Some(value) = source.get(key) {
+            args.entry(key.to_string()).or_insert_with(|| value.clone());
+        }
+    }
+}
+
+fn complete_run_cmd_async_start_contract(args: &mut serde_json::Map<String, Value>) {
+    if args.get("async_start").and_then(Value::as_bool) != Some(true) {
+        return;
+    }
+    args.entry("poll_after_seconds".to_string())
+        .or_insert_with(|| Value::from(2));
+    args.entry("expires_in_seconds".to_string())
+        .or_insert_with(|| Value::from(600));
+    args.entry(crate::agent_engine::CLAWD_RUNTIME_ASYNC_JOB_START_ARG.to_string())
+        .or_insert_with(|| Value::String("async_job_protocol".to_string()));
 }
 
 fn preserve_internal_execution_args(

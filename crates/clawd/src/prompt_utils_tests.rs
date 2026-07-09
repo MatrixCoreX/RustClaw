@@ -1186,6 +1186,57 @@ fn normalize_agent_action_shape_rewrites_call_tool_run_cmd_aliases() {
 }
 
 #[test]
+fn normalize_agent_action_shape_preserves_call_tool_run_cmd_async_contract() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let normalized = super::parse_agent_action_json_with_repair(
+        r#"{"type":"call_tool","tool":"run_cmd","args":{"command":"sleep 2 && echo RUSTCLAW_ASYNC_SMOKE","cwd":"/tmp/repo","async_start":true,"max_output_bytes":2048}}"#,
+        &state,
+    )
+    .expect("call_tool run_cmd async contract should normalize");
+    assert_eq!(
+        normalized,
+        json!({
+            "type": "call_skill",
+            "skill": "run_cmd",
+            "args": {
+                "command": "sleep 2 && echo RUSTCLAW_ASYNC_SMOKE",
+                "cwd": "/tmp/repo",
+                "async_start": true,
+                "max_output_bytes": 2048,
+                "poll_after_seconds": 2,
+                "expires_in_seconds": 600,
+                crate::agent_engine::CLAWD_RUNTIME_ASYNC_JOB_START_ARG: "async_job_protocol"
+            }
+        })
+    );
+}
+
+#[test]
+fn normalize_agent_action_shape_preserves_explicit_run_cmd_async_bounds() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let normalized = super::parse_agent_action_json_with_repair(
+        r#"{"type":"run_cmd","cmd":"sleep 1","async_start":true,"poll_after_seconds":7,"expires_in_seconds":30,"idle_timeout_seconds":9}"#,
+        &state,
+    )
+    .expect("bare run_cmd async contract should normalize");
+    assert_eq!(
+        normalized,
+        json!({
+            "type": "call_skill",
+            "skill": "run_cmd",
+            "args": {
+                "command": "sleep 1",
+                "async_start": true,
+                "poll_after_seconds": 7,
+                "expires_in_seconds": 30,
+                "idle_timeout_seconds": 9,
+                crate::agent_engine::CLAWD_RUNTIME_ASYNC_JOB_START_ARG: "async_job_protocol"
+            }
+        })
+    );
+}
+
+#[test]
 fn normalize_agent_action_shape_preserves_call_tool_fs_basic_write_text() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let normalized = super::parse_agent_action_json_with_repair(

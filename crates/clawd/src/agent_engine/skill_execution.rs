@@ -1758,6 +1758,9 @@ pub(super) async fn execute_prepared_skill_action(
 }
 
 #[cfg(test)]
+#[path = "skill_execution_async_start_tests.rs"]
+mod async_start_tests;
+#[cfg(test)]
 #[path = "skill_execution_hook_policy_tests.rs"]
 mod hook_policy_tests;
 #[cfg(test)]
