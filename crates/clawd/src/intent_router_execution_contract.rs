@@ -161,11 +161,12 @@ pub(super) fn apply_command_payload_contract_repair(
         output_contract.semantic_kind,
         OutputSemanticKind::None | OutputSemanticKind::ServiceStatus
     ) {
-        output_contract.semantic_kind = if preserve_command_summary_contract {
+        let output_contract_ref = if preserve_command_summary_contract {
             OutputSemanticKind::CommandOutputSummary
         } else {
             OutputSemanticKind::RawCommandOutput
         };
+        output_contract.apply_output_contract_ref(OutputContractRef::new(output_contract_ref));
     }
     if !matches!(
         output_contract.semantic_kind,
@@ -335,11 +336,12 @@ fn repair_explicit_directory_listing_selector_contract(
         return false;
     }
     let target_kind = selector_target_kind_machine_token(route_reason).unwrap_or_default();
-    output_contract.semantic_kind = match target_kind {
+    let output_contract_ref = match target_kind {
         OutputScalarCountTargetKind::File => OutputSemanticKind::FileNames,
         OutputScalarCountTargetKind::Dir => OutputSemanticKind::DirectoryNames,
         OutputScalarCountTargetKind::Any => OutputSemanticKind::DirectoryEntryGroups,
     };
+    output_contract.apply_output_contract_ref(OutputContractRef::new(output_contract_ref));
     output_contract.response_shape = OutputResponseShape::Strict;
     output_contract.requires_content_evidence = true;
     output_contract.locator_kind = OutputLocatorKind::Path;

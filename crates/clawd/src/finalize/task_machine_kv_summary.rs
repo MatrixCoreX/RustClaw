@@ -1164,7 +1164,9 @@ mod tests {
     ) {
         let mut route = service_status_route();
         route.route_reason = "capability_ref=service.status".to_string();
-        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.apply_output_contract_ref(
+            crate::pipeline_types::OutputContractRef::new(OutputSemanticKind::None),
+        );
         let requested_fields = ["target", "status", "manager_type"].join(" ");
         let mut journal = crate::task_journal::TaskJournal::for_task(
             "task-service-kv-capability-source",

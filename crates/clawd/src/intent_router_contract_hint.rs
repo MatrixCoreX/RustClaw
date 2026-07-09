@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use crate::pipeline_types::OutputContractRef;
+
 use super::{
     archive_list_contract_from_surface, archive_pair_contract_from_surface,
     archive_read_contract_from_surface, execution_finalize_style_for_contract,
@@ -73,7 +75,7 @@ pub(super) fn apply_structured_contract_hint_repair(
 ) -> Option<&'static str> {
     let semantic_kind = contract_test_hint_semantic_kind(req)?;
     let surface_req = request_without_contract_test_hint(req);
-    output_contract.semantic_kind = semantic_kind;
+    output_contract.apply_output_contract_ref(OutputContractRef::new(semantic_kind));
     output_contract.requires_content_evidence =
         contract_hint_requires_content_evidence(semantic_kind);
     output_contract.delivery_required = false;
@@ -270,7 +272,7 @@ fn apply_path_locator_defaults_for_contract_hint(
         if let Some((semantic_kind, locator_hint)) =
             archive_pair_contract_from_surface(output_contract, req_surface)
         {
-            output_contract.semantic_kind = semantic_kind;
+            output_contract.apply_output_contract_ref(OutputContractRef::new(semantic_kind));
             output_contract.locator_kind = OutputLocatorKind::Path;
             output_contract.locator_hint = locator_hint;
             return;
@@ -290,7 +292,8 @@ fn apply_path_locator_defaults_for_contract_hint(
     ]) {
         if let Some(locator_hint) = archive_list_contract_from_surface(output_contract, req_surface)
         {
-            output_contract.semantic_kind = OutputSemanticKind::ArchiveList;
+            output_contract
+                .apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::ArchiveList));
             output_contract.locator_kind = OutputLocatorKind::Path;
             output_contract.locator_hint = locator_hint;
             return;
