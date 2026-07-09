@@ -223,7 +223,7 @@ pub(super) fn direct_db_basic_observed_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.output_contract.delivery_required || !route.output_contract.requires_content_evidence {
+    if route.output_contract.delivery_required {
         return None;
     }
     if matches!(
