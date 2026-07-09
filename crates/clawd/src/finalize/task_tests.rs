@@ -10,9 +10,9 @@ use super::{
     deterministic_content_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
     deterministic_raw_tail_read_failure_recovery, deterministic_tree_summary_rows_failure_recovery,
     drop_execution_summaries_when_delivery_is_scalar, failed_task_lifecycle_payload,
-    journal_has_checkpointed_nonterminal_lifecycle, journal_has_missing_file_search_evidence,
-    machine_payload_observed_facts, non_failure_final_status,
-    normalize_existing_file_delivery_token_answer,
+    finalize_ask_checkpointed, journal_has_checkpointed_nonterminal_lifecycle,
+    journal_has_missing_file_search_evidence, machine_payload_observed_facts,
+    non_failure_final_status, normalize_existing_file_delivery_token_answer,
     record_answer_verifier_required_evidence_rollout_attribution,
     recover_requested_machine_kv_summary_final_answer, resume_context_has_directory_lookup_failure,
     resume_context_path_batch_facts_are_missing_only,
@@ -24,6 +24,8 @@ use serde_json::json;
 
 #[path = "task_tests/answer_verifier_recovery.rs"]
 mod answer_verifier_recovery;
+#[path = "task_tests/checkpoint_finalization.rs"]
+mod checkpoint_finalization;
 #[path = "task_tests/config_guard_recovery.rs"]
 mod config_guard_recovery;
 #[path = "task_tests/config_validation_delivery.rs"]

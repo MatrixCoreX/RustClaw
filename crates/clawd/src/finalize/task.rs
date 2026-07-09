@@ -790,8 +790,9 @@ async fn finalize_ask_checkpointed(
     task: &crate::ClaimedTask,
     answer_text: &str,
     answer_messages: &[String],
-    journal: &crate::task_journal::TaskJournal,
+    journal: &mut crate::task_journal::TaskJournal,
 ) -> Result<()> {
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     let result = ask_result_payload(answer_text, answer_messages, Some(journal));
     repo::update_task_progress_result(state, &task.task_id, &result.to_string())?;
     info!("{}", crate::LOG_CALL_WRAP);
@@ -1517,12 +1518,18 @@ pub(crate) async fn finalize_ask_result(
                     );
                 }
             }
-            if !failure_reply
-                && !semantic_clarify
+            if !semantic_clarify
+                && answer.resume_context.is_none()
                 && journal_has_checkpointed_nonterminal_lifecycle(&journal)
             {
-                finalize_ask_checkpointed(state, task, &answer_text, &answer_messages, &journal)
-                    .await?;
+                finalize_ask_checkpointed(
+                    state,
+                    task,
+                    &answer_text,
+                    &answer_messages,
+                    &mut journal,
+                )
+                .await?;
                 return Ok(());
             }
             if failure_reply {
