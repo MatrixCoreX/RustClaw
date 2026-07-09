@@ -17,8 +17,9 @@ use super::{
     try_recover_document_heading_answer_verifier_gap,
     try_recover_filesystem_mutation_success_answer_verifier_gap,
     try_recover_generic_path_content_read_range_answer_verifier_gap,
-    try_recover_http_health_answer_verifier_gap, try_recover_latest_synthesis_answer_verifier_gap,
-    try_recover_local_health_answer_verifier_gap, try_recover_log_analyze_answer_verifier_gap,
+    try_recover_http_health_answer_verifier_gap, try_recover_inconsistent_boundary_clarify,
+    try_recover_latest_synthesis_answer_verifier_gap, try_recover_local_health_answer_verifier_gap,
+    try_recover_log_analyze_answer_verifier_gap,
     try_recover_machine_kv_summary_output_format_answer_verifier_gap,
     try_recover_recent_artifacts_answer_verifier_gap, try_recover_rss_news_answer_verifier_gap,
     try_recover_structured_count_answer_verifier_gap,
@@ -346,6 +347,75 @@ fn locator_clarify_does_not_low_risk_freeform_replan() {
             .is_none()
     );
     assert!(loop_state.attempt_ledger_entries.is_empty());
+}
+
+#[test]
+fn inconsistent_locator_clarify_without_route_boundary_replans_then_finishes_as_answer() {
+    let plan = plan_result_with_raw_and_steps(
+        "{}",
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "Provide the target path.",
+                "terminal_intent": "clarify",
+                "clarify_reason_code": "missing_locator",
+                "missing_slot": "locator",
+                "locator_kind": "path"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
+    let mut route = route_result(OutputResponseShape::OneSentence);
+    route.risk_ceiling = RiskCeiling::Medium;
+    route.needs_clarify = false;
+    route.wants_file_delivery = false;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.delivery_required = false;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    let mut loop_state = LoopState::new(2);
+
+    let first = try_recover_inconsistent_boundary_clarify(&mut loop_state, Some(&route), &intent)
+        .expect("inconsistent boundary clarify should be recoverable");
+    assert_eq!(
+        first.stop_signal.as_deref(),
+        Some("recoverable_failure_continue_round")
+    );
+    assert!(!loop_state.pending_user_input_required);
+    assert!(loop_state.delivery_messages.is_empty());
+    assert!(loop_state.has_recoverable_failure_context);
+    assert_eq!(loop_state.attempt_ledger_entries.len(), 1);
+
+    loop_state.round_no = 2;
+    let second = try_recover_inconsistent_boundary_clarify(&mut loop_state, Some(&route), &intent)
+        .expect("repeated inconsistent boundary clarify should finish nonblocking");
+    assert_eq!(
+        second.stop_signal.as_deref(),
+        Some("structured_respond_nonblocking_clarify_answer")
+    );
+    assert!(!loop_state.pending_user_input_required);
+    assert_eq!(
+        loop_state.delivery_messages,
+        vec!["Provide the target path."]
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.terminal_intent")
+            .map(String::as_str),
+        Some("answer")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.recovered_terminal_intent")
+            .map(String::as_str),
+        Some("clarify")
+    );
 }
 
 #[test]
