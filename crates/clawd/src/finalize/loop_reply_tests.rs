@@ -198,6 +198,9 @@ mod task_lifecycle_renderers_tests;
 #[path = "loop_reply_compatibility_renderers_tests.rs"]
 mod compatibility_renderers_tests;
 
+#[path = "loop_reply_final_answer_renderers_tests.rs"]
+mod final_answer_renderers_tests;
+
 #[path = "loop_reply_route_helpers_tests.rs"]
 mod route_helpers_tests;
 

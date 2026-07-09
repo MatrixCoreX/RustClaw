@@ -16,6 +16,14 @@ use task_lifecycle_renderers::run_task_lifecycle_renderer_registry;
 mod compatibility_renderers;
 use compatibility_renderers::run_compatibility_fallback_renderer_registry;
 
+#[path = "loop_reply_final_answer_renderers.rs"]
+mod final_answer_renderers;
+use final_answer_renderers::{
+    replace_delivery_with_matrix_observed_shape_answer,
+    replace_delivery_with_requested_machine_kv_summary,
+    replace_final_delivery_with_raw_command_machine_field_projection,
+};
+
 #[path = "loop_reply_scalar_answer.rs"]
 mod scalar_answer;
 use scalar_answer::scalar_answer_from_json;
@@ -141,9 +149,7 @@ use raw_command::{
     direct_raw_command_output_projection, looks_like_raw_command_snapshot,
     looks_like_structured_machine_output, output_contract_requests_exact_delivery,
     raw_command_machine_field_delivery_satisfies_request,
-    raw_command_output_needs_structural_projection,
-    replace_final_delivery_with_raw_command_machine_field_projection,
-    route_explicitly_requests_command_result,
+    raw_command_output_needs_structural_projection, route_explicitly_requests_command_result,
 };
 
 #[path = "loop_reply_file_delivery.rs"]
@@ -204,7 +210,6 @@ use matrix_shape::{
     evidence_policy_candidate_satisfies_final_shape,
     finalizer_summary_requires_matrix_observed_replacement,
     matrix_grouped_name_list_observed_answer, matrix_observed_shape_summary,
-    replace_delivery_with_matrix_observed_shape_answer,
     route_requires_evidence_policy_deterministic_final_answer,
     route_requires_observed_output_projection, should_try_observed_output_language_fallback,
     synthetic_task_for_evidence_policy_shape_check,
@@ -218,7 +223,6 @@ use machine_envelope::{
 
 #[path = "loop_reply_machine_kv.rs"]
 mod machine_kv;
-use machine_kv::replace_delivery_with_requested_machine_kv_summary;
 
 #[path = "loop_reply_machine_payload.rs"]
 mod machine_payload;
