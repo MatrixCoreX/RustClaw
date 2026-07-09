@@ -28,6 +28,7 @@ pub(crate) struct RepairBoundaryInventoryItem {
     pub(crate) owner_layer: &'static str,
     pub(crate) runtime_scope: &'static str,
     pub(crate) source_files: &'static [&'static str],
+    pub(crate) entrypoints: &'static [&'static str],
     pub(crate) allowed_input_fields: &'static [&'static str],
     pub(crate) forbidden_input_fields: &'static [&'static str],
     pub(crate) migration_target: &'static str,
@@ -44,6 +45,7 @@ impl RepairBoundaryInventoryItem {
             "owner_layer": self.owner_layer,
             "runtime_scope": self.runtime_scope,
             "source_files": self.source_files,
+            "entrypoints": self.entrypoints,
             "allowed_input_fields": self.allowed_input_fields,
             "forbidden_input_fields": self.forbidden_input_fields,
             "migration_target": self.migration_target,
@@ -64,6 +66,10 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
             "crates/clawd/src/intent_router_normalizer_boundary_repair.rs",
             "crates/clawd/src/intent_router_contract_repair_report.rs",
             "crates/clawd/src/intent_router_contract_repair_judge.rs",
+        ],
+        entrypoints: &[
+            "run_intent_normalizer_model_step",
+            "apply_boundary_contract_judge_repair",
         ],
         allowed_input_fields: &[
             "llm_json_parse_error",
@@ -93,6 +99,11 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
             "crates/clawd/src/prompt_utils_contract_repair_judge.rs",
             "prompts/layers/overlays/contract_repair_judge_prompt.md",
         ],
+        entrypoints: &[
+            "run_contract_repair_judge",
+            "apply_contract_repair_judge_output",
+            "canonicalize_contract_repair_judge_object",
+        ],
         allowed_input_fields: &[
             "normalized_contract_json",
             "schema_violation_code",
@@ -120,6 +131,10 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         owner_layer: "ask_pipeline_contract_repair",
         runtime_scope: "pre_loop_contract_candidate_observation",
         source_files: &["crates/clawd/src/worker/ask_pipeline_contract_repair.rs"],
+        entrypoints: &[
+            "registry_capability_contract_observation",
+            "contract_repair_candidate_observations",
+        ],
         allowed_input_fields: &[
             "route_result",
             "capability_ref_token",
@@ -149,6 +164,12 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
             "crates/clawd/src/intent_router_active_task_repair.rs",
             "crates/clawd/src/intent_router_current_turn_structural_repair.rs",
             "crates/clawd/src/intent_router_observation_repair.rs",
+        ],
+        entrypoints: &[
+            "run_intent_normalizer",
+            "apply_current_turn_structural_contract_repair",
+            "apply_missing_active_task_reuse_clarify",
+            "apply_locatorless_observation_clarify_repair",
         ],
         allowed_input_fields: &[
             "current_turn_locator",
@@ -180,6 +201,12 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
             "crates/clawd/src/agent_engine/direct_observed_finalize_support.rs",
             "crates/clawd/src/agent_engine/session_alias_target_coverage.rs",
             "prompts/layers/overlays/plan_repair_prompt.md",
+        ],
+        entrypoints: &[
+            "plan_round_actions",
+            "repair_plan_actions",
+            "should_force_actionable_plan_repair",
+            "rewrite_rustclaw_config_validation_to_guard",
         ],
         allowed_input_fields: &[
             "repair_envelope",
@@ -213,6 +240,12 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
             "crates/clawd/src/agent_engine/loop_control_local_health_recovery.rs",
             "crates/clawd/src/task_journal.rs",
         ],
+        entrypoints: &[
+            "verify_answer_observe_only",
+            "local_missing_evidence_verifier_gap",
+            "answer_verifier_retry_summary",
+            "try_recover_latest_synthesis_answer_verifier_gap",
+        ],
         allowed_input_fields: &[
             "missing_evidence_fields",
             "should_retry",
@@ -241,6 +274,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
             "crates/clawd/src/repair_signal.rs",
             "crates/clawd/src/task_journal.rs",
         ],
+        entrypoints: &["verify_plan"],
         allowed_input_fields: &[
             "verify_issue_kind",
             "status_code",
@@ -272,6 +306,12 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
             "crates/clawd/src/agent_engine/skill_execution_preflight.rs",
             "configs/task_contract_matrix.toml",
         ],
+        entrypoints: &[
+            "preflight_permission_decision",
+            "handle_preflight_argument_failure",
+            "action_policy_for_route",
+            "arg_policy_decision_for_route",
+        ],
         allowed_input_fields: &[
             "permission_decision",
             "risk_level",
@@ -301,6 +341,11 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
             "crates/clawd/src/execution_adapters.rs",
             "crates/clawd/src/agent_engine/loop_control.rs",
             "crates/clawd/src/worker/async_poll_executor.rs",
+        ],
+        entrypoints: &[
+            "run_skill",
+            "execute_async_poll_dispatch_result_with_state",
+            "record_attempt",
         ],
         allowed_input_fields: &[
             "provider_status",
@@ -334,6 +379,13 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
             "crates/clawd/src/worker/resume_replay_executor.rs",
             "crates/clawd/src/worker/async_poll_executor.rs",
             "crates/clawd/src/agent_engine/attempt_ledger.rs",
+        ],
+        entrypoints: &[
+            "task_query_lifecycle_projection",
+            "checkpoint_resume_directive",
+            "execute_seeded_agent_loop_dispatch_result",
+            "record_claimed_handoff_paused_checkpoint_resume_dispatch_internal",
+            "build_attempt_ledger_snapshot",
         ],
         allowed_input_fields: &[
             "checkpoint_id",

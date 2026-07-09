@@ -45,6 +45,21 @@ fn repair_inventory_items_are_machine_field_bounded() {
         assert!(!item.owner_layer.trim().is_empty());
         assert!(!item.runtime_scope.trim().is_empty());
         assert!(!item.source_files.is_empty());
+        assert!(
+            !item.entrypoints.is_empty(),
+            "{} must list function-level repair entrypoints",
+            item.reason_code
+        );
+        for entrypoint in item.entrypoints {
+            assert!(
+                entrypoint
+                    .chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_'),
+                "{} entrypoint {} must be a machine token",
+                item.reason_code,
+                entrypoint
+            );
+        }
         assert!(!item.allowed_input_fields.is_empty());
         assert!(!item.forbidden_input_fields.is_empty());
         assert!(!item.migration_target.trim().is_empty());
@@ -209,6 +224,12 @@ fn trace_value_exposes_auditable_machine_fields() {
         value.get("deletion_gate").and_then(Value::as_str),
         Some("keep_policy_boundary")
     );
+    assert!(value
+        .get("entrypoints")
+        .and_then(Value::as_array)
+        .is_some_and(|entrypoints| entrypoints
+            .iter()
+            .any(|entrypoint| entrypoint.as_str() == Some("preflight_permission_decision"))));
     assert!(value
         .get("forbidden_input_fields")
         .and_then(Value::as_array)
