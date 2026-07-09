@@ -952,12 +952,11 @@ fn ask_runtime_failure_error_class(err: &str) -> &'static str {
 
 fn ask_runtime_failure_default_text(state: &AppState, language_hint: &str) -> String {
     let default_payload = ask_runtime_failure_machine_payload("");
-    crate::bilingual_t_with_default_vars(
+    crate::i18n_t_for_language_hint_with_default_vars(
         state,
+        language_hint,
         "clawd.msg.ask_runtime_failure",
         &default_payload,
-        &default_payload,
-        crate::fallback::fallback_prefers_english_for_language_hint(state, language_hint),
         &[],
     )
 }

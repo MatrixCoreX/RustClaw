@@ -50,6 +50,10 @@ pub(super) fn looks_like_delivery_locator_literal(text: &str, locator_hint: &str
         }
     }
 
+    if normalized.chars().any(char::is_whitespace) && !Path::new(&normalized).exists() {
+        return false;
+    }
+
     if normalized.starts_with('/')
         || normalized.starts_with("./")
         || normalized.starts_with("../")
@@ -57,10 +61,6 @@ pub(super) fn looks_like_delivery_locator_literal(text: &str, locator_hint: &str
         || normalized.contains('\\')
     {
         return true;
-    }
-
-    if normalized.chars().any(char::is_whitespace) {
-        return false;
     }
 
     normalized

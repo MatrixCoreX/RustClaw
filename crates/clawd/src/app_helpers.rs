@@ -147,6 +147,39 @@ fn i18n_t_for_locale_with_default(
     default_text.to_string()
 }
 
+fn i18n_locale_for_language_hint(language_hint: &str) -> String {
+    let normalized = language_hint.trim().replace('_', "-");
+    let lower = normalized.to_ascii_lowercase();
+    if lower.starts_with("zh") {
+        "zh-CN".to_string()
+    } else if lower.starts_with("en") {
+        "en-US".to_string()
+    } else if lower.starts_with("ko") {
+        "ko".to_string()
+    } else if lower.starts_with("ja") {
+        "ja".to_string()
+    } else {
+        normalized
+    }
+}
+
+pub(crate) fn i18n_t_for_language_hint_with_default_vars(
+    state: &AppState,
+    language_hint: &str,
+    key: &str,
+    default_text: &str,
+    vars: &[(&str, &str)],
+) -> String {
+    let locale = i18n_locale_for_language_hint(language_hint);
+    if locale.trim().is_empty() || locale == "config_default" {
+        return i18n_t_with_default_vars(state, key, default_text, vars);
+    }
+    render_i18n_vars(
+        i18n_t_for_locale_with_default(state, &locale, key, default_text),
+        vars,
+    )
+}
+
 pub(crate) fn bilingual_t_with_default_vars(
     state: &AppState,
     key: &str,

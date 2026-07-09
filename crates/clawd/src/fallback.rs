@@ -361,12 +361,11 @@ pub(crate) fn missing_file_delivery_default_text(
     let vars = locator
         .map(|missing_path| vec![("missing_path", missing_path)])
         .unwrap_or_default();
-    crate::bilingual_t_with_default_vars(
+    crate::i18n_t_for_language_hint_with_default_vars(
         state,
+        language_hint,
         key,
         &default_text,
-        &default_text,
-        fallback_prefers_english_for_language_hint(state, language_hint),
         &vars,
     )
 }
@@ -615,12 +614,11 @@ fn structured_clarify_default_text(
         "missing_slots": &contract.missing_slots,
     })
     .to_string();
-    Some(crate::bilingual_t_with_default_vars(
+    Some(crate::i18n_t_for_language_hint_with_default_vars(
         state,
+        &contract.language_hint,
         key,
         &default_payload,
-        &default_payload,
-        fallback_prefers_english_for_language_hint(state, &contract.language_hint),
         &[],
     ))
 }
@@ -892,12 +890,11 @@ pub(crate) fn clarify_fallback_text_with_language_hint(
 ) -> String {
     let hint = context_hint.unwrap_or("").trim();
     let default_payload = source.machine_default_payload();
-    crate::bilingual_t_with_default_vars(
+    crate::i18n_t_for_language_hint_with_default_vars(
         state,
+        language_hint,
         source.i18n_key(),
         &default_payload,
-        &default_payload,
-        fallback_prefers_english_for_language_hint(state, language_hint),
         &[("context_hint", hint)],
     )
 }
