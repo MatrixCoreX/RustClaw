@@ -61,6 +61,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         runtime_scope: "pre_route_normalizer",
         source_files: &[
             "crates/clawd/src/intent_router_normalizer_model.rs",
+            "crates/clawd/src/intent_router_normalizer_boundary_repair.rs",
             "crates/clawd/src/intent_router_contract_repair_report.rs",
             "crates/clawd/src/intent_router_contract_repair_judge.rs",
         ],
@@ -87,13 +88,19 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         owner_layer: "contract_repair_judge",
         runtime_scope: "pre_route_normalizer",
         source_files: &[
+            "crates/clawd/src/intent_router_contract_repair_context.rs",
             "crates/clawd/src/intent_router_contract_repair_judge.rs",
+            "crates/clawd/src/prompt_utils_contract_repair_judge.rs",
             "prompts/layers/overlays/contract_repair_judge_prompt.md",
         ],
         allowed_input_fields: &[
             "normalized_contract_json",
             "schema_violation_code",
             "machine_override_marker",
+            "contract_repair_context",
+            "contract_repair_judge_json",
+            "turn_type_token",
+            "target_task_policy_token",
         ],
         forbidden_input_fields: &[
             "user_prompt_phrase",
@@ -108,18 +115,46 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         deletion_gate: "keep_schema_compat_boundary",
     },
     RepairBoundaryInventoryItem {
+        reason_code: "ask_pipeline_contract_candidate_observation",
+        repair_class: RepairBoundaryClass::BoundarySafetyRepair,
+        owner_layer: "ask_pipeline_contract_repair",
+        runtime_scope: "pre_loop_contract_candidate_observation",
+        source_files: &["crates/clawd/src/worker/ask_pipeline_contract_repair.rs"],
+        allowed_input_fields: &[
+            "route_result",
+            "capability_ref_token",
+            "output_contract",
+            "structured_locator",
+            "sqlite_schema_probe",
+            "registry_contract_candidate",
+        ],
+        forbidden_input_fields: &[
+            "user_prompt_phrase",
+            "localized_reply_text",
+            "text",
+            "error_text",
+            "natural_language_skill_phrase",
+        ],
+        migration_target: "planner_contract_observation_or_capability_ref",
+        next_recovery_kind: "schema_repair",
+        deletion_gate: "keep_boundary_safety",
+    },
+    RepairBoundaryInventoryItem {
         reason_code: "current_turn_missing_locator_boundary_repair",
         repair_class: RepairBoundaryClass::BoundarySafetyRepair,
         owner_layer: "intent_router_normalizer_run",
         runtime_scope: "pre_route_normalizer",
         source_files: &[
             "crates/clawd/src/intent_router_normalizer_run.rs",
+            "crates/clawd/src/intent_router_active_task_repair.rs",
             "crates/clawd/src/intent_router_current_turn_structural_repair.rs",
             "crates/clawd/src/intent_router_observation_repair.rs",
         ],
         allowed_input_fields: &[
             "current_turn_locator",
+            "active_task_snapshot",
             "field_path",
+            "state_patch",
             "target_kind",
             "route_reason_token",
         ],
@@ -141,6 +176,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         runtime_scope: "agent_loop",
         source_files: &[
             "crates/clawd/src/agent_engine/planning.rs",
+            "crates/clawd/src/agent_engine/config_guard_capability_repair.rs",
             "crates/clawd/src/agent_engine/direct_observed_finalize_support.rs",
             "crates/clawd/src/agent_engine/session_alias_target_coverage.rs",
             "prompts/layers/overlays/plan_repair_prompt.md",
@@ -148,7 +184,10 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         allowed_input_fields: &[
             "repair_envelope",
             "attempt_ledger",
+            "auto_locator_path",
             "observed_action_refs",
+            "planned_action_refs",
+            "route_contract",
             "evidence_gap",
         ],
         forbidden_input_fields: &[

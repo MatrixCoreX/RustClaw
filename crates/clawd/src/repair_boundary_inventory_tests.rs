@@ -18,6 +18,7 @@ fn repair_inventory_covers_required_boundary_buckets() {
     let required = [
         "normalizer_schema_contract_repair",
         "contract_repair_judge_schema_boundary",
+        "ask_pipeline_contract_candidate_observation",
         "current_turn_missing_locator_boundary_repair",
         "plan_repair_loop_recovery",
         "answer_verifier_missing_evidence_repair",
