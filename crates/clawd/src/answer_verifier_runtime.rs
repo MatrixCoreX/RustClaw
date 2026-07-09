@@ -530,7 +530,96 @@ pub(super) fn local_missing_evidence_verifier_gap_for_answer(
     ) {
         return None;
     }
+    if non_path_status_observation_can_skip_path_content_gap(route_result, journal, &gap) {
+        return None;
+    }
     Some(gap)
+}
+
+fn non_path_status_observation_can_skip_path_content_gap(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    gap: &AnswerVerifierOut,
+) -> bool {
+    if !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || !route_result.output_contract.semantic_kind_is_unclassified()
+    {
+        return false;
+    }
+    if !gap
+        .missing_evidence_fields
+        .iter()
+        .any(|field| field == "path")
+    {
+        return false;
+    }
+    let non_control_steps: Vec<_> = journal
+        .step_results
+        .iter()
+        .filter(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+        })
+        .collect();
+    !non_control_steps.is_empty()
+        && non_control_steps.iter().all(|step| {
+            step.status == crate::executor::StepExecutionStatus::Ok
+                && non_path_status_skill(step.skill.as_str())
+                && step_output_has_status_observation(step.output_excerpt.as_deref())
+        })
+}
+
+fn non_path_status_skill(skill: &str) -> bool {
+    matches!(
+        skill,
+        "docker_basic"
+            | "health_check"
+            | "http_basic"
+            | "package_manager"
+            | "process_basic"
+            | "service_control"
+            | "system_basic"
+            | "task_control"
+    )
+}
+
+fn step_output_has_status_observation(output: Option<&str>) -> bool {
+    let Some(output) = output.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+        return false;
+    };
+    status_observation_value(&value)
+}
+
+fn status_observation_value(value: &serde_json::Value) -> bool {
+    if value
+        .get("available")
+        .and_then(serde_json::Value::as_bool)
+        .is_some()
+        || value
+            .get("command_succeeded")
+            .and_then(serde_json::Value::as_bool)
+            .is_some()
+        || value
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+        || value
+            .get("field_value")
+            .is_some_and(|field_value| !field_value.is_null())
+        || value
+            .get("count")
+            .and_then(serde_json::Value::as_u64)
+            .is_some()
+    {
+        return true;
+    }
+    value.get("extra").is_some_and(status_observation_value)
 }
 
 fn config_guard_machine_payload_can_skip_answer_verifier(

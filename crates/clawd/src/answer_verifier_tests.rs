@@ -807,6 +807,64 @@ fn local_missing_evidence_gap_uses_contract_not_route_trace() {
 }
 
 #[test]
+fn local_missing_evidence_gap_skips_non_path_status_observation() {
+    let mut route = route_with_mode(crate::AskMode::act_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.requires_content_evidence = true;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-docker-status-gap", "ask", "docker");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "docker_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "version",
+                    "available": false,
+                    "command_succeeded": false,
+                    "output": "docker unavailable"
+                },
+                "text": "docker unavailable"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "docker_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "ps",
+                    "available": false,
+                    "command_succeeded": false,
+                    "output": "docker unavailable"
+                },
+                "text": "docker unavailable"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 3,
+        finished_at: 4,
+    });
+
+    assert!(local_missing_evidence_verifier_gap_for_answer(
+        &route,
+        &journal,
+        "Docker is unavailable."
+    )
+    .is_none());
+}
+
+#[test]
 fn local_missing_evidence_gap_skips_when_required_fields_are_observed() {
     let mut route = route_with_mode(crate::AskMode::act_plain());
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
