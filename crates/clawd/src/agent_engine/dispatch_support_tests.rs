@@ -857,6 +857,53 @@ fn recoverable_nonterminal_failure_with_only_discussion_remaining_continues_next
     );
 }
 
+#[test]
+fn terminal_direct_respond_publishes_even_when_last_output_matches() {
+    let state = test_state_with_registry();
+    let task = crate::ClaimedTask {
+        task_id: "task-terminal-direct-respond".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: String::new(),
+    };
+    let policy = crate::agent_engine::support::load_agent_loop_guard_policy(&state);
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 1;
+    let content = r#"{"cancel_ref":"dry-run","adapter_kind":"local_process_poll","status":"cancelled","terminal_projection":{"state":"cancelled"}}"#;
+    loop_state.last_output = Some(content.to_string());
+    let actions = vec![AgentAction::Respond {
+        content: content.to_string(),
+    }];
+
+    let outcome = super::handle_respond_action(
+        &state,
+        &task,
+        &actions,
+        &mut loop_state,
+        &policy,
+        0,
+        1,
+        1,
+        "respond:terminal_direct",
+        content,
+        None,
+    );
+
+    assert!(outcome.should_stop);
+    assert_eq!(outcome.stop_signal.as_deref(), Some("respond"));
+    assert!(outcome.ended_with_user_visible_output);
+    assert_eq!(loop_state.delivery_messages, vec![content.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(content)
+    );
+}
+
 fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
     StepExecutionResult {
         step_id: step_id.to_string(),

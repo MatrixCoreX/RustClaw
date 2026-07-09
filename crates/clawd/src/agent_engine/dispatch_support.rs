@@ -899,7 +899,14 @@ pub(super) fn handle_respond_action(
     }
 
     let has_remaining_actions = has_remaining_action_after(actions, idx, policy.max_steps);
-    let publish_respond = should_publish_respond_message(loop_state, &text);
+    let terminal_direct_answer =
+        !has_remaining_actions && !text.is_empty() && !loop_state.has_tool_or_skill_output;
+    let duplicate_delivery = loop_state
+        .delivery_messages
+        .last()
+        .is_some_and(|last| last.trim() == text.trim());
+    let publish_respond = should_publish_respond_message(loop_state, &text)
+        || (terminal_direct_answer && !duplicate_delivery);
     if !text.is_empty() && (publish_respond || !has_remaining_actions) {
         loop_state.last_user_visible_respond = Some(text.clone());
     }
