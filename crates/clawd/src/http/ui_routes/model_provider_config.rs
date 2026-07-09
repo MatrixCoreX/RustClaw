@@ -29,6 +29,18 @@ struct ModelConfigItem {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     available_models: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    context_window_tokens: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    async_job_supported: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    shared_quota_group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    shared_quota_note_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model_list_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    capability_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     risk_level: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     dry_run_supported: Option<bool>,
@@ -92,6 +104,12 @@ fn default_model_item() -> ModelConfigItem {
         input_modalities: Vec::new(),
         output_modalities: Vec::new(),
         available_models: Vec::new(),
+        context_window_tokens: None,
+        async_job_supported: None,
+        shared_quota_group: None,
+        shared_quota_note_key: None,
+        model_list_source: None,
+        capability_source: None,
         risk_level: None,
         dry_run_supported: None,
         external_provider: None,
@@ -150,6 +168,12 @@ fn read_model_section(value: &toml::Value, section: &str) -> ModelConfigItem {
         input_modalities: Vec::new(),
         output_modalities: Vec::new(),
         available_models: read_section_model_cache(table),
+        context_window_tokens: read_context_window_tokens(table),
+        async_job_supported: None,
+        shared_quota_group: None,
+        shared_quota_note_key: None,
+        model_list_source: None,
+        capability_source: None,
         risk_level: None,
         dry_run_supported: None,
         external_provider: None,
@@ -195,6 +219,23 @@ fn read_llm_model_cache(config: &toml::Value, vendor: &str) -> Vec<String> {
     models
 }
 
+fn read_context_window_tokens(table: &toml::map::Map<String, toml::Value>) -> Option<usize> {
+    table
+        .get("context_window_tokens")
+        .and_then(toml::Value::as_integer)
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value > 0)
+}
+
+fn read_llm_context_window_tokens(config: &toml::Value, vendor: &str) -> Option<usize> {
+    config
+        .get("llm")
+        .and_then(toml::Value::as_table)
+        .and_then(|llm| llm.get(vendor.trim()))
+        .and_then(toml::Value::as_table)
+        .and_then(read_context_window_tokens)
+}
+
 fn model_item_with_capability_metadata(
     mut item: ModelConfigItem,
     section: &str,
@@ -214,6 +255,20 @@ fn model_item_with_capability_metadata(
         .iter()
         .map(|value| value.to_string())
         .collect();
+    item.async_job_supported = Some(metadata.async_job_supported);
+    if item.shared_quota_group.is_none() && metadata.shared_quota_by_provider {
+        let vendor = item.vendor.trim();
+        if !vendor.is_empty() {
+            item.shared_quota_group = Some(format!("provider_account:{vendor}"));
+            item.shared_quota_note_key = Some("provider_account_shared_quota".to_string());
+        }
+    }
+    item.model_list_source = Some(if item.available_models.is_empty() {
+        "not_configured".to_string()
+    } else {
+        "static_config".to_string()
+    });
+    item.capability_source = Some("static_metadata".to_string());
     item.risk_level = Some(metadata.risk_level.to_string());
     item.dry_run_supported = Some(metadata.dry_run_supported);
     item.external_provider = Some(metadata.external_provider);
@@ -232,6 +287,8 @@ struct ModelCapabilityMetadata {
     risk_level: &'static str,
     dry_run_supported: bool,
     external_provider: bool,
+    async_job_supported: bool,
+    shared_quota_by_provider: bool,
 }
 
 fn model_capability_metadata(section: &str) -> ModelCapabilityMetadata {
@@ -244,6 +301,8 @@ fn model_capability_metadata(section: &str) -> ModelCapabilityMetadata {
             risk_level: "medium",
             dry_run_supported: false,
             external_provider: true,
+            async_job_supported: false,
+            shared_quota_by_provider: true,
         },
         "image_edit" => ModelCapabilityMetadata {
             capability: Some("image.edit"),
@@ -251,8 +310,10 @@ fn model_capability_metadata(section: &str) -> ModelCapabilityMetadata {
             input_modalities: &["text", "image"],
             output_modalities: &["image"],
             risk_level: "high",
-            dry_run_supported: true,
+            dry_run_supported: false,
             external_provider: true,
+            async_job_supported: false,
+            shared_quota_by_provider: true,
         },
         "image_generation" => ModelCapabilityMetadata {
             capability: Some("image.generate"),
@@ -262,6 +323,8 @@ fn model_capability_metadata(section: &str) -> ModelCapabilityMetadata {
             risk_level: "high",
             dry_run_supported: true,
             external_provider: true,
+            async_job_supported: true,
+            shared_quota_by_provider: true,
         },
         "image_vision" => ModelCapabilityMetadata {
             capability: Some("image.understand"),
@@ -271,6 +334,8 @@ fn model_capability_metadata(section: &str) -> ModelCapabilityMetadata {
             risk_level: "medium",
             dry_run_supported: false,
             external_provider: true,
+            async_job_supported: false,
+            shared_quota_by_provider: true,
         },
         "audio_transcribe" => ModelCapabilityMetadata {
             capability: Some("audio.transcribe"),
@@ -280,6 +345,8 @@ fn model_capability_metadata(section: &str) -> ModelCapabilityMetadata {
             risk_level: "medium",
             dry_run_supported: false,
             external_provider: true,
+            async_job_supported: false,
+            shared_quota_by_provider: true,
         },
         "audio_synthesize" => ModelCapabilityMetadata {
             capability: Some("audio.synthesize"),
@@ -289,6 +356,8 @@ fn model_capability_metadata(section: &str) -> ModelCapabilityMetadata {
             risk_level: "high",
             dry_run_supported: true,
             external_provider: true,
+            async_job_supported: true,
+            shared_quota_by_provider: true,
         },
         "video_generation" => ModelCapabilityMetadata {
             capability: Some("video.generate"),
@@ -298,6 +367,8 @@ fn model_capability_metadata(section: &str) -> ModelCapabilityMetadata {
             risk_level: "high",
             dry_run_supported: true,
             external_provider: true,
+            async_job_supported: true,
+            shared_quota_by_provider: true,
         },
         "music_generation" => ModelCapabilityMetadata {
             capability: Some("music.generate"),
@@ -307,6 +378,8 @@ fn model_capability_metadata(section: &str) -> ModelCapabilityMetadata {
             risk_level: "high",
             dry_run_supported: true,
             external_provider: true,
+            async_job_supported: true,
+            shared_quota_by_provider: true,
         },
         _ => ModelCapabilityMetadata {
             capability: None,
@@ -316,6 +389,8 @@ fn model_capability_metadata(section: &str) -> ModelCapabilityMetadata {
             risk_level: "unknown",
             dry_run_supported: false,
             external_provider: false,
+            async_job_supported: false,
+            shared_quota_by_provider: false,
         },
     }
 }
@@ -443,6 +518,7 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+            let context_window_tokens = read_llm_context_window_tokens(&config, &vendor);
             model_item_with_capability_metadata(
                 ModelConfigItem {
                     available_models: read_llm_model_cache(&config, &vendor),
@@ -456,6 +532,12 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
                     capability_family: None,
                     input_modalities: Vec::new(),
                     output_modalities: Vec::new(),
+                    context_window_tokens,
+                    async_job_supported: None,
+                    shared_quota_group: None,
+                    shared_quota_note_key: None,
+                    model_list_source: None,
+                    capability_source: None,
                     risk_level: None,
                     dry_run_supported: None,
                     external_provider: None,

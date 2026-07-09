@@ -106,12 +106,28 @@ export function providerUnsupportedLabel(reason: string | null | undefined, lang
   }
 }
 
+export function formatContextWindow(tokens: number, lang: UiLanguage): string {
+  const label = copy(lang, "上下文", "Context");
+  if (tokens >= 1_000_000) return `${label}: ${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (tokens >= 1_000) return `${label}: ${(tokens / 1_000).toFixed(tokens % 1_000 === 0 ? 0 : 1)}K`;
+  return `${label}: ${tokens}`;
+}
+
 export function buildMultimodalMetaView(item: ModelConfigItem | null | undefined, lang: UiLanguage): MultimodalMetaView | null {
   if (!item) return null;
   const capabilityBadges = (item.capabilities ?? []).map(formatMultimodalToken);
   const modelOptions = (item.available_models ?? []).filter(Boolean);
   const visibleModels = modelOptions.slice(0, 4);
   const metaBadges: string[] = [];
+  if (item.capability_family) metaBadges.push(`${copy(lang, "能力族", "Family")}: ${formatMultimodalToken(item.capability_family)}`);
+  if ((item.input_modalities ?? []).length > 0) metaBadges.push(`${copy(lang, "输入", "Input")}: ${(item.input_modalities ?? []).map(formatMultimodalToken).join(", ")}`);
+  if ((item.output_modalities ?? []).length > 0) metaBadges.push(`${copy(lang, "输出", "Output")}: ${(item.output_modalities ?? []).map(formatMultimodalToken).join(", ")}`);
+  if (typeof item.context_window_tokens === "number" && item.context_window_tokens > 0) {
+    metaBadges.push(formatContextWindow(item.context_window_tokens, lang));
+  }
+  if (item.async_job_supported !== undefined && item.async_job_supported !== null) {
+    metaBadges.push(item.async_job_supported ? copy(lang, "支持异步任务", "Async job supported") : copy(lang, "同步/短任务", "Sync or short task"));
+  }
   if (item.risk_level) metaBadges.push(`${copy(lang, "风险", "Risk")}: ${item.risk_level}`);
   if (item.dry_run_supported !== undefined && item.dry_run_supported !== null) {
     metaBadges.push(item.dry_run_supported ? copy(lang, "支持 dry-run", "Dry-run supported") : copy(lang, "不支持 dry-run", "No dry-run"));
@@ -123,6 +139,9 @@ export function buildMultimodalMetaView(item: ModelConfigItem | null | undefined
         : copy(lang, "本地或内置能力", "Local or built-in capability"),
     );
   }
+  if (item.shared_quota_group) metaBadges.push(`${copy(lang, "额度组", "Quota")}: ${formatMultimodalToken(item.shared_quota_group)}`);
+  if (item.model_list_source) metaBadges.push(`${copy(lang, "模型列表", "Model list")}: ${formatMultimodalToken(item.model_list_source)}`);
+  if (item.capability_source) metaBadges.push(`${copy(lang, "能力来源", "Capability source")}: ${formatMultimodalToken(item.capability_source)}`);
   if (item.provider_supported === false) {
     metaBadges.push(providerUnsupportedLabel(item.unsupported_reason, lang));
   }

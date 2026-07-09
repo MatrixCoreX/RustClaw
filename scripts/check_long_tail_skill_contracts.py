@@ -19,6 +19,12 @@ MEDIA_SKILLS = {
     "video_generate": "generate",
     "music_generate": "generate",
 }
+POLLABLE_MEDIA_SKILLS = {
+    "image_generate": ("image", "generate"),
+    "audio_synthesize": ("audio", "synthesize"),
+    "video_generate": ("video", "generate"),
+    "music_generate": ("music", "generate"),
+}
 
 EXECUTION_MODES = {"sync_short", "async_preferred", "async_required"}
 ASYNC_EXECUTION_MODES = {"async_preferred", "async_required"}
@@ -194,6 +200,78 @@ def check_video_poll_contract(skills_by_name: dict[str, dict[str, Any]]) -> list
     return findings
 
 
+def check_pollable_media_contracts(skills_by_name: dict[str, dict[str, Any]]) -> list[str]:
+    findings: list[str] = []
+    for skill_name, (prefix, start_action) in POLLABLE_MEDIA_SKILLS.items():
+        skill = skills_by_name.get(skill_name)
+        if not skill:
+            findings.append(f"{skill_name}: missing registry skill entry")
+            continue
+        props = input_properties(skill)
+        for field in [
+            "task_id",
+            "job_id",
+            "cancel_token",
+            "cancel_ref",
+            "poll_after_seconds",
+            "poll_after_ms",
+            "expires_at",
+            "mock_status",
+            "mock_file_id",
+            "dry_run",
+        ]:
+            if field not in props:
+                findings.append(f"{skill_name}: input_schema missing {field}")
+
+        start = capability_by_action(skill, start_action)
+        if not start:
+            findings.append(f"{skill_name}: missing planner capability action={start_action}")
+        else:
+            if start.get("execution_mode") not in ASYNC_EXECUTION_MODES:
+                findings.append(f"{skill_name}.{start_action}: execution_mode must be async")
+            if start.get("async_adapter_kind") != "media_job_poll":
+                findings.append(f"{skill_name}.{start_action}: async_adapter_kind must be media_job_poll")
+            if "dry_run" not in optional_tokens(start):
+                findings.append(f"{skill_name}.{start_action}: optional missing dry_run")
+
+        poll = capability_by_name(skill, f"{prefix}.poll")
+        if not poll:
+            findings.append(f"{skill_name}: missing {prefix}.poll capability")
+        else:
+            if "task_id" not in required_tokens(poll):
+                findings.append(f"{skill_name}.{prefix}.poll: required missing task_id")
+            optional = optional_tokens(poll)
+            for field in ["job_id", "poll_after_seconds", "poll_after_ms", "expires_at", "dry_run"]:
+                if field not in optional:
+                    findings.append(f"{skill_name}.{prefix}.poll: optional missing {field}")
+            if poll.get("execution_mode") != "async_required":
+                findings.append(f"{skill_name}.{prefix}.poll: execution_mode must be async_required")
+            if poll.get("async_adapter_kind") != "media_job_poll":
+                findings.append(f"{skill_name}.{prefix}.poll: async_adapter_kind must be media_job_poll")
+            if poll.get("idempotent") is not True:
+                findings.append(f"{skill_name}.{prefix}.poll: idempotent must be true")
+
+        cancel = capability_by_name(skill, f"{prefix}.cancel")
+        if not cancel:
+            findings.append(f"{skill_name}: missing {prefix}.cancel capability")
+        else:
+            if "task_id" not in required_tokens(cancel):
+                findings.append(f"{skill_name}.{prefix}.cancel: required missing task_id")
+            optional = optional_tokens(cancel)
+            for field in ["job_id", "cancel_token", "cancel_ref", "dry_run"]:
+                if field not in optional:
+                    findings.append(f"{skill_name}.{prefix}.cancel: optional missing {field}")
+            if cancel.get("execution_mode") != "async_required":
+                findings.append(f"{skill_name}.{prefix}.cancel: execution_mode must be async_required")
+            if cancel.get("async_adapter_kind") != "media_job_poll":
+                findings.append(f"{skill_name}.{prefix}.cancel: async_adapter_kind must be media_job_poll")
+            if cancel.get("once_per_task") is not True:
+                findings.append(f"{skill_name}.{prefix}.cancel: once_per_task must be true")
+            if cancel.get("idempotent") is not False:
+                findings.append(f"{skill_name}.{prefix}.cancel: idempotent must be false")
+    return findings
+
+
 def check_registry(path: Path) -> tuple[int, list[str]]:
     skills = load_registry(path)
     skills_by_name = {
@@ -207,6 +285,7 @@ def check_registry(path: Path) -> tuple[int, list[str]]:
         + check_run_cmd_async_contract(skills_by_name)
         + check_media_dry_run_contract(skills_by_name)
         + check_video_poll_contract(skills_by_name)
+        + check_pollable_media_contracts(skills_by_name)
     )
     return len(skills), [f"{path.relative_to(ROOT)}: {finding}" for finding in findings]
 

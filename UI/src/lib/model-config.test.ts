@@ -7,6 +7,7 @@ import {
   buildMultimodalDraft,
   buildMultimodalMetaView,
   buildMultimodalSavePayload,
+  formatContextWindow,
   formatMultimodalToken,
   hasUnsavedMultimodalDraftChanges,
   providerUnsupportedLabel,
@@ -58,6 +59,11 @@ test("formats multimodal machine tokens for compact badges", () => {
   assert.equal(formatMultimodalToken("image_generation.dry-run"), "image / generation / dry / run");
 });
 
+test("formats context windows compactly", () => {
+  assert.equal(formatContextWindow(1_000_000, "en"), "Context: 1M");
+  assert.equal(formatContextWindow(32_768, "zh"), "上下文: 32.8K");
+});
+
 test("formats provider unsupported labels", () => {
   assert.equal(providerUnsupportedLabel("provider_not_configured", "en"), "Provider not configured");
   assert.equal(providerUnsupportedLabel("model_not_configured", "zh"), "未选择模型");
@@ -71,6 +77,13 @@ test("builds multimodal meta view from structured model fields", () => {
       model: "MiniMax-Hailuo-02",
       capabilities: ["video.generate"],
       available_models: ["a", "b", "c", "d", "e"],
+      capability_family: "video",
+      input_modalities: ["text", "image"],
+      output_modalities: ["video"],
+      async_job_supported: true,
+      shared_quota_group: "provider_account:minimax",
+      model_list_source: "static_config",
+      capability_source: "static_metadata",
       risk_level: "medium",
       dry_run_supported: true,
       external_provider: true,
@@ -85,9 +98,16 @@ test("builds multimodal meta view from structured model fields", () => {
   assert.deepEqual(view?.visibleModels, ["a", "b", "c", "d"]);
   assert.equal(view?.hiddenModelCount, 1);
   assert.deepEqual(view?.metaBadges, [
+    "Family: video",
+    "Input: text, image",
+    "Output: video",
+    "Async job supported",
     "Risk: medium",
     "Dry-run supported",
     "Quota/blockers managed by provider",
+    "Quota: provider / account:minimax",
+    "Model list: static / config",
+    "Capability source: static / metadata",
     "Model is not in the available list",
     "Key: mi***ey",
   ]);
