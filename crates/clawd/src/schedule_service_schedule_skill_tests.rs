@@ -176,23 +176,19 @@ async fn schedule_compile_only_create_returns_preview_without_insert() {
             .await
             .expect("schedule handler")
             .expect("preview reply");
-    let value: serde_json::Value = serde_json::from_str(&reply).expect("preview json");
-    assert!(value.get("contract_marker").is_none());
-    assert_eq!(
-        value.get("message_key").and_then(|value| value.as_str()),
-        Some("schedule.intent.preview")
-    );
-    assert_eq!(
-        value
-            .get("final_answer_shape")
-            .and_then(|value| value.as_str()),
-        Some("validation_verdict")
-    );
-    assert!(value.get("semantic_kind").is_none());
-    assert_eq!(
-        value.get("would_mutate").and_then(|value| value.as_bool()),
-        Some(false)
-    );
+    assert!(serde_json::from_str::<serde_json::Value>(&reply).is_err());
+    assert!(reply.contains("message_key=schedule.intent.preview"));
+    assert!(reply.contains("final_answer_shape=validation_verdict"));
+    assert!(reply.contains("status=ok"));
+    assert!(reply.contains("mode=compile_only"));
+    assert!(reply.contains("kind=create"));
+    assert!(reply.contains("would_mutate=false"));
+    assert!(reply.contains("timezone=Asia/Shanghai"));
+    assert!(reply.contains("schedule.type=once"));
+    assert!(reply.contains("schedule.run_at=2099-01-01 09:00:00"));
+    assert!(reply.contains("task_content=check service"));
+    assert!(!reply.contains("contract_marker"));
+    assert!(!reply.contains("semantic_kind"));
     let db = state.core.db.get().expect("db");
     let count: i64 = db
         .query_row("SELECT COUNT(*) FROM scheduled_jobs", [], |row| row.get(0))
@@ -233,20 +229,10 @@ async fn schedule_compile_only_preview_strips_internal_context_from_ask_payload(
             .await
             .expect("schedule handler")
             .expect("preview reply");
-    let value: serde_json::Value = serde_json::from_str(&reply).expect("preview json");
-    assert_eq!(
-        value
-            .pointer("/extra/task_content")
-            .and_then(|value| value.as_str()),
-        Some("check service")
-    );
-    assert_eq!(
-        value
-            .pointer("/extra/task_payload/text")
-            .and_then(|value| value.as_str()),
-        Some("check service")
-    );
-    assert!(!value.to_string().contains("ACTIVE_EXECUTION_ANCHOR"));
+    assert!(serde_json::from_str::<serde_json::Value>(&reply).is_err());
+    assert!(reply.contains("task_content=check service"));
+    assert!(!reply.contains("ACTIVE_EXECUTION_ANCHOR"));
+    assert!(!reply.contains("followup_bound_target"));
 }
 
 #[test]

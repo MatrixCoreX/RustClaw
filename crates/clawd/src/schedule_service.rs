@@ -798,19 +798,82 @@ fn schedule_compile_only_response(
     would_mutate: bool,
     extra: Value,
 ) -> String {
-    json!({
-        "schema_version": 1,
-        "message_key": "schedule.intent.preview",
-        "final_answer_shape": crate::evidence_policy::FinalAnswerShape::ValidationVerdict.as_str(),
-        "final_answer_shape_class": crate::evidence_policy::FinalAnswerShape::ValidationVerdict.class().as_str(),
-        "status": "ok",
-        "mode": schedule_intent_mode(intent),
-        "kind": kind,
-        "would_mutate": would_mutate,
-        "intent": intent,
-        "extra": extra,
-    })
-    .to_string()
+    let mut lines = Vec::new();
+    push_schedule_preview_kv(&mut lines, "schema_version", "1");
+    push_schedule_preview_kv(&mut lines, "message_key", "schedule.intent.preview");
+    push_schedule_preview_kv(
+        &mut lines,
+        "final_answer_shape",
+        crate::evidence_policy::FinalAnswerShape::ValidationVerdict.as_str(),
+    );
+    push_schedule_preview_kv(
+        &mut lines,
+        "final_answer_shape_class",
+        crate::evidence_policy::FinalAnswerShape::ValidationVerdict
+            .class()
+            .as_str(),
+    );
+    push_schedule_preview_kv(&mut lines, "status", "ok");
+    push_schedule_preview_kv(&mut lines, "mode", schedule_intent_mode(intent));
+    push_schedule_preview_kv(&mut lines, "kind", kind);
+    push_schedule_preview_kv(
+        &mut lines,
+        "would_mutate",
+        if would_mutate { "true" } else { "false" },
+    );
+    push_schedule_preview_kv(&mut lines, "timezone", intent.timezone.trim());
+    push_schedule_preview_kv(&mut lines, "schedule.type", intent.schedule.r#type.trim());
+    push_schedule_preview_kv(&mut lines, "schedule.run_at", intent.schedule.run_at.trim());
+    push_schedule_preview_kv(&mut lines, "schedule.time", intent.schedule.time.trim());
+    push_schedule_preview_kv(&mut lines, "schedule.cron", intent.schedule.cron.trim());
+    if intent.schedule.weekday > 0 {
+        push_schedule_preview_kv(
+            &mut lines,
+            "schedule.weekday",
+            &intent.schedule.weekday.to_string(),
+        );
+    }
+    if intent.schedule.every_minutes > 0 {
+        push_schedule_preview_kv(
+            &mut lines,
+            "schedule.every_minutes",
+            &intent.schedule.every_minutes.to_string(),
+        );
+    }
+    push_schedule_preview_kv(&mut lines, "task.kind", intent.task.kind.trim());
+    push_schedule_preview_kv_value(&mut lines, "schedule_type", extra.get("schedule_type"));
+    push_schedule_preview_kv_value(&mut lines, "next_run_at", extra.get("next_run_at"));
+    push_schedule_preview_kv_value(&mut lines, "next_run_human", extra.get("next_run_human"));
+    push_schedule_preview_kv_value(&mut lines, "task_kind", extra.get("task_kind"));
+    push_schedule_preview_kv_value(&mut lines, "task_content", extra.get("task_content"));
+    lines.join("\n")
+}
+
+fn push_schedule_preview_kv(lines: &mut Vec<String>, key: &str, value: &str) {
+    let value = normalize_schedule_preview_value(value);
+    if value.is_empty() {
+        return;
+    }
+    lines.push(format!("{key}={value}"));
+}
+
+fn push_schedule_preview_kv_value(lines: &mut Vec<String>, key: &str, value: Option<&Value>) {
+    let Some(value) = value else {
+        return;
+    };
+    let rendered = match value {
+        Value::String(text) => normalize_schedule_preview_value(text),
+        Value::Number(number) => number.to_string(),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Null | Value::Array(_) | Value::Object(_) => String::new(),
+    };
+    if !rendered.is_empty() {
+        lines.push(format!("{key}={rendered}"));
+    }
+}
+
+fn normalize_schedule_preview_value(value: &str) -> String {
+    value.trim().replace(['\r', '\n'], "\\n")
 }
 
 pub(crate) async fn try_handle_schedule_request(
