@@ -605,6 +605,16 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
 
 ## NL 回归快捷入口
 
+代码还在快速推进时，优先跑最小受影响 NL 集；阶段收口或 release gate 时再扩大覆盖：
+
+1. 静态 compact 覆盖：`python3 scripts/nl_tests/check_compact_coverage.py --report`，只检查源控 case 覆盖基础技能、route/lifecycle 分类和媒体 dry-run，不调用 provider。
+2. 受影响小集合：针对本次修改路径挑 10-30 条。
+3. 典型聚合集：一个阶段完成后跑压缩代表性覆盖。
+4. Canary：改变默认 authority 或删除旧 gate 前跑 500 条 client-like。
+5. Safe aggregate：先跑 compact 等价覆盖；只有高风险删除 gate 或发布硬化才跑完整 2100+。
+
+当前不再用固定七天等待作为普通开发删除门槛。删除兼容路径前，应使用受影响 compact live NL、release-gate 等价覆盖、loop-boundary/replay 无 unexplained mismatch，以及静态门禁。Contract repair 清理必须通过 `python3 scripts/check_contract_repair_loop_observation_boundary.py`；route/output-contract 清理应通过 `python3 scripts/check_route_reason_marker_facade.py` 和 `python3 scripts/check_output_semantic_kind_write_boundary.py`；repair 清理应通过 `python3 scripts/check_repair_boundary_inventory_coverage.py` 和 `python3 scripts/check_repair_no_user_text_fields.py`。
+
 面向长尾闭环链路的常用入口：
 
 - `bash scripts/nl_tests/run_suite.sh ops_closed_loop`
