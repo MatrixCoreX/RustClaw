@@ -673,19 +673,14 @@ fn latest_publishable_terminal_language_output(loop_state: &LoopState) -> Option
 
 fn priority_last_respond_for_final_delivery<'a>(
     loop_state: &'a LoopState,
-    finalizer_summary: Option<&crate::task_journal::TaskJournalFinalizerSummary>,
+    _finalizer_summary: Option<&crate::task_journal::TaskJournalFinalizerSummary>,
     synthesis_is_publishable: bool,
 ) -> Option<&'a String> {
     if synthesis_is_publishable {
         return None;
     }
     let last_respond = loop_state.last_user_visible_respond.as_ref()?;
-    if finalizer_summary.is_some_and(|summary| {
-        matches!(
-            summary.disposition,
-            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-        )
-    }) && !loop_state.delivery_messages.is_empty()
+    if !loop_state.delivery_messages.is_empty()
         && !latest_executed_step_is_respond(loop_state)
         && !delivery_messages_contain_last_respond(&loop_state.delivery_messages, last_respond)
     {
