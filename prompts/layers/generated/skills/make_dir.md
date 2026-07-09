@@ -9,6 +9,8 @@ Independent base skill for creating directories. Use `{"type":"call_skill","skil
 | Param | Required | Type | Default | Description |
 |-------|----------|------|---------|-------------|
 | `path` | yes | string(path) | - | Directory path to create. |
+| `parents` | no | bool | `true` | Whether to create missing parent directories. |
+| `recursive` | no | bool | `true` | Alias for `parents` when planning mkdir-style operations. |
 
 ## Output
 - Confirmation with the created path.

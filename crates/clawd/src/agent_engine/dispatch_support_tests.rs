@@ -248,6 +248,34 @@ fn unsupported_confirm_arg_is_removed_before_make_dir_skill_call() {
 }
 
 #[test]
+fn supported_parents_arg_is_kept_before_make_dir_skill_call() {
+    let state = test_state_with_registry();
+    let canonical = state.resolve_canonical_skill_name("make_dir");
+    let manifest = state.skill_manifest(&canonical).expect("make_dir manifest");
+    assert!(
+        manifest
+            .input_schema
+            .as_ref()
+            .and_then(|schema| schema.get("properties"))
+            .and_then(|properties| properties.get("parents"))
+            .is_some(),
+        "make_dir manifest should expose parents input_schema property"
+    );
+    let mut args = serde_json::json!({
+        "path": "document",
+        "parents": true
+    });
+
+    let removed = strip_unsupported_planner_metadata_args(&state, &canonical, &mut args);
+
+    assert!(removed.is_empty(), "{removed:?}");
+    assert_eq!(
+        args,
+        serde_json::json!({"path": "document", "parents": true})
+    );
+}
+
+#[test]
 fn confirm_arg_is_kept_when_skill_schema_declares_it() {
     let state = test_state_with_registry();
     let mut args = serde_json::json!({

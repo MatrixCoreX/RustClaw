@@ -256,6 +256,43 @@ async fn remove_file_keeps_directory_delete_explicit() {
 }
 
 #[tokio::test]
+async fn make_dir_accepts_parents_machine_arg() {
+    let root = TempDirGuard::new("make_dir_parents");
+    let state = test_state(root.path.clone());
+
+    let output = execute_builtin_skill(
+        &state,
+        "make_dir",
+        &json!({"path": "nested/child", "parents": true}),
+    )
+    .await
+    .expect("parents=true should create missing parents");
+
+    assert!(output.starts_with("created directory "));
+    assert!(root.path.join("nested/child").is_dir());
+}
+
+#[tokio::test]
+async fn make_dir_parents_false_does_not_create_missing_parents() {
+    let root = TempDirGuard::new("make_dir_no_parents");
+    let state = test_state(root.path.clone());
+
+    let err = execute_builtin_skill(
+        &state,
+        "make_dir",
+        &json!({"path": "nested/child", "parents": false}),
+    )
+    .await
+    .expect_err("parents=false should not create missing parents");
+
+    let structured =
+        crate::skills::parse_structured_skill_error(&err).expect("structured make_dir error");
+    assert_eq!(structured.skill, "make_dir");
+    assert_eq!(structured.error_kind, "not_found");
+    assert!(!root.path.join("nested/child").exists());
+}
+
+#[tokio::test]
 async fn run_cmd_accepts_timeout_seconds_override() {
     let root = TempDirGuard::new("run_cmd_timeout_override");
     let state = test_state(root.path.clone());
