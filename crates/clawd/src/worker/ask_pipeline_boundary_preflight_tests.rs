@@ -1,4 +1,7 @@
-use super::defer_locator_binding_to_agent_loop;
+use super::{
+    defer_locator_binding_to_agent_loop,
+    defer_locator_binding_to_agent_loop_preserving_content_evidence,
+};
 
 fn executable_route_with_semantic(kind: crate::OutputSemanticKind) -> crate::RouteResult {
     crate::RouteResult {
@@ -66,4 +69,23 @@ fn defer_locator_binding_clears_locatorless_runtime_contract_marker() {
         crate::OutputSemanticKind::None
     );
     assert!(!route.output_contract.requires_content_evidence);
+}
+
+#[test]
+fn defer_locator_binding_can_preserve_observation_requirement_for_agent_loop() {
+    let mut route =
+        executable_route_with_semantic(crate::OutputSemanticKind::ContentExcerptSummary);
+
+    defer_locator_binding_to_agent_loop_preserving_content_evidence(&mut route);
+
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::None
+    );
+    assert!(route.output_contract.locator_hint.is_empty());
+    assert_eq!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    );
+    assert!(route.output_contract.requires_content_evidence);
 }

@@ -30,7 +30,10 @@ kind = "builtin"
 output_kind = "text"
 side_effect = true
 auto_invocable = true
-input_schema = { type = "object", required = ["command"], properties = { command = { type = "string" } } }
+input_schema = { type = "object", required = ["command"], properties = { action = { type = "string" }, command = { type = "string" }, timeout_seconds = { type = "integer" }, idle_timeout_seconds = { type = "integer" }, max_output_bytes = { type = "integer" } } }
+planner_capabilities = [
+  { name = "system.inspect_cli_help", action = "inspect_cli_help", effect = "observe", required = ["command"], risk_level = "low", idempotent = true, dedup_scope = "args" },
+]
 
 [[skills]]
 name = "list_dir"

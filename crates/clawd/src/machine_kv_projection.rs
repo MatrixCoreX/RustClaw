@@ -32,10 +32,10 @@ pub(crate) fn requested_machine_kv_summary_from_observations(
     {
         return None;
     }
-    if !markers
-        .iter()
-        .all(|marker| machine_marker_is_observed(marker, observed_texts))
-    {
+    if !markers.iter().all(|marker| {
+        machine_marker_is_observed(marker, observed_texts)
+            || observed_machine_placeholder_projection(marker, observed_texts).is_some()
+    }) {
         return None;
     }
     if !template_markers
@@ -57,6 +57,10 @@ pub(crate) fn requested_machine_kv_summary_from_observations(
     let mut parts = Vec::new();
     for marker in markers {
         if let Some(projected) = observed_machine_marker_projection(marker.as_str(), observed_texts)
+        {
+            parts.push(projected);
+        } else if let Some(projected) =
+            observed_machine_placeholder_projection(marker.as_str(), observed_texts)
         {
             parts.push(projected);
         } else if valid_single_machine_marker(marker.as_str()) {
@@ -792,6 +796,71 @@ fn observed_machine_marker_projection(marker: &str, observed_texts: &[String]) -
                 .and_then(projected_machine_value)
         })
         .map(|value| format!("{marker}={value}"))
+}
+
+fn observed_machine_placeholder_projection(
+    marker: &str,
+    observed_texts: &[String],
+) -> Option<String> {
+    let placeholder = observed_placeholder_value_for_marker(marker, observed_texts)?;
+    Some(format!("{marker}={placeholder}"))
+}
+
+fn observed_placeholder_value_for_marker(
+    marker: &str,
+    observed_texts: &[String],
+) -> Option<String> {
+    let candidates = machine_placeholder_candidates_for_marker(marker);
+    if candidates.is_empty() {
+        return None;
+    }
+    for candidate in candidates {
+        let placeholder = format!("<{candidate}>");
+        if observed_texts
+            .iter()
+            .any(|text| text.contains(placeholder.as_str()))
+        {
+            return Some(placeholder);
+        }
+    }
+    None
+}
+
+fn machine_placeholder_candidates_for_marker(marker: &str) -> Vec<String> {
+    let Some(base) = marker.rsplit('.').next().map(str::trim) else {
+        return Vec::new();
+    };
+    if base.is_empty() || !valid_machine_key(base) || filename_like_machine_token(base) {
+        return Vec::new();
+    }
+    let parts = base
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() < 2 {
+        return Vec::new();
+    }
+    let mut candidates = Vec::new();
+    push_unique_placeholder_candidate(&mut candidates, &parts);
+    for start in 1..parts.len() {
+        let suffix = &parts[start..];
+        if suffix.len() >= 2 {
+            push_unique_placeholder_candidate(&mut candidates, suffix);
+        }
+    }
+    candidates
+}
+
+fn push_unique_placeholder_candidate(candidates: &mut Vec<String>, parts: &[&str]) {
+    let candidate = parts.join("_").to_ascii_uppercase();
+    if !candidate.is_empty()
+        && candidate
+            .chars()
+            .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
+        && !candidates.iter().any(|existing| existing == &candidate)
+    {
+        candidates.push(candidate);
+    }
 }
 
 fn projected_machine_value(raw: &str) -> Option<String> {

@@ -439,7 +439,10 @@ fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
     let risk_level = effective_step_risk_level(state, &normalized_skill, &step.args);
     let dry_run_observe_only =
         crate::execution_recipe::dry_run_observes_only_action(&normalized_skill, &step.args);
+    let registry_non_mutating_action =
+        registry_declares_non_mutating_planner_action(state, &normalized_skill, &step.args);
     let requires_confirmation = !dry_run_observe_only
+        && !registry_non_mutating_action
         && (state
             .skill_invocation_requires_confirmation_policy(&normalized_skill, Some(&step.args))
             || is_confirmation_like_skill(&normalized_skill)

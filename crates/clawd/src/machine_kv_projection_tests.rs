@@ -73,6 +73,33 @@ fn machine_summary_accepts_nested_machine_token_value() {
 }
 
 #[test]
+fn machine_summary_projects_cli_placeholder_for_required_machine_field() {
+    let observed = vec![
+        "Usage: clawcli resume --text <TEXT> <TASK_ID>\n\nArguments:\n  <TASK_ID>  Existing task id to continue"
+            .to_string(),
+    ];
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Return required machine field resume_task_id.",
+        &observed,
+    );
+
+    assert_eq!(summary.as_deref(), Some("resume_task_id=<TASK_ID>"));
+}
+
+#[test]
+fn machine_summary_does_not_project_placeholder_without_matching_field_suffix() {
+    let observed = vec!["Usage: demo --text <TEXT> <TASK_ID>".to_string()];
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Return required machine field checkpoint_id.",
+        &observed,
+    );
+
+    assert!(summary.is_none());
+}
+
+#[test]
 fn machine_summary_preserves_dotted_markers_and_embedded_pairs() {
     let observed = vec![
         "task_control.resume.dry_run task_control.pause.dry_run checkpoint_id=ckpt-1 task_id=00000000-0000-4000-8000-000000000010 pause_seconds=120 would_mutate=false"

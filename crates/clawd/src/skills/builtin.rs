@@ -571,6 +571,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             ensure_only_keys(
                 map,
                 &[
+                    "action",
                     "command",
                     "cwd",
                     "request_text",

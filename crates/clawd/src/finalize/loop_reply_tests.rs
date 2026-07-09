@@ -1001,6 +1001,100 @@ fn requested_machine_kv_summary_replaces_conflicting_machine_values_for_required
 }
 
 #[test]
+fn requested_machine_kv_summary_patches_empty_machine_field_in_rich_answer() {
+    let task = claimed_task("task-machine-kv-patch-empty-field");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "Usage: clawcli resume --text <TEXT> <TASK_ID>\n\nArguments:\n  <TASK_ID>  Existing task id to continue",
+    ));
+    let current =
+        "clawcli resume is available.\n\nFields:\n- <TASK_ID>\n- --text <TEXT>\n\nresume_task_id=";
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return required machine field resume_task_id.",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec![
+            "clawcli resume is available.\n\nFields:\n- <TASK_ID>\n- --text <TEXT>\n\nresume_task_id=<TASK_ID>"
+        ]
+    );
+}
+
+#[test]
+fn requested_machine_kv_summary_preserves_rich_answer_with_requested_machine_line() {
+    let task = claimed_task("task-machine-kv-preserve-rich-field");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "Usage: clawcli resume --text <TEXT> <TASK_ID>\n\nArguments:\n  <TASK_ID>  Existing task id to continue",
+    ));
+    let current = "clawcli resume is available.\n\nFields:\n- <TASK_ID>\n- --text <TEXT>\n\nresume_task_id=<TASK_ID>";
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return required machine field resume_task_id.",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![current.to_string()]);
+}
+
+#[test]
+fn requested_machine_kv_summary_preserves_latest_rich_answer_over_stale_machine_value() {
+    let task = claimed_task("task-machine-kv-preserve-latest-rich-field");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "Usage: clawcli resume --text <TEXT> <TASK_ID>\n\nArguments:\n  <TASK_ID>  Existing task id to continue",
+    ));
+    let latest = "clawcli resume is available.\n\nFields:\n- task_id: <TASK_ID>\n- text: <TEXT>\n\nresume_task_id=<TASK_ID>";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", latest));
+    loop_state.last_user_visible_respond = Some(latest.to_string());
+    let mut delivery_messages = vec![
+        "resume_task_id=null".to_string(),
+        "resume_task_id=not_applicable".to_string(),
+    ];
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return required machine field resume_task_id.",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![latest.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(latest)
+    );
+}
+
+#[test]
 fn requested_machine_kv_summary_ignores_context_summary_machine_tokens() {
     let task = claimed_task("task-machine-kv-context-token");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
