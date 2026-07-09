@@ -500,8 +500,9 @@ fn prefer_latest_synthesis_for_compound_observation_delivery(
     if output_contract_requests_exact_delivery(route) {
         return false;
     }
-    if !route.output_contract.requires_content_evidence
+    if !contract.requires_content_evidence
         && !route_expects_synthesis_over_raw_observation(route)
+        && !route_allows_grounded_compound_terminal_delivery(route, loop_state)
     {
         return false;
     }
@@ -620,6 +621,30 @@ fn prefer_content_evidence_synthesis_for_final_delivery(
     true
 }
 
+fn route_allows_grounded_compound_terminal_delivery(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> bool {
+    let contract = route.effective_output_contract();
+    if contract.delivery_required
+        || !matches!(contract.response_shape, crate::OutputResponseShape::Free)
+        || output_contract_requests_exact_delivery(route)
+    {
+        return false;
+    }
+    let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route) else {
+        return false;
+    };
+    if !matches!(
+        shape.class(),
+        crate::evidence_policy::FinalAnswerShapeClass::GroundedSummary
+            | crate::evidence_policy::FinalAnswerShapeClass::Freeform
+    ) {
+        return false;
+    }
+    successful_non_terminal_observation_count(loop_state) >= 2
+}
+
 fn structured_compound_synthesis_can_replace_current_delivery(
     route: &crate::RouteResult,
     loop_state: &LoopState,
@@ -647,7 +672,11 @@ fn structured_compound_synthesis_can_replace_current_delivery(
     ) {
         return false;
     }
-    let observation_count = loop_state
+    successful_non_terminal_observation_count(loop_state) >= 2
+}
+
+fn successful_non_terminal_observation_count(loop_state: &LoopState) -> usize {
+    loop_state
         .executed_step_results
         .iter()
         .filter(|step| {
@@ -657,8 +686,7 @@ fn structured_compound_synthesis_can_replace_current_delivery(
                     "respond" | "synthesize_answer" | "think" | "answer_verifier"
                 )
         })
-        .count();
-    observation_count >= 2
+        .count()
 }
 
 fn agent_hook_policy_surface_payload_is_publishable(synthesis: &str) -> bool {

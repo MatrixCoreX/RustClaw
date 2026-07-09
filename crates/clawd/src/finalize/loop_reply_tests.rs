@@ -46,9 +46,9 @@ use super::{
     observed_delivery_has_complete_contract_evidence,
     observed_execution_without_publishable_delivery_outcome,
     observed_execution_without_publishable_delivery_reply, observed_synthesis_unavailable_reply,
-    path_batch_size_comparison_answer, prefer_observed_answer_for_exact_contract,
-    preferred_route_clarify_question, priority_last_respond_for_final_delivery,
-    promote_observed_language_delivery_summary,
+    path_batch_size_comparison_answer, prefer_latest_synthesis_for_compound_observation_delivery,
+    prefer_observed_answer_for_exact_contract, preferred_route_clarify_question,
+    priority_last_respond_for_final_delivery, promote_observed_language_delivery_summary,
     replace_delivery_with_deterministic_current_workspace_dirs_overview_answer,
     replace_delivery_with_deterministic_directory_purpose_answer,
     replace_delivery_with_deterministic_execution_failed_step_answer,
@@ -469,6 +469,68 @@ fn hook_policy_surface_json_can_replace_short_token_delivery() {
         "require_confirmation background_wait stage=pre_tool_use",
         &synthesis,
     ));
+}
+
+#[test]
+fn grounded_compound_delivery_preserves_latest_terminal_language_over_observed_projection() {
+    let task = claimed_task("task-grounded-compound-terminal");
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "log_analyze",
+        r#"{"keyword_counts":{"error":1,"warn":2},"path":"logs/app.log"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "fs_basic",
+        r##"{"action":"read_range","path":"docs/service_notes.md","excerpt":"# Service Notes\nrestart guidance"}"##,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_3",
+        "transform",
+        r#"{"formatted":"| name | score |\n| beta | 12 |"}"#,
+    ));
+    let terminal_answer = concat!(
+        "1) log evidence: error=1 warn=2\n",
+        "2) document evidence: Service Notes restart guidance\n",
+        "3) table:\n",
+        "| name | score |\n",
+        "| beta | 12 |"
+    );
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_4",
+        "synthesize_answer",
+        terminal_answer,
+    ));
+    let mut delivery_messages = vec!["| name | score |\n| beta | 12 |".to_string()];
+    loop_state.delivery_messages = delivery_messages.clone();
+    loop_state.last_user_visible_respond = delivery_messages.first().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(prefer_latest_synthesis_for_compound_observation_delivery(
+        &task,
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut delivery_messages,
+        &mut finalizer_summary,
+    ));
+
+    assert_eq!(delivery_messages, vec![terminal_answer.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(terminal_answer)
+    );
+    assert_eq!(
+        finalizer_summary.as_ref().and_then(|summary| summary.stage),
+        Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric)
+    );
 }
 
 #[test]

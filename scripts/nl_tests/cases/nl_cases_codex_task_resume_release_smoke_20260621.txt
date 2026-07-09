@@ -54,7 +54,7 @@ codex_task_resume_release_smoke|web_search_readonly_en|covers:web_search_extract
 
 codex_task_resume_release_smoke|schedule_boundary_dry_run_zh|covers:schedule,dry_run;requires_tool_call=true;dry_run,no_external_side_effect|如果我要明天上午 9 点提醒自己检查 RustClaw 服务，请只解析日程意图和需要的结构化字段，不要创建真实提醒任务。|expect=9
 
-codex_task_resume_release_smoke|extension_gap_dry_run_zh|covers:extension_manager,dry_run;requires_tool_call=true;dry_run,no_external_side_effect|评估“增加一个只读取本地 CSV 并输出统计摘要的技能”是否需要新 external skill；只做 assess_gap，不要创建文件、不要注册、不要安装依赖。|expect=assess
+codex_task_resume_release_smoke|extension_gap_dry_run_zh|covers:extension_manager,skill:extension_manager,requires_tool_call=true,dry_run,no_external_side_effect|评估“增加一个只读取本地 CSV 并输出统计摘要的技能”是否需要新 external skill；只做 assess_gap，不要创建文件、不要注册、不要安装依赖。
 
 codex_task_resume_release_smoke|install_module_no_install_dry_run_zh|covers:install_module,package_manager,dry_run;requires_tool_call=true;dry_run,no_external_side_effect|假设需要 jq 命令，请只给出安装前检查和 dry-run 计划，不要实际安装任何包或模块；说明应该走系统包管理器还是语言模块安装。|expect=dry
 
