@@ -50,7 +50,9 @@ pub(super) fn repair_structured_field_target_from_prompt(
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route_result.output_contract.locator_hint = path.display().to_string();
     route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.output_contract.apply_output_contract_ref(
+        crate::pipeline_types::OutputContractRef::new(crate::OutputSemanticKind::None),
+    );
     route_result
         .output_contract
         .self_extension
@@ -61,7 +63,9 @@ pub(super) fn repair_structured_field_target_from_prompt(
 }
 
 fn set_effective_contract_marker(route_result: &mut crate::RouteResult, marker: &'static str) {
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.output_contract.apply_output_contract_ref(
+        crate::pipeline_types::OutputContractRef::new(crate::OutputSemanticKind::None),
+    );
     route_result.route_reason.push_str("; ");
     route_result.route_reason.push_str(marker);
 }
@@ -142,7 +146,9 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
         && super::route_reason_has_structural_marker(route_result, "recent_scalar_equality_check")
     {
         route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-        route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route_result.output_contract.apply_output_contract_ref(
+            crate::pipeline_types::OutputContractRef::new(crate::OutputSemanticKind::None),
+        );
         route_result
             .route_reason
             .push_str("; scalar_field_value_contract_repair");
@@ -168,7 +174,9 @@ pub(super) fn repair_scalar_field_value_contract_for_locator_reply(
         return;
     }
     route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.output_contract.apply_output_contract_ref(
+        crate::pipeline_types::OutputContractRef::new(crate::OutputSemanticKind::None),
+    );
     route_result
         .route_reason
         .push_str("; scalar_field_value_contract_repair");

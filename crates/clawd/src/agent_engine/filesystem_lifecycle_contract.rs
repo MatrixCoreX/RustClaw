@@ -1,6 +1,7 @@
 use serde_json::Value;
 use std::path::{Component, Path};
 
+use crate::pipeline_types::OutputContractRef;
 use crate::{AgentAction, AppState, IntentOutputContract, PlanStep, RouteResult};
 
 use super::LoopState;
@@ -29,7 +30,9 @@ pub(crate) fn effective_filesystem_lifecycle_output_contract_for_plan_steps(
         return None;
     }
     let mut output_contract = route.output_contract.clone();
-    output_contract.semantic_kind = crate::OutputSemanticKind::FilesystemMutationResult;
+    output_contract.apply_output_contract_ref(OutputContractRef::new(
+        crate::OutputSemanticKind::FilesystemMutationResult,
+    ));
     output_contract.requires_content_evidence = true;
     Some(output_contract)
 }
@@ -46,7 +49,9 @@ pub(crate) fn effective_filesystem_cleanup_recovery_output_contract_for_plan_ste
         return None;
     }
     let mut output_contract = route.output_contract.clone();
-    output_contract.semantic_kind = crate::OutputSemanticKind::FilesystemMutationResult;
+    output_contract.apply_output_contract_ref(OutputContractRef::new(
+        crate::OutputSemanticKind::FilesystemMutationResult,
+    ));
     output_contract.requires_content_evidence = true;
     Some(output_contract)
 }
