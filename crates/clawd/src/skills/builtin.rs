@@ -730,14 +730,22 @@ pub(crate) async fn execute_builtin_skill_with_task(
             })
         }
         "make_dir" => {
-            ensure_only_keys(map, &["path"])?;
+            ensure_only_keys(map, &["path", "parents", "recursive"])?;
             let path = required_string(map, "path")?;
             let real_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 path,
                 builtin_allows_path_outside_workspace(state, task),
             )?;
-            std::fs::create_dir_all(&real_path).map_err(|err| {
+            let create_parents = optional_bool(map, "parents")
+                .or_else(|| optional_bool(map, "recursive"))
+                .unwrap_or(true);
+            let create_result = if create_parents {
+                std::fs::create_dir_all(&real_path)
+            } else {
+                std::fs::create_dir(&real_path)
+            };
+            create_result.map_err(|err| {
                 io_builtin_error("make_dir", "create_dir", &err, Some(path), Some(&real_path))
             })?;
             Ok(format!("created directory {}", real_path.display()))

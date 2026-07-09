@@ -224,6 +224,41 @@ async fn finalize_loop_reply_keeps_generic_lifecycle_shape_synthesis_as_structur
     assert!(reply.text.contains("beta"));
 }
 
+#[test]
+fn generic_free_execute_route_accepts_complete_lifecycle_synthesis() {
+    let mut route = free_route_result();
+    route.resolved_intent = "scratch filesystem lifecycle structured result".to_string();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let synthesis = serde_json::json!({
+        "schema_version": 1,
+        "final_answer_shape": "lifecycle_result",
+        "final_answer_shape_class": "verdict",
+        "status": "ok",
+        "observed_action_count": 5,
+        "observed_actions": [
+            "make_dir",
+            "write_text",
+            "append_text",
+            "read_range",
+            "remove_path"
+        ],
+        "steps": [
+            {"step_id": "step_1", "skill": "fs_basic", "status": "ok", "action": "make_dir"}
+        ],
+        "final_state": {"cleanup_observed": true}
+    })
+    .to_string();
+
+    assert!(
+        crate::finalize::loop_reply::route_accepts_filesystem_mutation_synthesis(
+            &route, &synthesis
+        )
+    );
+}
+
 #[tokio::test]
 async fn finalize_loop_reply_uses_status_line_for_visible_filesystem_mutation_success() {
     let state = test_state();

@@ -341,18 +341,26 @@ pub(super) fn route_accepts_filesystem_mutation_synthesis(
     route: &crate::RouteResult,
     synthesis: &str,
 ) -> bool {
+    if !filesystem_mutation_synthesis_payload_is_complete(synthesis) {
+        return false;
+    }
     let route_accepts_lifecycle = route
         .output_contract_marker_is(crate::OutputSemanticKind::FilesystemMutationResult)
         || (route.is_execute_gate()
             && !route.output_contract.delivery_required
-            && route.output_contract.requires_content_evidence
+            && !route.wants_file_delivery
+            && (route.output_contract.requires_content_evidence
+                || matches!(
+                    route.output_contract.response_shape,
+                    crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
+                ))
             && matches!(
                 route.effective_output_contract_semantic_kind(),
                 crate::OutputSemanticKind::None
                     | crate::OutputSemanticKind::CommandOutputSummary
                     | crate::OutputSemanticKind::ExecutionFailedStep
             ));
-    route_accepts_lifecycle && filesystem_mutation_synthesis_payload_is_complete(synthesis)
+    route_accepts_lifecycle
 }
 
 fn filesystem_mutation_synthesis_payload_is_complete(synthesis: &str) -> bool {

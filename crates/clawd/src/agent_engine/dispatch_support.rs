@@ -714,6 +714,9 @@ fn should_publish_respond_message(loop_state: &LoopState, text: &str) -> bool {
     if respond_machine_envelope_payload(trimmed) {
         return true;
     }
+    if respond_lifecycle_result_payload(trimmed) {
+        return true;
+    }
     if !loop_state.has_tool_or_skill_output {
         return true;
     }
@@ -742,6 +745,23 @@ fn respond_machine_envelope_payload(text: &str) -> bool {
             .and_then(Value::as_str)
             .map(str::trim)
             .is_some_and(|owner| !owner.is_empty())
+}
+
+fn respond_lifecycle_result_payload(text: &str) -> bool {
+    let Ok(payload) = serde_json::from_str::<Value>(text.trim()) else {
+        return false;
+    };
+    payload.is_object()
+        && payload.get("final_answer_shape").and_then(Value::as_str) == Some("lifecycle_result")
+        && payload.get("status").and_then(Value::as_str) == Some("ok")
+        && payload
+            .get("steps")
+            .and_then(Value::as_array)
+            .is_some_and(|steps| !steps.is_empty())
+        && payload
+            .pointer("/final_state/cleanup_observed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 fn route_requires_file_token_delivery(agent_run_context: Option<&AgentRunContext>) -> bool {

@@ -54,6 +54,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 | `write_text` | `path`, `content` | yes | string(path), string | - | Replace/write text content. Requires confirmation. |
 | `append_text` | `path`, `content` | yes | string(path), string | - | Append text content to an existing or new file. Include the requested newline in `content` when the user asks for a line append. Requires confirmation. |
 | `make_dir` | `path` | yes | string(path) | - | Create directory. Requires confirmation. |
+| `make_dir` | `parents` / `recursive` | no | bool | `true` | Create missing parent directories for mkdir-p style operations. |
 | `remove_path` | `path` | yes | string(path) | - | Remove one file. Directory removal requires `target_kind="directory"` and `recursive=true`. Requires confirmation. |
 
 ## Boundaries
