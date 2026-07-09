@@ -7,6 +7,7 @@ struct HookPolicy {
     blocked_action_refs: Vec<String>,
     blocked_tools: Vec<String>,
     require_confirmation_action_refs: Vec<String>,
+    background_wait_action_refs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +26,11 @@ impl HookOutcome {
     pub(crate) fn requires_confirmation(&self) -> bool {
         self.decision_kind()
             .is_some_and(PolicyDecision::requires_confirmation)
+    }
+
+    pub(crate) fn requires_background_wait(&self) -> bool {
+        self.decision_kind()
+            .is_some_and(PolicyDecision::requires_background_wait)
     }
 
     pub(crate) fn to_machine_json(&self, tool_or_skill: &str) -> Value {
@@ -137,6 +143,8 @@ fn evaluate_pre_tool_use(policy: &HookPolicy, action_ref: &str) -> HookOutcome {
         || token_list_contains(&policy.blocked_tools, tool_ref)
     {
         PolicyDecision::Deny
+    } else if token_list_contains(&policy.background_wait_action_refs, &action_ref) {
+        PolicyDecision::BackgroundWait
     } else if token_list_contains(&policy.require_confirmation_action_refs, &action_ref) {
         PolicyDecision::RequireConfirmation
     } else {
@@ -152,6 +160,13 @@ fn evaluate_pre_tool_use(policy: &HookPolicy, action_ref: &str) -> HookOutcome {
 }
 
 fn structured_hook_error(outcome: &HookOutcome) -> String {
+    let message_key = match outcome.decision_kind() {
+        Some(PolicyDecision::BackgroundWait) => "clawd.agent_hook.pre_tool_use_background_wait",
+        Some(PolicyDecision::RequireConfirmation) => {
+            "clawd.agent_hook.pre_tool_use_requires_confirmation"
+        }
+        _ => "clawd.agent_hook.pre_tool_use_blocked",
+    };
     json!({
         "schema_version": 1,
         "owner_layer": "agent_hooks",
@@ -160,7 +175,7 @@ fn structured_hook_error(outcome: &HookOutcome) -> String {
         "reason_code": outcome.reason_code,
         "status_code": outcome.reason_code,
         "error_kind": outcome.reason_code,
-        "message_key": "clawd.agent_hook.pre_tool_use_blocked",
+        "message_key": message_key,
         "action_ref": outcome.action_ref,
     })
     .to_string()
@@ -183,6 +198,10 @@ fn load_hook_policy(state: &AppState) -> HookPolicy {
         require_confirmation_action_refs: toml_string_array(
             root,
             &["agent", "hooks", "require_confirmation_action_refs"],
+        ),
+        background_wait_action_refs: toml_string_array(
+            root,
+            &["agent", "hooks", "background_wait_action_refs"],
         ),
     }
 }

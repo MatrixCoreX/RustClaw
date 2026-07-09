@@ -25,6 +25,9 @@ wiring and intended ownership.
   sections, so they should not be treated as active rollback controls.
 - User-visible copy should move toward `message_key` plus finalizer/LLM/i18n
   rendering before it is used in runtime behavior.
+- `agent.hooks` pre-tool policy is now wired as machine-token control:
+  deny, require-confirmation, and background-wait decisions are driven by
+  action refs/tool refs, not user natural-language text.
 
 ## Wiring Matrix
 
@@ -52,6 +55,10 @@ wiring and intended ownership.
 | `agent.loop_guard.registry_idempotency_guard_scope` | Parsed as machine token `off \| selected_agent_loop \| all`; current config uses `all`, so execution-loop repeat guard can apply beyond selected agent-loop routes. | Wired behavior. | Registry rollout gate. | Keep route-delta/repeat-block attribution review active; roll back to `selected_agent_loop` or `off` if false repeat blocks appear. |
 | `agent.loop_guard.registry_idempotency_guard` | Historical bool name; current runtime config loader does not parse it. | Ignored legacy key. | Config migration. | Do not document or extend as a config field; use `registry_idempotency_guard_scope`. |
 | `agent.loop_guard.structured_evidence_required_for_selected_contracts` | Parsed and consumed by selected agent-loop contract evidence gate. Current default is true. | Wired behavior. | Evidence coverage gate. | Keep enabled; rollback only if canary shows false evidence gaps. |
+| `agent.hooks.blocked_action_refs` | Parsed by `agent_hooks::load_hook_policy()` and evaluated against normalized `tool.action` machine refs in PreToolUse. | Wired behavior. | Agent hook policy. | Keep machine-token only; run `check_policy_decision_tokens.py` after policy changes. |
+| `agent.hooks.blocked_tools` | Parsed by `agent_hooks::load_hook_policy()` and evaluated against normalized tool tokens in PreToolUse. | Wired behavior. | Agent hook policy. | Keep machine-token only; do not add natural-language aliases. |
+| `agent.hooks.require_confirmation_action_refs` | Parsed by `agent_hooks::load_hook_policy()`; matching action refs publish a `hook_confirmation_required` checkpoint that waits for user input. | Wired behavior. | Agent hook policy / checkpoint runtime. | Keep as action-ref tokens; expand to tool-level confirmation only if a machine-token use case appears. |
+| `agent.hooks.background_wait_action_refs` | Parsed by `agent_hooks::load_hook_policy()`; matching action refs publish a `hook_background_wait` checkpoint instead of terminal failure. | Wired behavior. | Agent hook policy / checkpoint runtime. | Keep as action-ref tokens; validate waiting/resume metrics with checkpoint tests. |
 | `agent.loop_guard.crypto.*_actions` | No production Rust reader found in current audit; config comments now mark these keys `DEPRECATED`. | Deprecated compatibility config. | Registry metadata owns effect/dedup semantics. | Do not wire into runtime; use `planner_capabilities[].effect`, `semantic_tags`, `risk_level`, `once_per_task`, `dedup_scope`, and `idempotent`. |
 | `agent.loop_guard.fs_search.query_actions` | No production Rust reader found in current audit; config comments now mark this key `DEPRECATED`. | Deprecated compatibility config. | Registry metadata / capability contract. | Do not wire into runtime; replace with capability metadata if still needed. |
 | `agent.loop_guard.media.image_*_skills` | No production Rust reader found in current audit; config comments now mark these keys `DEPRECATED`. | Deprecated compatibility config. | Registry metadata / output contract. | Do not wire into runtime; use `semantic_tags` or output delivery metadata. |

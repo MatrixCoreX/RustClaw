@@ -713,6 +713,15 @@ async fn try_auto_sudo_retry_after_permission_denied(
         );
         return Ok(Some(Some("hook_confirmation_required".to_string())));
     }
+    if pre_tool_use_outcome.requires_background_wait() {
+        super::support::publish_agent_loop_checkpoint_progress(
+            state,
+            task,
+            loop_state,
+            "hook_background_wait",
+        );
+        return Ok(Some(Some("hook_background_wait".to_string())));
+    }
     if let Some(err) = crate::agent_hooks::structured_error_for_outcome(&pre_tool_use_outcome) {
         let outcome = handle_preflight_argument_failure(
             state,
@@ -1584,6 +1593,19 @@ pub(super) async fn execute_prepared_skill_action(
             continue_in_round: false,
         });
     }
+    if pre_tool_use_outcome.requires_background_wait() {
+        super::support::publish_agent_loop_checkpoint_progress(
+            state,
+            task,
+            loop_state,
+            "hook_background_wait",
+        );
+        return Ok(SkillActionOutcome {
+            ended_with_user_visible_output: false,
+            stop_signal: Some("hook_background_wait".to_string()),
+            continue_in_round: false,
+        });
+    }
     if let Some(err) = crate::agent_hooks::structured_error_for_outcome(&pre_tool_use_outcome) {
         return Ok(handle_preflight_argument_failure(
             state,
@@ -1735,6 +1757,9 @@ pub(super) async fn execute_prepared_skill_action(
     }
 }
 
+#[cfg(test)]
+#[path = "skill_execution_hook_policy_tests.rs"]
+mod hook_policy_tests;
 #[cfg(test)]
 #[path = "skill_execution_isolation_tests.rs"]
 mod isolation_tests;

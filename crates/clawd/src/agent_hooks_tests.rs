@@ -54,6 +54,30 @@ fn pre_tool_use_hook_requires_confirmation_from_machine_action_ref() {
 }
 
 #[test]
+fn pre_tool_use_hook_background_waits_from_machine_action_ref() {
+    let policy = HookPolicy {
+        background_wait_action_refs: vec!["media.generate_video".to_string()],
+        ..HookPolicy::default()
+    };
+    let outcome = evaluate_pre_tool_use(&policy, "media.generate_video");
+
+    assert_eq!(outcome.decision, "background_wait");
+    assert_eq!(
+        outcome.decision_kind(),
+        Some(PolicyDecision::BackgroundWait)
+    );
+    assert!(outcome.requires_background_wait());
+    assert!(!outcome.requires_confirmation());
+    assert_eq!(outcome.reason_code, "pre_tool_use_background_wait");
+    let error = structured_hook_error(&outcome);
+    let parsed: serde_json::Value = serde_json::from_str(&error).expect("structured hook error");
+    assert_eq!(
+        parsed["message_key"],
+        json!("clawd.agent_hook.pre_tool_use_background_wait")
+    );
+}
+
+#[test]
 fn pre_tool_use_hook_blocks_whole_tool_by_machine_token() {
     let policy = HookPolicy {
         blocked_tools: vec!["run_cmd".to_string()],

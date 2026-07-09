@@ -41,6 +41,10 @@ impl PolicyDecision {
         self == Self::RequireConfirmation
     }
 
+    pub(crate) fn requires_background_wait(self) -> bool {
+        self == Self::BackgroundWait
+    }
+
     pub(crate) fn pre_tool_use_reason_code(self) -> &'static str {
         match self {
             Self::Allow => "pre_tool_use_allowed",
