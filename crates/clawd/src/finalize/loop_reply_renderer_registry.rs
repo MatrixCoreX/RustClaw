@@ -1,5 +1,9 @@
 #![allow(dead_code)]
 
+use serde_json::{json, Value};
+
+use crate::agent_engine::LoopState;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum FinalizerRendererShapeClass {
     CapabilityResult,
@@ -102,4 +106,55 @@ pub(super) fn renderers_for_shape_class(
     FINALIZER_RENDERER_REGISTRY
         .iter()
         .filter(move |renderer| renderer.shape_class == shape_class)
+}
+
+pub(super) fn record_renderer_trace(
+    loop_state: &mut LoopState,
+    renderer: &FinalizerRendererDescriptor,
+    rendered: bool,
+    evidence_refs: Vec<String>,
+    failure_reason: Option<&'static str>,
+) {
+    let payload = json!({
+        "schema_version": 1,
+        "kind": "finalizer_renderer_trace",
+        "renderer_key": renderer.key,
+        "shape": renderer.shape_class.as_str(),
+        "summary_contract": renderer.summary_contract,
+        "owner_module": renderer.owner_module,
+        "entrypoint": renderer.entrypoint,
+        "disposition": if rendered { "rendered" } else { "skipped" },
+        "failure_reason": failure_reason,
+        "evidence_refs": evidence_refs,
+    });
+    loop_state.output_vars.insert(
+        format!("finalizer.renderer_trace.{}", renderer.key),
+        payload.to_string(),
+    );
+    upsert_renderer_trace_index(loop_state, payload.clone());
+    loop_state.task_observations.push(payload);
+}
+
+fn upsert_renderer_trace_index(loop_state: &mut LoopState, payload: Value) {
+    let renderer_key = payload
+        .get("renderer_key")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let mut traces = loop_state
+        .output_vars
+        .get("finalizer.renderer_traces")
+        .and_then(|raw| serde_json::from_str::<Vec<Value>>(raw).ok())
+        .unwrap_or_default();
+    traces.retain(|trace| {
+        trace
+            .get("renderer_key")
+            .and_then(Value::as_str)
+            .map(|existing| existing != renderer_key)
+            .unwrap_or(true)
+    });
+    traces.push(payload);
+    loop_state.output_vars.insert(
+        "finalizer.renderer_traces".to_string(),
+        json!(traces).to_string(),
+    );
 }
