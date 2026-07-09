@@ -2,9 +2,10 @@
 
 Last updated: 2026-07-01
 
-This document supports
-`plan/agent_loop_ideal_state_convergence_plan_20260615.md`. It classifies
-`configs/agent_guard.toml` fields by current wiring and intended ownership.
+This document originally supported the June 2026 agent-loop migration plan and
+is now maintained as supporting documentation for the active post-migration
+hardening plan. It classifies `configs/agent_guard.toml` fields by current
+wiring and intended ownership.
 
 ## Summary
 

@@ -6,7 +6,7 @@ use super::{
     OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
 };
 
-pub(super) fn current_workspace_generic_summary_needs_semantic_contract(
+pub(super) fn current_workspace_generic_summary_needs_workspace_summary_contract(
     output_contract: &IntentOutputContract,
 ) -> bool {
     output_contract.requires_content_evidence

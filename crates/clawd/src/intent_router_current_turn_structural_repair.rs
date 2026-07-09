@@ -9,7 +9,7 @@ use super::{
     archive_pair_contract_from_surface, archive_read_contract_from_surface,
     config_mutation_contract_from_surface,
     current_turn_extension_inventory_file_paths_repair_applies,
-    current_workspace_generic_summary_needs_semantic_contract,
+    current_workspace_generic_summary_needs_workspace_summary_contract,
     existence_with_path_mixed_locator_summary_repair,
     explicit_surface_path_facts_fallback_decision,
     extension_inventory_locator_hint_should_use_workspace,
@@ -253,7 +253,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("existing_observed_context_synthesis");
     } else if route_reason_has_any_machine_marker(route_reason, FRESH_EVIDENCE_CONTRACT_MARKERS) {
         output_contract.requires_content_evidence = true;
-        reason = Some("semantic_contract_requires_evidence");
+        reason = Some("output_contract_requires_evidence");
     }
 
     if let Some((semantic_kind, locator_hint)) =
@@ -555,7 +555,7 @@ pub(super) fn apply_current_turn_structural_contract_repair(
         reason = Some("structured_keys_scalar_response_requires_field_value");
     }
 
-    if current_workspace_generic_summary_needs_semantic_contract(output_contract) {
+    if current_workspace_generic_summary_needs_workspace_summary_contract(output_contract) {
         if current_turn_extension_inventory_file_paths_repair_applies(
             output_contract,
             req,
@@ -580,14 +580,14 @@ pub(super) fn apply_current_turn_structural_contract_repair(
             if output_contract.locator_hint.trim().is_empty() {
                 output_contract.locator_hint = workspace_root.display().to_string();
             }
-            reason = Some("current_workspace_summary_semantic_contract_repair");
+            reason = Some("current_workspace_summary_boundary_contract_repair");
         }
     }
 
     if (route_reason_has_machine_marker(route_reason, "workspace_project_summary")
         || matches!(
             reason,
-            Some("current_workspace_summary_semantic_contract_repair")
+            Some("current_workspace_summary_boundary_contract_repair")
         ))
         && !matches!(
             output_contract.locator_kind,

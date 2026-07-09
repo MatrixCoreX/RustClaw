@@ -52,7 +52,7 @@ fn explicit_locator_summary_still_requires_fresh_evidence() {
         Some(TargetTaskPolicy::ReuseActive),
     );
 
-    assert_eq!(reason, Some("semantic_contract_requires_evidence"));
+    assert_eq!(reason, Some("output_contract_requires_evidence"));
     assert!(contract.requires_content_evidence);
 }
 

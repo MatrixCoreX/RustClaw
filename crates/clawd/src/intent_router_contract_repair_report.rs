@@ -78,7 +78,7 @@ fn contract_repair_source_class(source: &str) -> &'static str {
         | "structured_contract"
         | "structured_recipe"
         | "tool_payload" => "schema_normalization",
-        "boundary_contract" => "contract_integrity_repair",
+        "boundary_contract" | "llm_boundary_contract" => "contract_integrity_repair",
         "structural_cleanup" => "boundary_safety_repair",
         "conservative_none" => "boundary_safety_repair",
         _ => "machine_repair_unclassified",

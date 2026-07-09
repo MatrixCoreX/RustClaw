@@ -540,7 +540,7 @@ fn current_workspace_generic_summary_contract_repair_uses_workspace_project_summ
 
     assert_eq!(
         repair,
-        Some("current_workspace_summary_semantic_contract_repair")
+        Some("current_workspace_summary_boundary_contract_repair")
     );
     assert_eq!(
         contract.semantic_kind,
