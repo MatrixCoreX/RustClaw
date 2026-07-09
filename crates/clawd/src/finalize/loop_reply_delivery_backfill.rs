@@ -8,9 +8,9 @@ use crate::delivery_utils::trim_path_token;
 use crate::ClaimedTask;
 
 use super::{
-    current_user_visible_delivery_text, latest_publishable_synthesis_step_matches,
-    latest_successful_observation_body, latest_successful_raw_observation_body,
-    latest_tail_read_range_answer_from_loop, log_deterministic_delivery_record,
+    current_user_visible_delivery_text, latest_bounded_read_range_answer_from_loop,
+    latest_publishable_synthesis_step_matches, latest_successful_observation_body,
+    latest_successful_raw_observation_body, log_deterministic_delivery_record,
     looks_like_raw_command_snapshot, looks_like_structured_machine_output,
     message_is_non_answer_separator, planned_delivery_is_publishable_model_language_answer,
     raw_command_output_needs_structural_projection, route_allows_latest_tail_read_range_delivery,
@@ -614,7 +614,7 @@ fn backfill_latest_tail_read_range_delivery(
     if !route_allows_latest_tail_read_range_delivery(route) {
         return false;
     }
-    let Some(answer) = latest_tail_read_range_answer_from_loop(loop_state, false) else {
+    let Some(answer) = latest_bounded_read_range_answer_from_loop(loop_state, false) else {
         return false;
     };
     if answer.trim().is_empty() {
