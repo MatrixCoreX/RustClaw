@@ -77,6 +77,84 @@ fn active_bound_target_rewrites_matching_basename_without_route_prebind_marker()
 }
 
 #[test]
+fn active_bound_target_does_not_rewrite_current_turn_concrete_path() {
+    let mut route = route_result(
+        crate::AskMode::respond_trace(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "README.md".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.requires_content_evidence = true;
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "active_bound_targets".to_string(),
+        json!(["/home/guagua/rustclaw/README.md"]).to_string(),
+    );
+    let requested = "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md";
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "read_text_range",
+            "path": requested,
+            "mode": "head",
+            "n": 40
+        }),
+    }];
+
+    let normalized = rewrite_active_bound_target_observations_to_matching_locator_hint(
+        Some(&route),
+        &loop_state,
+        actions,
+    );
+
+    let Some((_, args)) = planned_call(&normalized[0]) else {
+        panic!("expected call");
+    };
+    assert_eq!(args.get("path").and_then(Value::as_str), Some(requested));
+}
+
+#[test]
+fn auto_locator_file_read_rewrite_preserves_current_turn_concrete_path() {
+    let mut route = route_result(
+        crate::AskMode::respond_trace(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "README.md".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.requires_content_evidence = true;
+    let requested = "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md";
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "read_text_range",
+            "path": requested,
+            "mode": "head",
+            "n": 40
+        }),
+    }];
+
+    let normalized = super::super::normalize_planned_actions_with_original_and_context(
+        &test_state(),
+        Some(&route),
+        &LoopState::new(2),
+        "read explicit target",
+        Some("read explicit target"),
+        None,
+        Some("/home/guagua/rustclaw/README.md"),
+        actions,
+    );
+
+    let Some((_, args)) = planned_call(&normalized[0]) else {
+        panic!("expected call");
+    };
+    assert_eq!(args.get("path").and_then(Value::as_str), Some(requested));
+}
+
+#[test]
 fn session_alias_delivery_rewrites_from_loop_required_alias_target_without_route_marker() {
     let mut route = delivery_route_result();
     route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;

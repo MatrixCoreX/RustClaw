@@ -84,6 +84,7 @@ pub(super) use execution_context::execution_user_request;
 use execution_context::{
     sanitize_untrusted_normalizer_answer_candidate_for_execution,
     sanitize_untrusted_normalizer_freeform_rewrite_for_direct_chat_execution,
+    sanitize_untrusted_normalizer_locator_completion_for_loop_boundary,
 };
 use file_delivery::{
     active_anchor_file_delivery_without_structured_reference_should_defer_to_agent_loop,
@@ -108,6 +109,7 @@ use locatorless_observation_guard::{
 };
 use post_route_binding::{
     auto_locator_scalar_file_without_current_locator_should_defer_to_agent_loop,
+    auto_locator_unbound_workspace_child_without_current_locator_should_defer_to_agent_loop,
     direct_auto_locator_path,
 };
 use post_route_refinement::apply_post_route_refinements;
@@ -125,6 +127,7 @@ use structured_anchor_guard::{
     session_has_authoritative_deictic_anchor, structured_anchor_route_requires_evidence_repair,
 };
 use unbound_context_guard::{
+    current_workspace_summary_repair_without_bound_locator_should_defer_to_agent_loop,
     deictic_memory_only_route_should_defer_to_agent_loop,
     execute_route_without_input_locator_should_plan,
     runtime_status_query_route_can_plan_without_locator,
@@ -253,6 +256,34 @@ fn push_pre_loop_clarify_candidate(candidates: &mut Vec<&'static str>, candidate
     if !candidates.contains(&candidate) {
         candidates.push(candidate);
     }
+}
+
+pub(super) fn pre_loop_candidates_redact_untrusted_workspace_child(
+    candidates: &[&'static str],
+) -> bool {
+    candidates.iter().any(|candidate| {
+        matches!(
+            *candidate,
+            "auto_locator_unbound_workspace_child_without_current_locator"
+                | "unbound_targeted_evidence"
+                | "implicit_workspace_file_locator"
+                | "model_completed_workspace_file_locator"
+                | "inferred_missing_workspace_locator"
+                | "background_only_locator"
+                | "bare_topic_model_supplied_locator"
+                | "unbound_model_context_target"
+        )
+    })
+}
+
+fn post_route_redacts_untrusted_workspace_child(
+    post_route: &crate::post_route_policy::PostRoutePolicyResult,
+) -> bool {
+    post_route.gate_record.reason_code == "post_route_non_boundary_clarify_deferred_to_agent_loop"
+        || route_reason_has_marker(
+            &post_route.execution_route_result,
+            "standalone_freeform_clarify_loop_context",
+        )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -387,7 +418,13 @@ fn agent_loop_boundary_observations_block(
     let current_request_locator = if default_main_config_contract.is_some() {
         None
     } else {
-        current_request_locator_observation(state, prompt, route)
+        current_request_locator_observation(
+            state,
+            prompt,
+            route,
+            pre_loop_candidates_redact_untrusted_workspace_child(pre_loop_clarify_candidates)
+                || post_route_redacts_untrusted_workspace_child(post_route),
+        )
     };
     let registry_capability_contract =
         registry_capability_contract_observation(resolved_prompt, route);
@@ -509,6 +546,7 @@ fn current_request_locator_observation(
     state: &AppState,
     prompt: &str,
     route: &crate::RouteResult,
+    redact_untrusted_workspace_child: bool,
 ) -> Option<serde_json::Value> {
     if default_main_config_contract_observation(state, prompt, route).is_some() {
         return None;
@@ -543,6 +581,13 @@ fn current_request_locator_observation(
     }
     let has_concrete_surface = current_request_has_concrete_locator_surface(prompt);
     let resolved_workspace_child = current_request_resolves_workspace_child_locator(state, prompt);
+    let resolved_workspace_child_redacted = redact_untrusted_workspace_child
+        && !has_concrete_surface
+        && explicit_locator_hints.is_empty()
+        && resolved_workspace_child
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|path| !path.is_empty());
     let resolved_workspace_path_pair = current_request_quantity_pair_evidence(state, prompt, route)
         .map(|(left, right)| vec![left, right])
         .unwrap_or_default();
@@ -562,6 +607,7 @@ fn current_request_locator_observation(
     if !has_concrete_surface
         && explicit_locator_hints.is_empty()
         && resolved_workspace_child.is_none()
+        && !resolved_workspace_child_redacted
         && resolved_workspace_path_pair.is_empty()
         && resolved_workspace_root.is_none()
         && !has_multiple_local_paths
@@ -572,7 +618,12 @@ fn current_request_locator_observation(
         "source": "current_request",
         "has_concrete_surface": has_concrete_surface,
         "explicit_locator_hints": explicit_locator_hints,
-        "resolved_workspace_child": resolved_workspace_child.as_deref().unwrap_or(""),
+        "resolved_workspace_child": if resolved_workspace_child_redacted {
+            ""
+        } else {
+            resolved_workspace_child.as_deref().unwrap_or("")
+        },
+        "resolved_workspace_child_redacted": resolved_workspace_child_redacted,
         "resolved_workspace_path_pair": resolved_workspace_path_pair,
         "mentions_workspace_root": mentions_workspace_root,
         "resolved_workspace_root": resolved_workspace_root.as_deref().unwrap_or(""),
@@ -1180,6 +1231,13 @@ fn build_loop_context_after_boundary_preflight(
         &mut post_route.execution_route_result,
         prompt,
         turn_analysis,
+        &mut resolved_prompt_for_execution,
+        &mut prompt_with_memory_for_execution,
+    );
+    sanitize_untrusted_normalizer_locator_completion_for_loop_boundary(
+        &mut post_route.execution_route_result,
+        prompt,
+        &pre_loop_clarify_candidates,
         &mut resolved_prompt_for_execution,
         &mut prompt_with_memory_for_execution,
     );

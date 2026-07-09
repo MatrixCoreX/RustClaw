@@ -20,6 +20,7 @@ fn should_preserve_original_inline_structured_input(
 enum ExecutionContextSanitization {
     FreeformRewrite,
     AnswerCandidate,
+    LocatorCompletion,
 }
 
 impl ExecutionContextSanitization {
@@ -30,6 +31,9 @@ impl ExecutionContextSanitization {
             }
             Self::AnswerCandidate => {
                 "untrusted_normalizer_answer_candidate_removed_from_execution_context"
+            }
+            Self::LocatorCompletion => {
+                "untrusted_normalizer_locator_completion_removed_from_execution_context"
             }
         }
     }
@@ -76,6 +80,40 @@ pub(super) fn sanitize_untrusted_normalizer_freeform_rewrite_for_direct_chat_exe
     prompt_with_context.push_str(&prompt_context_suffix);
     *prompt_with_memory_for_execution = prompt_with_context;
     ExecutionContextSanitization::FreeformRewrite.record(route_result);
+}
+
+pub(super) fn sanitize_untrusted_normalizer_locator_completion_for_loop_boundary(
+    route_result: &mut crate::RouteResult,
+    prompt: &str,
+    pre_loop_clarify_candidates: &[&'static str],
+    resolved_prompt_for_execution: &mut String,
+    prompt_with_memory_for_execution: &mut String,
+) {
+    let should_sanitize_locator_completion =
+        super::pre_loop_candidates_redact_untrusted_workspace_child(pre_loop_clarify_candidates)
+            || super::route_reason_has_marker(
+                route_result,
+                "standalone_freeform_clarify_loop_context",
+            );
+    if prompt.trim().is_empty()
+        || !should_sanitize_locator_completion
+        || route_result.resolved_intent.trim() == prompt.trim()
+    {
+        return;
+    }
+    let resolved_context_suffix = trusted_execution_context_suffix(resolved_prompt_for_execution);
+    let prompt_context_suffix = trusted_execution_context_suffix(prompt_with_memory_for_execution);
+    route_result.resolved_intent = prompt.to_string();
+    let mut resolved_with_context =
+        String::with_capacity(prompt.len() + resolved_context_suffix.len());
+    resolved_with_context.push_str(prompt);
+    resolved_with_context.push_str(&resolved_context_suffix);
+    *resolved_prompt_for_execution = resolved_with_context;
+    let mut prompt_with_context = String::with_capacity(prompt.len() + prompt_context_suffix.len());
+    prompt_with_context.push_str(prompt);
+    prompt_with_context.push_str(&prompt_context_suffix);
+    *prompt_with_memory_for_execution = prompt_with_context;
+    ExecutionContextSanitization::LocatorCompletion.record(route_result);
 }
 
 fn trusted_execution_context_suffix(text: &str) -> String {

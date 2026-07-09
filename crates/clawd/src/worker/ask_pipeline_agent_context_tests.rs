@@ -150,6 +150,20 @@ fn claimed_task(task_id: &str) -> crate::ClaimedTask {
     }
 }
 
+fn temp_workspace_root(label: &str) -> std::path::PathBuf {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw_post_route_refinement_{label}_{}_{}",
+        std::process::id(),
+        nonce
+    ));
+    std::fs::create_dir_all(&root).expect("temp root");
+    root
+}
+
 fn boundary_locator_post_route(
     reason_code: &'static str,
 ) -> crate::post_route_policy::PostRoutePolicyResult {
@@ -174,6 +188,172 @@ fn boundary_locator_post_route(
             crate::post_route_policy::PostRoutePolicyOutcome::BoundaryClarify,
         ),
     }
+}
+
+#[test]
+fn post_route_auto_locator_unbound_workspace_child_defers_to_agent_loop_candidate() {
+    let root = temp_workspace_root("unbound_workspace_child");
+    let readme = root.join("README.md");
+    std::fs::write(&readme, "# Demo\n").expect("readme");
+    let readme = readme.canonicalize().expect("canonical readme");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+    state.skill_rt.default_locator_search_dir = root.clone();
+    let task = claimed_task("unbound-workspace-child-auto-locator");
+    let session_snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    let mut route = base_route();
+    route.set_act_finalize(crate::ActFinalizeStyle::ChatWrapped);
+    route.route_reason =
+        "current_turn_anchor_overrides_contextual_target; executable_contract_preserved_for_agent_loop"
+            .to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "README".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let mut post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: Some(readme.display().to_string()),
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: true,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::with_owner(
+            "boundary_locator_gate",
+            "post_route_auto_locator_satisfied_path_scoped_content",
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
+        ),
+    };
+    let mut candidates = Vec::new();
+
+    apply_post_route_refinements(
+        &state,
+        &task,
+        "读一下那个 README 开头并用一句话总结",
+        None,
+        &session_snapshot,
+        &mut candidates,
+        &mut post_route,
+    );
+
+    assert_eq!(
+        candidates.as_slice(),
+        ["auto_locator_unbound_workspace_child_without_current_locator"]
+    );
+    assert!(post_route.auto_locator_path.is_none());
+    assert!(!post_route.auto_locator_resolved_direct);
+    assert!(post_route.missing_locator_for_path_scoped_content);
+    assert_eq!(
+        post_route.gate_record.reason_code,
+        "post_route_auto_locator_unbound_workspace_child_deferred_to_agent_loop"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn boundary_observation_redacts_unbound_workspace_child_locator_path() {
+    let root = temp_workspace_root("redact_unbound_workspace_child");
+    let readme = root.join("README.md");
+    std::fs::write(&readme, "# Demo\n").expect("readme");
+    let readme = readme.canonicalize().expect("canonical readme");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+    state.skill_rt.default_locator_search_dir = root.clone();
+    let session_snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    let mut route = base_route();
+    route.set_act_finalize(crate::ActFinalizeStyle::ChatWrapped);
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.requires_content_evidence = true;
+    let post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: None,
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: false,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: true,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::new(
+            "post_route_auto_locator_unbound_workspace_child_deferred_to_agent_loop",
+            crate::post_route_policy::PostRoutePolicyOutcome::RefineContract,
+        ),
+    };
+
+    let block = agent_loop_boundary_observations_block(
+        &state,
+        &post_route,
+        &session_snapshot,
+        None,
+        "读一下那个 README 开头并用一句话总结",
+        "读一下那个 README 开头并用一句话总结",
+        &["unbound_targeted_evidence"],
+    )
+    .expect("observation block");
+
+    assert!(block.contains("\"resolved_workspace_child\":\"\""));
+    assert!(block.contains("\"resolved_workspace_child_redacted\":true"));
+    assert!(!block.contains(&readme.display().to_string()));
+    assert!(block.contains("unbound_targeted_evidence"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn boundary_observation_redacts_non_boundary_clarify_workspace_child_path() {
+    let root = temp_workspace_root("redact_non_boundary_clarify");
+    let readme = root.join("README.md");
+    std::fs::write(&readme, "# Demo\n").expect("readme");
+    let readme = readme.canonicalize().expect("canonical readme");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+    state.skill_rt.default_locator_search_dir = root.clone();
+    let mut route = base_route();
+    route.route_reason = "standalone_freeform_clarify_loop_context".to_string();
+    let post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: None,
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: false,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::with_owner(
+            "agent_loop_boundary_defer",
+            "post_route_non_boundary_clarify_deferred_to_agent_loop",
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
+        ),
+    };
+
+    let block = agent_loop_boundary_observations_block(
+        &state,
+        &post_route,
+        &crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        },
+        None,
+        "读一下那个 README 开头并用一句话总结",
+        "读一下那个 README 开头并用一句话总结",
+        &[],
+    )
+    .expect("observation block");
+
+    assert!(block.contains("\"resolved_workspace_child\":\"\""));
+    assert!(block.contains("\"resolved_workspace_child_redacted\":true"));
+    assert!(!block.contains(&readme.display().to_string()));
+    assert!(block.contains("post_route_non_boundary_clarify_deferred_to_agent_loop"));
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]

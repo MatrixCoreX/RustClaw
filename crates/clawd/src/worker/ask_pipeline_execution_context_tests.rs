@@ -1,6 +1,7 @@
 use super::{
     execution_user_request, sanitize_untrusted_normalizer_answer_candidate_for_execution,
     sanitize_untrusted_normalizer_freeform_rewrite_for_direct_chat_execution,
+    sanitize_untrusted_normalizer_locator_completion_for_loop_boundary,
     should_preserve_original_inline_structured_input,
 };
 
@@ -256,6 +257,67 @@ fn evidence_route_keeps_resolved_prompt_rewrite() {
     assert!(!route_reason_has_marker(
         &route,
         "untrusted_normalizer_freeform_rewrite_removed_from_execution_context"
+    ));
+}
+
+#[test]
+fn unbound_locator_completion_uses_original_prompt_for_loop_execution() {
+    let mut route = base_route(
+        crate::AskMode::act_with_chat_finalizer(),
+        "Read the workspace README at /tmp/work/README.md and summarize it.",
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let mut resolved = format!(
+        "{}\n\n### RUNTIME_CONTEXT\nworkspace_root: /tmp/work",
+        route.resolved_intent
+    );
+    let mut prompt_with_memory = resolved.clone();
+
+    sanitize_untrusted_normalizer_locator_completion_for_loop_boundary(
+        &mut route,
+        "read that README and summarize it",
+        &["unbound_targeted_evidence"],
+        &mut resolved,
+        &mut prompt_with_memory,
+    );
+
+    assert_eq!(route.resolved_intent, "read that README and summarize it");
+    assert!(resolved.starts_with("read that README and summarize it\n\n### RUNTIME_CONTEXT"));
+    assert!(
+        prompt_with_memory.starts_with("read that README and summarize it\n\n### RUNTIME_CONTEXT")
+    );
+    assert!(!resolved.contains("/tmp/work/README.md"));
+    assert!(route_reason_has_marker(
+        &route,
+        "untrusted_normalizer_locator_completion_removed_from_execution_context"
+    ));
+}
+
+#[test]
+fn standalone_freeform_clarify_marker_removes_locator_completion_from_execution() {
+    let mut route = base_route(
+        crate::AskMode::act_with_chat_finalizer(),
+        "Read /tmp/work/README.md and summarize it.",
+    );
+    route.route_reason = "standalone_freeform_clarify_loop_context".to_string();
+    let mut resolved = route.resolved_intent.clone();
+    let mut prompt_with_memory = route.resolved_intent.clone();
+
+    sanitize_untrusted_normalizer_locator_completion_for_loop_boundary(
+        &mut route,
+        "read that README and summarize it",
+        &[],
+        &mut resolved,
+        &mut prompt_with_memory,
+    );
+
+    assert_eq!(route.resolved_intent, "read that README and summarize it");
+    assert!(!resolved.contains("/tmp/work/README.md"));
+    assert!(route_reason_has_marker(
+        &route,
+        "untrusted_normalizer_locator_completion_removed_from_execution_context"
     ));
 }
 

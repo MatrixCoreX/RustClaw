@@ -61,6 +61,7 @@ impl BoundaryClarifyCandidate {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BoundaryContractDeferral {
     AutoLocatorScalarFileWithoutCurrentLocator,
+    AutoLocatorUnboundWorkspaceChildWithoutCurrentLocator,
     DirectoryFileDeliveryRequiresStructuredSelection,
 }
 
@@ -69,6 +70,9 @@ impl BoundaryContractDeferral {
         match self {
             Self::AutoLocatorScalarFileWithoutCurrentLocator => {
                 "auto_locator_scalar_file_without_current_locator"
+            }
+            Self::AutoLocatorUnboundWorkspaceChildWithoutCurrentLocator => {
+                "auto_locator_unbound_workspace_child_without_current_locator"
             }
             Self::DirectoryFileDeliveryRequiresStructuredSelection => {
                 "directory_file_delivery_requires_structured_selection"
@@ -80,6 +84,9 @@ impl BoundaryContractDeferral {
         match self {
             Self::AutoLocatorScalarFileWithoutCurrentLocator => {
                 "post_route_auto_locator_scalar_file_deferred_to_agent_loop"
+            }
+            Self::AutoLocatorUnboundWorkspaceChildWithoutCurrentLocator => {
+                "post_route_auto_locator_unbound_workspace_child_deferred_to_agent_loop"
             }
             Self::DirectoryFileDeliveryRequiresStructuredSelection => {
                 "post_route_directory_file_delivery_deferred_to_agent_loop"
@@ -180,6 +187,16 @@ pub(super) fn apply_post_route_refinements(
         post_route.auto_locator_path.as_deref(),
     ) {
         BoundaryContractDeferral::AutoLocatorScalarFileWithoutCurrentLocator
+            .defer_to_agent_loop(pre_loop_clarify_candidates, post_route);
+    }
+    if auto_locator_unbound_workspace_child_without_current_locator_should_defer_to_agent_loop(
+        state,
+        prompt,
+        &post_route.execution_route_result,
+        session_snapshot,
+        post_route.auto_locator_path.as_deref(),
+    ) {
+        BoundaryContractDeferral::AutoLocatorUnboundWorkspaceChildWithoutCurrentLocator
             .defer_to_agent_loop(pre_loop_clarify_candidates, post_route);
     }
     if post_route.missing_locator_for_path_scoped_content

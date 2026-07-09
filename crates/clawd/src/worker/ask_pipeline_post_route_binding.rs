@@ -66,6 +66,56 @@ pub(super) fn auto_locator_scalar_file_without_current_locator_should_defer_to_a
     !super::structured_field_route_has_current_locator_surface(state, &surface)
 }
 
+pub(super) fn auto_locator_unbound_workspace_child_without_current_locator_should_defer_to_agent_loop(
+    state: &crate::AppState,
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    auto_locator_path: Option<&str>,
+) -> bool {
+    let Some(auto_locator_path) = auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    else {
+        return false;
+    };
+    let Some(resolved_child) =
+        super::current_request_resolves_workspace_child_locator(state, prompt)
+    else {
+        return false;
+    };
+    if !std::path::Path::new(auto_locator_path).is_file()
+        || super::current_request_has_concrete_locator_surface(prompt)
+        || super::current_request_has_self_contained_structured_payload(prompt)
+        || super::session_has_authoritative_deictic_anchor(prompt, route_result, session_snapshot)
+        || super::active_session_has_bound_target(session_snapshot)
+        || super::active_session_has_structured_observation_anchor(session_snapshot)
+        || !route_result.is_execute_gate()
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        || super::route_reason_has_marker(
+            route_result,
+            super::SESSION_ALIAS_LOCATOR_PREBOUND_FROM_CURRENT_REQUEST,
+        )
+        || super::route_has_capability_ref_machine_signal(route_result)
+        || super::route_reason_has_marker(
+            route_result,
+            "current_workspace_scope_from_current_request",
+        )
+    {
+        return false;
+    }
+    super::normalize_workspace_locator_path(std::path::Path::new(auto_locator_path))
+        == super::normalize_workspace_locator_path(std::path::Path::new(&resolved_child))
+}
+
 fn route_has_structured_scalar_field_contract(route_result: &crate::RouteResult) -> bool {
     route_result
         .output_contract

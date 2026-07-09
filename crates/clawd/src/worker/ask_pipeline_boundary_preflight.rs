@@ -263,7 +263,18 @@ pub(super) fn boundary_context_locator_preflight(
             route_result,
         );
     }
-    if unbound_targeted_evidence_route_should_defer_to_agent_loop(
+    if current_workspace_summary_repair_without_bound_locator_should_defer_to_agent_loop(
+        state,
+        prompt,
+        route_result,
+        session_snapshot,
+    ) {
+        BoundaryPreflightDeferral::UnboundTargetedEvidence.record(
+            task,
+            pre_loop_clarify_candidates,
+            route_result,
+        );
+    } else if unbound_targeted_evidence_route_should_defer_to_agent_loop(
         prompt,
         route_result,
         session_snapshot,
