@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::pipeline_types::OutputContractRef;
 use crate::AppState;
 
 use super::{
@@ -239,7 +240,7 @@ pub(super) fn apply_current_turn_anchor_drift_repair(
     } else {
         OutputDeliveryIntent::None
     };
-    output_contract.semantic_kind = if preserve_command_observation {
+    let output_contract_ref = if preserve_command_observation {
         if route_reason_has_machine_marker(route_reason, "execution_failed_step") {
             OutputSemanticKind::ExecutionFailedStep
         } else {
@@ -250,6 +251,7 @@ pub(super) fn apply_current_turn_anchor_drift_repair(
     } else {
         OutputSemanticKind::None
     };
+    output_contract.apply_output_contract_ref(OutputContractRef::new(output_contract_ref));
     output_contract.locator_hint = if preserve_command_observation {
         String::new()
     } else if preserve_quantity_comparison {

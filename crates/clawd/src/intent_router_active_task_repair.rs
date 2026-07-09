@@ -1,6 +1,8 @@
 use serde_json::Value;
 use std::collections::BTreeSet;
 
+use crate::pipeline_types::OutputContractRef;
+
 use super::{
     active_primary_task_prompt, active_session_has_structured_execution_target,
     active_task_turn_can_reuse_semantic_patch, active_text_followup_surface_is_chat_only,
@@ -673,7 +675,7 @@ pub(super) fn apply_active_task_structured_patch_repair(
     output_contract.delivery_required = false;
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.delivery_intent = OutputDeliveryIntent::None;
-    output_contract.semantic_kind = OutputSemanticKind::None;
+    output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
     output_contract.locator_hint.clear();
     Some("active_task_structured_patch_repair")
 }
@@ -775,7 +777,7 @@ pub(super) fn apply_active_task_scope_refinement_repair(
     output_contract.delivery_required = false;
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.delivery_intent = OutputDeliveryIntent::None;
-    output_contract.semantic_kind = OutputSemanticKind::None;
+    output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
     output_contract.locator_hint.clear();
     Some(repair_reason)
 }
@@ -851,7 +853,7 @@ pub(super) fn clear_output_contract_for_active_text_followup(
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.delivery_intent = OutputDeliveryIntent::None;
     output_contract.response_shape = OutputResponseShape::Free;
-    output_contract.semantic_kind = OutputSemanticKind::None;
+    output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
     output_contract.locator_hint.clear();
 }
 

@@ -1,3 +1,5 @@
+use crate::pipeline_types::OutputContractRef;
+
 use super::{
     ascii_token_present, execution_finalize_style_for_contract, ActFinalizeStyle,
     IntentExecutionRecipeOut, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
@@ -121,7 +123,7 @@ pub(super) fn apply_explicit_command_execution_contract_repair(
     *needs_clarify = false;
     clarify_question.clear();
     output_contract.requires_content_evidence = true;
-    output_contract.semantic_kind = if ascii_token_present(route_reason, "execution_failed_step") {
+    let output_contract_ref = if ascii_token_present(route_reason, "execution_failed_step") {
         output_contract.response_shape = OutputResponseShape::Strict;
         OutputSemanticKind::ExecutionFailedStep
     } else if preserve_command_summary_contract {
@@ -129,6 +131,7 @@ pub(super) fn apply_explicit_command_execution_contract_repair(
     } else {
         OutputSemanticKind::RawCommandOutput
     };
+    output_contract.apply_output_contract_ref(OutputContractRef::new(output_contract_ref));
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.locator_hint.clear();
     *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
@@ -221,7 +224,7 @@ pub(super) fn apply_file_delivery_contract_repair(
     output_contract.delivery_required = true;
     output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
     output_contract.response_shape = OutputResponseShape::FileToken;
-    output_contract.semantic_kind = OutputSemanticKind::None;
+    output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
     *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
     Some("file_delivery_request_preserves_delivery_contract")
 }
