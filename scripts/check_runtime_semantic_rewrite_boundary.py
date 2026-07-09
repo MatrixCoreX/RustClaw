@@ -2987,7 +2987,15 @@ def scan_schedule_preview_contract_marker() -> list[Finding]:
     fn_end = text.find("\npub(crate) async fn try_handle_schedule_request", fn_start)
     body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
     findings: list[Finding] = []
-    if '"final_answer_shape": crate::evidence_policy::FinalAnswerShape::ValidationVerdict.as_str()' not in body:
+    exposes_json_shape = (
+        '"final_answer_shape": crate::evidence_policy::FinalAnswerShape::ValidationVerdict.as_str()'
+        in body
+    )
+    exposes_kv_shape = (
+        '"final_answer_shape"' in body
+        and "crate::evidence_policy::FinalAnswerShape::ValidationVerdict.as_str()" in body
+    )
+    if not (exposes_json_shape or exposes_kv_shape):
         findings.append(
             Finding(
                 rel_path,

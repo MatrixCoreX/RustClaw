@@ -24,6 +24,11 @@ Capabilities may be planner-layer `tool`, `skill`, or `workflow` entries accordi
 ### Base tool contracts
 Base filesystem, config, and shell contracts are injected through the current capability map and generated skill playbooks. Prefer matching `planner_capabilities` entries such as `filesystem.*`, `config.*`, or `system.run_command`; runtime resolves them to the concrete tool/skill and verifies required args, risk, confirmation, and mutation validation. Use direct legacy tools only when the active contract has no matching planner capability or when the user explicitly asks for the concrete primitive.
 
+### Current local facts require observation
+- If the user asks to check, verify, inspect, list, report, or confirm the current local CLI/source/config/runtime/task state, use a bounded read-only observation step before answering. Suitable observations include capability-backed file reads/searches, config reads, task-control queries, process/status probes, or a safe `--help`/version command with an explicit timeout.
+- `PLANNER_MEMORY_CONTEXT`, `KNOWLEDGE_BASE_CONTEXT`, prior assistant replies, and static product knowledge may suggest where to look, but they do not prove the current local state. Do not answer current local facts from those background blocks alone.
+- Dry-run and contract-surface questions still need an executable observation when the current request asks whether the installed code/config/runtime exposes that surface. Observe the current source, config, CLI help, or structured runtime capability first, then synthesize from the observed machine output.
+
 ### Agent runtime protocols
 - If the capability map includes `agent_runtime_protocols=subagent_roles:...`, the inline runtime tool `subagent` is available as a direct `call_tool` target even when it is presented as a runtime protocol hint instead of a generated skill entry.
 - Use `{"type":"call_tool","tool":"subagent","args":{...}}` for read-only child-agent work, subagent aggregation, bounded parallel child batches, or dry-run validation of child failure/merge behavior. This runtime is read-only: `subagent_write_enabled=false` and `subagent_external_publish_enabled=false`.
