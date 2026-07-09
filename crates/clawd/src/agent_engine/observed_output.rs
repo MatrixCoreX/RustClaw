@@ -61,11 +61,11 @@ use output_system_inventory::{
 mod output_fs_search;
 use output_fs_search::{
     absolutize_fs_search_answer_paths, fs_search_content_presence_direct_answer_candidate,
-    fs_search_direct_answer_candidate, fs_search_find_ext_results,
-    fs_search_find_name_observed_candidate, fs_search_find_name_results,
-    fs_search_grep_text_observed_candidate, fs_search_route_filtered_listing_candidate,
-    fs_search_scalar_candidate, fs_search_semantic_listing_candidate, normalized_find_name_pattern,
-    preferred_fs_search_exact_match,
+    fs_search_contract_listing_candidate, fs_search_direct_answer_candidate,
+    fs_search_find_ext_results, fs_search_find_name_observed_candidate,
+    fs_search_find_name_results, fs_search_grep_text_observed_candidate,
+    fs_search_route_filtered_listing_candidate, fs_search_scalar_candidate,
+    normalized_find_name_pattern, preferred_fs_search_exact_match,
 };
 
 #[path = "observed_output_path_facts.rs"]

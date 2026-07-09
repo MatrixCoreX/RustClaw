@@ -12,7 +12,9 @@ pub(super) fn locator_kind_requires_path_binding(kind: OutputLocatorKind) -> boo
     )
 }
 
-pub(super) fn semantic_locator_hint_satisfies_non_path_binding(route_result: &RouteResult) -> bool {
+pub(super) fn service_status_locator_hint_satisfies_non_path_binding(
+    route_result: &RouteResult,
+) -> bool {
     route_reason_has_marker(route_result, "service_status")
         && !route_result.output_contract.locator_hint.trim().is_empty()
 }

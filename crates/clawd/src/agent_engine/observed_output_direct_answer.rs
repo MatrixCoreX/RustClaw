@@ -206,7 +206,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
                             .then(|| {
                                 route
                                     .and_then(|route| {
-                                        run_cmd_semantic_listing_text_candidate(
+                                        run_cmd_contract_listing_text_candidate(
                                             route,
                                             &observed_output.body,
                                         )
@@ -667,7 +667,7 @@ pub(super) fn fs_search_output_direct_answer_candidate(
                 fs_search_route_filtered_listing_candidate(route, value, allow_multi_result_list)
             })
         })
-        .or_else(|| route.and_then(|route| fs_search_semantic_listing_candidate(route, value)))
+        .or_else(|| route.and_then(|route| fs_search_contract_listing_candidate(route, value)))
         .or_else(|| {
             fs_search_direct_answer_candidate(
                 state,

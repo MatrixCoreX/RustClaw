@@ -20,7 +20,7 @@ use boundary_locator::{
     current_workspace_content_summary_requires_concrete_locator,
     direct_auto_locator_can_satisfy_background_clarify,
     direct_locator_path_is_unsuitable_for_contract, locator_kind_is_current_workspace,
-    locator_kind_requires_path_binding, semantic_locator_hint_satisfies_non_path_binding,
+    locator_kind_requires_path_binding, service_status_locator_hint_satisfies_non_path_binding,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -116,7 +116,7 @@ pub(crate) fn apply_post_route_policy(
     let mut execution_route_result = route_result.clone();
     let path_scoped_content_request = route_result.output_contract.requires_content_evidence
         && locator_kind_requires_path_binding(route_result.output_contract.locator_kind)
-        && !semantic_locator_hint_satisfies_non_path_binding(&route_result);
+        && !service_status_locator_hint_satisfies_non_path_binding(&route_result);
     let mut auto_locator_path = None;
     let mut auto_locator_hint = None;
     let mut auto_locator_resolved_direct = false;

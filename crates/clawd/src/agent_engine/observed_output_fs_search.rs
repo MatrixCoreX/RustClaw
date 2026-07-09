@@ -1015,7 +1015,7 @@ fn parent_directory_listing_from_paths(paths: &[String]) -> Option<String> {
     (!dirs.is_empty()).then(|| dirs.join("\n"))
 }
 
-pub(super) fn fs_search_semantic_listing_candidate(
+pub(super) fn fs_search_contract_listing_candidate(
     route: &crate::RouteResult,
     value: &serde_json::Value,
 ) -> Option<String> {
