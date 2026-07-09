@@ -826,7 +826,7 @@ fn schedule_compile_only_response(
     push_schedule_preview_kv(&mut lines, "schedule.run_at", intent.schedule.run_at.trim());
     push_schedule_preview_kv(&mut lines, "schedule.time", intent.schedule.time.trim());
     push_schedule_preview_kv(&mut lines, "schedule.cron", intent.schedule.cron.trim());
-    if intent.schedule.weekday > 0 {
+    if intent.schedule.r#type.trim() == "weekly" && intent.schedule.weekday > 0 {
         push_schedule_preview_kv(
             &mut lines,
             "schedule.weekday",
@@ -1143,10 +1143,10 @@ pub(crate) async fn try_handle_schedule_request(
             } else {
                 Some(intent.schedule.time.trim().to_string())
             };
-            let weekday = if intent.schedule.weekday <= 0 {
-                None
-            } else {
+            let weekday = if schedule_type == "weekly" && intent.schedule.weekday > 0 {
                 Some(intent.schedule.weekday)
+            } else {
+                None
             };
             let every_minutes = if intent.schedule.every_minutes <= 0 {
                 None
