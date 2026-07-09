@@ -542,6 +542,12 @@ export interface ModelConfigItem {
   input_modalities?: string[];
   output_modalities?: string[];
   available_models?: string[];
+  context_window_tokens?: number | null;
+  async_job_supported?: boolean | null;
+  shared_quota_group?: string | null;
+  shared_quota_note_key?: string | null;
+  model_list_source?: string | null;
+  capability_source?: string | null;
   risk_level?: string | null;
   dry_run_supported?: boolean | null;
   external_provider?: boolean | null;

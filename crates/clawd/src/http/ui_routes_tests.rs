@@ -338,11 +338,43 @@ api_key = "video-secret"
     );
     assert_eq!(item.output_modalities, vec!["video".to_string()]);
     assert_eq!(item.available_models, vec!["video-01", "video-02"]);
+    assert_eq!(item.async_job_supported, Some(true));
+    assert_eq!(
+        item.shared_quota_group.as_deref(),
+        Some("provider_account:minimax")
+    );
+    assert_eq!(
+        item.shared_quota_note_key.as_deref(),
+        Some("provider_account_shared_quota")
+    );
+    assert_eq!(item.model_list_source.as_deref(), Some("static_config"));
+    assert_eq!(item.capability_source.as_deref(), Some("static_metadata"));
     assert_eq!(item.risk_level.as_deref(), Some("high"));
     assert_eq!(item.dry_run_supported, Some(true));
     assert_eq!(item.external_provider, Some(true));
     assert_eq!(item.provider_supported, Some(true));
     assert_eq!(item.unsupported_reason, None);
+}
+
+#[test]
+fn llm_context_window_metadata_reads_selected_vendor_static_config() {
+    let parsed = toml::from_str::<toml::Value>(
+        r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M3"
+
+[llm.minimax]
+context_window_tokens = 1000000
+models = ["MiniMax-M3"]
+        "#,
+    )
+    .expect("parse");
+
+    assert_eq!(
+        read_llm_context_window_tokens(&parsed, "minimax"),
+        Some(1_000_000)
+    );
 }
 
 #[test]
