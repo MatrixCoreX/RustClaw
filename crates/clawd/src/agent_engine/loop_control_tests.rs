@@ -1288,6 +1288,55 @@ fn language_only_output_format_gap_keeps_best_model_answer_success() {
 }
 
 #[test]
+fn language_only_output_format_gap_prefers_latest_terminal_answer_over_stale_text() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let table_only = "| name | score |\n| --- | --- |\n| beta | 12 |";
+    let full_answer = "**1. log evidence**\n- WARN=2, ERROR=1\n\n**2. doc summary**\n- service notes\n\n**3. table**\n\n| name | score |\n| --- | --- |\n| beta | 12 |";
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    journal.record_final_answer(table_only);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "transform",
+            table_only,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "respond",
+            full_answer,
+        ));
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "language-only output shape".to_string(),
+        should_retry: true,
+        retry_instruction: "retry with requested language".to_string(),
+        confidence: 0.88,
+    });
+    let mut reply = AskReply::non_llm(table_only.to_string())
+        .with_messages(vec![table_only.to_string()])
+        .with_task_journal(journal);
+
+    assert!(try_accept_language_only_output_format_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+
+    assert_eq!(reply.text, full_answer);
+    assert_eq!(reply.messages, vec![full_answer.to_string()]);
+    let journal = reply.task_journal.as_ref().expect("journal");
+    assert_eq!(journal.final_answer.as_deref(), Some(full_answer));
+}
+
+#[test]
 fn latest_terminal_recovery_rejects_structured_visible_rewrite_gap() {
     let mut route = route_result(OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
