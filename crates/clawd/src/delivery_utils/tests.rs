@@ -501,6 +501,41 @@ fn directory_lookup_contract_does_not_replace_synthesized_answer() {
 }
 
 #[test]
+fn directory_lookup_contract_does_not_treat_slash_delimited_prose_as_locator() {
+    let mut state = test_state_with_i18n(&[]);
+    let isolated = TempDirGuard::new("directory_lookup_preserve_slash_prose");
+    state.skill_rt.workspace_root = isolated.path().to_path_buf();
+    state.skill_rt.default_locator_search_dir = isolated.path().to_path_buf();
+    write_text_file(&isolated.path().join("clawd.run.log"));
+    write_text_file(&isolated.path().join("model_io.log"));
+
+    let contract = IntentOutputContract {
+        exact_sentence_count: None,
+        delivery_intent: OutputDeliveryIntent::DirectoryLookup,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        locator_hint: "logs".to_string(),
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    };
+    let answer =
+        "logs scan found no panic/fatal/unauthorized/timeout matches in the latest records."
+            .to_string();
+
+    let (text, messages) = intercept_response_payload_for_delivery(
+        &state,
+        "Summarize the notable recent errors in logs.",
+        false,
+        &contract,
+        answer.clone(),
+        vec![answer.clone()],
+    );
+
+    assert_eq!(text, answer);
+    assert_eq!(messages, vec![answer]);
+}
+
+#[test]
 fn file_names_contract_does_not_reexpand_single_filename_answer_as_directory_lookup() {
     let mut state = test_state_with_i18n(&[]);
     let isolated = TempDirGuard::new("file_names_preserve_single_answer");

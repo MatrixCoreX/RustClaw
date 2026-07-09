@@ -47,34 +47,18 @@ impl DeliveryMessageKind {
     }
 }
 
-pub(super) fn localize_delivery_message(state: &AppState, kind: DeliveryMessageKind) -> String {
-    crate::i18n_t_with_default(state, kind.i18n_key(), &kind.machine_default_payload())
-}
-
 pub(super) fn localize_delivery_message_for_request(
     state: &AppState,
     kind: DeliveryMessageKind,
     user_request: &str,
 ) -> String {
-    match crate::language_policy::request_language_hint(user_request) {
-        "en" => crate::bilingual_t_with_default_vars(
-            state,
-            kind.i18n_key(),
-            &kind.machine_default_payload(),
-            &kind.machine_default_payload(),
-            true,
-            &[],
-        ),
-        "zh-CN" => crate::bilingual_t_with_default_vars(
-            state,
-            kind.i18n_key(),
-            &kind.machine_default_payload(),
-            &kind.machine_default_payload(),
-            false,
-            &[],
-        ),
-        _ => localize_delivery_message(state, kind),
-    }
+    crate::i18n_t_for_language_hint_with_default_vars(
+        state,
+        crate::language_policy::request_language_hint(user_request),
+        kind.i18n_key(),
+        &kind.machine_default_payload(),
+        &[],
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

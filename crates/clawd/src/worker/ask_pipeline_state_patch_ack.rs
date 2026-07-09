@@ -71,14 +71,11 @@ pub(super) fn alias_state_patch_ack_reply(
     let payload = alias_state_patch_ack_payload(message_key, reason_code, &bindings);
     let machine_default = payload.to_string();
     let language_hint = crate::language_policy::task_response_language_hint(state, task, prompt);
-    let prefer_english =
-        crate::fallback::fallback_prefers_english_for_language_hint(state, &language_hint);
-    let text = crate::bilingual_t_with_default_vars(
+    let text = crate::i18n_t_for_language_hint_with_default_vars(
         state,
+        &language_hint,
         message_key,
         &machine_default,
-        &machine_default,
-        prefer_english,
         &[],
     );
     Some(crate::AskReply::non_llm(text))

@@ -12,12 +12,11 @@ pub(super) fn compose_answer_verifier_failure_user_message(
         crate::language_policy::task_response_language_hint(state, task, user_request);
     let default_payload = answer_verifier_failure_default_payload(err_text);
     let missing_fields = answer_verifier_failure_missing_fields_text(err_text);
-    crate::bilingual_t_with_default_vars(
+    crate::i18n_t_for_language_hint_with_default_vars(
         state,
+        &language_hint,
         "clawd.msg.answer_verifier_required_evidence_block",
         &default_payload,
-        &default_payload,
-        crate::fallback::fallback_prefers_english_for_language_hint(state, &language_hint),
         &[("missing_evidence_fields", &missing_fields)],
     )
 }

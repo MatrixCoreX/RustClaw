@@ -609,15 +609,13 @@ fn synthesize_failure_default_text(
     user_text: &str,
 ) -> String {
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
-    let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
     let default_payload =
         crate::fallback::ClarifyFallbackSource::SynthesisEmpty.machine_default_payload();
-    crate::bilingual_t_with_default_vars(
+    crate::i18n_t_for_language_hint_with_default_vars(
         state,
+        &language_hint,
         crate::fallback::ClarifyFallbackSource::SynthesisEmpty.i18n_key(),
         &default_payload,
-        &default_payload,
-        prefer_english,
         &[],
     )
 }

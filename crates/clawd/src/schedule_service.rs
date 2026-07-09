@@ -768,13 +768,16 @@ fn schedule_needs_more_info_fallback_text(
     prompt: &str,
 ) -> String {
     let language_hint = crate::language_policy::task_response_language_hint(state, task, prompt);
-    let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
-    crate::bilingual_t_with_default_vars(
+    let default_payload = serde_json::json!({
+        "message_key": "schedule.msg.create_needs_more_info",
+        "reason_code": "schedule_needs_more_info",
+    })
+    .to_string();
+    crate::i18n_t_for_language_hint_with_default_vars(
         state,
+        &language_hint,
         "schedule.msg.create_needs_more_info",
-        "请补充必要信息后，我再帮你创建这个定时任务。",
-        "Please provide the necessary details first, then I can create this scheduled job for you.",
-        prefer_english,
+        &default_payload,
         &[],
     )
 }
