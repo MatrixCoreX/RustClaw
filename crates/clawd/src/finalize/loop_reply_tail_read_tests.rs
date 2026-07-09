@@ -130,6 +130,67 @@ fn bounded_head_read_range_observed_answer_replaces_failed_synthesis_for_content
 }
 
 #[test]
+fn bounded_head_read_range_recovery_allows_unclassified_failed_free_route() {
+    let state = test_state();
+    let task = claimed_task("task-head-read-free-route");
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state
+        .delivery_messages
+        .push("finalizer did not produce a publishable answer".to_string());
+    loop_state.last_user_visible_respond =
+        Some("finalizer did not produce a publishable answer".to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","mode":"head","requested_n":4,"start_line":1,"end_line":4,"total_lines":9,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for RustClaw NL regression tests.\n4|","path":"scripts/nl_tests/fixtures/device_local/README.md"}}"#,
+    ));
+    loop_state.executed_step_results.push(err_step_result(
+        "step_2",
+        "synthesize_answer",
+        "synthesis failed",
+    ));
+    let mut finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::AllowFallback),
+        parsed: true,
+        contract_ok: false,
+        completion_ok: Some(false),
+        grounded_ok: Some(false),
+        format_ok: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+
+    assert!(replace_delivery_with_latest_tail_read_range_answer(
+        &state,
+        &task,
+        "read the first 4 lines",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+    ));
+
+    let expected = "# Device Local Fixture\n\nThis directory contains stable local files for RustClaw NL regression tests.";
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(expected)
+    );
+    assert_eq!(loop_state.delivery_messages, vec![expected.to_string()]);
+    assert_eq!(
+        finalizer_summary.and_then(|summary| summary.disposition),
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
 fn one_sentence_content_excerpt_tail_read_selects_observed_log_line() {
     let state = test_state();
     let task = claimed_task("task-tail-one-sentence");
