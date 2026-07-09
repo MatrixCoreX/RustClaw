@@ -405,7 +405,7 @@ fn redacted_workspace_child_boundary_blocks_path_content_read_plan() {
                 step_id: "s1".to_string(),
                 action_type: "call_tool".to_string(),
                 skill: "fs_basic".to_string(),
-                args: json!({ "action": "read_text_range", "path": "/tmp/work/README.md" }),
+                args: json!({ "action": "read_text_range", "path": "/etc/rustclaw-verifier-outside/README.md" }),
                 depends_on: Vec::new(),
                 why: String::new(),
             }]),
@@ -425,6 +425,73 @@ fn redacted_workspace_child_boundary_blocks_path_content_read_plan() {
 }
 
 #[test]
+fn redacted_workspace_child_boundary_allows_workspace_relative_content_read_plan() {
+    let state = test_state();
+    let task = test_task();
+    let context = redacted_workspace_child_boundary_context();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("summarize workspace README"),
+            context_bundle_summary: Some(&context),
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({ "action": "read_text_range", "path": "README.md" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+
+    assert!(result.approved);
+    assert!(result
+        .issues
+        .iter()
+        .all(|issue| !matches!(issue.kind, VerifyIssueKind::RouteClarifyRequired)));
+    assert!(result.shadow_blocked_reason.is_none());
+}
+
+#[test]
+fn redacted_workspace_child_boundary_allows_workspace_absolute_content_read_plan() {
+    let state = test_state();
+    let task = test_task();
+    let context = redacted_workspace_child_boundary_context();
+    let path = state.skill_rt.workspace_root.join("README.md");
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("summarize workspace README"),
+            context_bundle_summary: Some(&context),
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({ "action": "read_text_range", "path": path.display().to_string() }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+
+    assert!(result.approved);
+    assert!(result
+        .issues
+        .iter()
+        .all(|issue| !matches!(issue.kind, VerifyIssueKind::RouteClarifyRequired)));
+    assert!(result.shadow_blocked_reason.is_none());
+}
+
+#[test]
 fn redacted_workspace_child_boundary_in_plan_goal_blocks_path_content_read_plan() {
     let state = test_state();
     let task = test_task();
@@ -433,7 +500,7 @@ fn redacted_workspace_child_boundary_in_plan_goal_blocks_path_content_read_plan(
         step_id: "s1".to_string(),
         action_type: "call_tool".to_string(),
         skill: "fs_basic".to_string(),
-        args: json!({ "action": "read_text_range", "path": "/tmp/work/README.md" }),
+        args: json!({ "action": "read_text_range", "path": "/etc/rustclaw-verifier-outside/README.md" }),
         depends_on: Vec::new(),
         why: String::new(),
     }]);

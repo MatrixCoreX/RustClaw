@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::{Component, Path};
 
 use claw_core::skill_registry::{PlannerCapabilityEffect, PrimaryFallbackRole, SkillRiskLevel};
 use serde_json::{json, Value};
@@ -833,22 +834,55 @@ fn context_bundle_has_redacted_workspace_child_locator(summary: Option<&str>) ->
     })
 }
 
-fn args_have_path_value(args: &Value) -> bool {
+fn path_args(args: &Value) -> Vec<&str> {
     let Some(obj) = args.as_object() else {
-        return false;
+        return Vec::new();
     };
     ["path", "file_path", "target_path", "requested_path"]
         .into_iter()
-        .any(|key| {
+        .filter_map(|key| {
             obj.get(key)
                 .and_then(Value::as_str)
                 .map(str::trim)
-                .is_some_and(|value| !value.is_empty())
+                .filter(|value| !value.is_empty())
         })
+        .collect()
 }
 
-fn step_reads_path_content_under_unbound_locator(step: &PlanStep, normalized_skill: &str) -> bool {
-    if !args_have_path_value(&step.args) {
+fn path_value_is_workspace_scoped(path: &str, workspace_root: &Path) -> bool {
+    let candidate = Path::new(path);
+    if candidate
+        .components()
+        .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
+    {
+        return false;
+    }
+    if !candidate.is_absolute() {
+        return true;
+    }
+    let root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let target = candidate
+        .canonicalize()
+        .unwrap_or_else(|_| candidate.to_path_buf());
+    target.starts_with(root)
+}
+
+fn args_have_untrusted_path_value(args: &Value, workspace_root: &Path) -> bool {
+    path_args(args)
+        .into_iter()
+        .any(|path| !path_value_is_workspace_scoped(path, workspace_root))
+}
+
+fn step_reads_path_content_under_unbound_locator(
+    step: &PlanStep,
+    normalized_skill: &str,
+    workspace_root: &Path,
+) -> bool {
+    if path_args(&step.args).is_empty()
+        || !args_have_untrusted_path_value(&step.args, workspace_root)
+    {
         return false;
     }
     match step.action_type.as_str() {
@@ -884,8 +918,13 @@ fn action_key_reads_path_content(action_key: &str) -> bool {
     )
 }
 
-fn policy_action_reads_path_content_under_unbound_locator(action_key: &str, args: &Value) -> bool {
-    args_have_path_value(args) && action_key_reads_path_content(action_key)
+fn policy_action_reads_path_content_under_unbound_locator(
+    action_key: &str,
+    args: &Value,
+    workspace_root: &Path,
+) -> bool {
+    args_have_untrusted_path_value(args, workspace_root)
+        && action_key_reads_path_content(action_key)
 }
 
 fn push_unbound_locator_route_clarify_issue(issues: &mut Vec<VerifyIssue>, step_id: &str) {
@@ -1401,7 +1440,11 @@ pub(crate) fn verify_plan(
     for (idx, step) in effective_plan_result.steps.iter().enumerate() {
         if step.action_type == "call_capability" {
             if unbound_locator_boundary
-                && step_reads_path_content_under_unbound_locator(step, &step.skill)
+                && step_reads_path_content_under_unbound_locator(
+                    step,
+                    &step.skill,
+                    &state.skill_rt.workspace_root,
+                )
             {
                 push_unbound_locator_route_clarify_issue(&mut issues, &step.step_id);
             }
@@ -1428,7 +1471,11 @@ pub(crate) fn verify_plan(
             }
             verify_step_args(state, step, &normalized_skill, &template_scope, &mut issues);
             if unbound_locator_boundary
-                && step_reads_path_content_under_unbound_locator(step, &normalized_skill)
+                && step_reads_path_content_under_unbound_locator(
+                    step,
+                    &normalized_skill,
+                    &state.skill_rt.workspace_root,
+                )
             {
                 push_unbound_locator_route_clarify_issue(&mut issues, &step.step_id);
             }
@@ -1447,6 +1494,7 @@ pub(crate) fn verify_plan(
                     && policy_action_reads_path_content_under_unbound_locator(
                         &policy.action_key,
                         &step.args,
+                        &state.skill_rt.workspace_root,
                     )
                 {
                     push_unbound_locator_route_clarify_issue(&mut issues, &step.step_id);
