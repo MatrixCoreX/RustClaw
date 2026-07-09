@@ -45,3 +45,17 @@ fn finalizer_renderer_registry_covers_initial_shape_classes() {
         );
     }
 }
+
+#[test]
+fn task_lifecycle_renderer_order_matches_dispatch_order() {
+    let keys = super::renderer_registry::renderers_for_shape_class(
+        FinalizerRendererShapeClass::TaskLifecycle,
+    )
+    .map(|renderer| renderer.key)
+    .collect::<Vec<_>>();
+
+    assert_eq!(
+        keys,
+        vec!["route_clarify_machine_envelope", "control_machine_envelope"]
+    );
+}
