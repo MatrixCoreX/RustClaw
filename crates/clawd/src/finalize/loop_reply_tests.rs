@@ -9,6 +9,7 @@ use super::directory_purpose;
 use super::{
     agent_context_allows_observed_output_language_fallback,
     append_compound_file_delivery_token_from_route,
+    attach_config_edit_observed_answer_from_registry,
     attach_deterministic_observed_execution_status_answer,
     attach_execution_recipe_closeout_to_delivery, attach_execution_summary_to_delivery,
     auto_requested_success_marker, backfill_delivery_from_last_outputs,
@@ -197,6 +198,12 @@ mod task_lifecycle_renderers_tests;
 
 #[path = "loop_reply_compatibility_renderers_tests.rs"]
 mod compatibility_renderers_tests;
+
+#[path = "loop_reply_capability_result_renderers_tests.rs"]
+mod capability_result_renderers_tests;
+
+#[path = "loop_reply_artifact_renderers_tests.rs"]
+mod artifact_renderers_tests;
 
 #[path = "loop_reply_final_answer_renderers_tests.rs"]
 mod final_answer_renderers_tests;
