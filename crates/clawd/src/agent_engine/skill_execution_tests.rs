@@ -224,6 +224,8 @@ fn subagent_step_execution_promotes_runtime_observation_to_step_output() {
             .map(String::as_str),
         Some(output)
     );
+    assert!(loop_state.has_tool_or_skill_output);
+    assert_eq!(loop_state.last_output.as_deref(), Some(output));
 }
 
 #[test]

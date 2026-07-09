@@ -203,7 +203,8 @@ fn hook_permission_surface_returns_pre_tool_use_machine_projection() {
                     "field_paths": [
                         "agent.hooks.blocked_action_refs",
                         "agent.hooks.blocked_tools",
-                        "agent.hooks.require_confirmation_action_refs"
+                        "agent.hooks.require_confirmation_action_refs",
+                        "agent.hooks.background_wait_action_refs"
                     ]
                 }),
             },
@@ -212,7 +213,9 @@ fn hook_permission_surface_returns_pre_tool_use_machine_projection() {
                     "stage": "pre_tool_use",
                     "field_value": {
                         "allow": "default_allow",
-                        "block": ["blocked_action_refs", "blocked_tools"]
+                        "deny": ["blocked_action_refs", "blocked_tools"],
+                        "require_confirmation": "require_confirmation_action_refs",
+                        "background_wait": "background_wait_action_refs"
                     },
                     "evidence_refs": ["step_1"]
                 })
@@ -254,7 +257,8 @@ fn hook_permission_surface_collects_fields_and_valid_for_config_validation_contr
                     "field_paths": [
                         "agent.hooks.blocked_action_refs",
                         "agent.hooks.blocked_tools",
-                        "agent.hooks.require_confirmation_action_refs"
+                        "agent.hooks.require_confirmation_action_refs",
+                        "agent.hooks.background_wait_action_refs"
                     ]
                 }),
             },

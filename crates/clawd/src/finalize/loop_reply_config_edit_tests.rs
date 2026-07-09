@@ -130,6 +130,67 @@ fn direct_config_edit_observed_answer_summarizes_guard_config() {
 }
 
 #[test]
+fn direct_config_edit_observed_answer_projects_agent_hook_policy_surface() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_basic",
+        r#"{"action":"extract_fields","count":4,"format":"toml","path":"configs/agent_guard.toml","resolved_path":"/workspace/configs/agent_guard.toml","results":[{"field_path":"agent.hooks.blocked_action_refs","resolved_field_path":"agent.hooks.blocked_action_refs","exists":true,"value":[],"value_text":"[]","value_type":"array"},{"field_path":"agent.hooks.blocked_tools","resolved_field_path":"agent.hooks.blocked_tools","exists":true,"value":["run_cmd"],"value_text":"[\"run_cmd\"]","value_type":"array"},{"field_path":"agent.hooks.require_confirmation_action_refs","resolved_field_path":"agent.hooks.require_confirmation_action_refs","exists":true,"value":[],"value_text":"[]","value_type":"array"},{"field_path":"agent.hooks.background_wait_action_refs","resolved_field_path":"agent.hooks.background_wait_action_refs","exists":true,"value":[],"value_text":"[]","value_type":"array"}]}"#,
+    ));
+
+    let (answer, summary) = direct_config_edit_observed_answer(
+        &state,
+        "只检查当前 hook/permission 配置能否表达 PreToolUse 的机器决策",
+        &loop_state,
+    )
+    .expect("agent hook surface answer");
+    let payload: serde_json::Value = serde_json::from_str(&answer).unwrap();
+
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("agent_hooks_pre_tool_use_policy_surface")
+    );
+    assert_eq!(
+        payload
+            .pointer("/stage")
+            .and_then(serde_json::Value::as_str),
+        Some("pre_tool_use")
+    );
+    assert_eq!(
+        payload
+            .pointer("/decisions/allow/supported")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        payload
+            .pointer("/decisions/deny/configured_ref_count")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        payload
+            .pointer("/decisions/require_confirmation/supported")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        payload
+            .pointer("/decisions/background_wait/supported")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        summary.disposition,
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
 fn direct_config_edit_observed_answer_ignores_visible_text_json_payload() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(1);

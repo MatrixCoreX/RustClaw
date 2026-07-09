@@ -69,6 +69,7 @@ pub(super) fn record_subagent_step_execution(
         "skill.subagent",
         &output,
     );
+    loop_state.has_tool_or_skill_output = true;
     crate::append_subtask_result(
         &mut loop_state.subtask_results,
         global_step,

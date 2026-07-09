@@ -65,9 +65,9 @@ use super::{
     run_compatibility_fallback_renderer_registry, run_task_lifecycle_renderer_registry,
     should_attach_execution_summary, should_drop_passthrough_delivery_for_content_evidence,
     should_return_missing_file_delivery_reply, should_try_observed_output_language_fallback,
-    structured_json_values_from_output, successful_delivery_final_status,
-    verify_summary_requires_resume_confirmation, visible_answer_is_machine_payload,
-    visible_machine_payload_should_remain_structured,
+    structured_compound_synthesis_can_replace_current_delivery, structured_json_values_from_output,
+    successful_delivery_final_status, verify_summary_requires_resume_confirmation,
+    visible_answer_is_machine_payload, visible_machine_payload_should_remain_structured,
 };
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{
@@ -427,6 +427,44 @@ fn requested_machine_kv_summary_preserves_richer_required_evidence_delivery() {
 }
 
 #[test]
+fn hook_policy_surface_json_can_replace_short_token_delivery() {
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_basic",
+        r#"{"action":"extract_fields","path":"configs/agent_guard.toml"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "fs_basic",
+        r#"{"action":"read_range","path":"plan/current.md","excerpt":"Track I"}"#,
+    ));
+    let synthesis = serde_json::json!({
+        "message_key": "clawd.msg.agent_hooks.pre_tool_use_policy_surface",
+        "reason_code": "agent_hooks_pre_tool_use_policy_surface",
+        "owner_layer": "agent_hooks",
+        "stage": "pre_tool_use",
+        "decision_tokens": ["allow", "deny", "require_confirmation", "background_wait"],
+        "decisions": {
+            "allow": {"supported": true},
+            "deny": {"supported": true},
+            "require_confirmation": {"supported": true},
+            "background_wait": {"supported": true}
+        }
+    })
+    .to_string();
+
+    assert!(structured_compound_synthesis_can_replace_current_delivery(
+        &route,
+        &loop_state,
+        "require_confirmation background_wait stage=pre_tool_use",
+        &synthesis,
+    ));
+}
+
+#[test]
 fn requested_machine_kv_summary_preserves_publishable_summary_over_marker_only_summary() {
     let task = claimed_task("task-machine-kv-marker-only-summary");
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -510,6 +548,36 @@ fn requested_machine_kv_summary_preserves_publishable_command_summary() {
         Some(full_answer)
     );
     assert_ne!(delivery_messages, vec!["port=8787".to_string()]);
+}
+
+#[test]
+fn requested_machine_kv_summary_preserves_agent_hook_policy_surface_delivery() {
+    let task = claimed_task("task-machine-kv-agent-hook-surface");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_basic",
+        r#"{"extra":{"action":"extract_fields","path":"configs/agent_guard.toml","results":[{"field_path":"agent.hooks.blocked_action_refs","value":[]},{"field_path":"agent.hooks.blocked_tools","value":[]},{"field_path":"agent.hooks.require_confirmation_action_refs","value":[]},{"field_path":"agent.hooks.background_wait_action_refs","value":[]}]}}"#,
+    ));
+    let full_answer = "stage=pre_tool_use\nagent.hooks.blocked_action_refs=[]\nagent.hooks.blocked_tools=[]\nagent.hooks.require_confirmation_action_refs=[]\nagent.hooks.background_wait_action_refs=[]";
+    let mut delivery_messages = vec![full_answer.to_string()];
+    loop_state.last_user_visible_respond = Some(full_answer.to_string());
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "最终输出必须包含机器字段 stage=pre_tool_use",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![full_answer.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(full_answer)
+    );
 }
 
 #[test]
