@@ -30,6 +30,7 @@ mod skill_execution;
 mod skill_quick_index;
 mod subagent_runtime;
 mod support;
+mod user_output_path;
 
 pub(crate) fn explicit_command_segment_for_policy(
     runtime: &crate::CommandIntentRuntime,
@@ -83,6 +84,10 @@ use self::support::{
     publish_agent_loop_user_input_checkpoint_progress, registry_idempotency_guard_attribution,
     AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN,
 };
+pub(crate) use self::user_output_path::{
+    action_has_user_named_output_path_marker, action_is_user_named_new_workspace_write,
+    CLAWD_USER_NAMED_OUTPUT_PATH_ARG,
+};
 
 use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
 
@@ -100,7 +105,6 @@ const CLAWD_LITERAL_COMMAND_ARG: &str = "_clawd_literal_command";
 const CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG: &str = "_clawd_literal_failure_repairable";
 const CLAWD_MISSING_TARGET_REPAIRABLE_ARG: &str = "_clawd_missing_target_repairable";
 const CLAWD_RUNTIME_ASYNC_JOB_START_ARG: &str = "_clawd_runtime_async_job_start";
-const CLAWD_USER_NAMED_OUTPUT_PATH_ARG: &str = "_clawd_user_named_output_path";
 const SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/single_plan_execution_prompt.md";
 const LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/lightweight_execution_prompt.md";
 const LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
@@ -108,109 +112,6 @@ const LIGHTWEIGHT_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str =
     "prompts/lightweight_incremental_plan_prompt.md";
 const PLAN_REPAIR_PROMPT_LOGICAL_PATH: &str = "prompts/plan_repair_prompt.md";
 pub(crate) const TASK_CANCELED_ERR: &str = "__TASK_CANCELED_BY_USER__";
-
-fn structured_write_path_arg(normalized_skill: &str, args: &Value) -> Option<String> {
-    let obj = args.as_object()?;
-    match normalized_skill {
-        "write_file" => obj.get("path").and_then(Value::as_str),
-        "fs_basic" => {
-            let action = obj.get("action").and_then(Value::as_str)?.trim();
-            if matches!(action, "write_text" | "append_text") {
-                obj.get("path").and_then(Value::as_str)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-    .map(str::trim)
-    .filter(|path| !path.is_empty())
-    .map(ToString::to_string)
-}
-
-fn structured_write_has_content_arg(args: &Value) -> bool {
-    let Some(obj) = args.as_object() else {
-        return false;
-    };
-    ["content", "text", "data", "body"].iter().any(|key| {
-        obj.get(*key)
-            .and_then(Value::as_str)
-            .is_some_and(|v| !v.is_empty())
-    })
-}
-
-fn resolve_workspace_candidate_path(
-    workspace_root: &Path,
-    raw_path: &str,
-) -> Option<std::path::PathBuf> {
-    let trimmed = raw_path.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let raw = Path::new(trimmed);
-    if raw
-        .components()
-        .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
-        return None;
-    }
-    let root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
-    let candidate = if raw.is_absolute() {
-        raw.to_path_buf()
-    } else {
-        root.join(raw)
-    };
-    candidate.starts_with(&root).then_some(candidate)
-}
-
-fn request_surface_names_user_output_path(request_text: &str, path: &Path) -> bool {
-    let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
-        return false;
-    };
-    let file_name = file_name.trim();
-    if file_name.is_empty() {
-        return false;
-    }
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(request_text);
-    surface
-        .filename_candidates_excluding_field_selectors()
-        .into_iter()
-        .any(|candidate| {
-            let trimmed = candidate.trim();
-            let candidate_file_name = Path::new(trimmed)
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or(trimmed)
-                .trim();
-            !candidate_file_name.is_empty() && candidate_file_name.eq_ignore_ascii_case(file_name)
-        })
-}
-
-pub(crate) fn action_is_user_named_new_workspace_write(
-    workspace_root: &Path,
-    request_text: &str,
-    normalized_skill: &str,
-    args: &Value,
-) -> bool {
-    if !structured_write_has_content_arg(args) {
-        return false;
-    }
-    let Some(raw_path) = structured_write_path_arg(normalized_skill, args) else {
-        return false;
-    };
-    let Some(candidate) = resolve_workspace_candidate_path(workspace_root, &raw_path) else {
-        return false;
-    };
-    !candidate.exists() && request_surface_names_user_output_path(request_text, &candidate)
-}
-
-pub(crate) fn action_has_user_named_output_path_marker(args: &Value) -> bool {
-    args.get(CLAWD_USER_NAMED_OUTPUT_PATH_ARG)
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
 
 fn ensure_task_running(state: &AppState, task: &ClaimedTask) -> Result<(), String> {
     match repo::is_task_still_running(state, &task.task_id) {
