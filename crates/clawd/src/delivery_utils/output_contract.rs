@@ -104,6 +104,11 @@ fn strip_preamble_before_markdown_table(text: &str) -> String {
 }
 
 fn should_strip_preamble_before_markdown_table(output_contract: &IntentOutputContract) -> bool {
+    if output_contract.requires_content_evidence
+        && output_contract.response_shape == OutputResponseShape::Free
+    {
+        return false;
+    }
     if output_contract.semantic_kind_is_unclassified() {
         return true;
     }
@@ -172,7 +177,8 @@ pub(super) fn enforce_output_contract(
             OutputResponseShape::FileToken
         );
     if file_contract && !response_has_any_delivery_token(normalized_text, normalized_messages) {
-        let current_output = canonical_output_text(normalized_text, normalized_messages);
+        let current_output =
+            canonical_output_text(output_contract, normalized_text, normalized_messages);
         if let Some(path) = existing_file_path_literal(normalized_text).or_else(|| {
             normalized_messages
                 .iter()
@@ -236,7 +242,11 @@ fn response_has_any_delivery_token(text: &str, messages: &[String]) -> bool {
             .any(|m| !extract_delivery_file_tokens(m).is_empty())
 }
 
-fn canonical_output_text(text: &str, messages: &[String]) -> String {
+fn canonical_output_text(
+    output_contract: &IntentOutputContract,
+    text: &str,
+    messages: &[String],
+) -> String {
     let text = text.trim();
     if !extract_delivery_file_tokens(text).is_empty() {
         return text.to_string();
@@ -247,6 +257,14 @@ fn canonical_output_text(text: &str, messages: &[String]) -> String {
         .find(|msg| !extract_delivery_file_tokens(msg).is_empty())
     {
         return message.trim().to_string();
+    }
+    if !should_collapse_to_single_output(output_contract, text, messages) {
+        if let Some(message) = messages.iter().rev().find_map(|message| {
+            let trimmed = message.trim();
+            (!trimmed.is_empty()).then_some(trimmed.to_string())
+        }) {
+            return message;
+        }
     }
     if !text.is_empty() {
         return text.to_string();
@@ -326,7 +344,8 @@ pub(crate) fn sync_output_payload(
         }
     }
 
-    let mut canonical = canonical_output_text(normalized_text, normalized_messages);
+    let mut canonical =
+        canonical_output_text(output_contract, normalized_text, normalized_messages);
     if should_strip_preamble_before_markdown_table(output_contract) {
         canonical = strip_preamble_before_markdown_table(&canonical);
     }

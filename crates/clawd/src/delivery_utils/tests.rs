@@ -313,6 +313,26 @@ fn sync_output_payload_collapses_strict_contract_to_single_message() {
 }
 
 #[test]
+fn sync_output_payload_free_contract_prefers_latest_delivery_message() {
+    let contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    };
+    let table_only = "| name | score |\n| --- | --- |\n| beta | 12 |".to_string();
+    let full_answer = "**1) log evidence**\n- WARN=2, ERROR=1\n\n**2) doc summary**\n- service notes\n\n**3) table**\n\n| name | score |\n| --- | --- |\n| beta | 12 |"
+        .to_string();
+    let mut text = table_only;
+    let mut messages = vec![full_answer.clone()];
+
+    sync_output_payload(&contract, &mut text, &mut messages);
+
+    assert_eq!(text, full_answer);
+    assert_eq!(messages, vec![full_answer]);
+}
+
+#[test]
 fn sync_output_payload_strict_contract_preserves_execution_summary_message() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
