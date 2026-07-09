@@ -32,6 +32,8 @@ fn config_edit_observable_action(action: &str) -> bool {
             | "apply_config_change"
             | "validate_config"
             | "guard_config"
+            | "extract_fields"
+            | "read_fields"
             | "read_back"
             | "restart_if_requested"
     )
@@ -285,6 +287,108 @@ fn config_edit_candidate_labels(value: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn path_is_agent_guard_config(path: &str) -> bool {
+    let components = Path::new(path)
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => value.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    matches!(components.as_slice(), [.., "configs", "agent_guard.toml"])
+}
+
+fn config_field_result<'a>(
+    value: &'a serde_json::Value,
+    field_path: &str,
+) -> Option<&'a serde_json::Value> {
+    value
+        .get("results")
+        .and_then(serde_json::Value::as_array)?
+        .iter()
+        .find(|item| {
+            item.get("field_path")
+                .or_else(|| item.get("resolved_field_path"))
+                .and_then(serde_json::Value::as_str)
+                == Some(field_path)
+        })
+}
+
+fn config_field_exists(value: &serde_json::Value, field_path: &str) -> bool {
+    config_field_result(value, field_path)
+        .and_then(|item| item.get("exists"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn config_field_array_count(value: &serde_json::Value, field_path: &str) -> usize {
+    config_field_result(value, field_path)
+        .and_then(|item| item.get("value"))
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0)
+}
+
+fn agent_hook_policy_surface_answer(
+    outputs: &[ConfigEditObservedOutput],
+    _prefer_english: bool,
+) -> Option<String> {
+    let observation = outputs.iter().rev().find(|item| {
+        matches!(
+            config_edit_output_action(&item.value),
+            Some("extract_fields" | "read_fields")
+        ) && config_edit_string_field(&item.value, "path")
+            .or_else(|| config_edit_string_field(&item.value, "resolved_path"))
+            .is_some_and(path_is_agent_guard_config)
+    })?;
+
+    let blocked_action_refs = "agent.hooks.blocked_action_refs";
+    let blocked_tools = "agent.hooks.blocked_tools";
+    let require_confirmation = "agent.hooks.require_confirmation_action_refs";
+    let background_wait = "agent.hooks.background_wait_action_refs";
+    let deny_supported = config_field_exists(&observation.value, blocked_action_refs)
+        || config_field_exists(&observation.value, blocked_tools);
+    let payload = serde_json::json!({
+        "message_key": "clawd.msg.agent_hooks.pre_tool_use_policy_surface",
+        "reason_code": "agent_hooks_pre_tool_use_policy_surface",
+        "owner_layer": "agent_hooks",
+        "stage": "pre_tool_use",
+        "path": "configs/agent_guard.toml",
+        "read_only": true,
+        "would_mutate": false,
+        "decision_tokens": ["allow", "deny", "require_confirmation", "background_wait"],
+        "field_paths": [
+            blocked_action_refs,
+            blocked_tools,
+            require_confirmation,
+            background_wait
+        ],
+        "decisions": {
+            "allow": {
+                "supported": true,
+                "source": "default_allow"
+            },
+            "deny": {
+                "supported": deny_supported,
+                "fields": [blocked_action_refs, blocked_tools],
+                "configured_ref_count": config_field_array_count(&observation.value, blocked_action_refs)
+                    + config_field_array_count(&observation.value, blocked_tools)
+            },
+            "require_confirmation": {
+                "supported": config_field_exists(&observation.value, require_confirmation),
+                "field": require_confirmation,
+                "configured_ref_count": config_field_array_count(&observation.value, require_confirmation)
+            },
+            "background_wait": {
+                "supported": config_field_exists(&observation.value, background_wait),
+                "field": background_wait,
+                "configured_ref_count": config_field_array_count(&observation.value, background_wait)
+            }
+        }
+    });
+    Some(payload.to_string())
+}
+
 fn direct_config_edit_guard_answer(
     outputs: &[ConfigEditObservedOutput],
     _prefer_english: bool,
@@ -359,6 +463,7 @@ pub(crate) fn direct_config_edit_observed_answer(
         || (request_language == "config_default" && prefer_english_for_user_text(state, user_text));
     let answer = direct_config_edit_apply_answer(&outputs, prefer_english)
         .or_else(|| direct_config_edit_plan_answer(&outputs, prefer_english))
+        .or_else(|| agent_hook_policy_surface_answer(&outputs, prefer_english))
         .or_else(|| direct_config_edit_guard_answer(&outputs, prefer_english))
         .or_else(|| direct_config_edit_validate_answer(&outputs, prefer_english))
         .or_else(|| direct_config_edit_read_back_answer(&outputs, prefer_english))?;

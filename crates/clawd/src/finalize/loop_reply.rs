@@ -628,13 +628,14 @@ fn structured_compound_synthesis_can_replace_current_delivery(
 ) -> bool {
     let current = current.trim();
     let synthesis = synthesis.trim();
+    let agent_hook_policy_surface = agent_hook_policy_surface_payload_is_publishable(synthesis);
     if current.is_empty()
         || synthesis.is_empty()
         || delivery_message_is_json_container(current)
         || !delivery_message_is_json_container(synthesis)
         || crate::finalize::looks_like_planner_artifact(synthesis)
         || crate::finalize::looks_like_internal_trace_artifact(synthesis)
-        || crate::finalize::is_execution_summary_message(synthesis)
+        || (crate::finalize::is_execution_summary_message(synthesis) && !agent_hook_policy_surface)
         || output_contract_requests_exact_delivery(route)
         || route.output_contract.delivery_required
     {
@@ -658,6 +659,32 @@ fn structured_compound_synthesis_can_replace_current_delivery(
         })
         .count();
     observation_count >= 2
+}
+
+fn agent_hook_policy_surface_payload_is_publishable(synthesis: &str) -> bool {
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(synthesis.trim()) else {
+        return false;
+    };
+    payload
+        .pointer("/owner_layer")
+        .and_then(serde_json::Value::as_str)
+        == Some("agent_hooks")
+        && payload
+            .pointer("/stage")
+            .and_then(serde_json::Value::as_str)
+            == Some("pre_tool_use")
+        && payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str)
+            == Some("agent_hooks_pre_tool_use_policy_surface")
+        && payload
+            .pointer("/decision_tokens")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|tokens| {
+                ["allow", "deny", "require_confirmation", "background_wait"]
+                    .iter()
+                    .all(|expected| tokens.iter().any(|token| token.as_str() == Some(*expected)))
+            })
 }
 
 fn latest_publishable_terminal_language_output(loop_state: &LoopState) -> Option<&str> {

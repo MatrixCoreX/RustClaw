@@ -20,6 +20,10 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         return false;
     }
     let current = normalize_markdown_format_table_delivery(loop_state, delivery_messages);
+    if current_delivery_contains_agent_hook_policy_surface(&current) {
+        loop_state.last_user_visible_respond = Some(current);
+        return false;
+    }
     if agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(|route| {
@@ -270,6 +274,20 @@ fn normalize_markdown_format_table_delivery(
     loop_state.delivery_messages.push(normalized.clone());
     loop_state.last_user_visible_respond = Some(normalized.clone());
     normalized
+}
+
+fn current_delivery_contains_agent_hook_policy_surface(current: &str) -> bool {
+    let current = current.trim();
+    !current.is_empty()
+        && current.contains("stage=pre_tool_use")
+        && [
+            "agent.hooks.blocked_action_refs",
+            "agent.hooks.blocked_tools",
+            "agent.hooks.require_confirmation_action_refs",
+            "agent.hooks.background_wait_action_refs",
+        ]
+        .iter()
+        .all(|field| current.contains(field))
 }
 
 fn strip_markdown_format_label_table(text: &str) -> Option<String> {
