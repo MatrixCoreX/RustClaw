@@ -197,6 +197,44 @@ async fn schedule_compile_only_create_returns_preview_without_insert() {
 }
 
 #[tokio::test]
+async fn schedule_compile_only_once_preview_omits_stale_weekday() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = claimed_task_with_payload(
+        "ui",
+        json!({
+            "text": "schedule parser dry-run"
+        }),
+    );
+    let intent = ScheduleIntentOutput {
+        kind: "create".to_string(),
+        timezone: "Asia/Shanghai".to_string(),
+        mode: "compile_only".to_string(),
+        schedule: ScheduleIntentSchedule {
+            r#type: "once".to_string(),
+            run_at: "2099-01-01 09:00:00".to_string(),
+            weekday: 1,
+            ..Default::default()
+        },
+        task: ScheduleIntentTask {
+            kind: "ask".to_string(),
+            payload: json!({"text": "check service"}),
+        },
+        confidence: 0.99,
+        ..Default::default()
+    };
+
+    let reply =
+        try_handle_schedule_request(&state, &task, "schedule parser dry-run", Some(&intent))
+            .await
+            .expect("schedule handler")
+            .expect("preview reply");
+
+    assert!(reply.contains("schedule.type=once"));
+    assert!(reply.contains("schedule.run_at=2099-01-01 09:00:00"));
+    assert!(!reply.contains("schedule.weekday="));
+}
+
+#[tokio::test]
 async fn schedule_compile_only_preview_strips_internal_context_from_ask_payload() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = claimed_task_with_payload(
