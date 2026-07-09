@@ -690,12 +690,6 @@ fn route_allows_dry_run_generated_file_path_report_payload(
                     && matches!(
                         route.effective_output_contract().delivery_intent,
                         crate::OutputDeliveryIntent::None
-                    )
-                    && matches!(
-                        route.effective_output_contract().response_shape,
-                        crate::OutputResponseShape::Free
-                            | crate::OutputResponseShape::OneSentence
-                            | crate::OutputResponseShape::Strict
                     ))
         })
 }

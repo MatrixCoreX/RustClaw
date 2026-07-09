@@ -600,6 +600,22 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
     assert_eq!(free_answer, answer);
     assert!(free_summary.contract_ok);
 
+    let mut scalar_route = free_route_result();
+    scalar_route.ask_mode = crate::AskMode::act_plain();
+    scalar_route.output_contract.requires_content_evidence = true;
+    scalar_route.output_contract.response_shape = OutputResponseShape::Scalar;
+    scalar_route.output_contract.delivery_required = false;
+    scalar_route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    let scalar_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(scalar_route),
+        ..Default::default()
+    };
+    let (scalar_answer, scalar_summary) =
+        direct_generated_file_path_report_from_dry_run_payload(&loop_state, Some(&scalar_context))
+            .expect("generic scalar dry_run payload should project planned output");
+    assert_eq!(scalar_answer, answer);
+    assert!(scalar_summary.contract_ok);
+
     let mut audio_loop_state = crate::agent_engine::LoopState::new(3);
     audio_loop_state.executed_step_results.push(ok_step_result(
         "step_1",
