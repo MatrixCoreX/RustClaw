@@ -16,6 +16,16 @@ use task_lifecycle_renderers::run_task_lifecycle_renderer_registry;
 mod compatibility_renderers;
 use compatibility_renderers::run_compatibility_fallback_renderer_registry;
 
+#[path = "loop_reply_capability_result_renderers.rs"]
+mod capability_result_renderers;
+use capability_result_renderers::{
+    attach_config_edit_observed_answer_from_registry, run_service_status_observed_fields_renderer,
+};
+
+#[path = "loop_reply_artifact_renderers.rs"]
+mod artifact_renderers;
+use artifact_renderers::normalize_file_token_delivery_from_observed_paths;
+
 #[path = "loop_reply_final_answer_renderers.rs"]
 mod final_answer_renderers;
 use final_answer_renderers::{
@@ -166,7 +176,6 @@ use file_delivery::{
     direct_generated_file_path_report_from_written_path, direct_path_from_active_bound_inventory,
     direct_scalar_path_candidate_list_from_observed_outputs,
     normalize_file_token_delivery_from_auto_locator,
-    normalize_file_token_delivery_from_observed_paths,
 };
 
 #[path = "loop_reply_file_missing.rs"]
@@ -800,22 +809,14 @@ pub(crate) async fn finalize_loop_reply(
         }
     }
 
-    if loop_state.delivery_messages.is_empty() {
-        if let Some((answer, summary)) =
-            direct_config_edit_observed_answer(state, user_text, &loop_state)
-        {
-            finalizer_summary = Some(summary);
-            loop_state.last_user_visible_respond = Some(answer.clone());
-            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
-            log_deterministic_delivery_record(
-                &task.task_id,
-                "fallback_from_config_edit_observed",
-                "attached",
-                agent_run_context,
-                loop_state.executed_step_results.len(),
-            );
-        }
-    }
+    attach_config_edit_observed_answer_from_registry(
+        state,
+        task,
+        user_text,
+        &mut loop_state,
+        agent_run_context,
+        &mut finalizer_summary,
+    );
 
     if loop_state.delivery_messages.is_empty() {
         if let Some((answer, summary)) =
@@ -1189,7 +1190,7 @@ pub(crate) async fn finalize_loop_reply(
         &mut loop_state,
         agent_run_context,
         &mut finalizer_summary,
-    ) || replace_delivery_with_service_status_observed_answer(
+    ) || run_service_status_observed_fields_renderer(
         task,
         &mut loop_state,
         agent_run_context,
