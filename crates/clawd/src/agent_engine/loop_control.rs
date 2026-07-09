@@ -614,6 +614,142 @@ fn try_replan_avoidable_low_risk_freeform_clarify(
     })
 }
 
+fn planner_locator_clarify_has_no_route_boundary(
+    route: &RouteResult,
+    intent: &StructuredRespondTerminalIntent,
+) -> bool {
+    if route.needs_clarify || route.wants_file_delivery {
+        return false;
+    }
+    let contract = &route.output_contract;
+    if contract.delivery_required
+        || contract.delivery_intent != crate::OutputDeliveryIntent::None
+        || contract.locator_kind != crate::OutputLocatorKind::None
+        || contract.requires_content_evidence
+    {
+        return false;
+    }
+
+    let mentions_locator_boundary = intent
+        .locator_kind
+        .as_deref()
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
+        .is_some_and(|kind| kind != "none")
+        || intent
+            .missing_slot
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|slot| {
+                slot.split(|ch: char| !ch.is_ascii_alphanumeric())
+                    .filter(|part| !part.is_empty())
+                    .any(|part| matches!(part, "locator" | "path" | "file" | "directory"))
+            });
+    mentions_locator_boundary
+}
+
+fn apply_nonblocking_structured_clarify_as_answer(
+    loop_state: &mut LoopState,
+    intent: &StructuredRespondTerminalIntent,
+) -> RoundOutcome {
+    loop_state.output_vars.insert(
+        "agent_loop.terminal_intent".to_string(),
+        "answer".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.recovered_terminal_intent".to_string(),
+        "clarify".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.nonblocking_clarify_answer".to_string(),
+        "true".to_string(),
+    );
+    if let Some(content) = intent
+        .content
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        loop_state.delivery_messages.push(content.to_string());
+        loop_state.last_user_visible_respond = Some(content.to_string());
+    }
+    loop_state.history_compact.push(format!(
+        "round={} structured_respond_terminal_intent=clarify treated_as=answer missing_slot={}",
+        loop_state.round_no,
+        intent.missing_slot.as_deref().unwrap_or("")
+    ));
+    RoundOutcome {
+        executed_actions: 0,
+        had_error: false,
+        stop_signal: Some("structured_respond_nonblocking_clarify_answer".to_string()),
+        next_goal_hint: None,
+        no_progress: false,
+    }
+}
+
+fn try_recover_inconsistent_boundary_clarify(
+    loop_state: &mut LoopState,
+    route: Option<&RouteResult>,
+    intent: &StructuredRespondTerminalIntent,
+) -> Option<RoundOutcome> {
+    let route = route?;
+    if !planner_locator_clarify_has_no_route_boundary(route, intent) {
+        return None;
+    }
+    if loop_state
+        .output_vars
+        .contains_key("agent_loop.inconsistent_boundary_clarify_replan_used")
+    {
+        return Some(apply_nonblocking_structured_clarify_as_answer(
+            loop_state, intent,
+        ));
+    }
+
+    loop_state.has_recoverable_failure_context = true;
+    loop_state.output_vars.insert(
+        "agent_loop.inconsistent_boundary_clarify_replan_used".to_string(),
+        "true".to_string(),
+    );
+    loop_state.history_compact.push(format!(
+        "round={} recoverable_clarify=inconsistent_boundary missing_slot={} locator_kind={}",
+        loop_state.round_no,
+        intent.missing_slot.as_deref().unwrap_or(""),
+        intent.locator_kind.as_deref().unwrap_or("")
+    ));
+    attempt_ledger::record_attempt_with_retry_instruction(
+        loop_state,
+        "planner_clarify",
+        &format!(
+            "terminal_intent=clarify missing_slot={} locator_kind={} route_locator_kind={} delivery_required={} content_evidence={}",
+            intent.missing_slot.as_deref().unwrap_or(""),
+            intent.locator_kind.as_deref().unwrap_or(""),
+            route.output_contract.locator_kind.as_str(),
+            route.output_contract.delivery_required,
+            route.output_contract.requires_content_evidence
+        ),
+        crate::executor::StepExecutionStatus::Error,
+        intent.clarify_reason_code.as_deref().unwrap_or(""),
+        Some("inconsistent_boundary_clarify"),
+        "recoverable_clarify_inconsistent_boundary",
+        Some(
+            "The previous planner step asked for a locator boundary, but the active route/output contract has no locator, delivery, content-evidence, or route-owned clarify boundary. Replan as a normal answer or recovery-guidance response unless the next plan can cite a concrete required machine boundary.",
+        ),
+    );
+    info!(
+        "inconsistent_boundary_clarify_replan round={} missing_slot={} locator_kind={}",
+        loop_state.round_no,
+        intent.missing_slot.as_deref().unwrap_or(""),
+        intent.locator_kind.as_deref().unwrap_or("")
+    );
+    Some(RoundOutcome {
+        executed_actions: 0,
+        had_error: false,
+        stop_signal: Some("recoverable_failure_continue_round".to_string()),
+        next_goal_hint: None,
+        no_progress: false,
+    })
+}
+
 fn record_agent_loop_decision_envelope_output_vars(
     loop_state: &mut LoopState,
     route: Option<&RouteResult>,
@@ -1160,6 +1296,20 @@ async fn run_agent_round(
     {
         if let Some(outcome) =
             try_replan_avoidable_low_risk_freeform_clarify(loop_state, route_result, &intent)
+        {
+            info!(
+                "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
+                task.task_id,
+                loop_state.round_no,
+                outcome.executed_actions,
+                outcome.no_progress,
+                outcome.stop_signal.as_deref().unwrap_or(""),
+                crate::truncate_for_log(outcome.next_goal_hint.as_deref().unwrap_or(""))
+            );
+            return Ok(outcome);
+        }
+        if let Some(outcome) =
+            try_recover_inconsistent_boundary_clarify(loop_state, route_result, &intent)
         {
             info!(
                 "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
