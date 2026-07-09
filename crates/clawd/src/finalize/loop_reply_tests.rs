@@ -176,6 +176,13 @@ fn config_guard_machine_payload_remains_structured_for_final_delivery() {
     ));
 }
 
+#[test]
+fn subagent_runtime_machine_payload_remains_structured_for_final_delivery() {
+    assert!(visible_machine_payload_should_remain_structured(
+        r#"{"output_format":"machine_json","owner_layer":"subagent_runtime","execution_mode":"bounded_parallel_readonly_child_runs","aggregation":{"finding_refs":[]}}"#
+    ));
+}
+
 #[path = "loop_reply_execution_summary_tests.rs"]
 mod execution_summary_tests;
 
@@ -1014,7 +1021,6 @@ fn requested_machine_kv_summary_patches_empty_machine_field_in_rich_answer() {
     let mut delivery_messages = vec![current.to_string()];
     loop_state.last_user_visible_respond = delivery_messages.last().cloned();
     let mut finalizer_summary = None;
-
     assert!(replace_delivery_with_requested_machine_kv_summary(
         &task,
         "Return required machine field resume_task_id.",
@@ -1029,6 +1035,35 @@ fn requested_machine_kv_summary_patches_empty_machine_field_in_rich_answer() {
         vec![
             "clawcli resume is available.\n\nFields:\n- <TASK_ID>\n- --text <TEXT>\n\nresume_task_id=<TASK_ID>"
         ]
+    );
+}
+
+#[test]
+fn requested_machine_kv_summary_patches_none_machine_field_in_rich_answer() {
+    let task = claimed_task("task-machine-kv-patch-none-field");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "Usage: clawcli resume --text <TEXT> <TASK_ID>\n\nArguments:\n  <TASK_ID>  Existing task id to continue",
+    ));
+    let current = "clawcli resume is available.\n\nresume_task_id=<none>";
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Return required machine field resume_task_id.",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(
+        delivery_messages,
+        vec!["clawcli resume is available.\n\nresume_task_id=<TASK_ID>"]
     );
 }
 

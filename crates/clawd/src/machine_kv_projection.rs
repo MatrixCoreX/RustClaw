@@ -789,13 +789,18 @@ fn text_has_exact_machine_marker(text: &str, marker: &str) -> bool {
 
 fn observed_machine_marker_projection(marker: &str, observed_texts: &[String]) -> Option<String> {
     let prefix = format!("{marker}=");
-    observed_texts
-        .iter()
-        .find_map(|text| {
-            text.strip_prefix(prefix.as_str())
-                .and_then(projected_machine_value)
-        })
-        .map(|value| format!("{marker}={value}"))
+    observed_texts.iter().find_map(|text| {
+        let value = text
+            .strip_prefix(prefix.as_str())
+            .and_then(projected_machine_value)?;
+        if machine_value_is_empty_placeholder(value.as_str()) {
+            if let Some(projected) = observed_machine_placeholder_projection(marker, observed_texts)
+            {
+                return Some(projected);
+            }
+        }
+        Some(format!("{marker}={value}"))
+    })
 }
 
 fn observed_machine_placeholder_projection(
@@ -879,6 +884,18 @@ fn projected_machine_value(raw: &str) -> Option<String> {
         .trim()
         .trim_end_matches(|ch| matches!(ch, ',' | ';'));
     (!projected.is_empty()).then(|| projected.to_string())
+}
+
+fn machine_value_is_empty_placeholder(value: &str) -> bool {
+    let normalized = value
+        .trim()
+        .trim_matches(|ch| matches!(ch, '<' | '>' | '{' | '}'))
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "" | "null" | "none" | "not_applicable" | "n/a" | "na"
+    )
 }
 
 fn first_json_value_prefix(value: &str) -> Option<serde_json::Value> {
