@@ -1,6 +1,159 @@
 use super::*;
 
 #[test]
+fn matrix_shape_replaces_stale_file_token_delivery_with_observed_directory_listing() {
+    let state = test_state();
+    let task = claimed_task("task-stale-file-token-listing");
+    let mut route = free_route_result();
+    route.wants_file_delivery = false;
+    route.output_contract.delivery_required = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: "directory inventory".to_string(),
+            execution_recipe_summary: None,
+            plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                step_id: "step_1".to_string(),
+                action_type: "call_capability".to_string(),
+                skill: "filesystem.list_dir".to_string(),
+                args: serde_json::json!({
+                    "path": "logs",
+                    "names_only": true,
+                    "max_entries": 5
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }])),
+            verify_result: None,
+        });
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "system_basic",
+        &serde_json::json!({
+            "action": "inventory_dir",
+            "path": "logs",
+            "resolved_path": "/home/guagua/rustclaw/logs",
+            "names": [
+                "act_plan.log",
+                "agent_rollout_metrics",
+                "base_skill_contracts_20260516_100540",
+                "base_skill_contracts_20260516_112927",
+                "base_skill_contracts_20260527_042323"
+            ],
+            "entries": [
+                {"kind": "file", "name": "act_plan.log", "path": "logs/act_plan.log"},
+                {"kind": "dir", "name": "agent_rollout_metrics", "path": "logs/agent_rollout_metrics"},
+                {"kind": "dir", "name": "base_skill_contracts_20260516_100540", "path": "logs/base_skill_contracts_20260516_100540"},
+                {"kind": "dir", "name": "base_skill_contracts_20260516_112927", "path": "logs/base_skill_contracts_20260516_112927"},
+                {"kind": "dir", "name": "base_skill_contracts_20260527_042323", "path": "logs/base_skill_contracts_20260527_042323"}
+            ]
+        })
+        .to_string(),
+    ));
+    let mut delivery = vec!["FILE:/home/guagua/rustclaw/logs/model_io.log".to_string()];
+    let mut finalizer_summary = None;
+
+    assert!(
+        super::super::replace_delivery_with_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "directory inventory",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        )
+    );
+
+    assert_eq!(
+        delivery,
+        vec![
+            "act_plan.log\nagent_rollout_metrics\nbase_skill_contracts_20260516_100540\nbase_skill_contracts_20260516_112927\nbase_skill_contracts_20260527_042323"
+                .to_string()
+        ]
+    );
+    assert_eq!(
+        loop_state.last_user_visible_respond,
+        delivery.first().cloned()
+    );
+    assert!(finalizer_summary.is_some());
+}
+
+#[test]
+fn matrix_shape_keeps_file_token_when_plan_uses_runtime_file_selection_template() {
+    let state = test_state();
+    let task = claimed_task("task-file-token-template-kept");
+    let mut route = free_route_result();
+    route.wants_file_delivery = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.round_traces.push(crate::task_journal::TaskJournalRoundTrace {
+        round_no: 1,
+        goal: "deliver selected file".to_string(),
+        execution_recipe_summary: None,
+        plan_result: Some(plan_result_with_steps(vec![
+            crate::PlanStep {
+                step_id: "step_1".to_string(),
+                action_type: "call_capability".to_string(),
+                skill: "filesystem.list_dir".to_string(),
+                args: serde_json::json!({"path": "logs", "names_only": true}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            },
+            crate::PlanStep {
+                step_id: "step_2".to_string(),
+                action_type: "respond".to_string(),
+                skill: "respond".to_string(),
+                args: serde_json::json!({"content": "FILE:{{last_output.lines().next().unwrap()}}"}),
+                depends_on: vec!["step_1".to_string()],
+                why: String::new(),
+            },
+        ])),
+        verify_result: None,
+    });
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "system_basic",
+        r#"{"action":"inventory_dir","path":"logs","names":["act_plan.log","model_io.log"]}"#,
+    ));
+    let mut delivery = vec!["FILE:/home/guagua/rustclaw/logs/model_io.log".to_string()];
+    let original = delivery.clone();
+    let mut finalizer_summary = None;
+
+    assert!(
+        !super::super::replace_delivery_with_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "deliver selected file",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        )
+    );
+    assert_eq!(delivery, original);
+    assert!(finalizer_summary.is_none());
+}
+
+#[test]
 fn active_bound_inventory_path_overrides_bare_path_directory_listing_contract() {
     let state = test_state();
     let task = claimed_task("task-active-bound-inventory-path");

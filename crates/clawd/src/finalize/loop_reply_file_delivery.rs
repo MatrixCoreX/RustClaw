@@ -389,6 +389,13 @@ fn planned_file_delivery_inventory_selection(
     None
 }
 
+pub(super) fn planned_file_delivery_uses_runtime_selection_template(
+    loop_state: &LoopState,
+) -> bool {
+    planned_file_delivery_used_unresolved_runtime_placeholder(loop_state)
+        || planned_file_delivery_inventory_selection(loop_state).is_some()
+}
+
 fn inventory_candidate_names(value: &serde_json::Value) -> Vec<String> {
     if let Some(names) = value.get("names").and_then(|value| value.as_array()) {
         return names

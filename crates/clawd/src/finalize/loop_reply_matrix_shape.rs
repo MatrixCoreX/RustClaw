@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::path::Path;
 
 use tracing::info;
 
@@ -448,6 +449,160 @@ pub(super) fn matrix_strict_list_observed_answer(
     }
     let answer = values.join("\n");
     Some((answer, matrix_observed_shape_summary(loop_state)))
+}
+
+fn stale_file_token_delivery_listing_answer(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    delivery_messages: &[String],
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if !route_has_unresolved_file_token_delivery_contract(route)
+        || !current_delivery_is_file_token(delivery_messages)
+        || super::file_delivery::planned_file_delivery_uses_runtime_selection_template(loop_state)
+        || !latest_plan_requested_directory_inventory(loop_state)
+    {
+        return None;
+    }
+    observed_directory_listing_answer(loop_state)
+        .map(|answer| (answer, matrix_observed_shape_summary(loop_state)))
+}
+
+fn route_has_unresolved_file_token_delivery_contract(route: &crate::RouteResult) -> bool {
+    let contract = route.effective_output_contract();
+    (route.wants_file_delivery
+        || contract.delivery_required
+        || matches!(
+            contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+        || matches!(
+            contract.delivery_intent,
+            crate::OutputDeliveryIntent::FileSingle
+        ))
+        && matches!(contract.locator_kind, crate::OutputLocatorKind::None)
+        && contract.locator_hint.trim().is_empty()
+}
+
+fn current_delivery_is_file_token(delivery_messages: &[String]) -> bool {
+    let answer = final_answer_text_from_delivery(delivery_messages);
+    let first_line = answer.trim().lines().next().unwrap_or_default().trim();
+    crate::finalize::parse_delivery_file_token(first_line).is_some()
+}
+
+fn latest_plan_requested_directory_inventory(loop_state: &LoopState) -> bool {
+    loop_state
+        .round_traces
+        .iter()
+        .rev()
+        .filter_map(|round| round.plan_result.as_ref())
+        .any(|plan| {
+            plan.steps.iter().any(|step| {
+                let action = step
+                    .args
+                    .get("action")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim);
+                matches!(action, Some("list_dir" | "inventory_dir"))
+                    || matches!(
+                        step.skill.as_str(),
+                        "filesystem.list_dir"
+                            | "filesystem.list_entries"
+                            | "fs_basic.list_dir"
+                            | "system_basic.inventory_dir"
+                    )
+            })
+        })
+}
+
+fn observed_directory_listing_answer(loop_state: &LoopState) -> Option<String> {
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok()
+            || matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+        {
+            continue;
+        }
+        let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            continue;
+        };
+        let output =
+            crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
+                output,
+            );
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&output) else {
+            continue;
+        };
+        if let Some(answer) = directory_listing_answer_from_value(&value) {
+            return Some(answer);
+        }
+    }
+    None
+}
+
+fn directory_listing_answer_from_value(value: &serde_json::Value) -> Option<String> {
+    if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
+        if let Some(answer) = directory_listing_answer_from_value(extra) {
+            return Some(answer);
+        }
+    }
+    if !matches!(
+        value.get("action").and_then(serde_json::Value::as_str),
+        Some("inventory_dir" | "list_dir")
+    ) {
+        return None;
+    }
+    let mut items = observed_directory_listing_names(value);
+    items.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    if items.len() < 2 {
+        return None;
+    }
+    Some(items.join("\n"))
+}
+
+fn observed_directory_listing_names(value: &serde_json::Value) -> Vec<String> {
+    if let Some(names) = value.get("names").and_then(serde_json::Value::as_array) {
+        let items = names
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        if !items.is_empty() {
+            return items;
+        }
+    }
+    value
+        .get("entries")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            entry
+                .get("name")
+                .or_else(|| entry.get("path"))
+                .or_else(|| entry.get("resolved_path"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(|name| {
+                    Path::new(name)
+                        .file_name()
+                        .and_then(|file_name| file_name.to_str())
+                        .map(str::trim)
+                        .filter(|file_name| !file_name.is_empty())
+                        .unwrap_or(name)
+                        .to_string()
+                })
+        })
+        .collect()
 }
 
 fn route_supports_matrix_strict_list_observed_answer(route: &crate::RouteResult) -> bool {
@@ -1493,6 +1648,26 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
         return false;
     };
     let current_answer = final_answer_text_from_delivery(delivery_messages);
+    if let Some((candidate, summary)) =
+        stale_file_token_delivery_listing_answer(route, loop_state, delivery_messages)
+    {
+        let answer = candidate.trim().to_string();
+        if answer.is_empty() {
+            return false;
+        }
+        delivery_messages.clear();
+        delivery_messages.push(answer.clone());
+        loop_state.last_user_visible_respond = Some(answer);
+        *finalizer_summary = Some(summary);
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "matrix_replace_stale_file_token_with_listing",
+            "replaced",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return true;
+    }
     if !current_answer.trim().is_empty()
         && !directory_entry_groups_prefers_observed_groups(route, loop_state)
         && !archive_member_list_prefers_observed_projection(route)
