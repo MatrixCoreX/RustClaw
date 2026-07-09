@@ -70,7 +70,7 @@ async fn apply_contract_judge_repair(
         {
             if apply_contract_repair_judge_output(&mut out, repair) {
                 let mut repair_applied = ContractRepairReport::default();
-                repair_applied.add("llm_semantic", "contract_repair_judge_applied");
+                repair_applied.add("llm_boundary_contract", "contract_repair_judge_applied");
                 contract_repair_report.merge(&repair_applied);
             }
         }

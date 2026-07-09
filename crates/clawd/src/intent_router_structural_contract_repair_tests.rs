@@ -200,7 +200,7 @@ fn structural_contract_repair_keeps_single_existence_path_verdict() {
         None,
     );
 
-    assert_eq!(reason, Some("semantic_contract_requires_evidence"));
+    assert_eq!(reason, Some("output_contract_requires_evidence"));
     assert_eq!(
         contract.semantic_kind,
         OutputSemanticKind::ExistenceWithPath
@@ -527,7 +527,7 @@ fn structural_contract_repair_keeps_new_filename_generated_delivery() {
         None,
     );
 
-    assert_eq!(reason, Some("semantic_contract_requires_evidence"));
+    assert_eq!(reason, Some("output_contract_requires_evidence"));
     assert_eq!(
         contract.semantic_kind,
         OutputSemanticKind::GeneratedFileDelivery
@@ -613,7 +613,7 @@ fn semantic_contract_repair_ignores_invented_answer_candidate_for_observation() 
         None,
     );
 
-    assert_eq!(reason, Some("semantic_contract_requires_evidence"));
+    assert_eq!(reason, Some("output_contract_requires_evidence"));
     assert!(contract.requires_content_evidence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Filename);
     assert_eq!(contract.locator_hint, "rustclaw.service");

@@ -205,7 +205,7 @@ mod structural_contracts;
 use structural_contracts::{
     config_mutation_contract_from_surface,
     current_turn_extension_inventory_file_paths_repair_applies,
-    current_workspace_generic_summary_needs_semantic_contract,
+    current_workspace_generic_summary_needs_workspace_summary_contract,
     existence_with_path_mixed_locator_summary_repair,
     extension_inventory_locator_hint_should_use_workspace,
     file_paths_missing_file_locator_parent_dir,
