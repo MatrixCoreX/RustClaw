@@ -17,6 +17,22 @@ impl WorkspaceUpdateMode {
     }
 }
 
+fn workspace_update_status_lock(
+    shared: &Mutex<WorkspaceUpdateStatus>,
+) -> std::sync::MutexGuard<'_, WorkspaceUpdateStatus> {
+    shared
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn workspace_update_control_lock(
+    control: &Mutex<WorkspaceUpdateControl>,
+) -> std::sync::MutexGuard<'_, WorkspaceUpdateControl> {
+    control
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 async fn get_workspace_update(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -61,7 +77,7 @@ async fn refresh_workspace_update_versions(
     workspace_root: &Path,
     shared: Arc<Mutex<WorkspaceUpdateStatus>>,
 ) -> WorkspaceUpdateStatus {
-    let snapshot = shared.lock().unwrap().clone();
+    let snapshot = workspace_update_status_lock(shared.as_ref()).clone();
     if matches!(snapshot.status.as_str(), "running" | "restarting") {
         return snapshot;
     }
@@ -89,7 +105,7 @@ async fn refresh_workspace_update_versions(
     .filter(|out| out.exit_code == Some(0))
     .and_then(|out| first_output_line(&out.stdout_tail));
 
-    let mut guard = shared.lock().unwrap();
+    let mut guard = workspace_update_status_lock(shared.as_ref());
     if let Some(local_commit) = local_commit.clone() {
         guard.old_commit = Some(local_commit.clone());
         if matches!(guard.status.as_str(), "idle" | "up_to_date" | "succeeded") {
@@ -184,7 +200,7 @@ async fn start_workspace_update_with_mode(
     let shared = workspace_update_state();
     let control = workspace_update_control();
     let status = {
-        let mut guard = shared.lock().unwrap();
+        let mut guard = workspace_update_status_lock(shared.as_ref());
         if matches!(guard.status.as_str(), "running" | "restarting") {
             return (
                 StatusCode::CONFLICT,
@@ -205,7 +221,7 @@ async fn start_workspace_update_with_mode(
         guard.clone()
     };
     {
-        let mut guard = control.lock().unwrap();
+        let mut guard = workspace_update_control_lock(control.as_ref());
         guard.cancel_requested = false;
         guard.active_child_pid = None;
     }
@@ -259,8 +275,8 @@ async fn cancel_workspace_update(
     let shared = workspace_update_state();
     let control = workspace_update_control();
     let pid = {
-        let mut control_guard = control.lock().unwrap();
-        let mut status_guard = shared.lock().unwrap();
+        let mut control_guard = workspace_update_control_lock(control.as_ref());
+        let mut status_guard = workspace_update_status_lock(shared.as_ref());
         if status_guard.status != "running" {
             return (
                 StatusCode::CONFLICT,
@@ -281,7 +297,7 @@ async fn cancel_workspace_update(
         terminate_workspace_update_process_tree(pid);
     }
 
-    let status = shared.lock().unwrap().clone();
+    let status = workspace_update_status_lock(shared.as_ref()).clone();
     (
         StatusCode::ACCEPTED,
         Json(ApiResponse {
@@ -346,14 +362,14 @@ async fn run_workspace_update_job(
         return;
     }
     {
-        let mut guard = shared.lock().unwrap();
+        let mut guard = workspace_update_status_lock(shared.as_ref());
         guard.old_commit = old_commit.clone();
     }
 
     set_workspace_update_step(&shared, "checking_remote_version");
     match run_workspace_update_command("git", &["fetch", "--quiet"], &workspace_root, 600).await {
         Ok(out) if out.exit_code == Some(0) => {
-            let mut guard = shared.lock().unwrap();
+            let mut guard = workspace_update_status_lock(shared.as_ref());
             guard.exit_code = out.exit_code;
             guard.stdout_tail = out.stdout_tail;
             guard.stderr_tail = out.stderr_tail;
@@ -408,7 +424,7 @@ async fn run_workspace_update_job(
         }
     };
     {
-        let mut guard = shared.lock().unwrap();
+        let mut guard = workspace_update_status_lock(shared.as_ref());
         if let Some(remote_commit) = remote_commit.clone() {
             guard.remote_commit = Some(remote_commit);
         }
@@ -425,7 +441,7 @@ async fn run_workspace_update_job(
             .await
         {
             Ok(out) if out.exit_code == Some(0) => {
-                let mut guard = shared.lock().unwrap();
+                let mut guard = workspace_update_status_lock(shared.as_ref());
                 guard.exit_code = out.exit_code;
                 guard.stdout_tail = out.stdout_tail;
                 guard.stderr_tail = out.stderr_tail;
@@ -466,7 +482,7 @@ async fn run_workspace_update_job(
                     return;
                 }
                 {
-                    let mut guard = shared.lock().unwrap();
+                    let mut guard = workspace_update_status_lock(shared.as_ref());
                     guard.next_step = Some(format!(
                         "已只覆盖 {} 个冲突路径；其他本地改动和额外文件保持不动，正在重新拉取远端。",
                         conflict_paths.len()
@@ -483,7 +499,7 @@ async fn run_workspace_update_job(
                 .await
                 {
                     Ok(out) if out.exit_code == Some(0) => {
-                        let mut guard = shared.lock().unwrap();
+                        let mut guard = workspace_update_status_lock(shared.as_ref());
                         guard.exit_code = out.exit_code;
                         guard.stdout_tail = out.stdout_tail;
                         guard.stderr_tail = out.stderr_tail;
@@ -520,7 +536,7 @@ async fn run_workspace_update_job(
             return;
         }
     } else {
-        let mut guard = shared.lock().unwrap();
+        let mut guard = workspace_update_status_lock(shared.as_ref());
         guard.step = "skipping_pull_latest_code".to_string();
         if old_commit.is_some() && remote_commit.is_some() {
             guard.next_step =
@@ -538,7 +554,7 @@ async fn run_workspace_update_job(
     .await
     {
         if out.exit_code == Some(0) {
-            let mut guard = shared.lock().unwrap();
+            let mut guard = workspace_update_status_lock(shared.as_ref());
             guard.new_commit = first_output_line(&out.stdout_tail);
         }
     }
@@ -548,7 +564,7 @@ async fn run_workspace_update_job(
 
     set_workspace_update_step(&shared, "building_workspace");
     {
-        let mut guard = shared.lock().unwrap();
+        let mut guard = workspace_update_status_lock(shared.as_ref());
         guard.exit_code = None;
         guard.stdout_tail.clear();
         guard.stderr_tail.clear();
@@ -565,7 +581,7 @@ async fn run_workspace_update_job(
     .await
     {
         Ok(out) if out.exit_code == Some(0) => {
-            let mut guard = shared.lock().unwrap();
+            let mut guard = workspace_update_status_lock(shared.as_ref());
             guard.exit_code = out.exit_code;
             guard.stdout_tail = out.stdout_tail;
             guard.stderr_tail = out.stderr_tail;
@@ -615,7 +631,7 @@ async fn run_workspace_update_job(
 
     match spawn_result {
         Ok(_) => {
-            let mut guard = shared.lock().unwrap();
+            let mut guard = workspace_update_status_lock(shared.as_ref());
             guard.status = "restarting".to_string();
             guard.step = "restart_scheduled".to_string();
             guard.finished_ts = Some(current_unix_ts());
@@ -706,7 +722,7 @@ async fn run_workspace_update_clawd_only_job(
     .await
     {
         Ok(out) if out.exit_code == Some(0) => {
-            let mut guard = shared.lock().unwrap();
+            let mut guard = workspace_update_status_lock(shared.as_ref());
             guard.exit_code = out.exit_code;
             guard.stdout_tail = out.stdout_tail;
             guard.stderr_tail = out.stderr_tail;
@@ -737,7 +753,7 @@ async fn run_workspace_update_clawd_only_job(
     set_workspace_update_step(&shared, "restarting_clawd");
     match schedule_workspace_update_clawd_restart(&workspace_root) {
         Ok(()) => {
-            let mut guard = shared.lock().unwrap();
+            let mut guard = workspace_update_status_lock(shared.as_ref());
             guard.status = "restarting".to_string();
             guard.step = "clawd_restart_scheduled".to_string();
             guard.finished_ts = Some(current_unix_ts());
@@ -767,7 +783,7 @@ async fn run_workspace_update_release_deploy_job(
     set_workspace_update_step(&shared, "downloading_release");
     reset_workspace_update_build_logs(&shared);
     {
-        let mut guard = shared.lock().unwrap();
+        let mut guard = workspace_update_status_lock(shared.as_ref());
         guard.next_step = Some("release_deploy_downloading".to_string());
     }
     match run_workspace_update_command_streaming(
@@ -781,7 +797,7 @@ async fn run_workspace_update_release_deploy_job(
     .await
     {
         Ok(out) if out.exit_code == Some(0) => {
-            let mut guard = shared.lock().unwrap();
+            let mut guard = workspace_update_status_lock(shared.as_ref());
             guard.exit_code = out.exit_code;
             guard.stdout_tail = out.stdout_tail;
             guard.stderr_tail = out.stderr_tail;
@@ -816,7 +832,7 @@ async fn run_workspace_update_release_deploy_job(
     set_workspace_update_step(&shared, "restarting_clawd");
     match schedule_workspace_update_clawd_restart(&workspace_root) {
         Ok(()) => {
-            let mut guard = shared.lock().unwrap();
+            let mut guard = workspace_update_status_lock(shared.as_ref());
             guard.status = "restarting".to_string();
             guard.step = "release_restart_scheduled".to_string();
             guard.finished_ts = Some(current_unix_ts());
@@ -1019,7 +1035,7 @@ async fn record_workspace_update_current_version(
     {
         if out.exit_code == Some(0) {
             let local_commit = first_output_line(&out.stdout_tail);
-            let mut guard = shared.lock().unwrap();
+            let mut guard = workspace_update_status_lock(shared.as_ref());
             guard.old_commit = local_commit.clone();
             guard.new_commit = local_commit;
         }
@@ -1027,7 +1043,7 @@ async fn record_workspace_update_current_version(
 }
 
 fn reset_workspace_update_build_logs(shared: &Arc<Mutex<WorkspaceUpdateStatus>>) {
-    let mut guard = shared.lock().unwrap();
+    let mut guard = workspace_update_status_lock(shared.as_ref());
     guard.exit_code = None;
     guard.stdout_tail.clear();
     guard.stderr_tail.clear();
@@ -1039,7 +1055,7 @@ fn finish_workspace_update_succeeded(
     step: &str,
     output: WorkspaceUpdateCommandOutput,
 ) {
-    let mut guard = shared.lock().unwrap();
+    let mut guard = workspace_update_status_lock(shared.as_ref());
     guard.status = "succeeded".to_string();
     guard.step = step.to_string();
     guard.finished_ts = Some(current_unix_ts());
@@ -1090,7 +1106,7 @@ fn schedule_workspace_update_clawd_restart(workspace_root: &Path) -> Result<(), 
 }
 
 fn set_workspace_update_step(shared: &Arc<Mutex<WorkspaceUpdateStatus>>, step: &str) {
-    let mut guard = shared.lock().unwrap();
+    let mut guard = workspace_update_status_lock(shared.as_ref());
     guard.status = "running".to_string();
     guard.step = step.to_string();
 }
@@ -1098,7 +1114,7 @@ fn set_workspace_update_step(shared: &Arc<Mutex<WorkspaceUpdateStatus>>, step: &
 const WORKSPACE_UPDATE_CANCELED_ERROR: &str = "workspace_update_canceled";
 
 fn workspace_update_cancel_requested(control: &Arc<Mutex<WorkspaceUpdateControl>>) -> bool {
-    control.lock().unwrap().cancel_requested
+    workspace_update_control_lock(control.as_ref()).cancel_requested
 }
 
 fn finish_workspace_update_if_canceled(
@@ -1117,10 +1133,10 @@ fn finish_workspace_update_canceled(
     control: &Arc<Mutex<WorkspaceUpdateControl>>,
 ) {
     {
-        let mut guard = control.lock().unwrap();
+        let mut guard = workspace_update_control_lock(control.as_ref());
         guard.active_child_pid = None;
     }
-    let mut guard = shared.lock().unwrap();
+    let mut guard = workspace_update_status_lock(shared.as_ref());
     guard.status = "canceled".to_string();
     guard.step = "canceled".to_string();
     guard.finished_ts = Some(current_unix_ts());
@@ -1135,7 +1151,7 @@ fn fail_workspace_update(
     next_step: &str,
     output: WorkspaceUpdateCommandOutput,
 ) {
-    let mut guard = shared.lock().unwrap();
+    let mut guard = workspace_update_status_lock(shared.as_ref());
     guard.status = "failed".to_string();
     guard.finished_ts = Some(current_unix_ts());
     guard.exit_code = output.exit_code;
@@ -1150,7 +1166,7 @@ fn fail_workspace_update_with_error(
     error: impl Into<String>,
     next_step: &str,
 ) {
-    let mut guard = shared.lock().unwrap();
+    let mut guard = workspace_update_status_lock(shared.as_ref());
     guard.status = "failed".to_string();
     guard.finished_ts = Some(current_unix_ts());
     guard.error = Some(error.into());
@@ -1325,7 +1341,7 @@ async fn run_workspace_update_command_streaming(
         .spawn()
         .map_err(|err| format!("failed to run {program}: {err}"))?;
     if let Some(pid) = child.id() {
-        let mut guard = control.lock().unwrap();
+        let mut guard = workspace_update_control_lock(control.as_ref());
         guard.active_child_pid = Some(pid);
     }
     let stdout = child
@@ -1360,7 +1376,7 @@ async fn run_workspace_update_command_streaming(
             let _ = child.kill().await;
             let _ = stdout_task.await;
             let _ = stderr_task.await;
-            let mut guard = control.lock().unwrap();
+            let mut guard = workspace_update_control_lock(control.as_ref());
             guard.active_child_pid = None;
             return Err(format!("{program} timed out after {timeout_seconds}s"));
         }
@@ -1375,11 +1391,11 @@ async fn run_workspace_update_command_streaming(
     let _ = stdout_task.await;
     let _ = stderr_task.await;
     {
-        let mut guard = control.lock().unwrap();
+        let mut guard = workspace_update_control_lock(control.as_ref());
         guard.active_child_pid = None;
     }
 
-    let guard = shared.lock().unwrap();
+    let guard = workspace_update_status_lock(shared.as_ref());
     Ok(WorkspaceUpdateCommandOutput {
         exit_code: status.code(),
         stdout_tail: guard.stdout_tail.clone(),
@@ -1439,7 +1455,7 @@ fn append_workspace_update_log_chunk(
     if chunk.is_empty() {
         return;
     }
-    let mut guard = shared.lock().unwrap();
+    let mut guard = workspace_update_status_lock(shared.as_ref());
     let target = if is_stdout {
         &mut guard.stdout_tail
     } else {
