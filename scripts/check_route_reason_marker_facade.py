@@ -19,7 +19,6 @@ SRC = ROOT / "crates" / "clawd" / "src"
 
 ALLOWED_DIRECT_PARSERS = {
     SRC / "pipeline_types.rs",
-    SRC / "finalize" / "loop_reply_route_helpers.rs",
 }
 
 PATTERNS = (

@@ -140,11 +140,7 @@ fn completed_act_delivery_should_own_terminal_state(
 }
 
 fn route_reason_has_machine_token(route_reason: &str, expected: &str) -> bool {
-    route_reason
-        .split(|ch: char| {
-            ch.is_whitespace() || matches!(ch, ';' | ',' | '|' | '[' | ']' | '(' | ')')
-        })
-        .any(|token| token.trim() == expected)
+    crate::RouteReasonMarkers::new(route_reason).has_machine_marker(expected)
 }
 
 fn delivery_has_terminal_clarify_machine_fields(message: &str) -> bool {

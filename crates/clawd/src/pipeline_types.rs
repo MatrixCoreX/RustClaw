@@ -446,7 +446,7 @@ impl<'a> RouteReasonMarkers<'a> {
     }
 
     pub(crate) fn has_machine_marker(self, marker: &str) -> bool {
-        self.route_reason.split(';').map(str::trim).any(|part| {
+        self.tokens().any(|part| {
             part == marker
                 || part
                     .rsplit_once(':')
@@ -455,28 +455,44 @@ impl<'a> RouteReasonMarkers<'a> {
     }
 
     pub(crate) fn has_any_machine_marker(self, markers: &[&str]) -> bool {
-        markers
-            .iter()
-            .any(|marker| self.has_machine_marker(marker))
+        markers.iter().any(|marker| self.has_machine_marker(marker))
     }
 
     pub(crate) fn any_part(self, mut predicate: impl FnMut(&str) -> bool) -> bool {
-        self.route_reason
-            .split(';')
-            .map(str::trim)
-            .any(|part| predicate(part))
+        self.tokens().any(|part| predicate(part))
+    }
+
+    pub(crate) fn machine_value(self, key: &str) -> Option<&'a str> {
+        let key = key.trim();
+        if key.is_empty() {
+            return None;
+        }
+        self.tokens()
+            .filter_map(|part| {
+                let value = part
+                    .strip_prefix(key)?
+                    .trim_start()
+                    .strip_prefix(':')
+                    .or_else(|| part.strip_prefix(key)?.trim_start().strip_prefix('='))?;
+                let value = value.trim().trim_matches(|ch: char| {
+                    matches!(ch, '"' | '\'' | '`' | ',' | ';' | ':' | ')' | '(')
+                });
+                (!value.is_empty()).then_some(value)
+            })
+            .last()
     }
 
     pub(crate) fn explicit_output_contract_marker_kind(self) -> Option<OutputSemanticKind> {
-        self.route_reason
-            .split(';')
-            .map(str::trim)
-            .rev()
-            .find_map(|part| {
+        self.tokens()
+            .filter_map(|part| {
                 let marker = part
                     .strip_prefix("output_contract_kind=")
                     .or_else(|| part.strip_prefix("contract:"))?
                     .trim();
+                (!marker.is_empty()).then_some(marker)
+            })
+            .last()
+            .and_then(|marker| {
                 OutputSemanticKind::ALL
                     .iter()
                     .copied()
@@ -485,6 +501,15 @@ impl<'a> RouteReasonMarkers<'a> {
                             && semantic_kind.as_str() == marker
                     })
             })
+    }
+
+    fn tokens(self) -> impl Iterator<Item = &'a str> {
+        self.route_reason
+            .split(|ch: char| {
+                ch.is_whitespace() || matches!(ch, ';' | ',' | '|' | '[' | ']' | '(' | ')')
+            })
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
     }
 }
 
