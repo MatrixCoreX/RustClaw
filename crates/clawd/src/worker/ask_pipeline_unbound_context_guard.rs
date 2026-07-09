@@ -312,6 +312,37 @@ pub(super) fn unbound_targeted_evidence_route_should_defer_to_agent_loop(
         )
 }
 
+pub(super) fn current_workspace_summary_repair_without_bound_locator_should_defer_to_agent_loop(
+    state: &AppState,
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> bool {
+    let Some(resolved_child) = current_request_resolves_workspace_child_locator(state, prompt)
+    else {
+        return false;
+    };
+    let locator_hint = route_result.output_contract.locator_hint.trim();
+    let locator_hint_is_unbound_workspace_scope = locator_hint.is_empty()
+        || locator_hint_points_to_workspace_root(&state.skill_rt.workspace_root, locator_hint);
+    !current_request_has_concrete_locator_surface(prompt)
+        && std::path::Path::new(&resolved_child).is_file()
+        && !session_has_authoritative_deictic_anchor(prompt, route_result, session_snapshot)
+        && !active_session_has_bound_target(session_snapshot)
+        && !active_session_has_structured_observation_anchor(session_snapshot)
+        && (route_result.is_execute_gate() || route_result.needs_clarify)
+        && route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+        && !route_result.wants_file_delivery
+        && route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && locator_hint_is_unbound_workspace_scope
+        && route_reason_has_marker(
+            route_result,
+            "current_workspace_summary_boundary_contract_repair",
+        )
+        && !authoritative_current_workspace_locator_hint_signal(route_result)
+}
+
 fn current_workspace_unmentioned_locator_hint_should_defer_to_agent_loop(
     prompt: &str,
     route_result: &crate::RouteResult,

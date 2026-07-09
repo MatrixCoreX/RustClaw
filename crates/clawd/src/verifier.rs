@@ -811,6 +811,97 @@ fn route_requires_clarify_before_tools(
         )
 }
 
+fn context_bundle_has_redacted_workspace_child_locator(summary: Option<&str>) -> bool {
+    const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    let Some(summary) = summary else {
+        return false;
+    };
+    summary.split(START).skip(1).any(|tail| {
+        let block = tail.split(END).next().unwrap_or(tail).trim();
+        let Ok(value) = serde_json::from_str::<Value>(block) else {
+            return false;
+        };
+        value
+            .get("current_request_locator")
+            .and_then(|locator| locator.get("resolved_workspace_child_redacted"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    })
+}
+
+fn args_have_path_value(args: &Value) -> bool {
+    let Some(obj) = args.as_object() else {
+        return false;
+    };
+    ["path", "file_path", "target_path", "requested_path"]
+        .into_iter()
+        .any(|key| {
+            obj.get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty())
+        })
+}
+
+fn step_reads_path_content_under_unbound_locator(step: &PlanStep, normalized_skill: &str) -> bool {
+    if !args_have_path_value(&step.args) {
+        return false;
+    }
+    match step.action_type.as_str() {
+        "call_capability" => action_key_reads_path_content(step.skill.trim()),
+        "call_skill" | "call_tool" => {
+            let action_key =
+                crate::evidence_policy::ActionRef::from_skill_args(normalized_skill, &step.args)
+                    .map(|action| action.as_key());
+            action_key
+                .as_deref()
+                .is_some_and(action_key_reads_path_content)
+        }
+        _ => false,
+    }
+}
+
+fn action_key_reads_path_content(action_key: &str) -> bool {
+    let Some(action_key) =
+        crate::evidence_policy::ActionRef::parse(action_key).map(|action| action.as_key())
+    else {
+        return false;
+    };
+    matches!(
+        action_key.as_str(),
+        "filesystem.read_text_range"
+            | "filesystem.read_file"
+            | "filesystem.grep_text"
+            | "fs_basic.read_text_range"
+            | "fs_basic.grep_text"
+            | "system_basic.read_range"
+            | "system_basic.read_file"
+            | "read_file"
+    )
+}
+
+fn policy_action_reads_path_content_under_unbound_locator(action_key: &str, args: &Value) -> bool {
+    args_have_path_value(args) && action_key_reads_path_content(action_key)
+}
+
+fn push_unbound_locator_route_clarify_issue(issues: &mut Vec<VerifyIssue>, step_id: &str) {
+    if issues.iter().any(|issue| {
+        issue.step_id == step_id
+            && matches!(issue.kind, VerifyIssueKind::RouteClarifyRequired)
+            && issue.detail.contains("resolved_workspace_child_redacted")
+    }) {
+        return;
+    }
+    issues.push(VerifyIssue {
+        step_id: step_id.to_string(),
+        kind: VerifyIssueKind::RouteClarifyRequired,
+        detail: "unbound_locator_requires_clarify; boundary=resolved_workspace_child_redacted"
+            .to_string(),
+        missing_fields: vec!["execution_target_or_boundary".to_string()],
+    });
+}
+
 fn route_clarify_can_defer_to_runtime_status_plan(
     state: &AppState,
     route: &crate::RouteResult,
@@ -1301,8 +1392,16 @@ pub(crate) fn verify_plan(
     }
 
     let mut template_scope = TemplatePlaceholderScope::default();
+    let unbound_locator_boundary =
+        context_bundle_has_redacted_workspace_child_locator(input.context_bundle_summary)
+            || context_bundle_has_redacted_workspace_child_locator(Some(&input.plan_result.goal));
     for (idx, step) in effective_plan_result.steps.iter().enumerate() {
         if step.action_type == "call_capability" {
+            if unbound_locator_boundary
+                && step_reads_path_content_under_unbound_locator(step, &step.skill)
+            {
+                push_unbound_locator_route_clarify_issue(&mut issues, &step.step_id);
+            }
             issues.push(VerifyIssue {
                 step_id: step.step_id.clone(),
                 kind: VerifyIssueKind::CapabilityUnavailable,
@@ -1325,6 +1424,11 @@ pub(crate) fn verify_plan(
                 });
             }
             verify_step_args(state, step, &normalized_skill, &template_scope, &mut issues);
+            if unbound_locator_boundary
+                && step_reads_path_content_under_unbound_locator(step, &normalized_skill)
+            {
+                push_unbound_locator_route_clarify_issue(&mut issues, &step.step_id);
+            }
             let subagent_review_boundary_surface_action_allowed =
                 subagent_review_boundary_surface_action_allowed(
                     &effective_plan_result,
@@ -1336,6 +1440,14 @@ pub(crate) fn verify_plan(
                 &normalized_skill,
                 &step.args,
             ) {
+                if unbound_locator_boundary
+                    && policy_action_reads_path_content_under_unbound_locator(
+                        &policy.action_key,
+                        &step.args,
+                    )
+                {
+                    push_unbound_locator_route_clarify_issue(&mut issues, &step.step_id);
+                }
                 if !policy.is_allowed()
                     && !crate::agent_engine::action_has_user_named_output_path_marker(&step.args)
                     && !(scratch_filesystem_lifecycle_plan

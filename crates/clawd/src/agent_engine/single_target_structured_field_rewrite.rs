@@ -132,6 +132,9 @@ pub(super) fn rewrite_single_target_file_read_to_auto_locator(
     if current_path == target_path {
         return actions;
     }
+    if action_path_is_concrete_locator(&current_path) {
+        return actions;
+    }
 
     // 当前轮 route/ordinal/auto-locator 已解析成一个具体文件时，这个路径比 LLM
     // 在厚上下文里“顺手抄到的旧文件路径”更权威。这里只在单目标读文件链路上收口，
@@ -335,6 +338,13 @@ pub(super) fn rewrite_session_alias_delivery_observation_action_path(
             if paths.len() != 1 || paths.first().and_then(Value::as_str) == Some(target) {
                 return false;
             }
+            if paths
+                .first()
+                .and_then(Value::as_str)
+                .is_some_and(action_path_is_concrete_locator)
+            {
+                return false;
+            }
             paths[0] = Value::String(target.to_string());
             true
         }
@@ -345,11 +355,26 @@ pub(super) fn rewrite_session_alias_delivery_observation_action_path(
             if path_value.as_str() == Some(target) {
                 return false;
             }
+            if path_value
+                .as_str()
+                .is_some_and(action_path_is_concrete_locator)
+            {
+                return false;
+            }
             *path_value = Value::String(target.to_string());
             true
         }
         _ => false,
     }
+}
+
+fn action_path_is_concrete_locator(path: &str) -> bool {
+    let path = path.trim();
+    if path.is_empty() {
+        return false;
+    }
+    let path = std::path::Path::new(path);
+    path.is_absolute() || path.components().count() > 1
 }
 
 pub(super) fn collapse_route_target_file_content_plan(

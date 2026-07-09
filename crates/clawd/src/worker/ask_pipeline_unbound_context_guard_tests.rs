@@ -1,5 +1,6 @@
 use super::super::deictic_guard::deictic_missing_locator_reason_code;
 use super::{
+    current_workspace_summary_repair_without_bound_locator_should_defer_to_agent_loop,
     task_control_route_can_plan_without_locator,
     unbound_model_context_target_route_should_defer_to_agent_loop,
     unbound_targeted_evidence_route_should_defer_to_agent_loop,
@@ -473,6 +474,74 @@ fn unbound_current_workspace_project_summary_still_allows_execution() {
         &snapshot,
         "<none>",
     ));
+}
+
+#[test]
+fn deictic_current_workspace_summary_repair_requires_loop_clarify_without_anchor() {
+    let root = make_temp_root("deictic_current_workspace_summary_repair");
+    std::fs::write(root.join("README.md"), "# Demo\n").expect("readme");
+    let state = test_state_with_root(root);
+    let mut route = executable_filename_route();
+    route.route_reason =
+        "current_workspace_summary_boundary_contract_repair; contract:workspace_project_summary"
+            .to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = state.skill_rt.workspace_root.display().to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.wants_file_delivery = false;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(
+        current_workspace_summary_repair_without_bound_locator_should_defer_to_agent_loop(
+            &state,
+            "读一下那个 README 开头并用一句话总结",
+            &route,
+            &snapshot,
+        )
+    );
+}
+
+#[test]
+fn clarify_current_workspace_summary_repair_is_not_auto_locator_rescued_without_anchor() {
+    let root = make_temp_root("clarify_current_workspace_summary_repair");
+    std::fs::write(root.join("README.md"), "# Demo\n").expect("readme");
+    let state = test_state_with_root(root);
+    let mut route = executable_filename_route();
+    route.set_clarify_gate();
+    route.needs_clarify = true;
+    route.route_reason =
+        "current_workspace_summary_boundary_contract_repair; contract:workspace_project_summary"
+            .to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = state.skill_rt.workspace_root.display().to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.wants_file_delivery = false;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(
+        current_workspace_summary_repair_without_bound_locator_should_defer_to_agent_loop(
+            &state,
+            "读一下那个 README 开头并用一句话总结",
+            &route,
+            &snapshot,
+        )
+    );
 }
 
 #[test]

@@ -335,6 +335,25 @@ fn plan_result(steps: Vec<PlanStep>) -> PlanResult {
     }
 }
 
+fn redacted_workspace_child_boundary_context() -> String {
+    let observation = json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "current_request_locator": {
+            "source": "current_request",
+            "has_concrete_surface": false,
+            "explicit_locator_hints": [],
+            "resolved_workspace_child": "",
+            "resolved_workspace_child_redacted": true
+        },
+        "pre_loop_clarify_candidates": ["unbound_targeted_evidence"]
+    });
+    format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS",
+        serde_json::to_string(&observation).expect("observation json")
+    )
+}
+
 #[test]
 fn observe_mode_keeps_route_clarify_as_shadow_only() {
     let state = test_state();
@@ -364,6 +383,78 @@ fn observe_mode_keeps_route_clarify_as_shadow_only() {
         result.issues.first().map(|issue| issue.kind),
         Some(VerifyIssueKind::RouteClarifyRequired)
     ));
+    assert!(result.shadow_blocked_reason.is_some());
+}
+
+#[test]
+fn redacted_workspace_child_boundary_blocks_path_content_read_plan() {
+    let state = test_state();
+    let task = test_task();
+    let context = redacted_workspace_child_boundary_context();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("read that README"),
+            context_bundle_summary: Some(&context),
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({ "action": "read_text_range", "path": "/tmp/work/README.md" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+
+    assert!(result.approved);
+    assert!(result.issues.iter().any(|issue| matches!(
+        issue.kind,
+        VerifyIssueKind::RouteClarifyRequired
+    ) && issue
+        .detail
+        .contains("resolved_workspace_child_redacted")));
+    assert!(result.shadow_blocked_reason.is_some());
+}
+
+#[test]
+fn redacted_workspace_child_boundary_in_plan_goal_blocks_path_content_read_plan() {
+    let state = test_state();
+    let task = test_task();
+    let context = redacted_workspace_child_boundary_context();
+    let mut plan = plan_result(vec![PlanStep {
+        step_id: "s1".to_string(),
+        action_type: "call_tool".to_string(),
+        skill: "fs_basic".to_string(),
+        args: json!({ "action": "read_text_range", "path": "/tmp/work/README.md" }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    }]);
+    plan.goal = format!("test\n\n{context}");
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("read that README"),
+            context_bundle_summary: None,
+            plan_result: &plan,
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+
+    assert!(result.approved);
+    assert!(result.issues.iter().any(|issue| matches!(
+        issue.kind,
+        VerifyIssueKind::RouteClarifyRequired
+    ) && issue
+        .detail
+        .contains("resolved_workspace_child_redacted")));
     assert!(result.shadow_blocked_reason.is_some());
 }
 
