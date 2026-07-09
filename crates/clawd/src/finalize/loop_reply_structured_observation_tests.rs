@@ -173,6 +173,39 @@ fn direct_db_basic_observed_answer_counts_rows_for_scalar_count_contract() {
 }
 
 #[test]
+fn direct_db_basic_observed_answer_handles_planner_selected_list_tables_without_route_evidence() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "db_basic",
+        r#"{"extra":{"field_value":{"table_count":3,"tables":["orders","service_logs","users"]},"result":{"columns":["name"],"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]},"table_count":3,"tables":["orders","service_logs","users"]},"text":"{\"columns\":[\"name\"],\"rows\":[{\"name\":\"orders\"},{\"name\":\"service_logs\"},{\"name\":\"users\"}]}"}"#,
+    ));
+
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..crate::agent_engine::AgentRunContext::default()
+    };
+
+    let (answer, summary) = direct_db_basic_observed_answer(
+        &state,
+        "List sqlite tables and output only names.",
+        &loop_state,
+        Some(&ctx),
+    )
+    .expect("db tables fallback");
+
+    assert_eq!(answer, "orders\nservice_logs\nusers");
+    assert_eq!(summary.format_ok, Some(true));
+    assert_eq!(summary.needs_clarify, Some(false));
+}
+
+#[test]
 fn direct_structured_observed_answer_defers_when_plan_requested_synthesis() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
