@@ -47,7 +47,8 @@ use super::{
     observed_execution_without_publishable_delivery_outcome,
     observed_execution_without_publishable_delivery_reply, observed_synthesis_unavailable_reply,
     path_batch_size_comparison_answer, prefer_observed_answer_for_exact_contract,
-    preferred_route_clarify_question, promote_observed_language_delivery_summary,
+    preferred_route_clarify_question, priority_last_respond_for_final_delivery,
+    promote_observed_language_delivery_summary,
     replace_delivery_with_deterministic_current_workspace_dirs_overview_answer,
     replace_delivery_with_deterministic_directory_purpose_answer,
     replace_delivery_with_deterministic_execution_failed_step_answer,
@@ -88,6 +89,58 @@ fn visible_answer_machine_payload_detection_is_structural() {
     assert!(!visible_answer_is_machine_payload(
         "configs/config.toml has one observed risk."
     ));
+}
+
+#[test]
+fn priority_last_respond_does_not_override_qualified_delivery_after_tool_observation() {
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state
+        .delivery_messages
+        .push("完整观察答案，包含日志分析、文档摘要和表格".to_string());
+    loop_state.last_user_visible_respond = Some("| name | score |".to_string());
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_3".to_string(),
+        skill: "transform".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some("| name | score |".to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    let summary = crate::task_journal::TaskJournalFinalizerSummary {
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        ..Default::default()
+    };
+
+    assert!(priority_last_respond_for_final_delivery(&loop_state, Some(&summary), false).is_none());
+}
+
+#[test]
+fn priority_last_respond_keeps_explicit_respond_step_priority() {
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state
+        .delivery_messages
+        .push("older delivery".to_string());
+    loop_state.last_user_visible_respond = Some("explicit respond answer".to_string());
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_4".to_string(),
+        skill: "respond".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some("explicit respond answer".to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    let summary = crate::task_journal::TaskJournalFinalizerSummary {
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        priority_last_respond_for_final_delivery(&loop_state, Some(&summary), false)
+            .map(String::as_str),
+        Some("explicit respond answer")
+    );
 }
 
 #[test]
