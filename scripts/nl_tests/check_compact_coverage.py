@@ -95,6 +95,17 @@ REQUIRED_ASYNC_LIFECYCLE = {
     "cancelled",
 }
 
+REQUIRED_CODEX_BOUNDARY = {
+    "agent_hooks",
+    "clawcli",
+    "external_blocker",
+    "no_hard_reply",
+    "no_hardmatch",
+    "observed_finalizer",
+    "provider_blocker",
+    "resume",
+}
+
 FORBIDDEN_LIVE_PUBLISH_TAGS = {
     "x",
     "twitter",
@@ -173,6 +184,7 @@ def coverage_for(paths: Iterable[Path]) -> dict[str, object]:
         "repair_loop": REQUIRED_REPAIR_LOOP,
         "async_lifecycle": REQUIRED_ASYNC_LIFECYCLE,
         "media_dry_run": REQUIRED_MEDIA_DRY_RUN,
+        "codex_boundary": REQUIRED_CODEX_BOUNDARY,
     }
     missing = {
         group: sorted(required - all_tags)
@@ -222,6 +234,7 @@ def run_self_test() -> int:
         | REQUIRED_REPAIR_LOOP
         | REQUIRED_ASYNC_LIFECYCLE
         | REQUIRED_MEDIA_DRY_RUN
+        | REQUIRED_CODEX_BOUNDARY
         | {"dry_run"}
     )
     tmp_parent = ROOT / "tmp"

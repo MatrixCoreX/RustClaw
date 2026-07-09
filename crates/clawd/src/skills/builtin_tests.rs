@@ -312,6 +312,27 @@ async fn run_cmd_accepts_timeout_seconds_override() {
     assert_eq!(output, "ok");
 }
 
+#[tokio::test]
+async fn run_cmd_accepts_planner_action_metadata() {
+    let root = TempDirGuard::new("run_cmd_planner_action_metadata");
+    let state = test_state(root.path.clone());
+    let output = execute_builtin_skill(
+        &state,
+        "run_cmd",
+        &json!({
+            "action": "inspect_cli_help",
+            "command": "printf ok",
+            "timeout_seconds": 1,
+            "idle_timeout_seconds": 1,
+            "max_output_bytes": 8000
+        }),
+    )
+    .await
+    .expect("run_cmd should ignore planner action metadata");
+
+    assert_eq!(output, "ok");
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn run_cmd_async_start_uses_dedicated_process_group() {

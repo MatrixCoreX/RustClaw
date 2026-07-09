@@ -316,11 +316,21 @@ fn clawcli_resume_surface_uses_planner_supplied_resume_help_call() {
     );
 
     let cmd_args = find_tool_call(&normalized, "run_cmd");
+    assert_eq!(
+        cmd_args.get("action").and_then(Value::as_str),
+        Some("inspect_cli_help")
+    );
     let command = cmd_args
         .get("command")
         .and_then(Value::as_str)
         .expect("command");
     assert!(command.contains("clawcli resume --help"), "{command}");
+    assert_eq!(
+        cmd_args
+            .get("timeout_seconds")
+            .and_then(serde_json::Value::as_i64),
+        Some(10)
+    );
 }
 
 #[test]

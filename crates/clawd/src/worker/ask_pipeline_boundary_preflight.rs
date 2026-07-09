@@ -5,12 +5,27 @@ use super::*;
 mod tests;
 
 pub(super) fn defer_locator_binding_to_agent_loop(route_result: &mut crate::RouteResult) {
+    defer_locator_binding_to_agent_loop_with_policy(route_result, false);
+}
+
+fn defer_locator_binding_to_agent_loop_preserving_content_evidence(
+    route_result: &mut crate::RouteResult,
+) {
+    defer_locator_binding_to_agent_loop_with_policy(route_result, true);
+}
+
+fn defer_locator_binding_to_agent_loop_with_policy(
+    route_result: &mut crate::RouteResult,
+    preserve_content_evidence: bool,
+) {
+    let content_evidence_required =
+        preserve_content_evidence && route_result.output_contract.requires_content_evidence;
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route_result.output_contract.locator_hint.clear();
     route_result.output_contract.apply_output_contract_ref(
         crate::pipeline_types::OutputContractRef::new(crate::OutputSemanticKind::None),
     );
-    route_result.output_contract.requires_content_evidence = false;
+    route_result.output_contract.requires_content_evidence = content_evidence_required;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -79,6 +94,10 @@ impl BoundaryPreflightDeferral {
         )
     }
 
+    fn preserves_content_evidence_on_locator_deferral(self) -> bool {
+        matches!(self, Self::UnboundTargetedEvidence)
+    }
+
     fn record(
         self,
         task: &crate::ClaimedTask,
@@ -87,7 +106,11 @@ impl BoundaryPreflightDeferral {
     ) {
         let before_gate_kind = route_result.gate_kind();
         if self.clears_locator_binding() {
-            defer_locator_binding_to_agent_loop(route_result);
+            if self.preserves_content_evidence_on_locator_deferral() {
+                defer_locator_binding_to_agent_loop_preserving_content_evidence(route_result);
+            } else {
+                defer_locator_binding_to_agent_loop(route_result);
+            }
         }
         push_pre_loop_clarify_candidate(pre_loop_clarify_candidates, self.observation_token());
         log_route_guard_record(

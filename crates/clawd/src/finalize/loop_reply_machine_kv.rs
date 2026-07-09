@@ -217,6 +217,77 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         loop_state.last_user_visible_respond = Some(answer);
         return true;
     }
+    if let Some(restored) = latest_publishable_delivery_with_requested_machine_units(
+        loop_state,
+        delivery_messages,
+        &answer,
+    ) {
+        if restored.trim() == current.trim() {
+            loop_state.last_user_visible_respond = Some(current);
+            return false;
+        }
+        delivery_messages.clear();
+        delivery_messages.push(restored.clone());
+        loop_state.delivery_messages.clear();
+        append_delivery_message(
+            &task.task_id,
+            &mut loop_state.delivery_messages,
+            restored.clone(),
+        );
+        loop_state.last_user_visible_respond = Some(restored);
+        *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: loop_state.executed_step_results.len(),
+            ..Default::default()
+        });
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "requested_machine_kv_summary_latest_rich_delivery",
+            "restored",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return true;
+    }
+    if let Some(patched) = patch_current_delivery_empty_requested_machine_fields(&current, &answer)
+    {
+        delivery_messages.clear();
+        delivery_messages.push(patched.clone());
+        loop_state.delivery_messages.clear();
+        append_delivery_message(
+            &task.task_id,
+            &mut loop_state.delivery_messages,
+            patched.clone(),
+        );
+        loop_state.last_user_visible_respond = Some(patched);
+        *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: loop_state.executed_step_results.len(),
+            ..Default::default()
+        });
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "requested_machine_kv_summary_patch_empty_field",
+            "patched",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return true;
+    }
     if current_delivery_preserves_web_search_listing(agent_run_context, loop_state, &current) {
         loop_state.last_user_visible_respond = Some(current);
         return false;
@@ -694,6 +765,9 @@ fn current_delivery_is_richer_than_requested_machine_summary(
     {
         return false;
     }
+    if current_delivery_contains_all_requested_machine_units(current, requested_summary) {
+        return true;
+    }
     if current_delivery_has_values_for_requested_marker_summary(current, requested_summary) {
         return true;
     }
@@ -722,6 +796,143 @@ fn current_delivery_has_conflicting_values_for_requested_keys(
     requested_machine_keys(requested_summary)
         .into_iter()
         .any(|key| machine_kv_values_for_key(current, &key).len() > 1)
+}
+
+fn current_delivery_contains_all_requested_machine_units(
+    current: &str,
+    requested_summary: &str,
+) -> bool {
+    if current_delivery_is_machine_kv_only(current) {
+        return false;
+    }
+    let requested_units = machine_kv_units(requested_summary);
+    if requested_units.is_empty() {
+        return false;
+    }
+    let current_units = machine_kv_units(current);
+    requested_units
+        .iter()
+        .all(|unit| current_units.iter().any(|current| current == unit))
+}
+
+fn latest_publishable_delivery_with_requested_machine_units(
+    loop_state: &LoopState,
+    delivery_messages: &[String],
+    requested_summary: &str,
+) -> Option<String> {
+    if machine_kv_units(requested_summary).is_empty() {
+        return None;
+    }
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok() || !matches!(step.skill.as_str(), "respond" | "synthesize_answer") {
+            continue;
+        }
+        if let Some(candidate) = step.output.as_deref().and_then(|candidate| {
+            publishable_rich_delivery_with_requested_machine_units(candidate, requested_summary)
+        }) {
+            return Some(candidate);
+        }
+    }
+    for candidate in [
+        loop_state.last_user_visible_respond.as_deref(),
+        loop_state.last_publishable_synthesis_output.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(candidate) =
+            publishable_rich_delivery_with_requested_machine_units(candidate, requested_summary)
+        {
+            return Some(candidate);
+        }
+    }
+    for candidate in loop_state
+        .delivery_messages
+        .iter()
+        .rev()
+        .chain(delivery_messages.iter().rev())
+    {
+        if let Some(candidate) =
+            publishable_rich_delivery_with_requested_machine_units(candidate, requested_summary)
+        {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn publishable_rich_delivery_with_requested_machine_units(
+    candidate: &str,
+    requested_summary: &str,
+) -> Option<String> {
+    let candidate = candidate.trim();
+    if candidate.is_empty()
+        || current_delivery_is_machine_kv_only(candidate)
+        || crate::finalize::parse_delivery_token(candidate).is_some()
+        || crate::finalize::looks_like_planner_artifact(candidate)
+        || crate::finalize::looks_like_internal_trace_artifact(candidate)
+        || crate::finalize::is_execution_summary_message(candidate)
+        || !current_delivery_contains_all_requested_machine_units(candidate, requested_summary)
+    {
+        return None;
+    }
+    Some(candidate.to_string())
+}
+
+fn patch_current_delivery_empty_requested_machine_fields(
+    current: &str,
+    requested_summary: &str,
+) -> Option<String> {
+    let pairs = requested_machine_summary_pairs(requested_summary);
+    if pairs.is_empty() || current.trim().is_empty() {
+        return None;
+    }
+    let mut changed = false;
+    let patched = current
+        .lines()
+        .map(|line| {
+            if let Some(patched) = patch_empty_machine_field_line(line, &pairs) {
+                changed = true;
+                patched
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    changed.then_some(patched)
+}
+
+fn requested_machine_summary_pairs(requested_summary: &str) -> Vec<(String, String)> {
+    machine_kv_units(requested_summary)
+        .into_iter()
+        .filter_map(|unit| {
+            let (key, value) = unit.split_once('=')?;
+            Some((key.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+fn patch_empty_machine_field_line(line: &str, pairs: &[(String, String)]) -> Option<String> {
+    let trimmed = line.trim();
+    for (key, value) in pairs {
+        if empty_machine_field_line(trimmed, key) {
+            let indent_len = line.len().saturating_sub(line.trim_start().len());
+            let indent = &line[..indent_len];
+            return Some(format!("{indent}{key}={value}"));
+        }
+    }
+    None
+}
+
+fn empty_machine_field_line(line: &str, key: &str) -> bool {
+    let Some(rest) = line.strip_prefix(key) else {
+        return false;
+    };
+    matches!(
+        rest.trim(),
+        "" | "=" | ":" | "=null" | ":null" | "= null" | ": null"
+    )
 }
 
 fn requested_machine_keys(requested_summary: &str) -> Vec<String> {

@@ -94,6 +94,66 @@ fn destructive_run_cmd_requires_confirmation_without_resume() {
 }
 
 #[test]
+fn readonly_cli_help_run_cmd_action_is_low_risk_without_confirmation() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+            request_text: Some("inspect local cli surface"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({
+                    "action": "inspect_cli_help",
+                    "command": "target/release/clawcli resume --help 2>&1 | head -80",
+                    "timeout_seconds": 10,
+                    "max_output_bytes": 24000
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved);
+    assert!(!result.needs_confirmation);
+    assert!(result.issues.iter().all(|issue| {
+        !matches!(
+            issue.kind,
+            VerifyIssueKind::ConfirmationRequired | VerifyIssueKind::RiskBudgetExceeded
+        )
+    }));
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/allowed")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/risk_level")
+            .and_then(serde_json::Value::as_str),
+        Some("low")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
+    );
+}
+
+#[test]
 fn high_risk_external_generation_requires_confirmation_without_dry_run() {
     let state = test_state();
     let task = test_task();
