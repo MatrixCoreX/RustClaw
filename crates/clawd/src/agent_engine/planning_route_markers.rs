@@ -26,8 +26,8 @@ pub(in crate::agent_engine) fn route_has_unresolved_clarify_or_locator_marker(
     if route.needs_clarify {
         return true;
     }
-    let has_unresolved_machine_token =
-        crate::RouteReasonMarkers::new(&route.route_reason).any_part(|part| {
+    let has_unresolved_machine_token = crate::RouteReasonMarkers::new(&route.route_reason)
+        .any_part(|part| {
             part.starts_with("clarify_reason_code:missing_")
                 || part.contains("needs_clarify=true")
                 || part.contains("missing_locator")

@@ -184,9 +184,7 @@ fn surface_locator_is_insufficient_for_clarify_repair(
         return false;
     }
     let markers = crate::RouteReasonMarkers::new(route_reason);
-    if markers.has_machine_marker("archive_pack")
-        || markers.has_machine_marker("archive_unpack")
-    {
+    if markers.has_machine_marker("archive_pack") || markers.has_machine_marker("archive_unpack") {
         return true;
     }
     !output_contract.requires_content_evidence && !has_observable_answer_shape

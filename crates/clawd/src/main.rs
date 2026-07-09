@@ -127,8 +127,8 @@ pub(crate) use output_paths::ensure_default_file_path;
 pub(crate) use pipeline_types::{
     plan_step_from_agent_action, IntentOutputContract, OutputDeliveryIntent, OutputListSelector,
     OutputLocatorKind, OutputResponseShape, OutputScalarCountFilter, OutputScalarCountTargetKind,
-    OutputSemanticKind, PlanKind, PlanResult, PlanStep, ResumeBehavior, RiskCeiling, RouteResult,
-    RouteReasonMarkers, ScheduleKind, SelfExtensionContract, SelfExtensionMode,
+    OutputSemanticKind, PlanKind, PlanResult, PlanStep, ResumeBehavior, RiskCeiling,
+    RouteReasonMarkers, RouteResult, ScheduleKind, SelfExtensionContract, SelfExtensionMode,
     SelfExtensionTrigger,
 };
 pub(crate) use prompt_utils::{

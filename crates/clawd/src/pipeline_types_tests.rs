@@ -1,6 +1,6 @@
 use super::{
-    plan_step_from_agent_action, AgentAction, AskMode, IntentOutputContract, PlanStep,
-    OutputContractRef, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
+    plan_step_from_agent_action, AgentAction, AskMode, IntentOutputContract, OutputContractRef,
+    PlanStep, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
 };
 use serde_json::json;
 
@@ -180,10 +180,7 @@ fn route_reason_marker_facade_parses_machine_tokens_without_call_site_splitting(
     );
 
     assert!(markers.has_machine_marker("pure_chat_agent_loop_submode"));
-    assert!(markers.has_any_machine_marker(&[
-        "workspace_project_summary",
-        "scalar_count",
-    ]));
+    assert!(markers.has_any_machine_marker(&["workspace_project_summary", "scalar_count",]));
     assert_eq!(
         markers.explicit_output_contract_marker_kind(),
         Some(crate::OutputSemanticKind::ScalarCount)
@@ -197,6 +194,19 @@ fn route_reason_marker_facade_parses_explicit_output_contract_kind() {
     assert_eq!(
         markers.explicit_output_contract_marker_kind(),
         Some(crate::OutputSemanticKind::ScalarCount)
+    );
+}
+
+#[test]
+fn route_reason_marker_facade_reads_machine_values_with_shared_tokenization() {
+    let markers = crate::RouteReasonMarkers::new(
+        "first_token, clarify_reason_code:missing_locator | clarify_reason_code=missing_target",
+    );
+
+    assert!(markers.has_machine_marker("first_token"));
+    assert_eq!(
+        markers.machine_value("clarify_reason_code"),
+        Some("missing_target")
     );
 }
 

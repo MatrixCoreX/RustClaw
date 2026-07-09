@@ -1,8 +1,8 @@
 use serde_json::Value;
 use std::path::Path;
 
-use crate::ActFinalizeStyle;
 use crate::pipeline_types::OutputContractRef;
+use crate::ActFinalizeStyle;
 
 use super::{
     active_primary_task_prompt, archive_list_contract_from_surface,
