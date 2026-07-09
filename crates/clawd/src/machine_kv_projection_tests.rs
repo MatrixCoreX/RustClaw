@@ -88,6 +88,26 @@ fn machine_summary_projects_cli_placeholder_for_required_machine_field() {
 }
 
 #[test]
+fn machine_summary_prefers_cli_placeholder_over_none_machine_value() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        "clawcli resume is available.\n\nresume_task_id=<none>",
+        &mut observed,
+    );
+    collect_machine_text_fragments_from_output(
+        "Usage: clawcli resume --text <TEXT> <TASK_ID>\n\nArguments:\n  <TASK_ID>  Existing task id to continue",
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Return required machine field resume_task_id.",
+        &observed,
+    );
+
+    assert_eq!(summary.as_deref(), Some("resume_task_id=<TASK_ID>"));
+}
+
+#[test]
 fn machine_summary_does_not_project_placeholder_without_matching_field_suffix() {
     let observed = vec!["Usage: demo --text <TEXT> <TASK_ID>".to_string()];
 

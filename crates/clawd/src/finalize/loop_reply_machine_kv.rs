@@ -931,7 +931,20 @@ fn empty_machine_field_line(line: &str, key: &str) -> bool {
     };
     matches!(
         rest.trim(),
-        "" | "=" | ":" | "=null" | ":null" | "= null" | ": null"
+        "" | "="
+            | ":"
+            | "=null"
+            | ":null"
+            | "= null"
+            | ": null"
+            | "=none"
+            | ":none"
+            | "= none"
+            | ": none"
+            | "=<none>"
+            | ":<none>"
+            | "= <none>"
+            | ": <none>"
     )
 }
 
