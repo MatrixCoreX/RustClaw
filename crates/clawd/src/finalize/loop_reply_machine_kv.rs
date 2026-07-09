@@ -169,7 +169,9 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         loop_state.last_user_visible_respond = Some(current);
         return false;
     }
-    if current_delivery_is_terminal_scalar_answer(agent_run_context, &current) {
+    if current_delivery_is_terminal_scalar_answer(agent_run_context, &current)
+        && !requested_machine_summary_should_override_scalar(&current, &answer)
+    {
         loop_state.last_user_visible_respond = Some(current);
         return false;
     }
@@ -580,6 +582,14 @@ fn terminal_scalar_respond_matches_route(route: &crate::RouteResult, candidate: 
             || candidate.contains('/');
     }
     true
+}
+
+fn requested_machine_summary_should_override_scalar(
+    current: &str,
+    requested_summary: &str,
+) -> bool {
+    let requested = requested_summary.trim();
+    !requested.is_empty() && requested.contains('=') && !current.contains(requested)
 }
 
 fn current_delivery_preserves_web_search_listing(
