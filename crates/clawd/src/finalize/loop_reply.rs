@@ -38,6 +38,10 @@ use final_answer_renderers::{
 mod scalar_answer;
 use scalar_answer::scalar_answer_from_json;
 
+#[path = "loop_reply_scalar_count_projection.rs"]
+mod scalar_count_projection;
+use scalar_count_projection::direct_observed_count_answer_for_scalar_contract;
+
 #[path = "loop_reply_scalar_placeholder.rs"]
 mod scalar_placeholder;
 

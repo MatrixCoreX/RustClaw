@@ -27,6 +27,11 @@ pub(super) fn direct_scalar_observed_answer(
         return None;
     }
     if let Some((answer, summary)) =
+        super::direct_observed_count_answer_for_scalar_contract(route, loop_state)
+    {
+        return Some((answer, summary));
+    }
+    if let Some((answer, summary)) =
         latest_terminal_scalar_respond_answer_from_loop_contract(route, loop_state)
     {
         return Some((answer, summary));
@@ -1452,6 +1457,12 @@ pub(super) fn route_allows_direct_scalar_observed_answer(route: &crate::RouteRes
         return true;
     }
     if route.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
+        && !contract.delivery_required
+    {
+        return true;
+    }
+    if crate::RouteReasonMarkers::new(&route.route_reason)
+        .has_machine_marker("scalar_locator_requires_evidence")
         && !contract.delivery_required
     {
         return true;

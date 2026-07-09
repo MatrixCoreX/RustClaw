@@ -1140,6 +1140,42 @@ fn direct_scalar_finalize_uses_wrapped_count_inventory_total() {
 }
 
 #[test]
+fn scalar_locator_marker_projects_find_ext_count_from_machine_field() {
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"find_ext","count":1,"ext":"zip","exts":["zip"],"patterns":[],"results":["scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"],"root":"scripts/nl_tests/fixtures/device_local"},"text":"{}"}"#,
+    ));
+    let mut route = free_route_result();
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.route_reason =
+        "scalar_locator_requires_evidence; executable_contract_preserved_for_agent_loop"
+            .to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        original_user_request: Some(
+            "count zip files under scripts/nl_tests/fixtures/device_local; output only the number"
+                .to_string(),
+        ),
+        ..Default::default()
+    };
+
+    let (answer, summary) =
+        direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
+            .expect("scalar locator marker should project observed count");
+
+    assert_eq!(answer.trim(), "1");
+    assert!(!answer.contains("test_bundle.zip"));
+    assert_eq!(
+        summary.disposition,
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
 fn direct_scalar_finalize_allows_scalar_count_with_one_sentence_shape() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
