@@ -134,6 +134,81 @@ fn answer_verifier_exhaustion_recovers_latest_contractual_synthesis() {
 }
 
 #[test]
+fn answer_verifier_exhaustion_recovers_multi_source_terminal_answer_for_free_route() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let terminal_answer = concat!(
+        "Log analysis:\n",
+        "error=1 warn=2\n",
+        "Document summary:\n",
+        "Service Notes contains restart guidance.\n",
+        "Sorted scores:\n",
+        "| name | score |\n",
+        "| beta | 12 |\n",
+        "| gamma | 9 |\n",
+        "| alpha | 7 |"
+    );
+    let table_only = "| name | score |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |";
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-compound-terminal", "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "log_analyze",
+            r#"{"keyword_counts":{"error":1,"warn":2},"path":"logs/app.log"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "doc_parse",
+            r##"{"extra":{"content_excerpt":"# Service Notes\nrestart guidance","path":"docs/service_notes.md"}}"##,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3",
+            "transform",
+            r#"{"format":"markdown_table","rows":[{"name":"beta","score":12},{"name":"gamma","score":9},{"name":"alpha","score":7}]}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_4",
+            "respond",
+            terminal_answer,
+        ));
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["content_excerpt".to_string()],
+        answer_incomplete_reason: "candidate omitted required observed content".to_string(),
+        should_retry: true,
+        retry_instruction: "use the latest terminal answer with all observed outputs".to_string(),
+        confidence: 0.92,
+    });
+    let mut reply = AskReply::non_llm(table_only.to_string()).with_task_journal(journal);
+
+    assert!(try_recover_latest_synthesis_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+
+    assert!(!reply.should_fail_task);
+    assert_eq!(reply.text, terminal_answer);
+    assert_eq!(reply.messages, vec![terminal_answer.to_string()]);
+    let journal = reply.task_journal.as_ref().expect("journal");
+    assert!(journal.answer_verifier_summary.is_none());
+    assert_eq!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+    assert_eq!(journal.final_answer.as_deref(), Some(terminal_answer));
+}
+
+#[test]
 fn answer_verifier_exhaustion_recovers_filesystem_mutation_success_payload() {
     let mut route = route_result(OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;

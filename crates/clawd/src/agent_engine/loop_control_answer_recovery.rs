@@ -1101,11 +1101,118 @@ fn latest_terminal_candidate_can_recover_answer_gap(
     if reply.text.trim() == candidate.answer.trim() {
         return false;
     }
+    if compound_observation_terminal_candidate_can_recover_answer_gap(
+        route, journal, reply, candidate,
+    ) {
+        return true;
+    }
     match candidate.source_skill {
         "respond" => route_allows_latest_respond_retry_recovery(route, journal),
         "synthesize_answer" => route_allows_latest_synthesis_retry_recovery(route, journal),
         _ => false,
     }
+}
+
+fn compound_observation_terminal_candidate_can_recover_answer_gap(
+    route: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    reply: &AskReply,
+    candidate: &TerminalAnswerCandidate,
+) -> bool {
+    route_allows_compound_terminal_retry_recovery(route)
+        && verifier_gap_allows_compound_terminal_retry_recovery(journal)
+        && journal_has_multiple_successful_observations(journal)
+        && terminal_candidate_is_structurally_richer_than_current_reply(
+            &candidate.answer,
+            &reply.text,
+        )
+}
+
+fn route_allows_compound_terminal_retry_recovery(route: &crate::RouteResult) -> bool {
+    if route.output_contract.delivery_required
+        || !matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Free
+        )
+    {
+        return false;
+    }
+    crate::evidence_policy::final_answer_shape_for_route(route)
+        .map(crate::evidence_policy::FinalAnswerShape::allows_model_language)
+        .unwrap_or(true)
+}
+
+fn verifier_gap_allows_compound_terminal_retry_recovery(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    let Some(summary) = journal.answer_verifier_summary.as_ref() else {
+        return false;
+    };
+    summary.high_confidence_retry_gap()
+        && !verifier_requires_structured_visible_rewrite(summary)
+        && summary.missing_evidence_fields.iter().any(|field| {
+            matches!(
+                field.as_str(),
+                "content_excerpt"
+                    | "observed_evidence"
+                    | "source_evidence"
+                    | "used_evidence"
+                    | "used_evidence_ids"
+                    | "evidence_quotes"
+            )
+        })
+}
+
+fn journal_has_multiple_successful_observations(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    let mut observed = 0usize;
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok
+            || matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+            || !step
+                .output_excerpt
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|output| !output.is_empty())
+        {
+            continue;
+        }
+        observed += 1;
+        if observed >= 2 {
+            return true;
+        }
+    }
+    false
+}
+
+fn terminal_candidate_is_structurally_richer_than_current_reply(
+    candidate: &str,
+    current: &str,
+) -> bool {
+    let candidate = candidate.trim();
+    let current = current.trim();
+    if candidate.is_empty() || candidate == current {
+        return false;
+    }
+    let candidate_lines = candidate
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .count();
+    let current_lines = current
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .count();
+    let candidate_chars = candidate.chars().count();
+    let current_chars = current.chars().count();
+    candidate_lines >= 2
+        && (candidate_chars > current_chars.saturating_add(32)
+            || candidate_lines > current_lines.saturating_add(1))
 }
 
 fn route_requires_structural_terminal_recovery(route: &crate::RouteResult) -> bool {
