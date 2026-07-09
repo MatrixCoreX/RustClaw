@@ -12,7 +12,7 @@ pub(super) fn run_task_lifecycle_renderer_registry(
     for renderer in super::renderer_registry::renderers_for_shape_class(
         super::renderer_registry::FinalizerRendererShapeClass::TaskLifecycle,
     ) {
-        rendered |= match renderer.key {
+        let rendered_by_renderer = match renderer.key {
             "route_clarify_machine_envelope" => {
                 super::clarify_envelope::attach_route_clarify_machine_envelope(
                     task,
@@ -33,6 +33,34 @@ pub(super) fn run_task_lifecycle_renderer_registry(
             }
             _ => false,
         };
+        super::renderer_registry::record_renderer_trace(
+            loop_state,
+            renderer,
+            rendered_by_renderer,
+            task_lifecycle_renderer_evidence_refs(task, loop_state),
+            (!rendered_by_renderer).then_some("not_applicable"),
+        );
+        rendered |= rendered_by_renderer;
     }
     rendered
+}
+
+fn task_lifecycle_renderer_evidence_refs(
+    task: &ClaimedTask,
+    loop_state: &LoopState,
+) -> Vec<String> {
+    let mut refs = loop_state
+        .executed_step_results
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            let mut reference = String::from("step_result:");
+            reference.push_str(&index.to_string());
+            reference
+        })
+        .collect::<Vec<_>>();
+    if refs.is_empty() {
+        refs.push(format!("task:{}", task.task_id));
+    }
+    refs
 }
