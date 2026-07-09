@@ -116,6 +116,26 @@ fn priority_last_respond_does_not_override_qualified_delivery_after_tool_observa
 }
 
 #[test]
+fn priority_last_respond_does_not_override_delivery_when_summary_is_missing() {
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state
+        .delivery_messages
+        .push("完整观察答案，包含日志分析、文档摘要和表格".to_string());
+    loop_state.last_user_visible_respond = Some("| name | score |".to_string());
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_3".to_string(),
+        skill: "transform".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some("| name | score |".to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+
+    assert!(priority_last_respond_for_final_delivery(&loop_state, None, false).is_none());
+}
+
+#[test]
 fn priority_last_respond_keeps_explicit_respond_step_priority() {
     let mut loop_state = crate::agent_engine::LoopState::new(1);
     loop_state
