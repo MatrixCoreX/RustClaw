@@ -1952,3 +1952,6 @@ mod scalar_capability_shape;
 
 #[path = "answer_verifier_tests/text_protocol_boundary.rs"]
 mod text_protocol_boundary;
+
+#[path = "answer_verifier_tests/local_status_evidence.rs"]
+mod local_status_evidence;

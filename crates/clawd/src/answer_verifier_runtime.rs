@@ -576,6 +576,7 @@ fn non_path_status_skill(skill: &str) -> bool {
     matches!(
         skill,
         "docker_basic"
+            | "git_basic"
             | "health_check"
             | "http_basic"
             | "package_manager"
