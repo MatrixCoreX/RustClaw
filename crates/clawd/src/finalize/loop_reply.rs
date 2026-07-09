@@ -3,6 +3,12 @@ use tracing::info;
 use crate::agent_engine::{append_delivery_message, AgentRunContext, LoopState};
 use crate::{AppState, AskReply, ClaimedTask};
 
+#[path = "loop_reply_renderer_registry.rs"]
+mod renderer_registry;
+#[cfg(test)]
+#[path = "loop_reply_renderer_registry_tests.rs"]
+mod renderer_registry_tests;
+
 #[path = "loop_reply_scalar_answer.rs"]
 mod scalar_answer;
 use scalar_answer::scalar_answer_from_json;
