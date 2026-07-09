@@ -1,5 +1,7 @@
 use serde_json::json;
 
+use crate::pipeline_types::OutputContractRef;
+
 use super::{
     ActFinalizeStyle, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
     OutputResponseShape, OutputSemanticKind, RouteDecision, ScheduleKind, TargetTaskPolicy,
@@ -225,7 +227,7 @@ pub(super) fn apply_schedule_route_contract_repair(
         changed = true;
     }
     if !output_contract.semantic_kind_is_unclassified() {
-        output_contract.semantic_kind = OutputSemanticKind::None;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
         changed = true;
     }
     if matches!(output_contract.response_shape, OutputResponseShape::Free) {
