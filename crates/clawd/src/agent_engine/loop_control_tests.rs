@@ -400,7 +400,9 @@ fn inconsistent_locator_clarify_without_route_boundary_replans_then_finishes_as_
     assert!(!loop_state.pending_user_input_required);
     assert_eq!(
         loop_state.delivery_messages,
-        vec!["Provide the target path."]
+        vec![
+            "Provide the target path.\nterminal_intent=clarify clarify_reason_code=missing_locator missing_slot=locator locator_kind=path"
+        ]
     );
     assert_eq!(
         loop_state
@@ -415,6 +417,20 @@ fn inconsistent_locator_clarify_without_route_boundary_replans_then_finishes_as_
             .get("agent_loop.recovered_terminal_intent")
             .map(String::as_str),
         Some("clarify")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.clarify_reason_code")
+            .map(String::as_str),
+        Some("missing_locator")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.missing_slot")
+            .map(String::as_str),
+        Some("locator")
     );
 }
 

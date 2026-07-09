@@ -477,22 +477,7 @@ fn apply_structured_respond_clarify_to_loop_state(
         loop_state.delivery_messages.push(content.to_string());
         loop_state.last_user_visible_respond = Some(content.to_string());
     }
-    for (key, value) in [
-        (
-            "agent_loop.clarify_reason_code",
-            intent.clarify_reason_code.as_deref(),
-        ),
-        ("agent_loop.missing_slot", intent.missing_slot.as_deref()),
-        ("agent_loop.message_key", intent.message_key.as_deref()),
-        ("agent_loop.field_path", intent.field_path.as_deref()),
-        ("agent_loop.locator_kind", intent.locator_kind.as_deref()),
-    ] {
-        if let Some(value) = value {
-            loop_state
-                .output_vars
-                .insert(key.to_string(), value.to_string());
-        }
-    }
+    record_structured_clarify_machine_fields(loop_state, intent);
     loop_state.history_compact.push(format!(
         "round={} structured_respond_terminal_intent=clarify missing_slot={}",
         loop_state.round_no,
@@ -664,14 +649,16 @@ fn apply_nonblocking_structured_clarify_as_answer(
         "agent_loop.nonblocking_clarify_answer".to_string(),
         "true".to_string(),
     );
+    record_structured_clarify_machine_fields(loop_state, intent);
     if let Some(content) = intent
         .content
         .as_deref()
         .map(str::trim)
         .filter(|text| !text.is_empty())
     {
-        loop_state.delivery_messages.push(content.to_string());
-        loop_state.last_user_visible_respond = Some(content.to_string());
+        let content = append_structured_clarify_machine_line(content, intent);
+        loop_state.delivery_messages.push(content.clone());
+        loop_state.last_user_visible_respond = Some(content);
     }
     loop_state.history_compact.push(format!(
         "round={} structured_respond_terminal_intent=clarify treated_as=answer missing_slot={}",
@@ -685,6 +672,57 @@ fn apply_nonblocking_structured_clarify_as_answer(
         next_goal_hint: None,
         no_progress: false,
     }
+}
+
+fn record_structured_clarify_machine_fields(
+    loop_state: &mut LoopState,
+    intent: &StructuredRespondTerminalIntent,
+) {
+    for (key, value) in [
+        (
+            "agent_loop.clarify_reason_code",
+            intent.clarify_reason_code.as_deref(),
+        ),
+        ("agent_loop.missing_slot", intent.missing_slot.as_deref()),
+        ("agent_loop.message_key", intent.message_key.as_deref()),
+        ("agent_loop.field_path", intent.field_path.as_deref()),
+        ("agent_loop.locator_kind", intent.locator_kind.as_deref()),
+    ] {
+        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+            loop_state
+                .output_vars
+                .insert(key.to_string(), value.to_string());
+        }
+    }
+}
+
+fn append_structured_clarify_machine_line(
+    content: &str,
+    intent: &StructuredRespondTerminalIntent,
+) -> String {
+    let Some(machine_line) = structured_clarify_machine_line(intent) else {
+        return content.to_string();
+    };
+    if content.contains(machine_line.as_str()) {
+        return content.to_string();
+    }
+    format!("{content}\n{machine_line}")
+}
+
+fn structured_clarify_machine_line(intent: &StructuredRespondTerminalIntent) -> Option<String> {
+    let mut parts = vec!["terminal_intent=clarify".to_string()];
+    for (key, value) in [
+        ("clarify_reason_code", intent.clarify_reason_code.as_deref()),
+        ("missing_slot", intent.missing_slot.as_deref()),
+        ("message_key", intent.message_key.as_deref()),
+        ("field_path", intent.field_path.as_deref()),
+        ("locator_kind", intent.locator_kind.as_deref()),
+    ] {
+        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+            parts.push(format!("{key}={value}"));
+        }
+    }
+    (parts.len() > 1).then(|| parts.join(" "))
 }
 
 fn try_recover_inconsistent_boundary_clarify(
