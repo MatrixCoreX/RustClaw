@@ -99,6 +99,44 @@ pub(super) fn latest_tail_read_range_observed_answer(
     ))
 }
 
+fn latest_bounded_read_range_failure_recovery_answer(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: Option<&crate::task_journal::TaskJournalFinalizerSummary>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if !finalizer_summary_rejects_current_delivery(finalizer_summary) {
+        return None;
+    }
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    let contract = route.effective_output_contract();
+    if contract.delivery_required
+        || matches!(
+            contract.response_shape,
+            crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
+        )
+    {
+        return None;
+    }
+    let answer = latest_bounded_read_range_answer_from_loop(loop_state, false)?;
+    if answer.trim().is_empty() {
+        return None;
+    }
+    Some((
+        answer,
+        crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: loop_state.executed_step_results.len().max(1),
+            ..Default::default()
+        },
+    ))
+}
+
 pub(super) fn latest_tail_read_range_answer_from_loop(
     loop_state: &LoopState,
     prefer_english: bool,
@@ -592,7 +630,14 @@ pub(super) fn replace_delivery_with_latest_tail_read_range_answer(
         user_text,
         loop_state,
         agent_run_context,
-    ) else {
+    )
+    .or_else(|| {
+        latest_bounded_read_range_failure_recovery_answer(
+            loop_state,
+            agent_run_context,
+            finalizer_summary.as_ref(),
+        )
+    }) else {
         return false;
     };
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
