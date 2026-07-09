@@ -46,7 +46,7 @@ pub(super) fn run_cmd_directory_entry_list_candidate(
         .flatten()
 }
 
-pub(super) fn run_cmd_semantic_listing_text_candidate(
+pub(super) fn run_cmd_contract_listing_text_candidate(
     route: &crate::RouteResult,
     body: &str,
 ) -> Option<String> {
