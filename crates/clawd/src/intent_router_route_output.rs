@@ -5,6 +5,7 @@ use super::{
     route_has_structured_execution_signal, route_trace_record,
     state_patch_targets_task_lifecycle_fields, IntentNormalizerOutput, RouteDecision, TurnAnalysis,
 };
+use crate::pipeline_types::OutputContractRef;
 use crate::{
     ActFinalizeStyle, AppState, AskMode, ClaimedTask, OutputSemanticKind, ResumeBehavior,
     RiskCeiling, RouteResult,
@@ -86,7 +87,8 @@ pub(crate) fn route_result_from_normalizer(
         output_contract.delivery_required = false;
         output_contract.locator_kind = crate::OutputLocatorKind::None;
         output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
-        output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+        output_contract
+            .apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::ServiceStatus));
         output_contract.locator_hint.clear();
         if output_contract
             .self_extension
@@ -178,7 +180,7 @@ fn demote_output_contract_semantic_to_route_marker(
         route_reason,
         "normalizer_semantic_contract_demoted_to_route_marker",
     );
-    output_contract.semantic_kind = OutputSemanticKind::None;
+    output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));
 }
 
 fn sanitize_normalizer_agent_display_name_hint(

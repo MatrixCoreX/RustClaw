@@ -1,5 +1,7 @@
 use serde_json::Value;
 
+use crate::pipeline_types::OutputContractRef;
+
 use super::{normalize_schema_token, IntentOutputContract};
 
 #[cfg(test)]
@@ -172,7 +174,9 @@ pub(super) fn apply_state_patch_structured_field_selector(
         output_contract.delivery_required = false;
         output_contract.locator_kind = crate::OutputLocatorKind::None;
         output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
-        output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+        output_contract.apply_output_contract_ref(OutputContractRef::new(
+            crate::OutputSemanticKind::ServiceStatus,
+        ));
         output_contract.locator_hint.clear();
     }
     Some(selector)

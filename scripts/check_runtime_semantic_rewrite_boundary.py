@@ -868,7 +868,7 @@ def scan_normalizer_route_result_boundary() -> list[Finding]:
     required_tokens = [
         "fn demote_output_contract_semantic_to_route_marker",
         'format!("contract:{}"',
-        "output_contract.semantic_kind = OutputSemanticKind::None;",
+        "output_contract.apply_output_contract_ref(OutputContractRef::new(OutputSemanticKind::None));",
         "demote_output_contract_semantic_to_route_marker(&mut output_contract, &mut route_reason);",
     ]
     for token in required_tokens:

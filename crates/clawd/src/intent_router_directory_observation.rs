@@ -1,6 +1,8 @@
 use serde_json::Value;
 use std::path::Path;
 
+use crate::pipeline_types::OutputContractRef;
+
 use super::{
     execution_finalize_style_for_contract, state_patch_deictic_reference_requires_clarify,
     ActFinalizeStyle, AppState, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
@@ -228,11 +230,12 @@ pub(super) fn apply_resolved_directory_observation_clarify_repair(
     output_contract.locator_kind = OutputLocatorKind::Path;
     output_contract.locator_hint = directory;
     if recover_empty_listing_contract {
-        output_contract.semantic_kind = if request_has_extension_filter_token(req) {
+        let output_contract_ref = if request_has_extension_filter_token(req) {
             OutputSemanticKind::FileNames
         } else {
             OutputSemanticKind::DirectoryEntryGroups
         };
+        output_contract.apply_output_contract_ref(OutputContractRef::new(output_contract_ref));
         output_contract.response_shape = OutputResponseShape::Strict;
     }
     *needs_clarify = false;
