@@ -95,3 +95,11 @@ pub(super) const FINALIZER_RENDERER_REGISTRY: &[FinalizerRendererDescriptor] = &
         summary_contract: "finalizer_summary",
     },
 ];
+
+pub(super) fn renderers_for_shape_class(
+    shape_class: FinalizerRendererShapeClass,
+) -> impl Iterator<Item = &'static FinalizerRendererDescriptor> {
+    FINALIZER_RENDERER_REGISTRY
+        .iter()
+        .filter(move |renderer| renderer.shape_class == shape_class)
+}

@@ -8,6 +8,9 @@ mod renderer_registry;
 #[cfg(test)]
 #[path = "loop_reply_renderer_registry_tests.rs"]
 mod renderer_registry_tests;
+#[path = "loop_reply_task_lifecycle_renderers.rs"]
+mod task_lifecycle_renderers;
+use task_lifecycle_renderers::run_task_lifecycle_renderer_registry;
 
 #[path = "loop_reply_scalar_answer.rs"]
 mod scalar_answer;
@@ -224,11 +227,9 @@ use weather::replace_delivery_with_weather_query_fields;
 
 #[path = "loop_reply_clarify_envelope.rs"]
 mod clarify_envelope;
-use clarify_envelope::attach_route_clarify_machine_envelope;
 
 #[path = "loop_reply_control_envelope.rs"]
 mod control_envelope;
-use control_envelope::attach_requested_control_machine_envelope;
 
 #[path = "loop_reply_delivery_backfill.rs"]
 mod delivery_backfill;
@@ -1817,14 +1818,7 @@ pub(crate) async fn finalize_loop_reply(
         &mut finalizer_summary,
         agent_run_context,
     );
-    attach_route_clarify_machine_envelope(
-        task,
-        &mut loop_state,
-        &mut delivery_deduped,
-        &mut finalizer_summary,
-        agent_run_context,
-    );
-    attach_requested_control_machine_envelope(
+    run_task_lifecycle_renderer_registry(
         task,
         &mut loop_state,
         &mut delivery_deduped,
