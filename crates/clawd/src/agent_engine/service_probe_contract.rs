@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use crate::pipeline_types::OutputContractRef;
 use crate::{AgentAction, AppState, IntentOutputContract, PlanStep, RouteResult};
 
 pub(crate) fn effective_service_probe_output_contract_for_plan_steps(
@@ -11,7 +12,9 @@ pub(crate) fn effective_service_probe_output_contract_for_plan_steps(
         return None;
     }
     let mut output_contract = route.output_contract.clone();
-    output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    output_contract.apply_output_contract_ref(OutputContractRef::new(
+        crate::OutputSemanticKind::ServiceStatus,
+    ));
     output_contract.requires_content_evidence = true;
     output_contract.locator_kind = crate::OutputLocatorKind::None;
     output_contract.locator_hint.clear();

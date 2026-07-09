@@ -459,7 +459,9 @@ fn record_unresolved_file_delivery_loop_candidate(route_result: &mut crate::Rout
     route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.output_contract.apply_output_contract_ref(
+        crate::pipeline_types::OutputContractRef::new(crate::OutputSemanticKind::None),
+    );
     route_result.output_contract.locator_hint.clear();
     route_result.route_reason.push_str("; ");
     route_result

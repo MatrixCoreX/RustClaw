@@ -7,7 +7,9 @@ mod tests;
 pub(super) fn defer_locator_binding_to_agent_loop(route_result: &mut crate::RouteResult) {
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route_result.output_contract.locator_hint.clear();
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.output_contract.apply_output_contract_ref(
+        crate::pipeline_types::OutputContractRef::new(crate::OutputSemanticKind::None),
+    );
     route_result.output_contract.requires_content_evidence = false;
 }
 

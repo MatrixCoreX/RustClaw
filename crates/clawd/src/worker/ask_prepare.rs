@@ -612,7 +612,9 @@ fn append_effective_contract_marker(route_result: &mut crate::RouteResult, marke
     if marker.is_empty() {
         return;
     }
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.output_contract.apply_output_contract_ref(
+        crate::pipeline_types::OutputContractRef::new(crate::OutputSemanticKind::None),
+    );
     append_route_reason_marker(route_result, &format!("contract:{marker}"));
 }
 
@@ -714,7 +716,9 @@ fn preserve_active_clarify_output_contract_for_locator_reply(
     if let Some(marker) = prior_marker {
         append_effective_contract_marker(route_result, marker);
     } else if prior_shape.is_some() && !current_requested_file_delivery {
-        route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route_result.output_contract.apply_output_contract_ref(
+            crate::pipeline_types::OutputContractRef::new(crate::OutputSemanticKind::None),
+        );
         route_result
             .route_reason
             .push_str("; drop_untrusted_locator_reply_semantic_kind");
@@ -822,7 +826,9 @@ fn bind_active_clarify_structured_payload_reply_for_loop(
     route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route_result.output_contract.locator_hint.clear();
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.output_contract.apply_output_contract_ref(
+        crate::pipeline_types::OutputContractRef::new(crate::OutputSemanticKind::None),
+    );
     route_result.route_reason.push_str("; ");
     route_result
         .route_reason
@@ -920,7 +926,9 @@ fn bind_active_clarify_locator_reply_for_loop(
         route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
         route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
         route_result.output_contract.requires_content_evidence = false;
-        route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route_result.output_contract.apply_output_contract_ref(
+            crate::pipeline_types::OutputContractRef::new(crate::OutputSemanticKind::None),
+        );
     }
     if matches!(
         route_result.output_contract.locator_kind,
@@ -1179,7 +1187,9 @@ fn repair_scalar_field_value_contract_for_active_clarify_fast_path(
         return;
     }
     route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.output_contract.apply_output_contract_ref(
+        crate::pipeline_types::OutputContractRef::new(crate::OutputSemanticKind::None),
+    );
     route_result
         .route_reason
         .push_str("; active_clarify_fast_path_scalar_field_value_contract_repair");
