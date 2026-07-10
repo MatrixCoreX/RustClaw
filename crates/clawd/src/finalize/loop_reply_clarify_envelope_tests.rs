@@ -171,6 +171,90 @@ async fn finalize_loop_reply_attaches_requested_clarify_machine_envelope() {
 }
 
 #[tokio::test]
+async fn finalize_loop_reply_preserves_agent_loop_nonblocking_clarify_machine_line() {
+    let state = test_state();
+    let task = claimed_task("task-agent-loop-nonblocking-clarify-line");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.needs_clarify = false;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.output_vars.insert(
+        "agent_loop.terminal_intent".to_string(),
+        "answer".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.recovered_terminal_intent".to_string(),
+        "clarify".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.nonblocking_clarify_answer".to_string(),
+        "true".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.clarify_reason_code".to_string(),
+        "missing_locator".to_string(),
+    );
+    loop_state
+        .output_vars
+        .insert("agent_loop.missing_slot".to_string(), "locator".to_string());
+    loop_state
+        .output_vars
+        .insert("agent_loop.locator_kind".to_string(), "path".to_string());
+    let model_question = "Which file should I read from?";
+    loop_state
+        .delivery_messages
+        .push(model_question.to_string());
+    loop_state.last_user_visible_respond = Some(model_question.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "read the first line of that file",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should preserve agent-loop clarify machine line");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert!(reply.text.contains(model_question), "reply: {}", reply.text);
+    assert!(
+        reply.text.contains("terminal_intent=clarify"),
+        "reply should expose terminal clarify machine line: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("clarify_reason_code=missing_locator"),
+        "reply should expose clarify reason: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("missing_slot=locator"),
+        "reply should expose missing slot: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("locator_kind=path"),
+        "reply should expose locator kind: {}",
+        reply.text
+    );
+    assert!(
+        !reply.text.contains("agent_loop_clarify"),
+        "reply should not attach route-owned clarify JSON envelope: {}",
+        reply.text
+    );
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_does_not_attach_clarify_envelope_after_completed_act_delivery() {
     let state = test_state();
     let task = claimed_task("task-deferred-clarify-act-complete");

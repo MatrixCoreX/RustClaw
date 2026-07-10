@@ -876,6 +876,11 @@ fn record_agent_loop_decision_envelope_output_vars(
         "semantic_authority",
         "answer_shape",
         "risk_level",
+        "clarify_reason_code",
+        "missing_slot",
+        "message_key",
+        "field_path",
+        "locator_kind",
     ] {
         if let Some(value) = envelope.get(field).and_then(Value::as_str) {
             loop_state

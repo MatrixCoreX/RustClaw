@@ -13,6 +13,15 @@ pub(super) fn run_task_lifecycle_renderer_registry(
         super::renderer_registry::FinalizerRendererShapeClass::TaskLifecycle,
     ) {
         let rendered_by_renderer = match renderer.key {
+            "agent_loop_clarify_machine_line" => {
+                super::clarify_envelope::attach_agent_loop_clarify_machine_line(
+                    task,
+                    loop_state,
+                    delivery_messages,
+                    finalizer_summary,
+                    agent_run_context,
+                )
+            }
             "route_clarify_machine_envelope" => {
                 super::clarify_envelope::attach_route_clarify_machine_envelope(
                     task,
