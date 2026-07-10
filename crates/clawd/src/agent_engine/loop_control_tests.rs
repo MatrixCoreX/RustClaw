@@ -1,8 +1,9 @@
 use super::{
-    answer_contract_route_result_for_reply, answer_verifier_output_format_machine_payload_gap,
-    answer_verifier_retry_budget_available, answer_verifier_retry_summary,
-    apply_structured_respond_clarify_to_loop_state, commit_answer_verifier_retry_answer,
-    evaluate_round_outcome, initial_execution_recipe_spec,
+    answer_contract_route_result_for_reply, answer_verifier_gap_has_observed_content_evidence,
+    answer_verifier_gap_requests_observed_content_rewrite,
+    answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_budget_available,
+    answer_verifier_retry_summary, apply_structured_respond_clarify_to_loop_state,
+    commit_answer_verifier_retry_answer, evaluate_round_outcome, initial_execution_recipe_spec,
     machine_status_visible_output_format_gap, mark_reply_failed_after_answer_verifier_exhausted,
     parse_log_analyze_finding, prefer_terminal_model_answer_for_verifier_candidate,
     record_agent_loop_decision_envelope_output_vars, retry_verifier_accepts_rewritten_answer,

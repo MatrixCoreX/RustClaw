@@ -250,69 +250,6 @@ fn commit_answer_verifier_retry_answer(reply: &mut AskReply, retried_answer: Str
     reply.is_llm_reply = true;
 }
 
-async fn try_rewrite_exhausted_answer_verifier_gap_with_observed_evidence(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
-    route_result: Option<&RouteResult>,
-    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
-    reply: &mut AskReply,
-) -> bool {
-    let Some(route) = route_result else {
-        return false;
-    };
-    if route.output_contract.delivery_required
-        || route.wants_file_delivery
-        || !verifier.high_confidence_retry_gap()
-        || !verifier.should_retry
-    {
-        return false;
-    }
-    let Some(journal_snapshot) = reply.task_journal.clone() else {
-        return false;
-    };
-    if !crate::task_journal::evidence_coverage_for_route(route, &journal_snapshot).is_complete() {
-        return false;
-    }
-    let verifier_out = answer_verifier_summary_to_out(verifier);
-    let rejected_answer = reply.text.clone();
-    let Some(retried_answer) = crate::finalize::retry_loop_answer_after_verifier(
-        state,
-        task,
-        user_text,
-        &journal_snapshot,
-        &rejected_answer,
-        &verifier_out,
-    )
-    .await
-    else {
-        return false;
-    };
-    if let Some(retry_verifier) = crate::answer_verifier::verify_answer_observe_only(
-        state,
-        task,
-        user_text,
-        route,
-        &journal_snapshot,
-        &retried_answer,
-    )
-    .await
-    {
-        if retry_verifier_accepts_rewritten_answer(&retry_verifier) {
-            commit_answer_verifier_retry_answer(reply, retried_answer);
-            info!("answer_verifier_retry_exhausted_rewritten_with_observed_evidence");
-            return true;
-        }
-        if let Some(journal) = reply.task_journal.as_mut() {
-            journal.record_answer_verifier_summary(retry_verifier);
-        }
-        return false;
-    }
-    commit_answer_verifier_retry_answer(reply, retried_answer);
-    info!("answer_verifier_retry_exhausted_rewritten_with_observed_evidence");
-    true
-}
-
 fn record_session_start_hooks(task: &ClaimedTask, user_text: &str, loop_state: &mut LoopState) {
     let mut session_start =
         crate::agent_hooks::session_start_outcome().to_machine_json("agent_loop");
@@ -1671,6 +1608,19 @@ pub(super) async fn run_agent_with_loop_seeded(
             if try_recover_structured_listing_answer_verifier_gap(route_result, &mut reply) {
                 return Ok(reply);
             }
+            if answer_verifier_gap_requests_observed_content_rewrite(&verifier)
+                && try_rewrite_answer_verifier_gap_with_observed_evidence(
+                    state,
+                    task,
+                    user_text,
+                    route_result,
+                    &verifier,
+                    &mut reply,
+                )
+                .await
+            {
+                return Ok(reply);
+            }
             if answer_verifier_retry_budget_available(&policy, answer_verifier_retry_count) {
                 loop_state = pre_finalize_loop_state;
                 answer_verifier_retry_count += 1;
@@ -1753,7 +1703,7 @@ pub(super) async fn run_agent_with_loop_seeded(
             ) {
                 return Ok(reply);
             }
-            if try_rewrite_exhausted_answer_verifier_gap_with_observed_evidence(
+            if try_rewrite_answer_verifier_gap_with_observed_evidence(
                 state,
                 task,
                 user_text,

@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "loop_control_answer_recovery/observed_rewrite.rs"]
+mod observed_rewrite;
 #[path = "loop_control_answer_recovery/structured_evidence_table.rs"]
 mod structured_evidence_table;
 #[path = "loop_control_answer_recovery/structured_listing.rs"]
@@ -7,6 +9,12 @@ mod structured_listing;
 #[path = "loop_control_answer_recovery/terminal_format.rs"]
 mod terminal_format;
 
+#[cfg(test)]
+pub(super) use observed_rewrite::answer_verifier_gap_has_observed_content_evidence;
+pub(super) use observed_rewrite::{
+    answer_verifier_gap_requests_observed_content_rewrite,
+    try_rewrite_answer_verifier_gap_with_observed_evidence,
+};
 pub(super) use structured_evidence_table::try_recover_structured_evidence_table_answer_verifier_gap;
 pub(super) use structured_listing::try_recover_structured_listing_answer_verifier_gap;
 pub(super) use terminal_format::prefer_terminal_model_answer_for_verifier_candidate;
