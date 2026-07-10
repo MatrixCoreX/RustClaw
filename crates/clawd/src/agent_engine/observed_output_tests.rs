@@ -25,9 +25,10 @@ use super::{
     route_prefers_plain_fs_search_paths,
     route_quantity_comparison_requires_model_language_synthesis, route_requests_scalar_path_only,
     route_requires_synthesized_delivery, scalar_count_diagnostic_line_for_answer,
-    scalar_route_prefers_structured_observed_answer, structured_observed_body,
-    tree_summary_direct_answer_candidate, try_synthesize_answer_from_observed_output,
-    AgentRunContext, OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
+    scalar_count_diagnostic_machine_answer, scalar_route_prefers_structured_observed_answer,
+    structured_observed_body, tree_summary_direct_answer_candidate,
+    try_synthesize_answer_from_observed_output, AgentRunContext,
+    OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
 };
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{

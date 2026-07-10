@@ -255,6 +255,19 @@ fn is_internal_missing_scalar_sentinel(text: &str) -> bool {
     trimmed == "<missing>" || trimmed.ends_with(": <missing>")
 }
 
+fn scalar_count_diagnostic_machine_answer(diagnostic: &str) -> String {
+    let diagnostic = crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(diagnostic).replace('\n', " "),
+    );
+    [
+        "message_key=clawd.msg.scalar_count.unreliable".to_string(),
+        "reason_code=count_unreliable_diagnostic".to_string(),
+        "final_answer_shape=scalar_count_unavailable".to_string(),
+        format!("diagnostic={diagnostic}"),
+    ]
+    .join("\n")
+}
+
 fn direct_free_text_conflicts_with_request_language(
     candidate: &str,
     request_language_hint: &str,
@@ -1537,14 +1550,7 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
             task.task_id,
             crate::truncate_for_log(&diagnostic)
         );
-        answer = observed_t_with_vars(
-            Some(state),
-            "clawd.msg.scalar_count_unreliable",
-            "无法可靠统计：{diagnostic}",
-            "Unable to produce a reliable count: {diagnostic}",
-            request_language_hint.starts_with("en"),
-            &[("diagnostic", &diagnostic)],
-        );
+        answer = scalar_count_diagnostic_machine_answer(&diagnostic);
     }
     let direct_passthrough_disallowed = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())

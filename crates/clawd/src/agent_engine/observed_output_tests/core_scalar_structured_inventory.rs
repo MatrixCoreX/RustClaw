@@ -555,6 +555,13 @@ fn scalar_count_answer_detects_non_numeric_diagnostic_line() {
         diagnostic.as_deref(),
         Some("find: /workspace/configs/config_copy: No such file or directory")
     );
+    let answer = scalar_count_diagnostic_machine_answer(diagnostic.as_deref().unwrap());
+    assert!(answer.contains("message_key=clawd.msg.scalar_count.unreliable"));
+    assert!(answer.contains("reason_code=count_unreliable_diagnostic"));
+    assert!(answer.contains("final_answer_shape=scalar_count_unavailable"));
+    assert!(answer.contains(
+        "diagnostic=find: /workspace/configs/config_copy: No such file or directory"
+    ));
 }
 
 fn reuse_active_context(user_request: &str) -> AgentRunContext {
