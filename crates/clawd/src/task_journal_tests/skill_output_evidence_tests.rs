@@ -834,6 +834,18 @@ fn json_observed_evidence_prioritizes_health_check_process_counts() {
             && item.get("excerpt").and_then(Value::as_str) == Some("1")
     }));
     assert!(items.iter().any(|item| {
+        item.get("field").and_then(Value::as_str) == Some("extra.clawd_log.keyword_error_count")
+            && item.get("excerpt").and_then(Value::as_str) == Some("43")
+    }));
+    assert!(items.iter().any(|item| {
+        item.get("field").and_then(Value::as_str) == Some("extra.telegramd_log.keyword_error_count")
+            && item.get("excerpt").and_then(Value::as_str) == Some("1")
+    }));
+    assert!(items.iter().any(|item| {
+        item.get("field").and_then(Value::as_str) == Some("extra.telegramd_log.size_bytes")
+            && item.get("excerpt").and_then(Value::as_str) == Some("942")
+    }));
+    assert!(items.iter().any(|item| {
         item.get("field").and_then(Value::as_str)
             == Some("extra.system_health.disk_root_total_bytes")
             && item.get("excerpt").and_then(Value::as_str) == Some("156546629632")
@@ -895,6 +907,82 @@ fn text_observed_evidence_parses_status_prefixed_json_body() {
         item.get("field").and_then(Value::as_str) == Some("body.data.telegramd_process_count")
             && item.get("excerpt").and_then(Value::as_str) == Some("0")
     }));
+}
+
+#[test]
+fn embedded_http_health_body_prioritizes_optional_daemon_statuses() {
+    let body = json!({
+        "ok": true,
+        "data": {
+            "version": "0.1.8",
+            "worker_state": "running",
+            "uptime_seconds": 76,
+            "running_length": 1,
+            "queue_length": 0,
+            "memory_rss_bytes": 72663040,
+            "telegramd_healthy": true,
+            "telegramd_process_count": 1,
+            "channel_gateway_healthy": false,
+            "channel_gateway_process_count": 0,
+            "telegram_bot_healthy": true,
+            "telegram_bot_process_count": 1,
+            "whatsappd_healthy": true,
+            "whatsappd_process_count": 1,
+            "webd_healthy": false,
+            "webd_process_count": 0,
+            "wechatd_healthy": true,
+            "wechatd_process_count": 1,
+            "feishud_healthy": true,
+            "feishud_process_count": 1,
+            "larkd_healthy": true,
+            "larkd_process_count": 1,
+            "whatsapp_cloud_healthy": true,
+            "whatsapp_cloud_process_count": 1,
+            "whatsapp_web_healthy": true,
+            "whatsapp_web_process_count": 1,
+            "gateway_instance_statuses": [
+                {"kind": "telegram", "name": "primary", "scope": "telegram:primary", "healthy": false, "status": "stale"},
+                {"kind": "feishu", "name": "primary", "scope": "feishu:primary", "healthy": true, "status": "running"}
+            ]
+        }
+    });
+    let output = json!({
+        "extra": {
+            "action": "get",
+            "url": "http://127.0.0.1:8787/v1/health",
+            "status_code": 200,
+            "success_status": true,
+            "body_preview": body.to_string()
+        },
+        "text": "status=200"
+    });
+
+    let observed = observed_evidence_from_output(Some(&output.to_string()))
+        .expect("json output should produce observed evidence");
+    let items = observed
+        .get("items")
+        .and_then(Value::as_array)
+        .expect("observed evidence items");
+
+    for (field, expected) in [
+        ("body.data.whatsapp_cloud_healthy", "true"),
+        ("body.data.whatsapp_cloud_process_count", "1"),
+        ("body.data.whatsapp_web_healthy", "true"),
+        ("body.data.whatsapp_web_process_count", "1"),
+        ("body.data.gateway_instance_statuses[0].status", "stale"),
+        (
+            "body.data.gateway_instance_statuses[0].scope",
+            "telegram:primary",
+        ),
+    ] {
+        assert!(
+            items.iter().any(|item| {
+                item.get("field").and_then(Value::as_str) == Some(field)
+                    && item.get("excerpt").and_then(Value::as_str) == Some(expected)
+            }),
+            "missing priority http health field {field}"
+        );
+    }
 }
 
 #[test]
