@@ -603,6 +603,53 @@ fn terminal_model_answer_does_not_replace_richer_machine_projection_with_observe
 }
 
 #[test]
+fn terminal_model_answer_does_not_replace_single_machine_projection_with_observed_scalar() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "AGENTS.md".to_string();
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-single-machine-projection-terminal",
+        "ask",
+        "prompt",
+    );
+    let grep_output = json!({
+        "extra": {
+            "action": "grep_text",
+            "match_count": 1,
+            "matches": [{
+                "line": 244,
+                "path": "AGENTS.md",
+                "text": "run `python3 scripts/check_no_nl_hardmatch.py` after boundary changes"
+            }],
+            "query": "check_no_nl_hardmatch.py",
+            "results": ["AGENTS.md"],
+            "root": "AGENTS.md"
+        },
+        "text": "AGENTS.md"
+    })
+    .to_string();
+    journal.push_step_result(&ok_step("step_1", "fs_basic", &grep_output));
+    journal.push_step_result(&ok_step("step_2", "respond", "AGENTS.md"));
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+    let observed_projection = "no_hardmatch_guard=check_no_nl_hardmatch.py";
+    let mut reply = AskReply::non_llm(observed_projection.to_string())
+        .with_messages(vec![observed_projection.to_string()])
+        .with_task_journal(journal);
+
+    assert!(!prefer_terminal_model_answer_for_verifier_candidate(
+        &mut reply,
+        Some(&route)
+    ));
+    assert_eq!(reply.text, observed_projection);
+}
+
+#[test]
 fn permission_denied_content_access_suppresses_missing_evidence_retry() {
     let mut route = route_result(OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
