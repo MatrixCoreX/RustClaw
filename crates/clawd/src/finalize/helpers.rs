@@ -307,6 +307,31 @@ pub(crate) fn parse_delivery_file_token(text: &str) -> Option<(DeliveryTokenKind
     parse_delivery_token(text).filter(|(kind, _)| kind.is_file_path())
 }
 
+fn object_has_planner_args_shape(map: &serde_json::Map<String, Value>) -> bool {
+    ["args", "arguments", "parameters", "input", "action_input"]
+        .into_iter()
+        .any(|key| map.contains_key(key))
+}
+
+fn object_is_planner_artifact(map: &serde_json::Map<String, Value>) -> bool {
+    if map
+        .get("steps")
+        .and_then(|value| value.as_array())
+        .is_some()
+    {
+        return true;
+    }
+    if ["type", "action_type", "action"].into_iter().any(|key| {
+        map.get(key)
+            .and_then(|value| value.as_str())
+            .is_some_and(crate::prompt_utils::is_agent_action_type_token)
+    }) {
+        return true;
+    }
+    object_has_planner_args_shape(map)
+        && (map.contains_key("tool") || map.contains_key("skill") || map.contains_key("capability"))
+}
+
 pub(crate) fn classify_planner_artifact(text: &str) -> Option<PlannerArtifactKind> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -335,12 +360,9 @@ pub(crate) fn classify_planner_artifact(text: &str) -> Option<PlannerArtifactKin
     }
     let value = crate::parse_llm_json_raw_or_any::<Value>(trimmed)?;
     match value {
-        Value::Object(map) => (map.contains_key("type")
-            || map.contains_key("tool")
-            || map.contains_key("skill")
-            || map.contains_key("action")
-            || map.get("steps").and_then(|v| v.as_array()).is_some())
-        .then_some(PlannerArtifactKind::PlannerObject),
+        Value::Object(map) => {
+            object_is_planner_artifact(&map).then_some(PlannerArtifactKind::PlannerObject)
+        }
         _ => None,
     }
 }

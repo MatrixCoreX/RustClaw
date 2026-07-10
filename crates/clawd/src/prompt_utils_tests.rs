@@ -1013,6 +1013,18 @@ fn extract_agent_action_objects_recovers_inner_actions_from_malformed_wrapper() 
 }
 
 #[test]
+fn extract_agent_action_objects_ignores_recovery_observation_tool_field() {
+    let raw = r#"{"retryable":true,"error_code":"tool_transient_failure","recovery_action":"retry_with_backoff","forbidden_repeat_signature":"sha256:example","attempt":1,"max_attempts":3,"remaining_attempts":2,"tool":"run_cmd","observed_at":"2026-07-11T00:00:00Z"}"#;
+    let extracted = super::extract_agent_action_objects(raw);
+    assert!(extracted.is_empty());
+
+    let typed_observation =
+        r#"{"type":"observation","tool":"run_cmd","status_code":"retryable_failure"}"#;
+    let extracted = super::extract_agent_action_objects(typed_observation);
+    assert!(extracted.is_empty());
+}
+
+#[test]
 fn normalize_agent_action_shape_rewrites_bare_run_cmd_aliases() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let normalized = super::parse_agent_action_json_with_repair(
