@@ -585,45 +585,82 @@ pub(super) fn parse_selector_list(value: Option<&Value>) -> Vec<String> {
 }
 
 pub(super) fn canonical_brand_name(raw: &str) -> Option<String> {
-    let lowered = raw.trim().to_ascii_lowercase();
-    match lowered.as_str() {
-        "canon" | "佳能" => Some("Canon".to_string()),
-        "sony" | "索尼" => Some("Sony".to_string()),
-        "nikon" | "尼康" => Some("Nikon".to_string()),
-        "fujifilm" | "fuji" | "富士" => Some("Fujifilm".to_string()),
-        "panasonic" | "lumix" | "松下" => Some("Panasonic".to_string()),
-        "leica" | "徕卡" => Some("Leica".to_string()),
-        _ if raw.trim().is_empty() => None,
-        _ => Some(raw.trim().to_string()),
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
     }
+    camera_brand_aliases()
+        .iter()
+        .find_map(|entry| {
+            entry
+                .aliases
+                .iter()
+                .any(|alias| token_matches_brand_alias(trimmed, alias))
+                .then(|| entry.canonical.to_string())
+        })
+        .or_else(|| Some(trimmed.to_string()))
 }
 
 pub(super) fn brand_matches(camera_make: &str, selected_brands: &[String]) -> bool {
     if selected_brands.is_empty() {
         return true;
     }
+    let make_canonical = canonical_brand_name(camera_make);
     let make_lower = camera_make.to_ascii_lowercase();
     selected_brands.iter().any(|brand| {
-        let brand_lower = brand.to_ascii_lowercase();
-        make_lower.contains(&brand_lower)
-            || match brand_lower.as_str() {
-                "canon" => make_lower.contains("canon") || make_lower.contains("佳能"),
-                "sony" => make_lower.contains("sony") || make_lower.contains("索尼"),
-                "nikon" => make_lower.contains("nikon") || make_lower.contains("尼康"),
-                "fujifilm" => {
-                    make_lower.contains("fujifilm")
-                        || make_lower.contains("fuji")
-                        || make_lower.contains("富士")
-                }
-                "panasonic" => {
-                    make_lower.contains("panasonic")
-                        || make_lower.contains("lumix")
-                        || make_lower.contains("松下")
-                }
-                "leica" => make_lower.contains("leica") || make_lower.contains("徕卡"),
-                _ => false,
-            }
+        let selected_canonical = canonical_brand_name(brand);
+        if make_canonical.is_some() && make_canonical == selected_canonical {
+            return true;
+        }
+        let Some(canonical) = selected_canonical else {
+            return false;
+        };
+        let brand_lower = canonical.to_ascii_lowercase();
+        !brand_lower.is_empty() && brand_lower.is_ascii() && make_lower.contains(&brand_lower)
     })
+}
+
+struct CameraBrandAlias {
+    canonical: &'static str,
+    aliases: &'static [&'static str],
+}
+
+fn camera_brand_aliases() -> &'static [CameraBrandAlias] {
+    const ALIASES: &[CameraBrandAlias] = &[
+        CameraBrandAlias {
+            canonical: "Canon",
+            aliases: &["canon", "佳能"],
+        },
+        CameraBrandAlias {
+            canonical: "Sony",
+            aliases: &["sony", "索尼"],
+        },
+        CameraBrandAlias {
+            canonical: "Nikon",
+            aliases: &["nikon", "尼康"],
+        },
+        CameraBrandAlias {
+            canonical: "Fujifilm",
+            aliases: &["fujifilm", "fuji", "富士"],
+        },
+        CameraBrandAlias {
+            canonical: "Panasonic",
+            aliases: &["panasonic", "lumix", "松下"],
+        },
+        CameraBrandAlias {
+            canonical: "Leica",
+            aliases: &["leica", "徕卡"],
+        },
+    ];
+    ALIASES
+}
+
+fn token_matches_brand_alias(token: &str, alias: &str) -> bool {
+    if alias.is_ascii() {
+        token.eq_ignore_ascii_case(alias)
+    } else {
+        token == alias
+    }
 }
 
 pub(super) fn text_matches_any(value: Option<&str>, selectors: &[String]) -> bool {
