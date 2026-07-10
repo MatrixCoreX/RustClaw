@@ -127,7 +127,7 @@ fn handle_request(
         _ => error_resp(
             rid,
             "unsupported_action",
-            format!("不支持 action `{}`，请使用 draft 或 list_investors", action),
+            format!("code=unsupported_action action={action} allowed=draft,list_investors"),
             Some(json!({ "action": action })),
         ),
     }
@@ -183,25 +183,17 @@ fn list_investors(request_id: String, personas: &[PersonaToml], args: &Value) ->
         .or_else(|| args.get("lang"))
         .and_then(Value::as_str);
     let en = is_en(locale);
-    let mut lines = vec![if en {
-        "Built-in personas (education-only; not endorsement):".to_string()
-    } else {
-        "内置人物（仅供投教文风参考，不构成背书）：".to_string()
-    }];
+    let mut lines = vec![format!("personas count={}", personas.len())];
     for p in personas {
         let name = if en && !p.display_name_en.is_empty() {
             p.display_name_en.as_str()
         } else {
             p.display_name_zh.as_str()
         };
-        lines.push(if en {
-            format!("- **{}**: slug=`{}`; {}", name, p.slug, p.one_liner_zh)
-        } else {
-            format!(
-                "- **{}**（`{}`）：{}",
-                p.display_name_zh, p.slug, p.one_liner_zh
-            )
-        });
+        lines.push(format!(
+            "slug={} display_name={} one_liner={}",
+            p.slug, name, p.one_liner_zh
+        ));
     }
     let text = lines.join("\n");
     SkillResp {
@@ -252,8 +244,8 @@ fn draft(
         return error_resp(
             request_id,
             "missing_person",
-            "缺少必选参数 args.person（人物 slug 或别名）",
-            None,
+            "code=missing_person field=args.person",
+            Some(json!({ "field": "args.person" })),
         );
     }
 
@@ -264,7 +256,7 @@ fn draft(
                 request_id,
                 "data_too_short",
                 format!(
-                    "args.data/material 有效长度过短（当前 {} 字，至少需要 {} 字）",
+                    "code=data_too_short current_chars={} min_chars={}",
                     s.chars().count(),
                     MIN_DATA_CHARS
                 ),
@@ -278,8 +270,8 @@ fn draft(
             return error_resp(
                 request_id,
                 "missing_data",
-                "缺少必选参数 args.data（或通过 material/user_data 传入同一正文）",
-                None,
+                "code=missing_data fields=args.data,args.material,args.user_data",
+                Some(json!({ "fields": ["args.data", "args.material", "args.user_data"] })),
             );
         }
     };
@@ -288,8 +280,8 @@ fn draft(
         return error_resp(
             request_id,
             "compliance_sensitive_input",
-            "材料或侧重点表述包含易被误解为喊单/保本保收益的内容；请改写为学习与信息梳理语境后再试",
-            None,
+            "code=compliance_sensitive_input",
+            Some(json!({ "policy": "compliance_sensitive_input" })),
         );
     }
 
@@ -300,10 +292,7 @@ fn draft(
             return error_resp(
                 request_id,
                 "unknown_person",
-                format!(
-                    "未知人物 `{}`，请先使用 action=list_investors 查看可用 slug/别名",
-                    person_raw
-                ),
+                format!("code=unknown_person person={person_raw} recovery_action=list_investors"),
                 Some(json!({ "person": person_raw })),
             );
         }
@@ -381,8 +370,8 @@ fn draft(
             return error_resp(
                 request_id,
                 "llm_failed",
-                format!("调用默认 LLM 失败：{e}"),
-                None,
+                format!("code=llm_failed reason={e}"),
+                Some(json!({ "reason": e })),
             );
         }
     };
@@ -391,8 +380,8 @@ fn draft(
         return error_resp(
             request_id,
             "compliance_sensitive_output",
-            "模型生成内容触发了合规敏感词校验；请调整材料措辞后重试，或使用 use_heuristic=true",
-            None,
+            "code=compliance_sensitive_output offline_arg=use_heuristic",
+            Some(json!({ "offline_arg": "use_heuristic" })),
         );
     }
 

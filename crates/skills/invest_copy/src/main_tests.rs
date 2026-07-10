@@ -31,10 +31,23 @@ fn draft_missing_person_returns_machine_error_extra() {
     );
 
     assert_eq!(resp.status, "error");
+    assert_eq!(
+        resp.error_text.as_deref(),
+        Some("code=missing_person field=args.person")
+    );
     let extra = resp.extra.expect("error extra");
     assert_eq!(extra["source_skill"], SKILL_NAME);
     assert_eq!(extra["error_kind"], "missing_person");
     assert_eq!(extra["message_key"], "skill.invest_copy.missing_person");
+}
+
+#[test]
+fn list_investors_uses_machine_header() {
+    let resp = list_investors("req-list".to_string(), &[], &json!({}));
+
+    assert_eq!(resp.status, "ok");
+    assert_eq!(resp.text, "personas count=0");
+    assert_eq!(resp.extra.unwrap()["action"], "list_investors");
 }
 
 #[test]
