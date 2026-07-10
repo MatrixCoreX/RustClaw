@@ -121,6 +121,15 @@ fn structured_group_by_accepts_year_and_date_fields() {
 }
 
 #[test]
+fn camera_brand_aliases_are_canonicalized_before_matching() {
+    assert_eq!(canonical_brand_name("佳能"), Some("Canon".to_string()));
+    assert_eq!(canonical_brand_name("FUJI"), Some("Fujifilm".to_string()));
+    assert!(brand_matches("Canon Inc.", &["佳能".to_string()]));
+    assert!(brand_matches("FUJIFILM Corporation", &["富士".to_string()]));
+    assert!(!brand_matches("Nikon", &["Sony".to_string()]));
+}
+
+#[test]
 fn structured_date_filters_normalize_common_machine_shapes() {
     assert_eq!(normalize_capture_year("2026-04-03"), "2026");
     assert_eq!(normalize_capture_month("202604"), "2026-04");
