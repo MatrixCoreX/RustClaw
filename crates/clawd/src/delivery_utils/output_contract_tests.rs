@@ -1,6 +1,9 @@
 use crate::{IntentOutputContract, OutputResponseShape, OutputSemanticKind};
 
-use super::{enforce_output_contract, looks_like_delivery_locator_literal, take_first_sentence};
+use super::{
+    enforce_output_contract, looks_like_delivery_locator_literal, sync_output_payload,
+    take_first_sentence,
+};
 
 #[test]
 fn delivery_locator_literal_accepts_hint_and_path_shapes() {
@@ -320,4 +323,46 @@ fn scalar_contract_preserves_structured_missing_field_line() {
     enforce_output_contract(&state, "只回答字段值", &contract, &mut text, &mut messages);
 
     assert_eq!(text, "package.name: <missing>");
+}
+
+#[test]
+fn one_sentence_contract_preserves_terminal_clarify_machine_line() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        ..Default::default()
+    };
+    let expected = "Which file should I read?\nterminal_intent=clarify clarify_reason_code=missing_locator missing_slot=locator message_key=clawd.clarify.missing_locator locator_kind=path";
+    let mut text = expected.to_string();
+    let mut messages = vec![expected.to_string()];
+
+    enforce_output_contract(
+        &state,
+        "read missing target",
+        &contract,
+        &mut text,
+        &mut messages,
+    );
+
+    assert_eq!(text, expected);
+    assert_eq!(messages, vec![expected.to_string()]);
+}
+
+#[test]
+fn sync_output_payload_prefers_terminal_clarify_machine_message() {
+    let contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::OneSentence,
+        ..Default::default()
+    };
+    let expected = "Which file should I read?\nterminal_intent=clarify clarify_reason_code=missing_locator missing_slot=locator locator_kind=path";
+    let mut text = "Which file should I read?".to_string();
+    let mut messages = vec!["stale answer".to_string(), expected.to_string()];
+
+    sync_output_payload(&contract, &mut text, &mut messages);
+
+    assert_eq!(text, expected);
+    assert_eq!(messages, vec![expected.to_string()]);
 }

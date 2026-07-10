@@ -16,7 +16,11 @@ fn task_lifecycle_renderer_dispatch_records_structured_traces_when_skipped() {
     );
 
     assert!(!rendered);
-    for renderer_key in ["route_clarify_machine_envelope", "control_machine_envelope"] {
+    for renderer_key in [
+        "agent_loop_clarify_machine_line",
+        "route_clarify_machine_envelope",
+        "control_machine_envelope",
+    ] {
         let trace = loop_state
             .output_vars
             .get(&format!("finalizer.renderer_trace.{renderer_key}"))
@@ -44,5 +48,5 @@ fn task_lifecycle_renderer_dispatch_records_structured_traces_when_skipped() {
                 == Some("finalizer_renderer_trace")
         })
         .count();
-    assert_eq!(trace_count, 2);
+    assert_eq!(trace_count, 3);
 }

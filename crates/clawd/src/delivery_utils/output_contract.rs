@@ -157,6 +157,9 @@ pub(super) fn enforce_output_contract(
     normalized_text: &mut String,
     normalized_messages: &mut Vec<String>,
 ) {
+    if preserve_terminal_clarify_machine_delivery(normalized_text, normalized_messages) {
+        return;
+    }
     if should_strip_preamble_before_markdown_table(output_contract) {
         *normalized_text = strip_preamble_before_markdown_table(normalized_text);
     }
@@ -365,6 +368,10 @@ pub(crate) fn sync_output_payload(
     normalized_text: &mut String,
     normalized_messages: &mut Vec<String>,
 ) {
+    if preserve_terminal_clarify_machine_delivery(normalized_text, normalized_messages) {
+        return;
+    }
+
     let file_contract = output_contract.delivery_required
         || matches!(
             output_contract.response_shape,
@@ -416,6 +423,56 @@ pub(crate) fn sync_output_payload(
         Some(last) => *last = canonical,
         None => normalized_messages.push(canonical),
     }
+}
+
+fn preserve_terminal_clarify_machine_delivery(
+    normalized_text: &mut String,
+    normalized_messages: &mut Vec<String>,
+) -> bool {
+    let Some(machine_delivery) =
+        terminal_clarify_machine_delivery(normalized_text, normalized_messages)
+    else {
+        return false;
+    };
+    *normalized_text = machine_delivery.clone();
+    normalized_messages.clear();
+    normalized_messages.push(machine_delivery);
+    true
+}
+
+fn terminal_clarify_machine_delivery(text: &str, messages: &[String]) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .map(String::as_str)
+        .chain(std::iter::once(text))
+        .map(str::trim)
+        .filter(|candidate| !candidate.is_empty())
+        .find(|candidate| has_terminal_clarify_machine_fields(candidate))
+        .map(str::to_string)
+}
+
+fn has_terminal_clarify_machine_fields(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if let Ok(payload) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        if payload
+            .get("owner_layer")
+            .and_then(serde_json::Value::as_str)
+            == Some("agent_loop_clarify")
+        {
+            return true;
+        }
+        if payload
+            .get("terminal_intent")
+            .and_then(serde_json::Value::as_str)
+            == Some("clarify")
+        {
+            return true;
+        }
+    }
+    let markers = crate::RouteReasonMarkers::new(trimmed);
+    markers.machine_value("terminal_intent") == Some("clarify")
+        || markers.machine_value("agent_loop.terminal_intent") == Some("clarify")
 }
 
 fn looks_like_leading_label_line(line: &str) -> bool {

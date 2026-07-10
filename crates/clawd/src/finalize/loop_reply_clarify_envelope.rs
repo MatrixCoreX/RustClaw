@@ -5,6 +5,53 @@ use serde_json::Value;
 use super::log_deterministic_delivery_record;
 use super::route_helpers::{route_clarify_reason_code, route_output_contract_machine_json};
 
+pub(super) fn attach_agent_loop_clarify_machine_line(
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    delivery_messages: &mut Vec<String>,
+    _finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    if !agent_loop_nonblocking_clarify_answer(loop_state) {
+        return false;
+    }
+    if completed_act_delivery_should_own_terminal_state(loop_state, delivery_messages) {
+        return false;
+    }
+    if delivery_messages
+        .iter()
+        .any(|message| delivery_has_terminal_clarify_machine_fields(message))
+    {
+        return false;
+    }
+
+    let Some(machine_line) = agent_loop_clarify_machine_line(loop_state) else {
+        return false;
+    };
+    let Some(index) = delivery_messages
+        .iter()
+        .rposition(|message| !message.trim().is_empty())
+    else {
+        return false;
+    };
+    if delivery_messages[index].contains(machine_line.as_str()) {
+        return false;
+    }
+
+    let rendered = format!("{}\n{}", delivery_messages[index].trim_end(), machine_line);
+    delivery_messages[index] = rendered.clone();
+    loop_state.delivery_messages = delivery_messages.clone();
+    loop_state.last_user_visible_respond = Some(rendered);
+    log_deterministic_delivery_record(
+        &task.task_id,
+        "agent_loop_clarify_machine_line",
+        "attached",
+        agent_run_context,
+        loop_state.executed_step_results.len(),
+    );
+    true
+}
+
 pub(super) fn attach_route_clarify_machine_envelope(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
@@ -126,6 +173,13 @@ fn route_allows_terminal_clarify_envelope(
     loop_state.pending_user_input_required
 }
 
+fn agent_loop_nonblocking_clarify_answer(loop_state: &LoopState) -> bool {
+    output_var(loop_state, "agent_loop.nonblocking_clarify_answer").as_deref() == Some("true")
+        || (output_var(loop_state, "agent_loop.recovered_terminal_intent").as_deref()
+            == Some("clarify")
+            && output_var(loop_state, "agent_loop.terminal_intent").as_deref() == Some("answer"))
+}
+
 fn completed_act_delivery_should_own_terminal_state(
     loop_state: &LoopState,
     delivery_messages: &[String],
@@ -160,7 +214,10 @@ fn delivery_has_terminal_clarify_machine_fields(message: &str) -> bool {
             return true;
         }
     }
+    let markers = crate::RouteReasonMarkers::new(message);
     route_reason_has_machine_token(message, "agent_loop.terminal_intent=clarify")
+        || markers.machine_value("agent_loop.terminal_intent") == Some("clarify")
+        || markers.machine_value("terminal_intent") == Some("clarify")
 }
 
 fn output_var(loop_state: &LoopState, key: &str) -> Option<String> {
@@ -171,6 +228,62 @@ fn output_var(loop_state: &LoopState, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn output_var_or_decision_envelope(loop_state: &LoopState, field: &str) -> Option<String> {
+    let mut decision_field_key = String::from("agent_loop.decision_envelope.");
+    decision_field_key.push_str(field);
+    output_var(loop_state, &format!("agent_loop.{field}"))
+        .or_else(|| output_var(loop_state, &decision_field_key))
+        .or_else(|| {
+            loop_state
+                .output_vars
+                .get("agent_loop.decision_envelope")
+                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                .and_then(|payload| {
+                    payload
+                        .get(field)
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
+}
+
+fn agent_loop_clarify_machine_line(loop_state: &LoopState) -> Option<String> {
+    let mut parts = vec!["terminal_intent=clarify".to_string()];
+    for (key, value) in [
+        (
+            "clarify_reason_code",
+            output_var_or_decision_envelope(loop_state, "clarify_reason_code"),
+        ),
+        (
+            "missing_slot",
+            output_var_or_decision_envelope(loop_state, "missing_slot"),
+        ),
+        (
+            "message_key",
+            output_var_or_decision_envelope(loop_state, "message_key"),
+        ),
+        (
+            "field_path",
+            output_var_or_decision_envelope(loop_state, "field_path"),
+        ),
+        (
+            "locator_kind",
+            output_var_or_decision_envelope(loop_state, "locator_kind"),
+        ),
+    ] {
+        if let Some(value) = value
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push(format!("{key}={value}"));
+        }
+    }
+    (parts.len() > 1).then(|| parts.join(" "))
 }
 
 fn ensure_output_var(loop_state: &mut LoopState, key: &str, value: &str) {

@@ -71,6 +71,13 @@ pub(super) const FINALIZER_RENDERER_REGISTRY: &[FinalizerRendererDescriptor] = &
         summary_contract: "delivery_token",
     },
     FinalizerRendererDescriptor {
+        key: "agent_loop_clarify_machine_line",
+        shape_class: FinalizerRendererShapeClass::TaskLifecycle,
+        owner_module: "finalize::loop_reply_clarify_envelope",
+        entrypoint: "attach_agent_loop_clarify_machine_line",
+        summary_contract: "terminal_clarify_machine_line",
+    },
+    FinalizerRendererDescriptor {
         key: "route_clarify_machine_envelope",
         shape_class: FinalizerRendererShapeClass::TaskLifecycle,
         owner_module: "finalize::loop_reply_clarify_envelope",

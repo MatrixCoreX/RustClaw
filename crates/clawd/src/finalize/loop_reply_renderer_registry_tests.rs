@@ -56,7 +56,11 @@ fn task_lifecycle_renderer_order_matches_dispatch_order() {
 
     assert_eq!(
         keys,
-        vec!["route_clarify_machine_envelope", "control_machine_envelope"]
+        vec![
+            "agent_loop_clarify_machine_line",
+            "route_clarify_machine_envelope",
+            "control_machine_envelope"
+        ]
     );
 }
 
