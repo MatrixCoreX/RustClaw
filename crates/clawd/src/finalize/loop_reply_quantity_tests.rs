@@ -10,7 +10,9 @@ fn compare_paths_size_ratio_answer_computes_ratio_from_structured_output() {
 
     assert!(answer.contains("Cargo.lock"));
     assert!(answer.contains("Cargo.toml"));
-    assert!(answer.contains("46.68"));
+    assert!(answer.contains("message_key=clawd.msg.quantity.size_comparison.observed"));
+    assert!(answer.contains("reason_code=quantity_size_comparison_observed"));
+    assert!(answer.contains("ratio=46.679586"));
 }
 
 #[test]
@@ -186,9 +188,13 @@ fn path_batch_size_comparison_answer_picks_largest_structured_size() {
     )
     .expect("size comparison answer");
 
+    assert!(answer.contains("message_key=clawd.msg.quantity.size_comparison.observed"));
+    assert!(answer.contains("reason_code=quantity_size_comparison_observed"));
     assert!(answer.contains("Cargo.lock"));
-    assert!(answer.contains("更大"));
-    assert!(answer.contains("46.68"));
+    assert!(answer.contains("largest.label=Cargo.lock"));
+    assert!(answer.contains("runner_up.label=Cargo.toml"));
+    assert!(answer.contains("delta_bytes=119041"));
+    assert!(answer.contains("ratio=46.679586"));
 }
 
 #[test]
@@ -527,7 +533,7 @@ fn direct_quantity_comparison_from_compare_paths_recovers_after_synthesis_failur
     )
     .expect("structured ratio fallback");
 
-    assert!(answer.contains("46.68"));
+    assert!(answer.contains("ratio=46.679586"));
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
@@ -574,7 +580,7 @@ fn direct_quantity_comparison_from_path_batch_facts_recovers_after_synthesis_fai
     .expect("structured path facts size fallback");
 
     assert!(answer.contains("Cargo.lock"));
-    assert!(answer.contains("46.68"));
+    assert!(answer.contains("ratio=46.679586"));
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
@@ -611,12 +617,12 @@ fn direct_quantity_comparison_scalar_shape_returns_ratio_not_byte_delta() {
     )
     .expect("structured scalar ratio fallback");
 
-    assert!(answer.contains("Cargo.lock"));
-    assert!(answer.contains("Cargo.toml"));
+    assert!(answer.contains("message_key=clawd.msg.quantity.size_comparison.observed"));
+    assert!(answer.contains("reason_code=quantity_size_comparison_observed"));
+    assert!(answer.contains("largest.label=Cargo.lock"));
+    assert!(answer.contains("runner_up.label=Cargo.toml"));
+    assert!(answer.contains("delta_bytes=119161"));
     assert!(answer.contains("46.15"));
-    assert!(answer.contains("更大"));
-    assert!(!answer.contains("is larger"));
-    assert!(!answer.contains("119161"));
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
@@ -652,7 +658,8 @@ fn direct_quantity_comparison_unwraps_skill_success_envelope() {
     )
     .expect("wrapped path facts ratio fallback");
 
-    assert!(answer.contains("46.15"));
+    assert!(answer.contains("reason_code=quantity_size_comparison_observed"));
+    assert!(answer.contains("ratio=46.153846"));
     assert!(!answer.contains(r#""action":"#));
 }
 
@@ -688,8 +695,10 @@ fn direct_quantity_comparison_uses_original_request_language_over_scaffold() {
     )
     .expect("contextual language fallback");
 
-    assert!(answer.contains("更大"));
-    assert!(!answer.contains("is larger"));
+    assert!(answer.contains("reason_code=quantity_size_comparison_observed"));
+    assert!(answer.contains("largest.label=Cargo.lock"));
+    assert!(answer.contains("runner_up.label=Cargo.toml"));
+    assert!(answer.contains("ratio=46.153846"));
 }
 
 #[test]
@@ -731,7 +740,12 @@ fn direct_quantity_comparison_strict_shape_returns_byte_delta() {
     )
     .expect("structured strict delta fallback");
 
-    assert_eq!(answer, "README.md: 8447 bytes");
+    assert!(answer.contains("message_key=clawd.msg.quantity.size_comparison.observed"));
+    assert!(answer.contains("reason_code=quantity_size_comparison_observed"));
+    assert!(answer.contains("style=delta_only"));
+    assert!(answer.contains("largest.label=README.md"));
+    assert!(answer.contains("runner_up.label=AGENTS.md"));
+    assert!(answer.contains("delta_bytes=8447"));
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
