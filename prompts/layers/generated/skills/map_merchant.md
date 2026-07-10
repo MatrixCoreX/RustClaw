@@ -12,7 +12,8 @@
 - 默认 provider 从 `configs/map_merchant.toml` 的 `[map_merchant].default_provider` 读取；当前建议默认值为 `amap`。
 - 技能支持按“当前位置/经纬度”或“城市/地址/商圈关键词”推荐附近商户。
 - 技能支持偏好型筛选，可结合 `keyword`、`category`、`cuisine`、`price_level`、`max_distance_meters`、`sort_by` 做排序。
-- 成功响应会返回可读推荐文本、结构化候选列表，以及可供通信端转换为按钮的导航链接行。
+- 成功响应的 `text` 是 `message_key=...` 机器 fallback；自然语言推荐说明由 finalizer/i18n/LLM 根据 `extra` 渲染。
+- 成功响应会返回结构化候选列表、`reason_codes`、评分/距离/价格事实，以及可供通信端转换为按钮的导航链接行。
 
 ## Config Entry Points (from interface)
 - No dedicated config entry points declared.
@@ -24,7 +25,7 @@
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | all | `action` | no | string | `recommend` | 当前仅支持 `recommend`。 |
-| all | `provider` | 否 | string | 配置默认值 | 支持 `amap` / `google`。 |
+| all | `provider` | 否 | string | 配置默认值 | 支持 canonical token：`amap` / `google`；provider 别名只能来自 `configs/map_merchant.toml` 元数据。 |
 | all | `latitude` + `longitude` | 否* | number | - | 当前位置坐标。与地点描述方式二选一。 |
 | all | `city` / `district` / `address` / `place` / `location` / `q` | 否* | string | - | 用于确定推荐中心点；可只给城市，也可给更具体的地址或商圈。 |
 | all | `keyword` | 否 | string | `configs/map_merchant.toml` 中的 `default_keyword` | 用户想找的商户关键词，如“咖啡”“火锅”“亲子餐厅”。 |
@@ -38,11 +39,8 @@
 \* 必须提供「`latitude` + `longitude`」或「地点描述字段」其中一种。
 
 ## Error Contract (from interface)
-- 未提供坐标，且未提供任何可用于定位的地点字段。
-- 默认 provider 未启用，或对应 provider 未配置 API Key。
-- `action` 非 `recommend`。
-- 高德或 Google 地点解析失败。
-- 高德或 Google 商户搜索失败或未找到满足条件的商户。
+- `error_text` 使用 `code=...` 机器字段形式；运行时不得解析自然语言错误文本。
+- 常见错误码包括 `missing_anchor`、`provider_disabled`、`provider_api_key_missing`、`unsupported_action`、`amap_geocode_*`、`google_geocode_*`、`amap_nearby_*`、`google_places_*`、`no_matching_merchants`。
 
 ## Request/Response Examples (from interface)
 ### Example 1：默认 provider（高德）查询
@@ -52,7 +50,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"map-1","status":"ok","text":"…","extra":{"action":"recommend","provider":"amap","returned":3},"error_text":null}
+{"request_id":"map-1","status":"ok","text":"message_key=skill.map_merchant.recommendation_ready provider=amap returned=3 anchor_source=geocode radius_meters=3000 sort_by=balanced keyword=咖啡","extra":{"schema_version":1,"source_skill":"map_merchant","status":"ok","message_key":"skill.map_merchant.recommendation_ready","action":"recommend","provider":"amap","provider_token":"amap","returned":3},"error_text":null}
 ```
 
 ### Example 2：显式使用 Google
@@ -62,7 +60,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"map-2","status":"ok","text":"…","extra":{"action":"recommend","provider":"google"},"error_text":null}
+{"request_id":"map-2","status":"ok","text":"message_key=skill.map_merchant.recommendation_ready provider=google returned=3 anchor_source=coordinates radius_meters=3000 sort_by=balanced keyword=coffee","extra":{"schema_version":1,"source_skill":"map_merchant","status":"ok","message_key":"skill.map_merchant.recommendation_ready","action":"recommend","provider":"google","provider_token":"google"},"error_text":null}
 ```
 
 ### Example 3：错误（provider 未配置 key）
@@ -72,7 +70,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"map-3","status":"error","text":"","extra":null,"error_text":"…"}
+{"request_id":"map-3","status":"error","text":"","extra":{"schema_version":1,"source_skill":"map_merchant","status":"error","error_kind":"execution_failed","message_key":"skill.map_merchant.execution_failed","retryable":false},"error_text":"code=provider_api_key_missing provider=google config=configs/map_merchant.toml"}
 ```
 
 ## Output Contract

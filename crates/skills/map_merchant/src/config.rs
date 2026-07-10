@@ -35,6 +35,12 @@ struct MapMerchantConfig {
     keyword_weight: f64,
     #[serde(default)]
     default_keyword: Option<String>,
+    #[serde(default = "default_google_language_code")]
+    google_language_code: String,
+    #[serde(default)]
+    amap_aliases: Vec<String>,
+    #[serde(default)]
+    google_aliases: Vec<String>,
     #[serde(default)]
     amap: ProviderConfig,
     #[serde(default)]
@@ -54,6 +60,9 @@ impl Default for MapMerchantConfig {
             price_weight: default_price_weight(),
             keyword_weight: default_keyword_weight(),
             default_keyword: None,
+            google_language_code: default_google_language_code(),
+            amap_aliases: Vec::new(),
+            google_aliases: Vec::new(),
             amap: ProviderConfig::default(),
             google: ProviderConfig::default(),
         }
@@ -80,6 +89,8 @@ pub(super) struct RuntimeConfig {
     pub(super) price_weight: f64,
     pub(super) keyword_weight: f64,
     pub(super) default_keyword: String,
+    pub(super) google_language_code: String,
+    provider_aliases: Vec<(String, MapProvider)>,
     pub(super) amap: ProviderRuntime,
     pub(super) google: ProviderRuntime,
 }
@@ -88,6 +99,15 @@ pub(super) struct RuntimeConfig {
 pub(super) struct ProviderRuntime {
     pub(super) enabled: bool,
     pub(super) api_key: String,
+}
+
+impl RuntimeConfig {
+    pub(super) fn provider_for_alias(&self, raw: &str) -> Option<MapProvider> {
+        let normalized = raw.trim().to_ascii_lowercase();
+        self.provider_aliases
+            .iter()
+            .find_map(|(alias, provider)| (alias == &normalized).then_some(*provider))
+    }
 }
 
 fn load_config(workspace_root: &Path) -> RootConfig {
@@ -101,6 +121,7 @@ fn load_config(workspace_root: &Path) -> RootConfig {
 
 pub(super) fn resolve_runtime_config(workspace_root: &Path) -> RuntimeConfig {
     let cfg = load_config(workspace_root).map_merchant;
+    let provider_aliases = provider_aliases(&cfg);
     RuntimeConfig {
         default_provider: parse_provider(Some(cfg.default_provider.as_str()))
             .unwrap_or(MapProvider::Amap),
@@ -121,6 +142,11 @@ pub(super) fn resolve_runtime_config(workspace_root: &Path) -> RuntimeConfig {
             .filter(|v| !v.is_empty())
             .unwrap_or(DEFAULT_KEYWORD)
             .to_string(),
+        google_language_code: non_empty_or_default(
+            cfg.google_language_code.as_str(),
+            default_google_language_code,
+        ),
+        provider_aliases,
         amap: ProviderRuntime {
             enabled: cfg.amap.enabled,
             api_key: std::env::var("AMAP_API_KEY")
@@ -200,4 +226,33 @@ fn default_price_weight() -> f64 {
 
 fn default_keyword_weight() -> f64 {
     0.15
+}
+
+fn default_google_language_code() -> String {
+    "en".to_string()
+}
+
+fn provider_aliases(cfg: &MapMerchantConfig) -> Vec<(String, MapProvider)> {
+    cfg.amap_aliases
+        .iter()
+        .map(|alias| (alias, MapProvider::Amap))
+        .chain(
+            cfg.google_aliases
+                .iter()
+                .map(|alias| (alias, MapProvider::Google)),
+        )
+        .filter_map(|(alias, provider)| {
+            let normalized = alias.trim().to_ascii_lowercase();
+            (!normalized.is_empty()).then_some((normalized, provider))
+        })
+        .collect()
+}
+
+fn non_empty_or_default(raw: &str, default_fn: fn() -> String) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        default_fn()
+    } else {
+        trimmed.to_string()
+    }
 }

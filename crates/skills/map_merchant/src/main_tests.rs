@@ -37,8 +37,8 @@ fn amap_poi_parser_tolerates_array_fields() {
     assert_eq!(pois.len(), 1);
     assert_eq!(pois[0].name, "测试店");
     assert_eq!(
-        display_address_value(&pois[0].address),
-        "上海市黄浦区人民大道1号"
+        normalized_address_value(&pois[0].address).as_deref(),
+        Some("上海市黄浦区人民大道1号")
     );
     assert_eq!(
         optional_string_value(&pois[0].tel).as_deref(),
