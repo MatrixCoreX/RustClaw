@@ -43,19 +43,18 @@ pub(super) fn deterministic_log_analyze_summary_text(
 }
 
 pub(super) fn deterministic_structured_search_summary_text(
-    user_text: &str,
+    _user_text: &str,
     finding: &StructuredSearchFinding,
 ) -> String {
     let count = finding.count.max(finding.results.len());
-    let prefer_english = crate::language_policy::request_language_hint(user_text) == "en";
     let mut lines = Vec::new();
-    if prefer_english {
-        lines.push(format!("Found {count} candidates:"));
-    } else {
-        lines.push(format!("找到 {count} 个候选："));
-    }
+    lines.push("message_key=clawd.msg.structured_search.candidates".to_string());
+    lines.push("reason_code=structured_search_candidates".to_string());
+    push_machine_line(&mut lines, "action", &finding.action);
+    lines.push(format!("count={count}"));
+    lines.push(format!("result_count={}", finding.results.len()));
     for (idx, result) in finding.results.iter().enumerate() {
-        lines.push(format!("{}. {}", idx + 1, result));
+        push_machine_line(&mut lines, &format!("candidate.{}", idx + 1), result);
     }
     lines.join("\n")
 }
@@ -80,54 +79,38 @@ pub(super) fn deterministic_rss_news_items_text(items: &[RssNewsItem]) -> String
 }
 
 pub(super) fn deterministic_structured_count_summary_text(
-    user_text: &str,
+    _user_text: &str,
     finding: &StructuredCountFinding,
 ) -> String {
-    let prefer_english = crate::language_policy::request_language_hint(user_text) == "en";
-    let scope = finding.path.as_deref().unwrap_or(if prefer_english {
-        "the requested scope"
-    } else {
-        "目标范围"
-    });
-    let direct = finding.recursive == Some(false);
-    match (
-        prefer_english,
-        direct,
-        finding.files,
-        finding.dirs,
-        finding.hidden,
-    ) {
-        (true, true, Some(files), Some(dirs), Some(hidden)) => format!(
-            "{scope} has {} direct entries: {files} files, {dirs} directories, {hidden} hidden.",
-            finding.total
-        ),
-        (true, true, Some(files), Some(dirs), None) => format!(
-            "{scope} has {} direct entries: {files} files and {dirs} directories.",
-            finding.total
-        ),
-        (true, _, Some(files), Some(dirs), _) => format!(
-            "{scope} has {} entries: {files} files and {dirs} directories.",
-            finding.total
-        ),
-        (true, true, _, _, _) => {
-            format!("{scope} has {} direct entries.", finding.total)
-        }
-        (true, _, _, _, _) => format!("{scope} has {} entries.", finding.total),
-        (false, true, Some(files), Some(dirs), Some(hidden)) => format!(
-            "{scope} 共有 {} 个直接子项：文件 {files} 个，目录 {dirs} 个，隐藏项 {hidden} 个。",
-            finding.total
-        ),
-        (false, true, Some(files), Some(dirs), None) => format!(
-            "{scope} 共有 {} 个直接子项：文件 {files} 个，目录 {dirs} 个。",
-            finding.total
-        ),
-        (false, _, Some(files), Some(dirs), _) => format!(
-            "{scope} 共有 {} 个子项：文件 {files} 个，目录 {dirs} 个。",
-            finding.total
-        ),
-        (false, true, _, _, _) => format!("{scope} 共有 {} 个直接子项。", finding.total),
-        (false, _, _, _, _) => format!("{scope} 共有 {} 个子项。", finding.total),
+    let mut lines = vec![
+        "message_key=clawd.msg.structured_count.summary".to_string(),
+        "reason_code=structured_count_observed".to_string(),
+        format!("total={}", finding.total),
+    ];
+    if let Some(path) = finding.path.as_deref() {
+        push_machine_line(&mut lines, "path", path);
     }
+    if let Some(files) = finding.files {
+        lines.push(format!("files={files}"));
+    }
+    if let Some(dirs) = finding.dirs {
+        lines.push(format!("dirs={dirs}"));
+    }
+    if let Some(hidden) = finding.hidden {
+        lines.push(format!("hidden={hidden}"));
+    }
+    if let Some(recursive) = finding.recursive {
+        lines.push(format!("recursive={recursive}"));
+        lines.push(format!("direct={}", !recursive));
+    }
+    lines.join("\n")
+}
+
+fn push_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
+    let value = crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),
+    );
+    lines.push(format!("{key}={value}"));
 }
 
 pub(super) fn display_log_path(path: &str) -> &str {
