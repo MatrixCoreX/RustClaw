@@ -27,11 +27,23 @@ fn parse_llm_alias_response_rejects_name_field_json_fallback() {
 #[test]
 fn parse_sina_hq_returns_structured_quote_extra() {
     let body = r#"var hq_str_sh600519="贵州茅台,1500.00,1490.00,1519.80,1525.00,1488.00,0,0,123456,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2026-07-07,15:00:00,00";"#;
+    let correction = SymbolCorrection {
+        input: "茅台".to_string(),
+        matched_name: "贵州茅台".to_string(),
+        used_llm: false,
+    };
 
-    let (text, extra) = parse_sina_hq(body, "sh600519", Some("alias=贵州茅台")).unwrap();
+    let (text, extra) = parse_sina_hq(body, "sh600519", Some(&correction)).unwrap();
 
-    assert!(text.contains("【SH600519】贵州茅台"));
+    assert!(text.contains("message_key=stock.msg.quote"));
+    assert!(text.contains("code=SH600519"));
+    assert!(text.contains("current=1519.80"));
+    assert!(!text.contains("现价"));
     assert_eq!(extra.get("action").and_then(Value::as_str), Some("quote"));
+    assert_eq!(
+        extra.get("message_key").and_then(Value::as_str),
+        Some("stock.msg.quote")
+    );
     assert_eq!(
         extra.get("source_skill").and_then(Value::as_str),
         Some("stock")
@@ -41,6 +53,20 @@ fn parse_sina_hq_returns_structured_quote_extra() {
     assert_eq!(
         extra.get("current").and_then(Value::as_str),
         Some("1519.80")
+    );
+    assert_eq!(
+        extra
+            .get("quote")
+            .and_then(|quote| quote.get("current"))
+            .and_then(Value::as_str),
+        Some("1519.80")
+    );
+    assert_eq!(
+        extra
+            .get("correction")
+            .and_then(|correction| correction.get("reason_code"))
+            .and_then(Value::as_str),
+        Some("alias_match")
     );
     assert!(extra
         .get("change_pct")
