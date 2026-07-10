@@ -69,7 +69,8 @@
 | `trade_preview`/`trade_submit` | `symbol` | yes | string | - | Order symbol. |
 | `trade_preview`/`trade_submit` | `side` | no* | string | `buy` | `buy` or `sell`. |
 | `trade_preview`/`trade_submit` | `order_type` | no | string | `market` | `market`, `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker`. Aliases: `type`, `orderType`. |
-| `trade_preview`/`trade_submit` | `qty` | cond | number/string | - | Base asset quantity. Use `"all"` for full-position sell (SELL side only). Aliases: `quantity`, `amount`, `base_qty`, `base_quantity`. `amount` means base-asset amount; use `quote_qty_usd`/`amount_usd` for quote-currency notional. |
+| `trade_preview`/`trade_submit` | `qty` | cond | number/string | - | Base asset quantity. Language-neutral compatibility tokens `"all"` / `"max"` are accepted for full-position sell (SELL side only). Aliases: `quantity`, `amount`, `base_qty`, `base_quantity`. `amount` means base-asset amount; use `quote_qty_usd`/`amount_usd` for quote-currency notional. |
+| `trade_preview`/`trade_submit` | `qty_all` | cond | boolean | `false` | Preferred structured full-position sell marker. When the user asks in any natural language to sell the full position, planner must normalize that intent to `qty_all=true` instead of passing localized words in `qty`. |
 | `trade_preview`/`trade_submit` | `quote_qty_usd` | cond | number | - | USDT amount to spend/receive. Aliases: `quote_qty`, `amount_usd`, `notional_usd`. |
 | `trade_preview`/`trade_submit` | `price` | required for limit/stop orders | number | - | Required for `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker`. |
 | `trade_preview`/`trade_submit` | `stop_price` | required for stop orders | number | - | Trigger price for `stop_loss_limit` / `take_profit_limit`. Alias: `stopPrice`. |
