@@ -1,0 +1,10 @@
+[service_control]
+ambiguous_target_aliases = [
+  "后端",
+  "服务们",
+  "那几个",
+  "那几个服务",
+  "全部",
+  "全部服务",
+  "服务",
+]

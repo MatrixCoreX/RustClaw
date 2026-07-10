@@ -9,8 +9,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+mod config;
 mod platform;
 
+pub(crate) use config::is_ambiguous_target;
 use platform::{
     brew_service_entry, command_output_text, discover_all_candidates, fetch_logs_inner,
     is_safe_target, launchctl_entry, looks_like_permission_error, normalize_target_alias,
@@ -53,32 +55,9 @@ const MANAGER_TYPES: &[&str] = &[
     "unknown",
 ];
 
-/// Targets that are too vague for high-risk actions (stop/restart).
-const AMBIGUOUS_TARGETS: &[&str] = &[
-    "\u{540E}\u{7AEF}",
-    "\u{670D}\u{52A1}\u{4EEC}",
-    "\u{90A3}\u{51E0}\u{4E2A}",
-    "\u{90A3}\u{51E0}\u{4E2A}\u{670D}\u{52A1}",
-    "\u{5168}\u{90E8}",
-    "\u{5168}\u{90E8}\u{670D}\u{52A1}",
-    "all",
-    "*",
-    "\u{670D}\u{52A1}",
-];
-
 const TAIL_LINES_DEFAULT: usize = 100;
 const TAIL_LINES_MAX: usize = 500;
 const VERIFY_WAIT_SECONDS: u64 = 2;
-
-pub(crate) fn is_ambiguous_target(target: &str) -> bool {
-    let t = target.trim().to_lowercase();
-    if t.is_empty() {
-        return true;
-    }
-    AMBIGUOUS_TARGETS
-        .iter()
-        .any(|a| t == *a || t.contains(&a.to_lowercase()))
-}
 
 pub(crate) fn is_high_risk_action(action: &str) -> bool {
     matches!(action, "stop" | "restart")
