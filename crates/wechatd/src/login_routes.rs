@@ -42,7 +42,7 @@ pub(super) async fn login_qr_start(
                 return Ok(Json(LoginStartResponse {
                     session_key,
                     qrcode_url: existing.qrcode_url.clone(),
-                    message: "二维码已就绪，请使用微信扫描。".to_string(),
+                    message: wechat_t(&state.config, "wechat.msg.login.qr_ready_scan"),
                 }));
             }
         }
@@ -64,7 +64,7 @@ pub(super) async fn login_qr_start(
             qrcode_url: qrcode_url.clone(),
             started_at_ms: current_ts_ms(),
             status: "wait".to_string(),
-            message: "二维码已生成，等待扫码。".to_string(),
+            message: wechat_t(&state.config, "wechat.msg.login.qr_waiting_scan"),
         },
     );
     update_status(&state, |status| {
@@ -77,7 +77,7 @@ pub(super) async fn login_qr_start(
     Ok(Json(LoginStartResponse {
         session_key,
         qrcode_url,
-        message: "使用微信扫描二维码完成连接。".to_string(),
+        message: wechat_t(&state.config, "wechat.msg.login.scan_to_connect"),
     }))
 }
 
@@ -96,7 +96,7 @@ pub(super) async fn login_qr_wait(
         .ok_or_else(|| {
             (
                 axum::http::StatusCode::BAD_REQUEST,
-                "当前没有进行中的登录，请先发起登录。".to_string(),
+                wechat_t(&state.config, "wechat.msg.login.no_active_login"),
             )
         })?;
 
@@ -105,7 +105,7 @@ pub(super) async fn login_qr_wait(
             return Ok(Json(LoginWaitResponse {
                 connected: false,
                 qr_status: "expired".to_string(),
-                message: "二维码已过期，请重新生成。".to_string(),
+                message: wechat_t(&state.config, "wechat.msg.login.qr_expired"),
                 account_id: None,
                 user_id: None,
             }));
@@ -117,9 +117,9 @@ pub(super) async fn login_qr_wait(
         match status.status.as_str() {
             "wait" | "scaned" => {
                 let qr_message = if status.status == "scaned" {
-                    "二维码已被扫描，请在手机上确认登录。".to_string()
+                    wechat_t(&state.config, "wechat.msg.login.qr_scanned_confirm")
                 } else {
-                    "二维码已生成，等待扫码。".to_string()
+                    wechat_t(&state.config, "wechat.msg.login.qr_waiting_scan")
                 };
                 if let Some(login) = state.active_logins.write().await.get_mut(&req.session_key) {
                     login.status = status.status.clone();
@@ -151,7 +151,7 @@ pub(super) async fn login_qr_wait(
                     return Ok(Json(LoginWaitResponse {
                         connected: false,
                         qr_status: "expired".to_string(),
-                        message: "登录超时：二维码多次过期，请重新开始登录流程。".to_string(),
+                        message: wechat_t(&state.config, "wechat.msg.login.qr_expired_too_many"),
                         account_id: None,
                         user_id: None,
                     }));
@@ -173,7 +173,7 @@ pub(super) async fn login_qr_wait(
                         qrcode_url,
                         started_at_ms: current_ts_ms(),
                         status: "wait".to_string(),
-                        message: "二维码已刷新，等待扫码。".to_string(),
+                        message: wechat_t(&state.config, "wechat.msg.login.qr_refreshed_waiting"),
                     },
                 );
             }
@@ -184,8 +184,10 @@ pub(super) async fn login_qr_wait(
                     return Ok(Json(LoginWaitResponse {
                         connected: false,
                         qr_status: "confirmed".to_string(),
-                        message: "登录失败：服务器未返回完整 bot_token / ilink_bot_id。"
-                            .to_string(),
+                        message: wechat_t(
+                            &state.config,
+                            "wechat.msg.login.confirmed_missing_token",
+                        ),
                         account_id: None,
                         user_id: None,
                     }));
@@ -211,7 +213,7 @@ pub(super) async fn login_qr_wait(
                 return Ok(Json(LoginWaitResponse {
                     connected: true,
                     qr_status: "confirmed".to_string(),
-                    message: "与微信连接成功。".to_string(),
+                    message: wechat_t(&state.config, "wechat.msg.login.connected"),
                     account_id,
                     user_id: status.ilink_user_id,
                 }));
@@ -224,7 +226,7 @@ pub(super) async fn login_qr_wait(
             return Ok(Json(LoginWaitResponse {
                 connected: false,
                 qr_status: "wait".to_string(),
-                message: "登录超时，请重试。".to_string(),
+                message: wechat_t(&state.config, "wechat.msg.login.wait_timeout"),
                 account_id: None,
                 user_id: None,
             }));
