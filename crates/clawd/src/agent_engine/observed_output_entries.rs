@@ -38,6 +38,11 @@ pub(super) fn observed_step_body(step: &crate::executor::StepExecutionResult) ->
         let sanitized = crate::visible_text::sanitize_user_visible_text(&normalized);
         return (!sanitized.trim().is_empty()).then_some(sanitized);
     }
+    if step.skill == "run_cmd" && run_cmd_body_allows_command_output_observation(body) {
+        let sanitized = crate::visible_text::sanitize_user_visible_text(body);
+        return (!sanitized.trim().is_empty())
+            .then(|| format!("command_output:\n{}", sanitized.trim()));
+    }
     if crate::finalize::classify_observed_content_status(body)
         != crate::finalize::ObservedContentStatus::ContentAvailable
     {
@@ -72,6 +77,25 @@ pub(super) fn normalized_structured_observed_fact_allows_artifact_filter_bypass(
     (skill == "archive_basic" && output.trim_start().starts_with("archive_basic action="))
         || (matches!(skill, "fs_basic" | "system_basic")
             && output.trim_start().starts_with("read_range "))
+        || (skill == "run_cmd" && output.trim_start().starts_with("command_output:\n"))
+}
+
+fn run_cmd_body_allows_command_output_observation(body: &str) -> bool {
+    let trimmed = body.trim_start();
+    if trimmed.is_empty()
+        || trimmed.starts_with("[TOOL_CALL]")
+        || trimmed.contains("<minimax:tool_call")
+        || trimmed.contains("<invoke ")
+        || crate::finalize::looks_like_internal_trace_artifact(trimmed)
+    {
+        return false;
+    }
+    if matches!(trimmed.as_bytes().first(), Some(b'{') | Some(b'['))
+        && crate::finalize::looks_like_planner_artifact(trimmed)
+    {
+        return false;
+    }
+    true
 }
 
 pub(super) fn observed_output_entries(loop_state: &LoopState) -> Vec<String> {

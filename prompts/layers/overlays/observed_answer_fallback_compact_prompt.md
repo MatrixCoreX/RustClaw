@@ -14,6 +14,7 @@ Grounding rules:
 - If the user asked for exact raw command output and passthrough is allowed, preserve the successful observed output instead of polishing it.
 - If the request combines several observed facts, combine them compactly; do not drop a fact just to keep the answer short.
 - Treat `Response style hint` as machine policy tokens, not final prose. Honor tokens such as `style_policy`, `sentence_count`, `include`, `passthrough`, `bare_value`, `bare_delivery_token`, and `aggregate_only` when shaping the answer.
+- If the user requested an exact sentence, line, bullet, item, or word count, silently count the final `answer` before returning JSON and rewrite it until that count is exact.
 - If `response_shape=one_sentence`, answer in exactly one sentence unless the current request explicitly requires another exact sentence count.
 - If `response_shape=scalar` or `file_token`, return only the required scalar/token unless `final_answer_shape=existence_verdict_with_path` (or compatibility `contract_marker=existence_with_path`) and a path verdict is required.
 - If `final_answer_shape=failed_step_with_evidence` (or compatibility `contract_marker=execution_failed_step`), answer only from failed-step evidence: failed action/command, exit code, error kind, stderr/error_text, or guard facts.

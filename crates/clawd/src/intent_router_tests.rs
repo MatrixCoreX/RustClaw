@@ -509,7 +509,10 @@ Provided target or content: [{"name":"alpha","score":7},{"name":"beta","score":1
     assert_eq!(contract.response_shape, OutputResponseShape::Strict);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
-    assert!(contract.locator_hint.is_empty());
+    assert_eq!(
+        contract.locator_hint,
+        state.skill_rt.workspace_root.display().to_string()
+    );
 }
 
 #[test]
@@ -551,7 +554,7 @@ fn current_workspace_generic_summary_contract_repair_uses_workspace_project_summ
         contract.locator_hint,
         state.skill_rt.workspace_root.display().to_string()
     );
-    assert!(contract.requires_content_evidence);
+    assert!(!contract.requires_content_evidence);
     assert!(!contract.delivery_required);
 }
 
@@ -595,7 +598,7 @@ fn current_workspace_generic_contract_without_summary_marker_defers_to_agent_loo
 }
 
 #[test]
-fn current_workspace_extension_inventory_repair_uses_file_paths() {
+fn current_workspace_extension_inventory_repair_keeps_free_synthesis_contract() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let request = "find toml files in this repo and briefly mention a few representative ones";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
@@ -622,16 +625,16 @@ fn current_workspace_extension_inventory_repair_uses_file_paths() {
 
     assert_eq!(
         repair,
-        Some("current_workspace_extension_file_paths_contract_repair")
+        Some("current_workspace_generic_contract_deferred_to_agent_loop")
     );
-    assert_eq!(contract.semantic_kind, OutputSemanticKind::FilePaths);
-    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(contract.response_shape, OutputResponseShape::Free);
     assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
     assert_eq!(
         contract.locator_hint,
         state.skill_rt.workspace_root.display().to_string()
     );
-    assert!(contract.requires_content_evidence);
+    assert!(!contract.requires_content_evidence);
     assert!(!contract.delivery_required);
 }
 
