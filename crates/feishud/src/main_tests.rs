@@ -201,6 +201,10 @@ async fn feishu_pending_bind_requires_explicit_token() {
     let feishu_state = MockFeishuState {
         sent_texts: Arc::new(Mutex::new(Vec::new())),
     };
+    let i18n_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../configs/i18n/feishud.zh-CN.toml")
+        .to_string_lossy()
+        .to_string();
     let feishu_listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind mock feishu");
@@ -226,6 +230,7 @@ async fn feishu_pending_bind_requires_explicit_token() {
                 api_base_url: format!("http://{feishu_addr}"),
                 app_id: "cli_test_feishu_app".to_string(),
                 app_secret: "cli_test_secret".to_string(),
+                i18n_path,
                 ..FeishuSection::default()
             },
         },
