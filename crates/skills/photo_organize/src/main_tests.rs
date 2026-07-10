@@ -1,5 +1,33 @@
 use super::*;
 
+fn domain_metadata_config() -> PhotoOrganizeConfig {
+    PhotoOrganizeConfig {
+        photo_child_dir_hints: Some(vec![
+            "DCIM".to_string(),
+            "Photos".to_string(),
+            "Pictures".to_string(),
+            "Camera".to_string(),
+            "照片".to_string(),
+            "相机".to_string(),
+        ]),
+        camera_brand_aliases: Some(vec![
+            CameraBrandAliasConfig {
+                canonical: "Canon".to_string(),
+                aliases: vec!["canon".to_string(), "佳能".to_string()],
+            },
+            CameraBrandAliasConfig {
+                canonical: "Fujifilm".to_string(),
+                aliases: vec![
+                    "fujifilm".to_string(),
+                    "fuji".to_string(),
+                    "富士".to_string(),
+                ],
+            },
+        ]),
+        ..PhotoOrganizeConfig::default()
+    }
+}
+
 #[test]
 fn error_extra_exposes_machine_contract() {
     let extra = error_extra("execution_failed");
@@ -50,7 +78,8 @@ fn media_style_discovery_handles_raspberry_pi_user_mounts() {
     fs::create_dir_all(pi_camera.join("DCIM")).unwrap();
     fs::create_dir_all(direct_usb.join("DCIM")).unwrap();
 
-    let roots = discover_media_style_roots(media.to_str().unwrap())
+    let cfg = domain_metadata_config();
+    let roots = discover_media_style_roots(media.to_str().unwrap(), &cfg)
         .into_iter()
         .map(|path| path.display().to_string())
         .collect::<Vec<_>>();
@@ -122,11 +151,26 @@ fn structured_group_by_accepts_year_and_date_fields() {
 
 #[test]
 fn camera_brand_aliases_are_canonicalized_before_matching() {
-    assert_eq!(canonical_brand_name("佳能"), Some("Canon".to_string()));
-    assert_eq!(canonical_brand_name("FUJI"), Some("Fujifilm".to_string()));
-    assert!(brand_matches("Canon Inc.", &["佳能".to_string()]));
-    assert!(brand_matches("FUJIFILM Corporation", &["富士".to_string()]));
-    assert!(!brand_matches("Nikon", &["Sony".to_string()]));
+    let cfg = domain_metadata_config();
+    assert_eq!(
+        canonical_brand_name("佳能", &PhotoOrganizeConfig::default()),
+        Some("佳能".to_string())
+    );
+    assert_eq!(
+        canonical_brand_name("佳能", &cfg),
+        Some("Canon".to_string())
+    );
+    assert_eq!(
+        canonical_brand_name("FUJI", &cfg),
+        Some("Fujifilm".to_string())
+    );
+    assert!(brand_matches("Canon Inc.", &["佳能".to_string()], &cfg));
+    assert!(brand_matches(
+        "FUJIFILM Corporation",
+        &["富士".to_string()],
+        &cfg
+    ));
+    assert!(!brand_matches("Nikon", &["Sony".to_string()], &cfg));
 }
 
 #[test]

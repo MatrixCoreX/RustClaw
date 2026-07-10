@@ -22,7 +22,7 @@ const NON_EXIF_LIST_LIMIT: usize = 50;
 const TEXT_PATH_DELIMS: &[char] = &[
     ' ', '\n', '\t', ',', ';', '，', '；', '。', '(', ')', '[', ']', '{', '}',
 ];
-const PHOTO_CHILD_DIR_HINTS: &[&str] = &["DCIM", "Photos", "Pictures", "照片", "相机", "Camera"];
+const DEFAULT_PHOTO_CHILD_DIR_HINTS: &[&str] = &["DCIM", "Photos", "Pictures", "Camera"];
 const SKILL_NAME: &str = "photo_organize";
 
 #[derive(Debug, Deserialize)]
@@ -70,6 +70,17 @@ struct PhotoOrganizeConfig {
     language: Option<String>,
     #[serde(default)]
     i18n_path: Option<String>,
+    #[serde(default)]
+    photo_child_dir_hints: Option<Vec<String>>,
+    #[serde(default)]
+    camera_brand_aliases: Option<Vec<CameraBrandAliasConfig>>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct CameraBrandAliasConfig {
+    canonical: String,
+    #[serde(default)]
+    aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,7 +265,7 @@ fn main() -> anyhow::Result<()> {
             Ok(req) => {
                 let lang = resolve_lang(&req, &cfg);
                 let cat = load_catalog(&workspace_root, &cfg.photo_organize, &lang);
-                match execute(&req.args, &cat) {
+                match execute(&req.args, &cat, &cfg.photo_organize) {
                     Ok(out) => Resp {
                         request_id: req.request_id,
                         status: "ok".to_string(),
@@ -320,6 +331,23 @@ fn load_root_config(workspace_root: &Path) -> RootConfig {
         Err(_) => return RootConfig::default(),
     };
     toml::from_str::<RootConfig>(&raw).unwrap_or_default()
+}
+
+fn photo_child_dir_hints(cfg: &PhotoOrganizeConfig) -> Vec<&str> {
+    let configured = cfg
+        .photo_child_dir_hints
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|hint| !hint.is_empty())
+        .collect::<Vec<_>>();
+    if configured.is_empty() {
+        DEFAULT_PHOTO_CHILD_DIR_HINTS.to_vec()
+    } else {
+        configured
+    }
 }
 
 fn read_camera_metadata(path: &Path) -> Option<Value> {
@@ -442,7 +470,11 @@ fn normalize_focal_length_label(raw: &str) -> String {
     sanitize_component(raw).replace(" ", "").replace("__", "_")
 }
 
-fn normalize_args(args: &Value, cat: &TextCatalog) -> Result<Value, String> {
+fn normalize_args(
+    args: &Value,
+    cat: &TextCatalog,
+    cfg: &PhotoOrganizeConfig,
+) -> Result<Value, String> {
     let mut obj = match args {
         Value::Object(map) => map.clone(),
         Value::String(text) => {
@@ -453,7 +485,7 @@ fn normalize_args(args: &Value, cat: &TextCatalog) -> Result<Value, String> {
         _ => return Err(tr(cat, "photo_organize.err.args_object")),
     };
 
-    let mut inferred = infer_from_natural_language(&obj);
+    let mut inferred = infer_from_natural_language(&obj, cfg);
 
     if !obj.contains_key("source_dir") {
         if let Some(source_dir) = inferred.source_dir.take() {
@@ -477,7 +509,10 @@ fn normalize_args(args: &Value, cat: &TextCatalog) -> Result<Value, String> {
     Ok(Value::Object(obj))
 }
 
-fn infer_from_natural_language(obj: &Map<String, Value>) -> InferredIntent {
+fn infer_from_natural_language(
+    obj: &Map<String, Value>,
+    cfg: &PhotoOrganizeConfig,
+) -> InferredIntent {
     let mut inferred = InferredIntent::default();
     let Some(text) = pick_string(obj, &["text", "prompt", "input", "instruction", "query"]) else {
         return inferred;
@@ -503,7 +538,7 @@ fn infer_from_natural_language(obj: &Map<String, Value>) -> InferredIntent {
                 .notes
                 .push(format!("from_text_output_dir={second_path}"));
         }
-    } else if let Some(candidate) = resolve_candidate_root_from_text(trimmed) {
+    } else if let Some(candidate) = resolve_candidate_root_from_text(trimmed, cfg) {
         inferred.source_dir = Some(candidate.clone());
         inferred
             .notes
@@ -529,10 +564,10 @@ fn extract_path_like_tokens(text: &str) -> Vec<String> {
     out
 }
 
-fn resolve_candidate_root_from_text(text: &str) -> Option<String> {
+fn resolve_candidate_root_from_text(text: &str, cfg: &PhotoOrganizeConfig) -> Option<String> {
     let lowered = text.to_lowercase();
     let mut matches = Vec::new();
-    for candidate in discover_external_photo_candidates() {
+    for candidate in discover_external_photo_candidates(cfg) {
         let base_name = Path::new(&candidate)
             .file_name()
             .and_then(|value| value.to_str())
@@ -563,21 +598,22 @@ fn relative_or_absolute(path: &Path, base: &Path) -> String {
         .unwrap_or_else(|_| path.display().to_string())
 }
 
-fn discover_external_photo_candidates() -> Vec<String> {
+fn discover_external_photo_candidates(cfg: &PhotoOrganizeConfig) -> Vec<String> {
     let mut roots = Vec::new();
-    for path in discover_external_roots() {
+    for path in discover_external_roots(cfg) {
         push_unique_string(&mut roots, path.display().to_string());
-        for child in discover_photo_children(&path) {
+        for child in discover_photo_children(&path, cfg) {
             push_unique_string(&mut roots, child.display().to_string());
         }
     }
     roots
 }
 
-fn discover_photo_children(root: &Path) -> Vec<PathBuf> {
+fn discover_photo_children(root: &Path, cfg: &PhotoOrganizeConfig) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(root) else {
         return Vec::new();
     };
+    let hints = photo_child_dir_hints(cfg);
     let mut out = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
@@ -588,10 +624,7 @@ fn discover_photo_children(root: &Path) -> Vec<PathBuf> {
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or_default();
-        if PHOTO_CHILD_DIR_HINTS
-            .iter()
-            .any(|hint| name.eq_ignore_ascii_case(hint))
-        {
+        if hints.iter().any(|hint| name.eq_ignore_ascii_case(hint)) {
             out.push(path);
         }
     }
@@ -599,7 +632,7 @@ fn discover_photo_children(root: &Path) -> Vec<PathBuf> {
     out
 }
 
-fn discover_external_roots() -> Vec<PathBuf> {
+fn discover_external_roots(cfg: &PhotoOrganizeConfig) -> Vec<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         discover_macos_volume_roots()
@@ -610,7 +643,7 @@ fn discover_external_roots() -> Vec<PathBuf> {
         for path in discover_linux_mountinfo_roots() {
             push_unique_path(&mut roots, path);
         }
-        for path in discover_linux_common_mount_roots() {
+        for path in discover_linux_common_mount_roots(cfg) {
             push_unique_path(&mut roots, path);
         }
         roots
@@ -658,12 +691,12 @@ fn linux_external_roots_from_mountinfo(raw: &str) -> Vec<PathBuf> {
 }
 
 #[cfg(target_os = "linux")]
-fn discover_linux_common_mount_roots() -> Vec<PathBuf> {
+fn discover_linux_common_mount_roots(cfg: &PhotoOrganizeConfig) -> Vec<PathBuf> {
     let mut roots = Vec::new();
-    for path in discover_media_style_roots("/media") {
+    for path in discover_media_style_roots("/media", cfg) {
         push_unique_path(&mut roots, path);
     }
-    for path in discover_media_style_roots("/run/media") {
+    for path in discover_media_style_roots("/run/media", cfg) {
         push_unique_path(&mut roots, path);
     }
     for path in discover_roots_in("/mnt") {
@@ -673,11 +706,11 @@ fn discover_linux_common_mount_roots() -> Vec<PathBuf> {
 }
 
 #[cfg(target_os = "linux")]
-fn discover_media_style_roots(base: &str) -> Vec<PathBuf> {
+fn discover_media_style_roots(base: &str, cfg: &PhotoOrganizeConfig) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     for path in discover_roots_in(base) {
         let child_dirs = discover_roots_in_path(&path);
-        if !child_dirs.is_empty() && !has_photo_child_hint(&child_dirs) {
+        if !child_dirs.is_empty() && !has_photo_child_hint(&child_dirs, cfg) {
             for child in child_dirs {
                 push_unique_path(&mut roots, child);
             }
@@ -706,15 +739,14 @@ fn is_likely_user_media_container(path: &Path) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn has_photo_child_hint(paths: &[PathBuf]) -> bool {
+fn has_photo_child_hint(paths: &[PathBuf], cfg: &PhotoOrganizeConfig) -> bool {
+    let hints = photo_child_dir_hints(cfg);
     paths.iter().any(|path| {
         let name = path
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or_default();
-        PHOTO_CHILD_DIR_HINTS
-            .iter()
-            .any(|hint| name.eq_ignore_ascii_case(hint))
+        hints.iter().any(|hint| name.eq_ignore_ascii_case(hint))
     })
 }
 
