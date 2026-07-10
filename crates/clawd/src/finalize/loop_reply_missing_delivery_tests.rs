@@ -413,10 +413,18 @@ async fn observed_execution_without_delivery_uses_structured_container_summary()
     .expect("observed execution reply");
 
     assert!(!reply.should_fail_task);
-    assert_eq!(
-        reply.text,
-        "`scripts` contains 3 entries: build=echo build, dev=echo dev, lint=echo lint."
-    );
+    assert!(reply
+        .text
+        .contains("message_key=clawd.msg.structured_container.observed"));
+    assert!(reply
+        .text
+        .contains("reason_code=structured_container_observed"));
+    assert!(reply.text.contains("field_path=scripts"));
+    assert!(reply.text.contains("container_kind=object"));
+    assert!(reply.text.contains("item_count=3"));
+    assert!(reply.text.contains("item.1.label=build=echo build"));
+    assert!(reply.text.contains("item.2.label=dev=echo dev"));
+    assert!(reply.text.contains("item.3.label=lint=echo lint"));
     assert_eq!(reply.messages, vec![reply.text.clone()]);
     assert_eq!(
         reply
