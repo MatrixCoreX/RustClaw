@@ -7,6 +7,17 @@ fn markdown_non_json_fallback_prefers_text_outside_code_fences() {
 }
 
 #[test]
+fn markdown_non_json_fallback_preserves_markdown_table_fence() {
+    let answer = non_code_markdown_text(
+        "```markdown\n| Field | Value |\n| --- | --- |\n| planner_kind | tool |\n```\n\nno_secret_fields=true",
+    );
+    assert_eq!(
+        answer.as_deref(),
+        Some("| Field | Value |\n| --- | --- |\n| planner_kind | tool |\nno_secret_fields=true")
+    );
+}
+
+#[test]
 fn observed_answer_parser_strips_bare_json_language_prefix() {
     let raw = "json\n{\"answer\":\"ok\",\"qualified\":true}";
     assert_eq!(

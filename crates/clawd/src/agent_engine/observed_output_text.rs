@@ -47,14 +47,39 @@ pub(super) fn extract_answer_from_finalizer_envelope_text(raw: &str) -> Option<S
 
 pub(super) fn non_code_markdown_text(raw: &str) -> Option<String> {
     let mut in_fence = false;
+    let mut fence_lang = String::new();
+    let mut fence_lines = Vec::new();
     let mut lines = Vec::new();
     for line in raw.lines() {
         let trimmed_start = line.trim_start();
         if trimmed_start.starts_with("```") {
-            in_fence = !in_fence;
+            if in_fence {
+                if markdown_fence_body_is_publishable(&fence_lang, &fence_lines) {
+                    lines.extend(
+                        fence_lines
+                            .iter()
+                            .map(|line| line.trim())
+                            .filter(|line| !line.is_empty())
+                            .map(ToString::to_string),
+                    );
+                }
+                fence_lang.clear();
+                fence_lines.clear();
+                in_fence = false;
+            } else {
+                fence_lang = trimmed_start
+                    .trim_start_matches('`')
+                    .trim()
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                in_fence = true;
+            }
             continue;
         }
         if in_fence {
+            fence_lines.push(line.to_string());
             continue;
         }
         let trimmed = line.trim();
@@ -62,5 +87,18 @@ pub(super) fn non_code_markdown_text(raw: &str) -> Option<String> {
             lines.push(trimmed.to_string());
         }
     }
+    if in_fence && markdown_fence_body_is_publishable(&fence_lang, &fence_lines) {
+        lines.extend(
+            fence_lines
+                .iter()
+                .map(|line| line.trim())
+                .filter(|line| !line.is_empty())
+                .map(ToString::to_string),
+        );
+    }
     (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn markdown_fence_body_is_publishable(lang: &str, lines: &[String]) -> bool {
+    matches!(lang, "markdown" | "md" | "gfm") && lines.iter().any(|line| !line.trim().is_empty())
 }
