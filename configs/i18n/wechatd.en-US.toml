@@ -1,0 +1,12 @@
+locale = "en-US"
+
+[dict]
+"wechat.msg.bind_key_required_for_chat" = "Please send your key first to bind this account before chatting or using features."
+"wechat.msg.bind_help" = "Welcome to RustClaw.\nPlease send /key <your_key> first to bind this account."
+"wechat.msg.bind_success" = "Key bound successfully. Please send your previous message again."
+"wechat.msg.bind_invalid" = "Invalid key. Please try again."
+"wechat.msg.bind_request_failed" = "Bind request failed, please try again later."
+"wechat.msg.media_decode_or_unsupported" = "Media was received, but CDN decryption failed or the media type is not supported."
+"wechat.msg.task_done_fallback_text" = "Done."
+"wechat.msg.task_failed_fallback_error" = "Request failed. Please try again later."
+"wechat.msg.request_timeout_retry_later" = "Your task is still running (task id: {task_id}). I will reply when it finishes."

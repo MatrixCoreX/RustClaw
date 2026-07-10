@@ -1,10 +1,10 @@
 use super::*;
 
-const WECHAT_BIND_REQUIRED_FOR_CHAT: &str = "请先发送你的 key 进行绑定，然后再继续聊天或使用功能。\nPlease send your key first to bind this account before chatting or using features.";
-const WECHAT_BIND_HELP: &str = "欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定。\nWelcome to RustClaw.\nPlease send /key <your_key> first to bind this account.";
-const WECHAT_BIND_SUCCESS: &str =
-    "绑定成功，请重新发送刚才的消息。\nKey bound successfully. Please send your previous message again.";
-const WECHAT_BIND_INVALID: &str = "key 无效，请重新输入。\nInvalid key. Please try again.";
+const WECHAT_BIND_REQUIRED_FOR_CHAT_KEY: &str = "wechat.msg.bind_key_required_for_chat";
+const WECHAT_BIND_HELP_KEY: &str = "wechat.msg.bind_help";
+const WECHAT_BIND_SUCCESS_KEY: &str = "wechat.msg.bind_success";
+const WECHAT_BIND_INVALID_KEY: &str = "wechat.msg.bind_invalid";
+const WECHAT_BIND_REQUEST_FAILED_KEY: &str = "wechat.msg.bind_request_failed";
 
 pub(super) fn is_unbound_allowed_command(text: &str) -> bool {
     static COMMAND_CATALOG: OnceLock<ChannelCommandCatalog> = OnceLock::new();
@@ -75,7 +75,8 @@ pub(super) async fn ensure_bound_before_task(
         let trimmed = text.trim();
         if is_unbound_allowed_command(trimmed) {
             set_expect_key_reply(state, from_user_id, true).await;
-            send_text_reply_via_session(state, from_user_id, context_token, WECHAT_BIND_HELP).await;
+            let reply = wechat_t(&state.config, WECHAT_BIND_HELP_KEY);
+            send_text_reply_via_session(state, from_user_id, context_token, &reply).await;
             return None;
         }
         let expect_key_reply = should_expect_key_reply(state, from_user_id).await;
@@ -91,34 +92,19 @@ pub(super) async fn ensure_bound_before_task(
             {
                 Ok(Some(_)) => {
                     set_expect_key_reply(state, from_user_id, false).await;
-                    send_text_reply_via_session(
-                        state,
-                        from_user_id,
-                        context_token,
-                        WECHAT_BIND_SUCCESS,
-                    )
-                    .await;
+                    let reply = wechat_t(&state.config, WECHAT_BIND_SUCCESS_KEY);
+                    send_text_reply_via_session(state, from_user_id, context_token, &reply).await;
                 }
                 Ok(None) => {
                     set_expect_key_reply(state, from_user_id, true).await;
-                    send_text_reply_via_session(
-                        state,
-                        from_user_id,
-                        context_token,
-                        WECHAT_BIND_INVALID,
-                    )
-                    .await;
+                    let reply = wechat_t(&state.config, WECHAT_BIND_INVALID_KEY);
+                    send_text_reply_via_session(state, from_user_id, context_token, &reply).await;
                 }
                 Err(err) => {
                     warn!("wechatd: bind request failed err={}", err);
                     set_expect_key_reply(state, from_user_id, true).await;
-                    send_text_reply_via_session(
-                        state,
-                        from_user_id,
-                        context_token,
-                        "绑定请求失败，请稍后重试。\nBind request failed, please try again later.",
-                    )
-                    .await;
+                    let reply = wechat_t(&state.config, WECHAT_BIND_REQUEST_FAILED_KEY);
+                    send_text_reply_via_session(state, from_user_id, context_token, &reply).await;
                 }
             }
             return None;
@@ -126,12 +112,7 @@ pub(super) async fn ensure_bound_before_task(
     }
 
     set_expect_key_reply(state, from_user_id, true).await;
-    send_text_reply_via_session(
-        state,
-        from_user_id,
-        context_token,
-        WECHAT_BIND_REQUIRED_FOR_CHAT,
-    )
-    .await;
+    let reply = wechat_t(&state.config, WECHAT_BIND_REQUIRED_FOR_CHAT_KEY);
+    send_text_reply_via_session(state, from_user_id, context_token, &reply).await;
     None
 }

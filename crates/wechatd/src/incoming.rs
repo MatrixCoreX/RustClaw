@@ -260,11 +260,12 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
         Some(t) => t,
         None => {
             if has_non_text_media_items(&msg) {
+                let reply = wechat_t(&state.config, "wechat.msg.media_decode_or_unsupported");
                 send_text_reply_via_session(
                     &state,
                     &from_user_id,
                     msg.context_token.as_deref(),
-                    "收到媒体消息但未能完成 CDN 解密或类型不受支持（如部分系统表情等）。",
+                    &reply,
                 )
                 .await;
             }

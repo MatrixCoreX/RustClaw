@@ -11,6 +11,10 @@ enabled = true
 listen = "0.0.0.0:8792"
 clawd_base_url = "http://127.0.0.1:8787"
 api_base_url = "https://ilinkai.weixin.qq.com"
+# i18n 语言（优先尝试 configs/i18n/wechatd.<language>.toml）
+language = "zh-CN"
+# i18n 文件路径（当 language 对应文件不存在时回退到此路径）
+i18n_path = "configs/i18n/wechatd.zh-CN.toml"
 # 图片 CDN 根地址（与 OpenClaw 插件 CDN_BASE_URL 一致）；收图解密与发图上传均依赖此域。
 cdn_base_url = "https://novac2c.cdn.weixin.qq.com/c2c"
 # 收到图片后的落盘根目录
