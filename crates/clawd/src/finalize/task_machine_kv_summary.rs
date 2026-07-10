@@ -806,7 +806,8 @@ fn text_is_structured_machine_field_projection(text: &str) -> bool {
             || value.starts_with('[')
             || matches!(
                 key,
-                "async_poll_adapter_result"
+                "async_cancel_adapter_result"
+                    | "async_poll_adapter_result"
                     | "dry_run"
                     | "job_id"
                     | "model"
@@ -1050,10 +1051,15 @@ fn generated_file_machine_report_has_multi_field_payload(text: &str) -> bool {
     }
     let has_output_path = text.contains("output_path=");
     let has_planned_outputs = text.contains("planned_outputs=");
-    let has_async_poll_result = text.contains("async_poll_adapter_result:");
-    let has_task_status =
-        text.contains("task_id:") && text.contains("job_id:") && text.contains("status:");
-    (has_output_path && has_planned_outputs) || (has_async_poll_result && has_task_status)
+    let has_async_poll_result =
+        text.contains("async_poll_adapter_result:") || text.contains("async_poll_adapter_result=");
+    let has_async_cancel_result = text.contains("async_cancel_adapter_result:")
+        || text.contains("async_cancel_adapter_result=");
+    let has_task_status = (text.contains("task_id:") || text.contains("task_id="))
+        && (text.contains("job_id:") || text.contains("job_id="))
+        && (text.contains("status:") || text.contains("status="));
+    (has_output_path && has_planned_outputs)
+        || ((has_async_poll_result || has_async_cancel_result) && has_task_status)
 }
 
 #[cfg(test)]

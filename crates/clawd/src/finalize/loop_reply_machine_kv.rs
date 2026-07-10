@@ -179,6 +179,7 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         || current_delivery_is_execution_recipe_closeout(&current)
         || current_delivery_is_structured_json_answer(&current)
         || current_delivery_is_generated_file_report_machine_projection(&current)
+        || current_delivery_is_async_adapter_machine_projection(&current)
     {
         loop_state.last_user_visible_respond = Some(current);
         return false;
@@ -510,6 +511,35 @@ fn current_delivery_is_generated_file_report_machine_projection(current: &str) -
         unit.strip_prefix("planned_outputs=")
             .is_some_and(|value| value.starts_with('[') && !value.is_empty())
     })
+}
+
+fn current_delivery_is_async_adapter_machine_projection(current: &str) -> bool {
+    let current = current.trim();
+    if current.is_empty() {
+        return false;
+    }
+    let units = machine_kv_units(current);
+    if units.is_empty() {
+        return false;
+    }
+    let has_adapter_result = units.iter().any(|unit| {
+        unit.strip_prefix("async_poll_adapter_result=")
+            .or_else(|| unit.strip_prefix("async_cancel_adapter_result="))
+            .is_some_and(|value| value.starts_with('{') && !value.is_empty())
+    });
+    let has_task = units.iter().any(|unit| {
+        unit.strip_prefix("task_id=")
+            .is_some_and(|value| !value.is_empty())
+    });
+    let has_job = units.iter().any(|unit| {
+        unit.strip_prefix("job_id=")
+            .is_some_and(|value| !value.is_empty())
+    });
+    let has_status = units.iter().any(|unit| {
+        unit.strip_prefix("status=")
+            .is_some_and(|value| !value.is_empty())
+    });
+    has_adapter_result && has_task && has_job && has_status
 }
 
 fn delivery_contains_agent_loop_control_envelope(
