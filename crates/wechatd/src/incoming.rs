@@ -114,10 +114,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         status.last_error = None;
                     })
                     .await;
-                    let hint = format!(
-                        "用户发来视频，已保存为工作区相对路径：{}。请根据能力回复或调用工具处理。",
-                        rel
-                    );
+                    let hint = wechat_media_agent_context("video", &rel, None);
                     return spawn_inbound_ask_flow(
                         state,
                         from_user_id,
@@ -180,10 +177,7 @@ pub(super) async fn handle_incoming_message(state: State, msg: WeixinMessage) {
                         )
                         .await;
                     }
-                    let hint = format!(
-                        "用户发来文件「{}」，已保存为工作区相对路径：{}。请根据能力回复或调用工具处理。",
-                        safe_name, rel
-                    );
+                    let hint = wechat_media_agent_context("file", &rel, Some(&safe_name));
                     return spawn_inbound_ask_flow(
                         state,
                         from_user_id,
