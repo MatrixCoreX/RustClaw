@@ -121,6 +121,13 @@ impl BoundaryEnvelope {
                 BoundaryStringKind::Reference,
             );
         }
+        if boundary_language_hint_is_unclear(self.language_hint.as_deref()) {
+            if let Some(language_hint) =
+                boundary_string_field(model.get("language_hint"), BoundaryStringKind::Reference)
+            {
+                self.language_hint = Some(language_hint);
+            }
+        }
         self
     }
 
@@ -211,6 +218,12 @@ fn non_empty_token(value: &str) -> &str {
     } else {
         trimmed
     }
+}
+
+fn boundary_language_hint_is_unclear(language_hint: Option<&str>) -> bool {
+    language_hint
+        .map(str::trim)
+        .is_none_or(|hint| hint.is_empty() || matches!(hint, "mixed" | "config_default"))
 }
 
 fn explicit_locator_refs_for_boundary(contract: &IntentOutputContract) -> Vec<String> {

@@ -436,3 +436,73 @@ fn normalizer_schema_normalization_does_not_treat_target_scope_as_execution() {
     )
     .expect("schema validation");
 }
+
+#[test]
+fn normalizer_schema_promotes_legacy_top_level_observation_contract_fields() {
+    let raw = r#"{
+          "boundary_envelope":{"schema_version":1,"language_hint":"zh-CN"},
+          "resolved_user_intent":"读取已绑定文件的标题，只输出标题。",
+          "needs_clarify":false,
+          "output_contract":null,
+          "requires_content_evidence":true,
+          "delivery_required":false,
+          "locator_kind":"path",
+          "locator_hint":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+          "delivery_intent":"none",
+          "contract_marker":"none",
+          "state_patch":{"alias_bindings":{"甲文件":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md"}}
+        }"#;
+    let normalized =
+        super::normalize_intent_normalizer_raw_for_schema(raw, "读取甲文件的标题，只输出标题。");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert!(value.get("requires_content_evidence").is_none());
+    assert_eq!(
+        value
+            .pointer("/output_contract/requires_content_evidence")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        value
+            .pointer("/output_contract/locator_hint")
+            .and_then(|value| value.as_str()),
+        Some("scripts/nl_tests/fixtures/device_local/docs/service_notes.md")
+    );
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
+}
+
+#[test]
+fn normalizer_schema_promotes_legacy_top_level_language_hint_into_boundary_envelope() {
+    let raw = r#"{
+          "schema_version":1,
+          "language_hint":"zh",
+          "schedule_intent":{"kind":"none"},
+          "attachment_refs":[],
+          "explicit_locators":["scripts/nl_tests/fixtures/device_local/docs/service_notes.md"],
+          "needs_clarify":false,
+          "state_patch":{"alias_bindings":{"alias":"甲文件","target":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md"}},
+          "resolved_user_intent":"Bind temporary alias '甲文件' to path 'scripts/nl_tests/fixtures/device_local/docs/service_notes.md' in session memory."
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(
+        raw,
+        "先记一下，甲文件是 scripts/nl_tests/fixtures/device_local/docs/service_notes.md。只回复已记住。",
+    );
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/boundary_envelope/language_hint")
+            .and_then(|value| value.as_str()),
+        Some("zh")
+    );
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
+}

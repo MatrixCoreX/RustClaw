@@ -1668,6 +1668,30 @@ fn state_patch_accepts_alias_bindings_object_map() {
 }
 
 #[test]
+fn state_patch_accepts_alias_bindings_object_map_value_field() {
+    let patch = json!({
+        "alias_bindings": {
+            "자료A": {
+                "kind": "path",
+                "value": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+                "scope": "session",
+                "created_by": "user_request"
+            }
+        },
+        "required_content_literals": ["기억했습니다"]
+    });
+
+    assert!(super::state_patch_is_alias_bindings_only(&patch));
+    let bindings = super::session_alias_bindings_from_state_patch(Some(&patch));
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].alias, "자료A");
+    assert_eq!(
+        bindings[0].target,
+        "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+    );
+}
+
+#[test]
 fn state_patch_accepts_alias_bindings_record_object() {
     let patch = json!({
         "alias_bindings": {
@@ -1696,6 +1720,7 @@ fn state_patch_alias_bindings_allow_visibility_constraint_metadata() {
             "target": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
         }],
         "forbidden_visible_literals": ["scripts/nl_tests/fixtures/device_local/docs/service_notes.md"],
+        "required_content_literals": ["記憶しました"],
         "required_visible_literals": ["ack-token"],
         "primary_task_update": {"new_task": false}
     });
@@ -1704,6 +1729,79 @@ fn state_patch_alias_bindings_allow_visibility_constraint_metadata() {
     let bindings = super::session_alias_bindings_from_state_patch(Some(&patch));
     assert_eq!(bindings.len(), 1);
     assert_eq!(bindings[0].alias, "甲文件");
+    assert_eq!(
+        bindings[0].target,
+        "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+    );
+}
+
+#[test]
+fn state_patch_alias_bindings_accept_alias_key_target_fields() {
+    let patch = json!({
+        "alias_bindings": [{
+            "alias_key": "甲文件",
+            "alias_target": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+            "binding_scope": "session"
+        }]
+    });
+
+    assert!(super::state_patch_is_alias_bindings_only(&patch));
+    let bindings = super::session_alias_bindings_from_state_patch(Some(&patch));
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].alias, "甲文件");
+    assert_eq!(
+        bindings[0].target,
+        "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+    );
+}
+
+#[test]
+fn state_patch_alias_bindings_allow_alias_update_primary_task_metadata() {
+    let patch = json!({
+        "alias_bindings": [{
+            "alias": "甲文件",
+            "target": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+            "previous_target": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+            "scope": "session",
+            "action": "rebind"
+        }],
+        "primary_task_update": {
+            "action": "alias_update",
+            "alias": "甲文件",
+            "new_target": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+            "previous_target": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+            "confirmation_required": true
+        }
+    });
+
+    assert!(super::state_patch_is_alias_bindings_only(&patch));
+    let bindings = super::session_alias_bindings_from_state_patch(Some(&patch));
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].alias, "甲文件");
+    assert_eq!(
+        bindings[0].target,
+        "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+    );
+}
+
+#[test]
+fn state_patch_alias_bindings_allow_primary_task_projection_metadata() {
+    let patch = json!({
+        "alias_bindings": [{
+            "alias": "ALPHA_DOC",
+            "target": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+            "scope": "session"
+        }],
+        "primary_task_update": {
+            "last_primary_task_prompt": "current request surface",
+            "last_primary_task_output": "ack surface"
+        }
+    });
+
+    assert!(super::state_patch_is_alias_bindings_only(&patch));
+    let bindings = super::session_alias_bindings_from_state_patch(Some(&patch));
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].alias, "ALPHA_DOC");
     assert_eq!(
         bindings[0].target,
         "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"

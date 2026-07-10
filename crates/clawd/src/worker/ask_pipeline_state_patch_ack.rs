@@ -70,7 +70,7 @@ pub(super) fn alias_state_patch_ack_reply(
     };
     let payload = alias_state_patch_ack_payload(message_key, reason_code, &bindings);
     let machine_default = payload.to_string();
-    let language_hint = crate::language_policy::task_response_language_hint(state, task, prompt);
+    let language_hint = alias_state_patch_ack_language_hint(state, task, prompt, boundary_envelope);
     let text = crate::i18n_t_for_language_hint_with_default_vars(
         state,
         &language_hint,
@@ -79,6 +79,20 @@ pub(super) fn alias_state_patch_ack_reply(
         &[],
     );
     Some(crate::AskReply::non_llm(text))
+}
+
+fn alias_state_patch_ack_language_hint(
+    state: &crate::AppState,
+    task: &crate::ClaimedTask,
+    prompt: &str,
+    boundary_envelope: Option<&crate::intent_router::BoundaryEnvelope>,
+) -> String {
+    boundary_envelope
+        .and_then(|envelope| envelope.language_hint.as_deref())
+        .map(str::trim)
+        .filter(|hint| !hint.is_empty() && *hint != "config_default")
+        .map(str::to_string)
+        .unwrap_or_else(|| crate::language_policy::task_response_language_hint(state, task, prompt))
 }
 
 fn alias_state_patch_ack_payload(
