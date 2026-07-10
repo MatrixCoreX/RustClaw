@@ -124,6 +124,7 @@ pub(super) fn collect_priority_json_status_scalar_evidence(
     }
     match value {
         Value::Object(map) => {
+            collect_priority_json_log_status_fields(collector, source, prefix, map);
             let mut emitted_priority_keys = BTreeSet::new();
             for key in JSON_STATUS_SCALAR_PRIORITY_KEYS {
                 let Some(child) = map.get(*key) else {
@@ -196,6 +197,42 @@ pub(super) fn collect_priority_json_status_scalar_evidence(
     }
 }
 
+fn collect_priority_json_log_status_fields(
+    collector: &mut ObservedEvidenceCollector,
+    source: &str,
+    prefix: &str,
+    map: &serde_json::Map<String, Value>,
+) {
+    for (key, child) in map {
+        if !normalize_evidence_field(key).ends_with("_log") {
+            continue;
+        }
+        let Some(log_fields) = child.as_object() else {
+            continue;
+        };
+        let log_prefix = if prefix.is_empty() {
+            key.to_string()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        for field in ["keyword_error_count", "size_bytes"] {
+            let Some(value) = log_fields.get(field) else {
+                continue;
+            };
+            if matches!(
+                value,
+                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)
+            ) {
+                collector.push(json_observed_evidence_item(
+                    source,
+                    &format!("{log_prefix}.{field}"),
+                    value,
+                ));
+            }
+        }
+    }
+}
+
 const JSON_STATUS_SCALAR_PRIORITY_KEYS: &[&str] = &[
     "ok",
     "status",
@@ -221,6 +258,10 @@ const JSON_STATUS_SCALAR_PRIORITY_KEYS: &[&str] = &[
     "telegram_configured_bot_count",
     "whatsappd_healthy",
     "whatsappd_process_count",
+    "whatsapp_cloud_healthy",
+    "whatsapp_cloud_process_count",
+    "whatsapp_web_healthy",
+    "whatsapp_web_process_count",
     "webd_healthy",
     "webd_process_count",
     "wechatd_healthy",
@@ -251,6 +292,17 @@ pub(super) fn json_status_scalar_field_is_priority(field: &str, value: &Value) -
     let leaf = normalized_field_leaf(&normalized);
     if leaf == "warnings" && normalized.contains("system_health") && value.is_array() {
         return true;
+    }
+    if normalized.contains("_log.")
+        && matches!(
+            leaf,
+            "exists" | "keyword_error_count" | "modified_ts" | "size_bytes"
+        )
+    {
+        return matches!(
+            value,
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)
+        );
     }
     if !matches!(
         value,

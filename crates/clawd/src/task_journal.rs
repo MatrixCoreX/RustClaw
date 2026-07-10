@@ -33,7 +33,7 @@ pub(crate) use task_journal_evidence_registry::{
 };
 use task_journal_trace_storage::*;
 
-const MAX_OBSERVED_EVIDENCE_ITEMS: usize = 24;
+const MAX_OBSERVED_EVIDENCE_ITEMS: usize = 40;
 const MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS: usize = 240;
 const MAX_OBSERVED_EVIDENCE_KEYS: usize = 16;
 const MAX_OBSERVED_EVIDENCE_DEPTH: usize = 3;
