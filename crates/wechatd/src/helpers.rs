@@ -130,7 +130,7 @@ pub(super) fn body_from_message_item(item: &MessageItem) -> String {
         if quoted_parts.is_empty() {
             text.to_string()
         } else {
-            format!("[引用: {}]\n{}", quoted_parts.join(" | "), text)
+            format!("[quote: {}]\n{}", quoted_parts.join(" | "), text)
         }
     } else if item.r#type == Some(3) {
         item.voice_item

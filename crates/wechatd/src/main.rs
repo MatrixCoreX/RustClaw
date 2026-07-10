@@ -396,7 +396,8 @@ async fn monitor_wechat_loop(state: State) {
                             status.healthy = false;
                             status.status = "session_expired".to_string();
                             status.last_event_ts = Some(current_ts_ms());
-                            status.last_error = Some("会话已过期，请重新扫码登录。".to_string());
+                            status.last_error =
+                                Some(wechat_t(&state.config, "wechat.msg.session_expired"));
                         })
                         .await;
                         *state.session.write().await = None;

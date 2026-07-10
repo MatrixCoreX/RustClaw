@@ -185,14 +185,18 @@ pub(super) async fn send_wechat_error_notice(
     err: &str,
 ) {
     let notice = if err.contains("remote media download failed") || err.contains("fetch") {
-        "⚠️ 媒体文件下载失败，请检查链接是否可访问。".to_string()
+        wechat_t(&state.config, "wechat.msg.media_download_failed")
     } else if err.contains("getuploadurl")
         || err.contains("cdn upload")
         || err.contains("upload_param")
     {
-        "⚠️ 媒体文件上传失败，请稍后重试。".to_string()
+        wechat_t(&state.config, "wechat.msg.media_upload_failed")
     } else {
-        format!("⚠️ 消息发送失败：{err}")
+        wechat_t_with(
+            &state.config,
+            "wechat.msg.send_failed_with_error",
+            &[("err", err)],
+        )
     };
     if let Err(send_err) = send_text_message(
         &state.client,
