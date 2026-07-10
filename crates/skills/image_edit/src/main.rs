@@ -660,22 +660,14 @@ fn execute(
             &output_path,
         ) {
             Ok((model, model_kind)) => {
-                let saved_path = output_path.to_string_lossy().to_string();
-                let preface = i18n.render(
-                    "image_edit.msg.saved",
-                    &[("path", saved_path.clone())],
-                    "Edited successfully and saved: {path}",
-                );
-                let text = format!("{preface}\nFILE:{saved_path}\nEPHEMERAL:IMAGE_SAVED");
-                let extra = json!({
-                    "provider": vendor_name(vendor),
-                    "model": model,
-                    "model_kind": model_kind,
-                    "latency_ms": 0,
-                    "action": action,
-                    "outputs": [{"type":"image_file","path": saved_path}]
-                });
-                return Ok((text, extra));
+                return Ok(build_success_response(
+                    &i18n,
+                    &output_path,
+                    vendor_name(vendor),
+                    &model,
+                    model_kind,
+                    &action,
+                ));
             }
             Err(err) => provider_errors.push(err),
         }
@@ -687,6 +679,35 @@ fn execute(
             .cloned()
             .unwrap_or_else(|| "unknown error".to_string())
     ))
+}
+
+fn build_success_response(
+    i18n: &TextCatalog,
+    output_path: &Path,
+    provider: &str,
+    model: &str,
+    model_kind: &str,
+    action: &str,
+) -> (String, Value) {
+    let saved_path = output_path.to_string_lossy().to_string();
+    let preface = i18n.render(
+        "image_edit.msg.saved",
+        &[("path", saved_path.clone())],
+        "Edited successfully and saved: {path}",
+    );
+    let text = format!("{preface}\nFILE:{saved_path}\nEPHEMERAL:IMAGE_SAVED");
+    let extra = json!({
+        "message_key": "image_edit.msg.saved",
+        "provider": provider,
+        "model": model,
+        "model_kind": model_kind,
+        "latency_ms": 0,
+        "action": action,
+        "media_type": "image",
+        "output_path": saved_path.clone(),
+        "outputs": [{"type":"image_file","path": saved_path}]
+    });
+    (text, extra)
 }
 
 fn first_model_candidate<'a>(

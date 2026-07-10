@@ -94,6 +94,8 @@ fn dry_run_returns_machine_payload_without_writing_file() {
     assert_eq!(extra["provider"], "minimax");
     assert_eq!(extra["model"], "image-01");
     assert_eq!(extra["model_kind"], "dry_run");
+    assert_eq!(extra["message_key"], "image_generate.msg.dry_run");
+    assert_eq!(extra["media_type"], "image");
     assert_eq!(
         extra["pending_async_job_contract"]["poll_adapter"]["kind"],
         "media_job_poll"
@@ -174,6 +176,12 @@ fn explicit_local_fallback_writes_image_file() {
     let bytes = std::fs::read(&out).expect("fallback image");
     assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
     assert!(text.contains(&format!("FILE:{}", out.display())), "{text}");
+    assert_eq!(extra["message_key"], "image_generate.msg.saved");
+    assert_eq!(extra["media_type"], "image");
+    assert_eq!(
+        extra["output_path"].as_str(),
+        Some(out.to_string_lossy().as_ref())
+    );
     assert_eq!(extra["provider"], "local_fallback");
     assert_eq!(extra["model_kind"], "local_fallback");
     assert_eq!(

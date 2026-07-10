@@ -21,10 +21,13 @@ pub(super) fn build_success_response(
     );
     let text = format!("{preface}\nFILE:{saved_path}\nEPHEMERAL:IMAGE_SAVED");
     let mut extra = json!({
+        "message_key": "image_generate.msg.saved",
         "provider": provider,
         "model": model,
         "model_kind": model_kind,
         "latency_ms": 0,
+        "media_type": "image",
+        "output_path": saved_path.clone(),
         "outputs": [{"type":"image_file","path": saved_path}]
     });
     if let Some(fallback) = fallback {
@@ -63,11 +66,13 @@ pub(super) fn build_dry_run_response(
     (
         "IMAGE_GENERATE_DRY_RUN".to_string(),
         json!({
+            "message_key": "image_generate.msg.dry_run",
             "dry_run": true,
             "provider": provider,
             "model": model,
             "model_kind": "dry_run",
             "latency_ms": 0,
+            "media_type": "image",
             "output_path": saved_path,
             "outputs": [],
             "planned_outputs": [{"type":"image_file","path": saved_path}],

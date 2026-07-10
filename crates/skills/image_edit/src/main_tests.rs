@@ -13,6 +13,39 @@ fn error_extra_exposes_machine_contract() {
 }
 
 #[test]
+fn success_response_exposes_media_machine_fields() {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw-image-edit-success-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).expect("temp root");
+    let cfg = ImageSkillConfig::default();
+    let i18n = TextCatalog::for_lang(&root, &cfg, "en-US");
+    let output_path = root.join("image/out.png");
+
+    let (text, extra) =
+        build_success_response(&i18n, &output_path, "minimax", "image-01", "native", "edit");
+
+    assert!(text.contains(&format!("FILE:{}", output_path.display())));
+    assert_eq!(extra["message_key"], "image_edit.msg.saved");
+    assert_eq!(extra["provider"], "minimax");
+    assert_eq!(extra["model"], "image-01");
+    assert_eq!(extra["model_kind"], "native");
+    assert_eq!(extra["action"], "edit");
+    assert_eq!(extra["media_type"], "image");
+    assert_eq!(
+        extra["output_path"].as_str(),
+        Some(output_path.to_string_lossy().as_ref())
+    );
+    assert_eq!(extra["outputs"][0]["type"], "image_file");
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn parse_vendor_aliases() {
     assert_eq!(parse_vendor("openai"), Some(VendorKind::OpenAI));
     assert_eq!(parse_vendor("gemini"), Some(VendorKind::Google));
