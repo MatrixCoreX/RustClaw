@@ -73,6 +73,23 @@ fn machine_summary_accepts_nested_machine_token_value() {
 }
 
 #[test]
+fn machine_summary_projects_status_from_status_code_alias() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"status_code":200,"output_path":"/tmp/example.body"}}"#,
+        &mut observed,
+    );
+
+    let summary =
+        requested_machine_kv_summary_from_observations("Return status and output_path.", &observed);
+
+    assert_eq!(
+        summary.as_deref(),
+        Some("status=200 output_path=/tmp/example.body")
+    );
+}
+
+#[test]
 fn machine_summary_projects_cli_placeholder_for_required_machine_field() {
     let observed = vec![
         "Usage: clawcli resume --text <TEXT> <TASK_ID>\n\nArguments:\n  <TASK_ID>  Existing task id to continue"
