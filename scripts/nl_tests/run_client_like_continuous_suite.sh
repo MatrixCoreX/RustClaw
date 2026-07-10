@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NL_TEST_SCRIPT_DIR="$SCRIPT_DIR"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=/dev/null
 source "${ROOT_DIR}/scripts/lib.sh"
@@ -17,6 +18,8 @@ DB_PATH_VALUE="${RUSTCLAW_DB_PATH:-}"
 WAIT_SECONDS_VALUE="${MAX_WAIT_SECONDS:-1200}"
 POLL_SECONDS_VALUE="${POLL_INTERVAL_SECONDS:-1}"
 LLM_INFRA_TURN_RETRIES_VALUE="${LLM_INFRA_TURN_RETRIES:-3}"
+PRINT_LLM_TRACE_VALUE="${PRINT_LLM_TRACE:-1}"
+PRINT_LLM_TRACE_MAX_CHARS_VALUE="${PRINT_LLM_TRACE_MAX_CHARS:-1200}"
 LOG_ROOT="${ROOT_DIR}/scripts/nl_suite_logs/client_like_continuous"
 PROMPT_REPLY_ONLY=1
 QUALITY_GUARD=0
@@ -82,6 +85,8 @@ Options:
                              independent case groups are isolated while turns in the same group share context.
   --prompt-reply-only        print only prompt and reply snippets. Default: on
   --verbose-turn-output      print compact turn status/reply fields instead of prompt/reply blocks
+  --no-llm-trace             do not print numbered raw LLM return fields after each turn
+  --llm-trace-max-chars N    max chars per long raw LLM field excerpt. Default: 1200
   --quality-guard            fail on common soft failures, not only terminal task status
   -h, --help                 show this help
 EOF
@@ -227,6 +232,14 @@ while [[ $# -gt 0 ]]; do
     --verbose-turn-output)
       PROMPT_REPLY_ONLY=0
       shift
+      ;;
+    --no-llm-trace)
+      PRINT_LLM_TRACE_VALUE=0
+      shift
+      ;;
+    --llm-trace-max-chars)
+      PRINT_LLM_TRACE_MAX_CHARS_VALUE="${2:-}"
+      shift 2
       ;;
     --quality-guard)
       QUALITY_GUARD=1
@@ -1120,6 +1133,27 @@ for line in lines[-20:]:
 PY
 }
 
+init_llm_trace_offset() {
+  local offset_file="$1"
+  python3 "${NL_TEST_SCRIPT_DIR}/print_llm_raw_trace.py" \
+    --log "${ROOT_DIR}/logs/model_io.log" \
+    --state-file "$offset_file" \
+    --init-state
+}
+
+print_new_llm_trace() {
+  local turn_number="$1"
+  local task_id="$2"
+  [[ "${PRINT_LLM_TRACE:-1}" == "1" ]] || return 0
+  [[ -n "${LLM_TRACE_STATE_FILE:-}" ]] || return 0
+  echo "[TURN ${turn_number}] llm_trace task_id=${task_id}"
+  python3 "${NL_TEST_SCRIPT_DIR}/print_llm_raw_trace.py" \
+    --log "${ROOT_DIR}/logs/model_io.log" \
+    --task-id "$task_id" \
+    --state-file "$LLM_TRACE_STATE_FILE" \
+    --max-field-chars "${PRINT_LLM_TRACE_MAX_CHARS:-1200}"
+}
+
 submit_turn() {
   local turn="$1"
   local prompt="$2"
@@ -1229,6 +1263,7 @@ PY
     fi
   fi
   print_turn_metrics "$out_file" "$turn"
+  print_new_llm_trace "$turn" "$task_id"
 
   if [[ "$status" != "succeeded" ]]; then
     echo "Turn ${turn} did not succeed: status=${status} error=${error}" >&2
@@ -1970,6 +2005,8 @@ CHAT_ID="$CHAT_ID_VALUE"
 USER_KEY="$USER_KEY_VALUE"
 MAX_WAIT_SECONDS="$WAIT_SECONDS_VALUE"
 POLL_INTERVAL_SECONDS="$POLL_SECONDS_VALUE"
+PRINT_LLM_TRACE="$PRINT_LLM_TRACE_VALUE"
+PRINT_LLM_TRACE_MAX_CHARS="$PRINT_LLM_TRACE_MAX_CHARS_VALUE"
 DB_PATH_VALUE="$(resolve_db_path)"
 if [[ -n "${CASE_FILE_VALUE:-}" && -n "${CASE_JSONL_VALUE:-}" ]]; then
   echo "Use only one of --case-file or --case-jsonl." >&2
@@ -2033,6 +2070,13 @@ echo "exclude_case_tags=${CASE_EXCLUDE_TAGS_VALUE:-<none>}"
 echo "case_group_isolation=${CASE_GROUP_ISOLATION}"
 echo "quality_guard=${QUALITY_GUARD}"
 echo "llm_infra_turn_retries=${LLM_INFRA_TURN_RETRIES_VALUE}"
+echo "print_llm_trace=${PRINT_LLM_TRACE}"
+echo "llm_trace_max_chars=${PRINT_LLM_TRACE_MAX_CHARS}"
+
+LLM_TRACE_STATE_FILE="${RUN_DIR}/llm_trace_state.json"
+if [[ "${PRINT_LLM_TRACE}" == "1" ]]; then
+  init_llm_trace_offset "$LLM_TRACE_STATE_FILE"
+fi
 
 read -r -d '' HEAVY_CONTEXT_PROMPT <<'EOF' || true
 请记住下面这段较长的上下文，后续我会基于它继续问问题。不要执行外部工具，只需要用中文确认已收到。
