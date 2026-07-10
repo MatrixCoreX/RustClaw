@@ -227,6 +227,7 @@ fn extract_execution_anchor(
     let request = task_payload_summary(kind, payload_json);
     let result = task_result_summary(result_json);
     let payload = serde_json::from_str::<Value>(payload_json).ok();
+    let result_value = serde_json::from_str::<Value>(result_json).ok();
 
     let skill_from_payload = payload
         .as_ref()
@@ -239,9 +240,16 @@ fn extract_execution_anchor(
         .or(skill_from_result)
         .unwrap_or_else(|| "unknown".to_string());
 
-    let symbol =
-        extract_symbol_from_payload(payload.as_ref()).or_else(|| extract_symbol_from_text(&result));
-    let subject = extract_subject_from_result(&result);
+    let symbol = extract_symbol_from_payload(payload.as_ref())
+        .or_else(|| {
+            result_value
+                .as_ref()
+                .and_then(extract_symbol_from_result_value)
+        })
+        .or_else(|| extract_symbol_from_text(&result));
+    let subject = result_value
+        .as_ref()
+        .and_then(extract_subject_from_result_value);
     let domain = infer_domain(&skill, symbol.as_deref());
 
     if skill == "unknown" && symbol.is_none() && subject.is_none() {
@@ -279,6 +287,47 @@ fn extract_symbol_from_payload(payload: Option<&Value>) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+fn market_quote_value_from_result(value: &Value) -> Option<&Value> {
+    if let Some(quote) = value
+        .get("quote")
+        .or_else(|| value.pointer("/extra/quote"))
+        .filter(|quote| quote.is_object())
+    {
+        return Some(quote);
+    }
+    value.get("extra").filter(|extra| {
+        extra.is_object()
+            && (extra
+                .get("source_skill")
+                .and_then(Value::as_str)
+                .is_some_and(|source| source == "stock")
+                || extra
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .is_some_and(|action| action == "quote"))
+    })
+}
+
+fn extract_symbol_from_result_value(value: &Value) -> Option<String> {
+    let quote = market_quote_value_from_result(value)?;
+    quote
+        .get("symbol")
+        .or_else(|| quote.get("code"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn extract_subject_from_result_value(value: &Value) -> Option<String> {
+    market_quote_value_from_result(value)?
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
 fn extract_symbol_from_text(text: &str) -> Option<String> {
     let stock_re = Regex::new(r"\[(?:SH|SZ)?(\d{6})\]").ok()?;
     if let Some(symbol) = stock_re
@@ -293,22 +342,6 @@ fn extract_symbol_from_text(text: &str) -> Option<String> {
         .captures(text)
         .and_then(|caps| caps.get(1))
         .map(|m| m.as_str().to_string())
-}
-
-fn extract_subject_from_result(result: &str) -> Option<String> {
-    let stock_re = Regex::new(
-        r"\[(?:SH|SZ)?\d{6}\]\s*([^\s\[]+?)\s+(?:现价|今开|昨收|涨跌幅|最高|最低|成交量|日期)",
-    )
-    .ok()?;
-    if let Some(subject) = stock_re
-        .captures(result)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().trim().to_string())
-        .filter(|v| !v.is_empty())
-    {
-        return Some(subject);
-    }
-    None
 }
 
 fn infer_domain(skill: &str, symbol: Option<&str>) -> String {
