@@ -374,24 +374,21 @@ const LARK_I18N_TASK_FAILED_FALLBACK_ERROR_KEY: &str = "lark.msg.task_failed_fal
 const LARK_I18N_PROCESS_FAILED_WITH_ERROR_KEY: &str = "lark.msg.process_failed_with_error";
 
 const LARK_IDENTITY_CHECK_UNAVAILABLE_FALLBACK: &str =
-    "Identity check temporarily unavailable, please try again later.";
-const LARK_BIND_REQUIRED_FALLBACK: &str =
-    "Please send your key first to bind this account before chatting or using features.\n请先发送你的 key 进行绑定，然后再继续聊天或使用功能。";
-const LARK_BIND_HELP_FALLBACK: &str =
-    "Welcome to RustClaw.\nPlease send /key <your_key> first to bind this account.\n欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定。";
-const LARK_BIND_SUCCESS_FALLBACK: &str =
-    "Bound successfully. Please send your previous message again.\n绑定成功，请重新发送刚才的消息。";
-const LARK_BIND_INVALID_FALLBACK: &str =
-    "Invalid key. Please try again.\nkey 无效或绑定失败，请发送有效 key 完成绑定。";
-const LARK_BIND_REQUEST_FAILED_FALLBACK: &str =
-    "Bind request failed, please try again later.\n绑定请求失败，请稍后重试。";
-const LARK_MEDIA_DOWNLOAD_FAILED_FALLBACK: &str = "Media download failed, please try again later.";
-const LARK_MEDIA_FILE_TOO_LARGE_FALLBACK: &str = "Media file is too large and was not saved.";
+    "message_key=lark.msg.identity_check_unavailable";
+const LARK_BIND_REQUIRED_FALLBACK: &str = "message_key=lark.msg.bind_key_required_for_chat";
+const LARK_BIND_HELP_FALLBACK: &str = "message_key=lark.msg.bind_help";
+const LARK_BIND_SUCCESS_FALLBACK: &str = "message_key=lark.msg.bind_success";
+const LARK_BIND_INVALID_FALLBACK: &str = "message_key=lark.msg.bind_invalid";
+const LARK_BIND_REQUEST_FAILED_FALLBACK: &str = "message_key=lark.msg.bind_request_failed";
+const LARK_MEDIA_DOWNLOAD_FAILED_FALLBACK: &str = "message_key=lark.msg.media_download_failed";
+const LARK_MEDIA_FILE_TOO_LARGE_FALLBACK: &str = "message_key=lark.msg.media_file_too_large";
 const LARK_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK: &str =
-    "你的任务正在持续执行（任务编号：{task_id}），执行完了给你回复。";
-const LARK_TASK_DONE_FALLBACK_TEXT_FALLBACK: &str = "Done.";
-const LARK_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str = "Task failed";
-const LARK_PROCESS_FAILED_WITH_ERROR_FALLBACK: &str = "Failed: {error}";
+    "message_key=lark.msg.request_timeout_retry_later task_id={task_id}";
+const LARK_TASK_DONE_FALLBACK_TEXT_FALLBACK: &str = "message_key=lark.msg.task_done_fallback_text";
+const LARK_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str =
+    "message_key=lark.msg.task_failed_fallback_error";
+const LARK_PROCESS_FAILED_WITH_ERROR_FALLBACK: &str =
+    "message_key=lark.msg.process_failed_with_error error={error}";
 
 fn should_expect_key_reply(state: &AppState, chat_id: &str) -> bool {
     state

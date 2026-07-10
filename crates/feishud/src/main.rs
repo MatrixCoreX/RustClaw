@@ -333,24 +333,23 @@ const FEISHU_I18N_TASK_DONE_FALLBACK_TEXT_KEY: &str = "feishu.msg.task_done_fall
 const FEISHU_I18N_TASK_FAILED_FALLBACK_ERROR_KEY: &str = "feishu.msg.task_failed_fallback_error";
 const FEISHU_I18N_PROCESS_FAILED_WITH_ERROR_KEY: &str = "feishu.msg.process_failed_with_error";
 
-const FEISHU_IDENTITY_CHECK_UNAVAILABLE_FALLBACK: &str = "身份校验暂时不可用，请稍后重试。";
-const FEISHU_BIND_REQUIRED_FALLBACK: &str =
-    "请先发送你的 key 进行绑定，然后再继续聊天或使用功能。\nPlease send your key first to bind this account before chatting or using features.";
-const FEISHU_BIND_HELP_FALLBACK: &str =
-    "欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定。\nWelcome to RustClaw.\nPlease send /key <your_key> first to bind this account.";
-const FEISHU_BIND_SUCCESS_FALLBACK: &str =
-    "绑定成功，请重新发送你的问题。\nKey bound successfully. Please send your previous message again.";
-const FEISHU_BIND_INVALID_FALLBACK: &str =
-    "key 无效或绑定失败，请发送有效 key 完成绑定。\nInvalid key. Please try again.";
-const FEISHU_BIND_REQUEST_FAILED_FALLBACK: &str =
-    "绑定请求失败，请稍后重试。\nBind request failed, please try again later.";
-const FEISHU_MEDIA_DOWNLOAD_FAILED_FALLBACK: &str = "媒体下载失败，请稍后重试。";
-const FEISHU_MEDIA_FILE_TOO_LARGE_FALLBACK: &str = "媒体文件过大，已拒绝保存。";
+const FEISHU_IDENTITY_CHECK_UNAVAILABLE_FALLBACK: &str =
+    "message_key=feishu.msg.identity_check_unavailable";
+const FEISHU_BIND_REQUIRED_FALLBACK: &str = "message_key=feishu.msg.bind_key_required_for_chat";
+const FEISHU_BIND_HELP_FALLBACK: &str = "message_key=feishu.msg.bind_help";
+const FEISHU_BIND_SUCCESS_FALLBACK: &str = "message_key=feishu.msg.bind_success";
+const FEISHU_BIND_INVALID_FALLBACK: &str = "message_key=feishu.msg.bind_invalid";
+const FEISHU_BIND_REQUEST_FAILED_FALLBACK: &str = "message_key=feishu.msg.bind_request_failed";
+const FEISHU_MEDIA_DOWNLOAD_FAILED_FALLBACK: &str = "message_key=feishu.msg.media_download_failed";
+const FEISHU_MEDIA_FILE_TOO_LARGE_FALLBACK: &str = "message_key=feishu.msg.media_file_too_large";
 const FEISHU_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK: &str =
-    "你的任务正在持续执行（任务编号：{task_id}），执行完了给你回复。";
-const FEISHU_TASK_DONE_FALLBACK_TEXT_FALLBACK: &str = "处理完成。";
-const FEISHU_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str = "任务失败";
-const FEISHU_PROCESS_FAILED_WITH_ERROR_FALLBACK: &str = "处理失败：{error}";
+    "message_key=feishu.msg.request_timeout_retry_later task_id={task_id}";
+const FEISHU_TASK_DONE_FALLBACK_TEXT_FALLBACK: &str =
+    "message_key=feishu.msg.task_done_fallback_text";
+const FEISHU_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str =
+    "message_key=feishu.msg.task_failed_fallback_error";
+const FEISHU_PROCESS_FAILED_WITH_ERROR_FALLBACK: &str =
+    "message_key=feishu.msg.process_failed_with_error error={error}";
 
 fn should_expect_key_reply(state: &AppState, chat_id: &str) -> bool {
     state
