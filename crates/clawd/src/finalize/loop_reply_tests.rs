@@ -571,6 +571,66 @@ fn requested_machine_kv_summary_preserves_publishable_summary_over_marker_only_s
 }
 
 #[test]
+fn requested_machine_kv_summary_preserves_structured_media_dry_run_projection() {
+    let task = claimed_task("task-machine-kv-media-dry-run-projection");
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    let output_path = "/home/guagua/rustclaw/document/media_dry_run/image_status_card.png";
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "image_generate",
+        &serde_json::json!({
+            "text": "IMAGE_GENERATE_DRY_RUN",
+            "extra": {
+                "dry_run": true,
+                "provider": "minimax",
+                "model": "image-01",
+                "model_kind": "dry_run",
+                "output_path": output_path,
+                "planned_outputs": [{
+                    "path": output_path,
+                    "type": "image_file"
+                }]
+            }
+        })
+        .to_string(),
+    ));
+    let current = concat!(
+        "dry_run=true\n",
+        "provider=minimax\n",
+        "model=image-01\n",
+        "model_kind=dry_run\n",
+        "output_path=/home/guagua/rustclaw/document/media_dry_run/image_status_card.png\n",
+        "planned_outputs=[{\"path\":\"/home/guagua/rustclaw/document/media_dry_run/image_status_card.png\",\"type\":\"image_file\"}]"
+    );
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = Some(current.to_string());
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "use image.generate dry_run=true and return provider/model planned_outputs output_path",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![current.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(current)
+    );
+}
+
+#[test]
 fn requested_machine_kv_summary_preserves_publishable_command_summary() {
     let task = claimed_task("task-machine-kv-summary-command-summary");
     let mut loop_state = crate::agent_engine::LoopState::new(1);

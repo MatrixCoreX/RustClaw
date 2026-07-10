@@ -679,19 +679,7 @@ fn route_allows_dry_run_generated_file_path_report_payload(
 ) -> bool {
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
-        .is_some_and(|route| {
-            route_allows_generated_file_path_report_payload(agent_run_context)
-                || (route.effective_output_contract().delivery_required
-                    && matches!(
-                        route.effective_output_contract().response_shape,
-                        crate::OutputResponseShape::FileToken
-                    ))
-                || (!route.effective_output_contract().delivery_required
-                    && matches!(
-                        route.effective_output_contract().delivery_intent,
-                        crate::OutputDeliveryIntent::None
-                    ))
-        })
+        .is_none_or(|route| !route.needs_clarify)
 }
 
 fn compact_machine_json(value: &serde_json::Value) -> Option<String> {
