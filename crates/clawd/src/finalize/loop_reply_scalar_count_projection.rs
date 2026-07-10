@@ -4,7 +4,7 @@ pub(super) fn direct_observed_count_answer_for_scalar_contract(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route_prefers_observed_count(route) {
+    if !route_prefers_observed_count(route, loop_state) {
         return None;
     }
     let answer = loop_state
@@ -50,11 +50,44 @@ pub(super) fn direct_observed_count_answer_for_scalar_contract(
     ))
 }
 
-fn route_prefers_observed_count(route: &crate::RouteResult) -> bool {
+fn route_prefers_observed_count(route: &crate::RouteResult, loop_state: &LoopState) -> bool {
     let contract = route.effective_output_contract();
-    !contract.delivery_required
-        && crate::RouteReasonMarkers::new(&route.route_reason)
-            .has_machine_marker("scalar_locator_requires_evidence")
+    if contract.delivery_required {
+        return false;
+    }
+    if crate::RouteReasonMarkers::new(&route.route_reason)
+        .has_machine_marker("scalar_locator_requires_evidence")
+    {
+        return true;
+    }
+    route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
+        && !plan_requests_count_inventory_file_dir_breakdown(loop_state)
+}
+
+fn plan_requests_count_inventory_file_dir_breakdown(loop_state: &LoopState) -> bool {
+    loop_state
+        .round_traces
+        .iter()
+        .rev()
+        .filter_map(|trace| trace.plan_result.as_ref())
+        .any(|plan| {
+            plan.steps.iter().any(|step| {
+                step.is_skill_invocation()
+                    && step.skill == "system_basic"
+                    && step.args.get("action").and_then(|value| value.as_str())
+                        == Some("count_inventory")
+                    && step
+                        .args
+                        .get("count_files")
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false)
+                    && step
+                        .args
+                        .get("count_dirs")
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false)
+            })
+        })
 }
 
 fn observed_count_from_value(value: &serde_json::Value) -> Option<String> {
@@ -63,9 +96,26 @@ fn observed_count_from_value(value: &serde_json::Value) -> Option<String> {
             return Some(count);
         }
     }
+    if path_batch_facts_has_missing_target(value) {
+        return None;
+    }
     numeric_count(value.get("count"))
         .or_else(|| numeric_count(value.pointer("/counts/total")))
         .or_else(|| numeric_count(value.pointer("/summary/count")))
+}
+
+fn path_batch_facts_has_missing_target(value: &serde_json::Value) -> bool {
+    value.get("action").and_then(|value| value.as_str()) == Some("path_batch_facts")
+        && value
+            .get("facts")
+            .and_then(|value| value.as_array())
+            .is_some_and(|facts| {
+                facts.iter().any(|fact| {
+                    fact.get("exists")
+                        .and_then(|value| value.as_bool())
+                        .is_some_and(|exists| !exists)
+                })
+            })
 }
 
 fn numeric_count(value: Option<&serde_json::Value>) -> Option<String> {

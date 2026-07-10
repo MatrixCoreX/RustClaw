@@ -5,7 +5,7 @@ pub(super) fn service_status_system_basic_info_answer(
     loop_state: &LoopState,
 ) -> Option<String> {
     if !crate::finalize::route_matches_service_status_output_contract(route) {
-        return None;
+        return service_control_status_observed_answer_without_route_contract(loop_state);
     }
     let system_health_only = service_status_selector_is_system_health_only(route);
     if should_preserve_health_check_summary_synthesis(route, loop_state, system_health_only) {
@@ -191,13 +191,36 @@ fn structurally_publishable_one_sentence(candidate: &str) -> bool {
 }
 
 fn service_control_status_observed_answer(loop_state: &LoopState) -> Option<String> {
-    let value = loop_state
+    let value = latest_service_control_status_payload(loop_state)?;
+    service_control_status_observed_answer_from_payload(&value)
+}
+
+fn service_control_status_observed_answer_without_route_contract(
+    loop_state: &LoopState,
+) -> Option<String> {
+    let value = latest_service_control_status_payload(loop_state)?;
+    let answer = service_control_status_observed_answer_from_payload(&value)?;
+    if should_preserve_current_service_control_delivery_without_route_contract(
+        loop_state, &value, &answer,
+    ) {
+        return None;
+    }
+    Some(answer)
+}
+
+fn latest_service_control_status_payload(loop_state: &LoopState) -> Option<serde_json::Value> {
+    loop_state
         .executed_step_results
         .iter()
         .rev()
         .find(|step| step.is_ok() && step.skill == "service_control")
         .and_then(|step| step.output.as_deref())
-        .and_then(service_control_payload_from_output)?;
+        .and_then(service_control_payload_from_output)
+}
+
+fn service_control_status_observed_answer_from_payload(
+    value: &serde_json::Value,
+) -> Option<String> {
     let mut fields = Vec::new();
     push_json_path_alias_field(&mut fields, &value, "target", "target");
     push_json_path_alias_field(&mut fields, &value, "service_name", "target");
@@ -212,6 +235,67 @@ fn service_control_status_observed_answer(loop_state: &LoopState) -> Option<Stri
     }
     fields.push("source=service_control".to_string());
     Some(fields.join(" "))
+}
+
+fn should_preserve_current_service_control_delivery_without_route_contract(
+    loop_state: &LoopState,
+    value: &serde_json::Value,
+    observed_answer: &str,
+) -> bool {
+    let Some(current) = latest_service_control_delivery(loop_state) else {
+        return false;
+    };
+    let current = current.trim();
+    if current.is_empty()
+        || current == observed_answer.trim()
+        || current_matches_service_control_observed_scalar(current, value)
+    {
+        return false;
+    }
+    true
+}
+
+fn latest_service_control_delivery(loop_state: &LoopState) -> Option<&str> {
+    loop_state
+        .delivery_messages
+        .last()
+        .map(String::as_str)
+        .or(loop_state.last_user_visible_respond.as_deref())
+        .or(loop_state.last_publishable_synthesis_output.as_deref())
+}
+
+fn current_matches_service_control_observed_scalar(
+    current: &str,
+    value: &serde_json::Value,
+) -> bool {
+    let observed_fields = [
+        "summary",
+        "post_state",
+        "pre_state",
+        "status",
+        "service_name",
+        "target",
+    ];
+    if observed_fields
+        .iter()
+        .copied()
+        .filter_map(|field| value.get(field).and_then(json_scalar_to_string))
+        .any(|scalar| current == scalar.trim())
+    {
+        return true;
+    }
+    let Some((key, field_value)) = current.split_once('=') else {
+        return false;
+    };
+    let key = key.trim();
+    let field_value = field_value.trim();
+    observed_fields.iter().copied().any(|field| {
+        key == field
+            && value
+                .get(field)
+                .and_then(json_scalar_to_string)
+                .is_some_and(|scalar| field_value == scalar.trim())
+    })
 }
 
 fn service_control_payload_from_output(output: &str) -> Option<serde_json::Value> {

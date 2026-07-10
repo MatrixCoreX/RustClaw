@@ -60,6 +60,9 @@ fn answer_verifier_output_format_machine_payload_gap(
     if verifier.answer_incomplete_reason == "machine_status_token_visible" {
         return true;
     }
+    if visible_answer_is_machine_field_projection(reply_text) {
+        return true;
+    }
     serde_json::from_str::<Value>(reply_text.trim())
         .ok()
         .and_then(|value| value.as_object().cloned())
@@ -75,6 +78,32 @@ fn answer_verifier_output_format_machine_payload_gap(
                     .is_some_and(|format| format == "machine_json")
                 || (object.contains_key("status") && object.contains_key("steps"))
         })
+}
+
+fn visible_answer_is_machine_field_projection(reply_text: &str) -> bool {
+    let mut field_count = 0usize;
+    for token in reply_text.split_whitespace() {
+        let Some((key, value)) = token.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if machine_projection_field_key(key) && !value.is_empty() {
+            field_count += 1;
+            if field_count >= 2 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn machine_projection_field_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.chars().all(|ch| {
+            ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '_' | '.' | '-')
+        })
+        && key.chars().any(|ch| ch.is_ascii_lowercase())
 }
 
 fn visible_answer_is_observed_machine_status_token(

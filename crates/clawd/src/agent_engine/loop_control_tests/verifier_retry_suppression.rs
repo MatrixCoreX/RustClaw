@@ -13,7 +13,7 @@ use crate::{
 use serde_json::json;
 
 #[test]
-fn output_format_machine_payload_gap_detects_structured_reply_only() {
+fn output_format_machine_payload_gap_detects_structured_or_field_projection_reply() {
     let verifier = crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,
         missing_evidence_fields: vec!["output_format".to_string()],
@@ -30,6 +30,10 @@ fn output_format_machine_payload_gap_detects_structured_reply_only() {
     assert!(answer_verifier_output_format_machine_payload_gap(
         &verifier,
         r#"{"contract_marker":"filesystem_mutation_result","status":"ok","steps":[{"action":"ingest","path":"README.md"}]}"#
+    ));
+    assert!(answer_verifier_output_format_machine_payload_gap(
+        &verifier,
+        "target=telegramd service_name=telegramd post_state=telegramd=running verified=true"
     ));
     assert!(!answer_verifier_output_format_machine_payload_gap(
         &verifier,
@@ -555,6 +559,47 @@ fn terminal_model_answer_replaces_raw_observation_before_verifier() {
         Some(&route)
     ));
     assert_eq!(reply.text, answer);
+}
+
+#[test]
+fn terminal_model_answer_does_not_replace_richer_machine_projection_with_observed_scalar() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-service-status-terminal", "ask", "status");
+    let service_output = json!({
+        "extra": {
+            "manager_type": "rustclaw",
+            "post_state": "telegramd=running",
+            "pre_state": "telegramd=running",
+            "service_name": "telegramd",
+            "status": "ok",
+            "summary": "Status: telegramd=running",
+            "target": "telegramd",
+            "verified": true
+        },
+        "text": "Status: telegramd=running"
+    })
+    .to_string();
+    journal.push_step_result(&ok_step("step_1", "service_control", &service_output));
+    journal.push_step_result(&ok_step("step_2", "respond", "Status: telegramd=running"));
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+    let observed_projection = "target=telegramd service_name=telegramd post_state=telegramd=running pre_state=telegramd=running status=ok verified=true manager_type=rustclaw source=service_control";
+    let mut reply = AskReply::non_llm(observed_projection.to_string())
+        .with_messages(vec![observed_projection.to_string()])
+        .with_task_journal(journal);
+
+    assert!(!prefer_terminal_model_answer_for_verifier_candidate(
+        &mut reply,
+        Some(&route)
+    ));
+    assert_eq!(reply.text, observed_projection);
 }
 
 #[test]

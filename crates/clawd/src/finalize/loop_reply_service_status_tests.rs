@@ -1,5 +1,6 @@
 use super::*;
 use crate::finalize::loop_reply::replace_delivery_with_direct_structured_observed_answer;
+use crate::finalize::loop_reply::service_status_system_basic_info_answer;
 
 #[tokio::test]
 async fn finalize_loop_reply_preserves_health_check_summary_synthesis() {
@@ -809,6 +810,351 @@ fn replace_delivery_with_structured_service_status_uses_capability_shape() {
         ]
     );
     assert!(finalizer_summary.is_some());
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_projects_service_control_summary_without_route_marker() {
+    let state = test_state();
+    let task = claimed_task("task-service-status-planner-observed-summary");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.route_reason.clear();
+    route.resolved_intent.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "service_control",
+        r#"{"extra":{"service_name":"telegramd","post_state":"running","pre_state":"running","status":"active","verified":true,"manager_type":"systemd","summary":"Status: telegramd=running"}}"#,
+    ));
+    loop_state
+        .delivery_messages
+        .push("Status: telegramd=running".to_string());
+    loop_state.last_user_visible_respond = Some("Status: telegramd=running".to_string());
+    let projected = service_status_system_basic_info_answer(
+        agent_run_context.route_result.as_ref().unwrap(),
+        &loop_state,
+    )
+    .expect("service_control observation should project without route marker");
+    assert!(
+        projected.contains("target=telegramd"),
+        "projected: {}",
+        projected
+    );
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "service status",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should project planner-observed service status fields");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert!(
+        reply.text.contains("target=telegramd"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("service_name=telegramd"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("post_state=running"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("pre_state=running"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("status=active"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("verified=true"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("manager_type=systemd"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("source=service_control"),
+        "reply: {}",
+        reply.text
+    );
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_projects_service_control_fields_when_short_synthesis_exists() {
+    let state = test_state();
+    let task = claimed_task("task-service-status-short-synthesis-fields");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "service/process".to_string();
+    route.route_reason =
+        "structured_locator_contract_repair; executable_contract_preserved_for_agent_loop"
+            .to_string();
+    route.resolved_intent =
+        "Read-only status check of the clawd service/process on the local system".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        user_request: Some(
+            "Check clawd service/process status only; return target, status, manager_type."
+                .to_string(),
+        ),
+        ..Default::default()
+    };
+    let service_output = serde_json::json!({
+        "extra": {
+            "executed_actions": ["status"],
+            "failure_reason": "",
+            "key_evidence": ["clawd process_count=1 memory_rss_bytes=Some(78950400)"],
+            "manager_type": "rustclaw",
+            "next_step": "",
+            "post_state": "clawd=running",
+            "pre_state": "clawd=running",
+            "requested_action": "status",
+            "service_name": "clawd",
+            "status": "ok",
+            "summary": "Status: clawd=running",
+            "target": "clawd",
+            "verified": true
+        },
+        "text": "{\"status\":\"ok\",\"target\":\"clawd\",\"service_name\":\"clawd\",\"manager_type\":\"rustclaw\",\"requested_action\":\"status\",\"executed_actions\":[\"status\"],\"pre_state\":\"clawd=running\",\"post_state\":\"clawd=running\",\"verified\":true,\"key_evidence\":[\"clawd process_count=1 memory_rss_bytes=Some(78950400)\"],\"failure_reason\":\"\",\"next_step\":\"\",\"summary\":\"Status: clawd=running\"}"
+    })
+    .to_string();
+    let short_status = "Status: clawd=running";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "service_control",
+        &service_output,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        short_status,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "respond", short_status));
+    loop_state.last_publishable_synthesis_output = Some(short_status.to_string());
+    loop_state.last_user_visible_respond = Some(short_status.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "Check clawd service/process status only; return target, status, manager_type.",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should preserve structured service_control evidence");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert!(reply.text.contains("target=clawd"), "reply: {}", reply.text);
+    assert!(
+        reply.text.contains("service_name=clawd"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("post_state=clawd=running"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("pre_state=clawd=running"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(reply.text.contains("status=ok"), "reply: {}", reply.text);
+    assert!(
+        reply.text.contains("verified=true"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("manager_type=rustclaw"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("source=service_control"),
+        "reply: {}",
+        reply.text
+    );
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_expands_service_control_summary_for_free_status_route() {
+    let state = test_state();
+    let task = claimed_task("task-service-status-free-route-summary-expand");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.route_reason = concat!(
+        "executable_contract_preserved_for_agent_loop; ",
+        "untrusted_normalizer_locator_completion_removed_from_execution_context"
+    )
+    .to_string();
+    route.resolved_intent =
+        "check whether telegramd is running right now and briefly explain the status".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        user_request: Some(
+            "check whether telegramd is running right now and briefly explain the status"
+                .to_string(),
+        ),
+        ..Default::default()
+    };
+    let service_output = serde_json::json!({
+        "extra": {
+            "executed_actions": ["status"],
+            "failure_reason": "",
+            "key_evidence": ["telegramd process_count=1 memory_rss_bytes=Some(53248)"],
+            "manager_type": "rustclaw",
+            "next_step": "",
+            "post_state": "telegramd=running",
+            "pre_state": "telegramd=running",
+            "requested_action": "status",
+            "service_name": "telegramd",
+            "status": "ok",
+            "summary": "Status: telegramd=running",
+            "target": "telegramd",
+            "verified": true
+        },
+        "text": "{\"status\":\"ok\",\"target\":\"telegramd\",\"service_name\":\"telegramd\",\"manager_type\":\"rustclaw\",\"requested_action\":\"status\",\"executed_actions\":[\"status\"],\"pre_state\":\"telegramd=running\",\"post_state\":\"telegramd=running\",\"verified\":true,\"key_evidence\":[\"telegramd process_count=1 memory_rss_bytes=Some(53248)\"],\"failure_reason\":\"\",\"next_step\":\"\",\"summary\":\"Status: telegramd=running\"}"
+    })
+    .to_string();
+    let short_status = "Status: telegramd=running";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "service_control",
+        &service_output,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        short_status,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "respond", short_status));
+    loop_state.delivery_messages.push(short_status.to_string());
+    loop_state.last_user_visible_respond = Some(short_status.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "check whether telegramd is running right now and briefly explain the status",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should expand service_control summary evidence");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert!(
+        reply.text.contains("target=telegramd"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("post_state=telegramd=running"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("pre_state=telegramd=running"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("verified=true"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("manager_type=rustclaw"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("source=service_control"),
+        "reply: {}",
+        reply.text
+    );
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_preserves_richer_service_control_synthesis_without_route_marker() {
+    let state = test_state();
+    let task = claimed_task("task-service-status-planner-observed-synthesis");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.route_reason.clear();
+    route.resolved_intent.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "service_control",
+        r#"{"extra":{"service_name":"telegramd","post_state":"running","pre_state":"running","status":"active","verified":true,"manager_type":"systemd","summary":"Status: telegramd=running"}}"#,
+    ));
+    let synthesis = "telegramd status is active and verified by service_control.".to_string();
+    loop_state.delivery_messages.push(synthesis.clone());
+    loop_state.last_user_visible_respond = Some(synthesis.clone());
+    loop_state.last_publishable_synthesis_output = Some(synthesis.clone());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "service status",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should preserve richer synthesis");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert_eq!(reply.text.trim(), synthesis);
 }
 
 #[test]

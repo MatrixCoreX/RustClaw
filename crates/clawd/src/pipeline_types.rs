@@ -795,6 +795,10 @@ pub(crate) struct PlanResult {
 }
 
 impl PlanStep {
+    pub(crate) fn is_skill_invocation(&self) -> bool {
+        self.action_type == "call_skill"
+    }
+
     pub(crate) fn to_agent_action(&self) -> Option<AgentAction> {
         match self.action_type.as_str() {
             "call_skill" => Some(AgentAction::CallSkill {
