@@ -746,8 +746,12 @@ fn scalar_count_missing_explicit_path_checks_that_path_not_auto_parent() {
     }
     match &normalized[1] {
         AgentAction::Respond { content } => {
-            assert!(content.contains("不存在"));
-            assert!(content.contains("无法统计"));
+            assert!(content.contains("message_key=clawd.msg.scalar_count.unavailable"));
+            assert!(content.contains("reason_code=count_unavailable_missing_target"));
+            assert!(content.contains("exists=false"));
+            assert!(content.contains("kind=missing"));
+            assert!(content.contains("final_answer_shape=scalar_count_unavailable"));
+            assert!(content.contains(&format!("path={missing_path}")));
         }
         other => panic!("expected missing-path Respond action, got {other:?}"),
     }
@@ -836,8 +840,12 @@ fn scalar_count_pathlike_hint_in_current_workspace_does_not_use_parent_auto_loca
     }
     match &normalized[1] {
         AgentAction::Respond { content } => {
-            assert!(content.contains("不存在"));
-            assert!(content.contains("无法统计"));
+            assert!(content.contains("message_key=clawd.msg.scalar_count.unavailable"));
+            assert!(content.contains("reason_code=count_unavailable_missing_target"));
+            assert!(content.contains("exists=false"));
+            assert!(content.contains("kind=missing"));
+            assert!(content.contains("final_answer_shape=scalar_count_unavailable"));
+            assert!(content.contains("path=configs/config_copy"));
         }
         other => panic!("expected missing-path Respond action, got {other:?}"),
     }

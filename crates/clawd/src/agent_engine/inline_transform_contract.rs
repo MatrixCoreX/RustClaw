@@ -657,7 +657,7 @@ pub(super) fn replace_scalar_count_plan_with_count_inventory(
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
     auto_locator_path: Option<&str>,
-    user_text: &str,
+    _user_text: &str,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
     if loop_state.has_tool_or_skill_output {
@@ -681,14 +681,7 @@ pub(super) fn replace_scalar_count_plan_with_count_inventory(
     };
     if !Path::new(&path).is_dir() {
         info!("plan_replace_scalar_count_missing_locator_with_path_facts path={path}");
-        let answer = if crate::language_policy::request_language_hint(user_text)
-            .to_ascii_lowercase()
-            .starts_with("en")
-        {
-            format!("{path} does not exist, so the matching item count cannot be computed.")
-        } else {
-            format!("{path} 不存在，无法统计匹配项数量。")
-        };
+        let answer = scalar_count_missing_target_machine_answer(&path);
         return vec![
             AgentAction::CallTool {
                 tool: "fs_basic".to_string(),
@@ -738,6 +731,21 @@ pub(super) fn replace_scalar_count_plan_with_count_inventory(
         tool: "fs_basic".to_string(),
         args,
     }]
+}
+
+fn scalar_count_missing_target_machine_answer(path: &str) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.scalar_count.unavailable".to_string(),
+        "reason_code=count_unavailable_missing_target".to_string(),
+        "exists=false".to_string(),
+        "kind=missing".to_string(),
+        "final_answer_shape=scalar_count_unavailable".to_string(),
+    ];
+    let path = crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(path).replace('\n', " "),
+    );
+    lines.push(format!("path={path}"));
+    lines.join("\n")
 }
 
 pub(super) fn scalar_count_actions_include_listing(actions: &[AgentAction]) -> bool {
