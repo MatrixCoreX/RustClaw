@@ -676,12 +676,16 @@ fn push_machine_field_aliases(
     value: &str,
     values: &mut Vec<String>,
 ) {
-    if key != "line" {
-        return;
-    }
-    values.push(format!("line_number={value}"));
-    if let Some(parent) = parent_path {
-        values.push(format!("{parent}.line_number={value}"));
+    let aliases: &[&str] = match key {
+        "line" => &["line_number"],
+        "status_code" => &["status"],
+        _ => &[],
+    };
+    for alias in aliases {
+        values.push(format!("{alias}={value}"));
+        if let Some(parent) = parent_path {
+            values.push(format!("{parent}.{alias}={value}"));
+        }
     }
 }
 
