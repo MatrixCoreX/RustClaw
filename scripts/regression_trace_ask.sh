@@ -271,61 +271,9 @@ PY
 
 print_model_io_summary() {
   local task_id="$1"
-  python3 - "${ROOT_DIR}/logs/model_io.log" "$task_id" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-task_id = sys.argv[2]
-if not path.exists():
-    print("  [llm] logs/model_io.log not found")
-    raise SystemExit(0)
-
-def compact(s: str, limit: int = 180) -> str:
-    s = " ".join((s or "").split())
-    if len(s) > limit:
-        return s[:limit] + "...(truncated)"
-    return s
-
-def prompt_head(prompt: str) -> str:
-    lines = (prompt or "").splitlines()
-    for line in lines:
-        t = line.strip()
-        if not t or t in ("<!--", "-->"):
-            continue
-        return compact(t, 120)
-    return "<empty>"
-
-rows = []
-for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
-    raw = raw.strip()
-    if not raw:
-        continue
-    try:
-        obj = json.loads(raw)
-    except Exception:
-        continue
-    if str(obj.get("task_id") or "") != task_id:
-        continue
-    rows.append(obj)
-
-if not rows:
-    print("  [llm] no model_io.log rows matched task_id")
-else:
-    print("  [llm] model_io.log")
-    for idx, row in enumerate(rows, start=1):
-        status = row.get("status") or ""
-        model = row.get("model") or ""
-        phead = prompt_head(row.get("prompt") or "")
-        rhead = compact(row.get("response") or "", 160)
-        ehead = compact(row.get("error") or "", 160)
-        print(f"    [{idx}] status={status} model={model} prompt={phead}")
-        if rhead:
-            print(f"         response={rhead}")
-        if ehead:
-            print(f"         error={ehead}")
-PY
+  python3 "${ROOT_DIR}/scripts/nl_tests/print_llm_raw_trace.py" \
+    --log "${ROOT_DIR}/logs/model_io.log" \
+    --task-id "$task_id"
 }
 
 print_issue_hints() {

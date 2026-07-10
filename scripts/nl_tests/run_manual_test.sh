@@ -496,85 +496,20 @@ PY
 
 init_llm_trace_offset() {
   local offset_file="$1"
-  python3 - "$ROOT_DIR/logs/model_io.log" "$offset_file" <<'PY'
-import sys
-from pathlib import Path
-
-log_path = Path(sys.argv[1])
-offset_file = Path(sys.argv[2])
-size = log_path.stat().st_size if log_path.exists() else 0
-offset_file.write_text(str(size), encoding="utf-8")
-PY
+  python3 "${SCRIPT_DIR}/print_llm_raw_trace.py" \
+    --log "$ROOT_DIR/logs/model_io.log" \
+    --state-file "$offset_file" \
+    --init-state
 }
 
 print_new_llm_trace() {
   local task_id="$1"
   local offset_file="$2"
   [[ "${PRINT_LLM_TRACE:-1}" == "1" ]] || return 0
-  python3 - "$ROOT_DIR/logs/model_io.log" "$task_id" "$offset_file" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-log_path = Path(sys.argv[1])
-task_id = sys.argv[2]
-offset_file = Path(sys.argv[3])
-
-def indent_block(text: str) -> str:
-    return "\n".join(f"    {line}" for line in text.splitlines()) if text else ""
-
-offset = 0
-if offset_file.exists():
-    raw = offset_file.read_text(encoding="utf-8").strip()
-    if raw:
-        try:
-            offset = int(raw)
-        except ValueError:
-            offset = 0
-
-if not log_path.exists():
-    offset_file.write_text(str(offset), encoding="utf-8")
-    raise SystemExit(0)
-
-with log_path.open("rb") as fh:
-    fh.seek(offset)
-    chunk = fh.read()
-    new_offset = fh.tell()
-
-offset_file.write_text(str(new_offset), encoding="utf-8")
-if not chunk:
-    raise SystemExit(0)
-
-for raw_line in chunk.decode("utf-8", errors="replace").splitlines():
-    line = raw_line.strip()
-    if not line:
-        continue
-    try:
-        obj = json.loads(line)
-    except Exception:
-        continue
-    if str(obj.get("task_id") or "") != task_id:
-        continue
-
-    vendor = str(obj.get("vendor") or "").strip()
-    model = str(obj.get("model") or "").strip()
-    status = str(obj.get("status") or "").strip()
-    prompt = str(obj.get("prompt") or "").strip()
-    response = str(obj.get("clean_response") or obj.get("response") or "").strip()
-    error = str(obj.get("error") or "").strip()
-
-    header = f"  [llm] vendor={vendor or '<unknown>'} model={model or '<unknown>'} status={status or '<unknown>'}"
-    print(header)
-    if prompt:
-        print("  [llm-request]")
-        print(indent_block(prompt))
-    if response:
-        print("  [llm-response]")
-        print(indent_block(response))
-    if error:
-        print("  [llm-error]")
-        print(indent_block(error))
-PY
+  python3 "${SCRIPT_DIR}/print_llm_raw_trace.py" \
+    --log "$ROOT_DIR/logs/model_io.log" \
+    --task-id "$task_id" \
+    --state-file "$offset_file"
 }
 
 poll_until_terminal() {
