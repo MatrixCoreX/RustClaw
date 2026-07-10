@@ -1,5 +1,10 @@
-use super::{extract_bind_key_candidate, is_unbound_allowed_command};
+use super::{
+    extract_bind_key_candidate, is_unbound_allowed_command, WA_BIND_REQUIRED_FALLBACK,
+    WA_I18N_BIND_REQUIRED_KEY,
+};
 use claw_core::channel_commands::ChannelCommandCatalog;
+use claw_core::channel_i18n::text_from_path;
+use std::path::Path;
 
 fn default_catalog() -> ChannelCommandCatalog {
     ChannelCommandCatalog::default()
@@ -47,4 +52,27 @@ fn waiting_key_state_does_not_treat_business_commands_as_key() {
 fn unbound_media_like_empty_text_requires_binding_prompt() {
     assert!(!unbound_allowed(""));
     assert_eq!(extract_bind_key_candidate("", false), None);
+}
+
+#[test]
+fn whatsapp_i18n_is_locale_specific_with_machine_fallback() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let zh_path = root.join("configs/i18n/whatsapp-cloud.zh-CN.toml");
+    let en_path = root.join("configs/i18n/whatsapp-cloud.en-US.toml");
+    let zh = text_from_path(
+        zh_path.to_string_lossy().as_ref(),
+        WA_I18N_BIND_REQUIRED_KEY,
+        "fallback",
+    );
+    let en = text_from_path(
+        en_path.to_string_lossy().as_ref(),
+        WA_I18N_BIND_REQUIRED_KEY,
+        "fallback",
+    );
+
+    assert!(zh.contains("请先发送"));
+    assert!(!zh.contains("Please send"));
+    assert!(en.contains("Please send"));
+    assert!(!en.contains("请先"));
+    assert!(WA_BIND_REQUIRED_FALLBACK.starts_with("message_key="));
 }
