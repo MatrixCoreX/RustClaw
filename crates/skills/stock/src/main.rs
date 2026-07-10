@@ -88,6 +88,8 @@ struct StockSkillConfig {
     max_llm_candidates: usize,
     #[serde(default)]
     aliases: HashMap<String, String>,
+    #[serde(default)]
+    cleanup_tokens: Vec<String>,
 }
 
 impl Default for StockSkillConfig {
@@ -100,6 +102,7 @@ impl Default for StockSkillConfig {
             llm_timeout_seconds: None,
             max_llm_candidates: default_max_llm_candidates(),
             aliases: HashMap::new(),
+            cleanup_tokens: Vec::new(),
         }
     }
 }
@@ -304,8 +307,8 @@ fn resolve_symbol(input: &str, runtime: &RuntimeConfig) -> Result<ResolvedSymbol
         return Err("code=name_lookup_disabled config=configs/stock.toml".to_string());
     }
 
-    let alias_map = build_alias_map(&runtime.stock.aliases);
-    let normalized_input = normalize_stock_name(input);
+    let alias_map = build_alias_map(&runtime.stock.aliases, &runtime.stock.cleanup_tokens);
+    let normalized_input = normalize_stock_name(input, &runtime.stock.cleanup_tokens);
     if normalized_input.is_empty() {
         return Err("code=symbol_unrecognized reason=empty_normalized_name".to_string());
     }
@@ -322,7 +325,12 @@ fn resolve_symbol(input: &str, runtime: &RuntimeConfig) -> Result<ResolvedSymbol
         &alias_map,
         runtime.stock.max_llm_candidates,
     );
-    if let Some(best) = choose_direct_candidate(input, &normalized_input, &candidates) {
+    if let Some(best) = choose_direct_candidate(
+        input,
+        &normalized_input,
+        &candidates,
+        &runtime.stock.cleanup_tokens,
+    ) {
         return Ok(ResolvedSymbol {
             code: best.code.clone(),
             correction: symbol_correction(input, &best.alias, false),
@@ -526,10 +534,13 @@ fn looks_like_stock_code(input: &str) -> bool {
     (s.starts_with("sh") || s.starts_with("sz")) && digits.len() == 6
 }
 
-fn build_alias_map(aliases: &HashMap<String, String>) -> HashMap<String, (String, String)> {
+fn build_alias_map(
+    aliases: &HashMap<String, String>,
+    cleanup_tokens: &[String],
+) -> HashMap<String, (String, String)> {
     let mut out = HashMap::new();
     for (alias, code) in aliases {
-        let normalized = normalize_stock_name(alias);
+        let normalized = normalize_stock_name(alias, cleanup_tokens);
         if normalized.is_empty() {
             continue;
         }
@@ -539,24 +550,14 @@ fn build_alias_map(aliases: &HashMap<String, String>) -> HashMap<String, (String
     out
 }
 
-fn normalize_stock_name(input: &str) -> String {
+fn normalize_stock_name(input: &str, cleanup_tokens: &[String]) -> String {
     let mut s = input.trim().to_string();
-    for token in [
-        "股票代码",
-        "股票代号",
-        "股票名称",
-        "股票",
-        "股价",
-        "行情",
-        "A股",
-        "a股",
-        "股份有限公司",
-        "股份",
-        "有限公司",
-        "集团",
-        "控股",
-        "公司",
-    ] {
+    for token in cleanup_tokens
+        .iter()
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    {
         s = s.replace(token, "");
     }
     s.chars()
@@ -606,6 +607,7 @@ fn choose_direct_candidate<'a>(
     raw_input: &str,
     normalized_input: &str,
     candidates: &'a [AliasCandidate],
+    cleanup_tokens: &[String],
 ) -> Option<&'a AliasCandidate> {
     let best = candidates.first()?;
     if best.normalized == normalized_input {
@@ -618,7 +620,12 @@ fn choose_direct_candidate<'a>(
     if best.score >= 4_200 && best.score - second_score >= 900 {
         return Some(best);
     }
-    if levenshtein(&normalize_stock_name(raw_input), &best.normalized) <= 1 && best.score >= 3_800 {
+    if levenshtein(
+        &normalize_stock_name(raw_input, cleanup_tokens),
+        &best.normalized,
+    ) <= 1
+        && best.score >= 3_800
+    {
         return Some(best);
     }
     None
@@ -636,9 +643,9 @@ fn choose_candidate_via_llm<'a>(
         .iter()
         .map(|c| format!("{} -> {}", c.alias, c.code))
         .collect::<Vec<_>>();
-    let system = "你是 A 股股票名称纠错器。只能从候选列表中选择一个最可能匹配的名称；如果没有把握就返回 NONE。只输出一行 JSON，如 {\"alias\":\"中国移动\"} 或 {\"alias\":\"NONE\"}。";
+    let system = "You normalize A-share stock-name typos. Select exactly one alias from the provided candidates, or NONE when uncertain. Output one-line JSON only: {\"alias\":\"<candidate alias>\"} or {\"alias\":\"NONE\"}.";
     let user = format!(
-        "用户输入：{}\n候选列表：\n{}\n请只从候选里选一个最可能的标准名称；没有把握就返回 NONE。",
+        "raw_input: {}\ncandidates:\n{}\nReturn exactly one candidate alias from the list, or NONE.",
         raw_input.trim(),
         candidate_names.join("\n")
     );
@@ -767,31 +774,34 @@ fn call_internal_llm_text(
         let client = Client::builder()
             .timeout(Duration::from_secs(timeout_secs.max(5)))
             .build()
-            .map_err(|e| format!("创建内部 LLM 客户端失败: {e}"))?;
+            .map_err(|e| format!("code=internal_llm_client_build_failed detail={e}"))?;
         let resp = client
             .post(url)
             .header("x-rustclaw-internal-llm-token", token)
             .json(&body)
             .send()
-            .map_err(|e| format!("内部 LLM 名称纠错请求失败: {e}"))?;
+            .map_err(|e| format!("code=internal_llm_request_failed detail={e}"))?;
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().unwrap_or_default();
-            return Err(format!("内部 LLM 名称纠错失败 HTTP {}: {}", status, body));
+            return Err(format!(
+                "code=internal_llm_http_status status={} body={}",
+                status, body
+            ));
         }
         let parsed: InternalLlmApiResponse = resp
             .json()
-            .map_err(|e| format!("解析内部 LLM 名称纠错响应失败: {e}"))?;
+            .map_err(|e| format!("code=internal_llm_json_failed detail={e}"))?;
         if !parsed.ok {
             return Err(parsed
                 .error
-                .unwrap_or_else(|| "内部 LLM 名称纠错失败".to_string()));
+                .unwrap_or_else(|| "code=internal_llm_failed".to_string()));
         }
         parsed
             .data
             .map(|data| data.text)
             .filter(|text| !text.trim().is_empty())
-            .ok_or_else(|| "内部 LLM 名称纠错返回空内容".to_string())
+            .ok_or_else(|| "code=internal_llm_empty_content".to_string())
     })();
     Some(result)
 }
@@ -831,21 +841,24 @@ fn call_openai_compatible_chat(
     let client = Client::builder()
         .timeout(Duration::from_secs(timeout_secs))
         .build()
-        .map_err(|e| format!("创建 LLM 客户端失败: {e}"))?;
+        .map_err(|e| format!("code=llm_client_build_failed detail={e}"))?;
     let resp = client
         .post(url)
         .bearer_auth(vendor_cfg.api_key.trim())
         .json(&body)
         .send()
-        .map_err(|e| format!("LLM 名称纠错请求失败: {e}"))?;
+        .map_err(|e| format!("code=llm_request_failed detail={e}"))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        return Err(format!("LLM 名称纠错失败 HTTP {}: {}", status, body));
+        return Err(format!(
+            "code=llm_http_status status={} body={}",
+            status, body
+        ));
     }
     let v: Value = resp
         .json()
-        .map_err(|e| format!("解析 LLM 名称纠错响应失败: {e}"))?;
+        .map_err(|e| format!("code=llm_json_failed detail={e}"))?;
     let content = v
         .get("choices")
         .and_then(|v| v.as_array())
@@ -855,7 +868,7 @@ fn call_openai_compatible_chat(
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "LLM 名称纠错返回空内容".to_string())?;
+        .ok_or_else(|| "code=llm_empty_content".to_string())?;
     Ok(content.to_string())
 }
 
@@ -873,7 +886,7 @@ fn parse_llm_alias_response(content: &str) -> Result<String, String> {
     }
     let line = trimmed.lines().next().unwrap_or("").trim();
     if line.is_empty() {
-        return Err("LLM 名称纠错返回空别名".to_string());
+        return Err("code=llm_empty_alias".to_string());
     }
     Ok(line.trim_matches('"').to_string())
 }
