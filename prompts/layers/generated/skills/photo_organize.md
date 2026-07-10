@@ -19,7 +19,7 @@
 - 输出语言由 `configs/photo_organize.toml` 和 `configs/i18n/photo_organize.<locale>.toml` 控制，也可被 `args.locale/lang` 或 `context.locale/lang` 覆盖。
 
 ## Config Entry Points (from interface)
-- `configs/photo_organize.toml`: skill defaults such as locale and optional i18n file override.
+- `configs/photo_organize.toml`: skill defaults such as locale, optional i18n file override, external photo child directory hints, and camera brand alias metadata. User-language directory/brand aliases belong in this metadata file, not in Rust source.
 - `configs/i18n/photo_organize.<locale>.toml`: user-visible message catalog for localized output.
 - `configs/skills_registry.toml`: runtime registry entry, aliases, prompt file, risk/confirmation metadata, and planner visibility.
 - No external account, API key, or model provider is required for the skill itself.

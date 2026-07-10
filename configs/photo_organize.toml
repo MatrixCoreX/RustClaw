@@ -3,3 +3,31 @@
 language = "zh-CN"
 # 可选：自定义词典路径（相对于仓库根目录）
 # i18n_path = "configs/i18n/photo_organize.zh-CN.toml"
+
+# Domain metadata for external drive photo-directory discovery.
+# Keep user-language labels here instead of hardcoding them in Rust.
+photo_child_dir_hints = ["DCIM", "Photos", "Pictures", "Camera", "照片", "相机"]
+
+[[photo_organize.camera_brand_aliases]]
+canonical = "Canon"
+aliases = ["canon", "佳能"]
+
+[[photo_organize.camera_brand_aliases]]
+canonical = "Sony"
+aliases = ["sony", "索尼"]
+
+[[photo_organize.camera_brand_aliases]]
+canonical = "Nikon"
+aliases = ["nikon", "尼康"]
+
+[[photo_organize.camera_brand_aliases]]
+canonical = "Fujifilm"
+aliases = ["fujifilm", "fuji", "富士"]
+
+[[photo_organize.camera_brand_aliases]]
+canonical = "Panasonic"
+aliases = ["panasonic", "lumix", "松下"]
+
+[[photo_organize.camera_brand_aliases]]
+canonical = "Leica"
+aliases = ["leica", "徕卡"]

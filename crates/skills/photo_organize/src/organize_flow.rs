@@ -1,7 +1,11 @@
 use super::*;
 
-pub(super) fn execute(args: &Value, cat: &TextCatalog) -> Result<SkillOutput, String> {
-    let normalized = normalize_args(args, cat)?;
+pub(super) fn execute(
+    args: &Value,
+    cat: &TextCatalog,
+    cfg: &PhotoOrganizeConfig,
+) -> Result<SkillOutput, String> {
+    let normalized = normalize_args(args, cat, cfg)?;
     let obj = normalized
         .as_object()
         .ok_or_else(|| tr(cat, "photo_organize.err.normalized_args_object"))?;
@@ -12,11 +16,11 @@ pub(super) fn execute(args: &Value, cat: &TextCatalog) -> Result<SkillOutput, St
         .trim()
         .to_ascii_lowercase();
     if let Some(default_mode) = default_mode_for_action_alias(&action) {
-        return handle_organize_with_default_mode(obj, cat, default_mode);
+        return handle_organize_with_default_mode(obj, cat, cfg, default_mode);
     }
     match action.as_str() {
-        "prepare" | "select_source" => Ok(build_directory_prompt(cat)),
-        "organize" | "run" => handle_organize(obj, cat),
+        "prepare" | "select_source" => Ok(build_directory_prompt(cat, cfg)),
+        "organize" | "run" => handle_organize(obj, cat, cfg),
         other => Err(tr_with(
             cat,
             "photo_organize.err.unsupported_action",
@@ -45,22 +49,24 @@ pub(super) fn has_mode_arg(obj: &Map<String, Value>) -> bool {
 pub(super) fn handle_organize_with_default_mode(
     obj: &Map<String, Value>,
     cat: &TextCatalog,
+    cfg: &PhotoOrganizeConfig,
     default_mode: OrganizeMode,
 ) -> Result<SkillOutput, String> {
     if has_mode_arg(obj) {
-        return handle_organize(obj, cat);
+        return handle_organize(obj, cat, cfg);
     }
     let mut normalized = obj.clone();
     normalized.insert(
         "mode".to_string(),
         Value::String(default_mode.as_str().to_string()),
     );
-    handle_organize(&normalized, cat)
+    handle_organize(&normalized, cat, cfg)
 }
 
 pub(super) fn handle_organize(
     obj: &Map<String, Value>,
     cat: &TextCatalog,
+    cfg: &PhotoOrganizeConfig,
 ) -> Result<SkillOutput, String> {
     let source_dir_raw = match pick_string(
         obj,
@@ -74,9 +80,9 @@ pub(super) fn handle_organize(
         ],
     ) {
         Some(raw) if !raw.trim().is_empty() => raw.trim().to_string(),
-        _ => match auto_source_dir_from_external_roots() {
+        _ => match auto_source_dir_from_external_roots(cfg) {
             Some(path) => path.display().to_string(),
-            None => return Ok(build_directory_prompt(cat)),
+            None => return Ok(build_directory_prompt(cat, cfg)),
         },
     };
     let mode = OrganizeMode::parse(
@@ -94,7 +100,7 @@ pub(super) fn handle_organize(
         .and_then(Value::as_u64)
         .unwrap_or(PREVIEW_LIMIT_DEFAULT as u64)
         .clamp(1, 50) as usize;
-    let options = resolve_organize_options(obj);
+    let options = resolve_organize_options(obj, cfg);
 
     let source_dir = resolve_existing_dir(&source_dir_raw, cat)?;
     let output_dir = resolve_output_dir(obj, &source_dir)?;
@@ -107,7 +113,8 @@ pub(super) fn handle_organize(
         ));
     }
 
-    let mut build_result = build_photo_plans(&source_dir, &output_dir, photo_files, &options, cat)?;
+    let mut build_result =
+        build_photo_plans(&source_dir, &output_dir, photo_files, &options, cat, cfg)?;
     build_result
         .plans
         .sort_by(|left, right| left.source_rel.cmp(&right.source_rel));
@@ -228,8 +235,8 @@ pub(super) fn handle_organize(
     })
 }
 
-pub(super) fn build_directory_prompt(cat: &TextCatalog) -> SkillOutput {
-    let candidates = discover_external_photo_candidates();
+pub(super) fn build_directory_prompt(cat: &TextCatalog, cfg: &PhotoOrganizeConfig) -> SkillOutput {
+    let candidates = discover_external_photo_candidates(cfg);
     let lines = if candidates.is_empty() {
         platform_hint_lines(cat)
     } else {
@@ -276,8 +283,8 @@ pub(super) fn build_directory_prompt(cat: &TextCatalog) -> SkillOutput {
     }
 }
 
-pub(super) fn auto_source_dir_from_external_roots() -> Option<PathBuf> {
-    preferred_auto_source_root(discover_external_roots())
+pub(super) fn auto_source_dir_from_external_roots(cfg: &PhotoOrganizeConfig) -> Option<PathBuf> {
+    preferred_auto_source_root(discover_external_roots(cfg))
 }
 
 pub(super) fn preferred_auto_source_root(roots: Vec<PathBuf>) -> Option<PathBuf> {
@@ -371,7 +378,10 @@ pub(super) fn resolve_output_dir(
     Ok(output)
 }
 
-pub(super) fn resolve_organize_options(obj: &Map<String, Value>) -> OrganizeOptions {
+pub(super) fn resolve_organize_options(
+    obj: &Map<String, Value>,
+    cfg: &PhotoOrganizeConfig,
+) -> OrganizeOptions {
     let group_by = parse_group_by_value(obj.get("group_by"))
         .filter(|fields| !fields.is_empty())
         .unwrap_or_else(GroupField::defaults);
@@ -402,7 +412,7 @@ pub(super) fn resolve_organize_options(obj: &Map<String, Value>) -> OrganizeOpti
             .or_else(|| obj.get("camera_brands")),
     )
     .into_iter()
-    .filter_map(|brand| canonical_brand_name(&brand))
+    .filter_map(|brand| canonical_brand_name(&brand, cfg))
     .collect::<Vec<_>>();
     let selected_models = parse_selector_list(
         obj.get("selected_models")
@@ -584,31 +594,44 @@ pub(super) fn parse_selector_list(value: Option<&Value>) -> Vec<String> {
     out
 }
 
-pub(super) fn canonical_brand_name(raw: &str) -> Option<String> {
+pub(super) fn canonical_brand_name(raw: &str, cfg: &PhotoOrganizeConfig) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
     }
-    camera_brand_aliases()
+    configured_camera_brand_aliases(cfg)
         .iter()
         .find_map(|entry| {
             entry
                 .aliases
                 .iter()
                 .any(|alias| token_matches_brand_alias(trimmed, alias))
-                .then(|| entry.canonical.to_string())
+                .then(|| entry.canonical.trim().to_string())
+        })
+        .or_else(|| {
+            static_camera_brand_aliases().iter().find_map(|entry| {
+                entry
+                    .aliases
+                    .iter()
+                    .any(|alias| token_matches_brand_alias(trimmed, alias))
+                    .then(|| entry.canonical.to_string())
+            })
         })
         .or_else(|| Some(trimmed.to_string()))
 }
 
-pub(super) fn brand_matches(camera_make: &str, selected_brands: &[String]) -> bool {
+pub(super) fn brand_matches(
+    camera_make: &str,
+    selected_brands: &[String],
+    cfg: &PhotoOrganizeConfig,
+) -> bool {
     if selected_brands.is_empty() {
         return true;
     }
-    let make_canonical = canonical_brand_name(camera_make);
+    let make_canonical = canonical_brand_name(camera_make, cfg);
     let make_lower = camera_make.to_ascii_lowercase();
     selected_brands.iter().any(|brand| {
-        let selected_canonical = canonical_brand_name(brand);
+        let selected_canonical = canonical_brand_name(brand, cfg);
         if make_canonical.is_some() && make_canonical == selected_canonical {
             return true;
         }
@@ -625,34 +648,38 @@ struct CameraBrandAlias {
     aliases: &'static [&'static str],
 }
 
-fn camera_brand_aliases() -> &'static [CameraBrandAlias] {
+fn static_camera_brand_aliases() -> &'static [CameraBrandAlias] {
     const ALIASES: &[CameraBrandAlias] = &[
         CameraBrandAlias {
             canonical: "Canon",
-            aliases: &["canon", "佳能"],
+            aliases: &["canon"],
         },
         CameraBrandAlias {
             canonical: "Sony",
-            aliases: &["sony", "索尼"],
+            aliases: &["sony"],
         },
         CameraBrandAlias {
             canonical: "Nikon",
-            aliases: &["nikon", "尼康"],
+            aliases: &["nikon"],
         },
         CameraBrandAlias {
             canonical: "Fujifilm",
-            aliases: &["fujifilm", "fuji", "富士"],
+            aliases: &["fujifilm", "fuji"],
         },
         CameraBrandAlias {
             canonical: "Panasonic",
-            aliases: &["panasonic", "lumix", "松下"],
+            aliases: &["panasonic", "lumix"],
         },
         CameraBrandAlias {
             canonical: "Leica",
-            aliases: &["leica", "徕卡"],
+            aliases: &["leica"],
         },
     ];
     ALIASES
+}
+
+fn configured_camera_brand_aliases(cfg: &PhotoOrganizeConfig) -> &[CameraBrandAliasConfig] {
+    cfg.camera_brand_aliases.as_deref().unwrap_or_default()
 }
 
 fn token_matches_brand_alias(token: &str, alias: &str) -> bool {
@@ -750,6 +777,7 @@ pub(super) fn build_photo_plans(
     photo_files: Vec<PathBuf>,
     options: &OrganizeOptions,
     cat: &TextCatalog,
+    cfg: &PhotoOrganizeConfig,
 ) -> Result<BuildPhotoPlansResult, String> {
     let scanned_photo_count = photo_files.len();
     let mut skipped_no_exif = 0usize;
@@ -798,7 +826,7 @@ pub(super) fn build_photo_plans(
             .and_then(Value::as_str)
             .map(str::to_string);
         if let Some(make_text) = make.as_deref() {
-            if !brand_matches(make_text, &options.selected_brands) {
+            if !brand_matches(make_text, &options.selected_brands, cfg) {
                 continue;
             }
         } else if !options.selected_brands.is_empty() {
