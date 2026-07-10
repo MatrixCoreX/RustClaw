@@ -201,10 +201,12 @@ fn direct_answer_formats_run_cmd_exists_probe_with_resolved_path() {
         auto_locator_path: Some(resolved.clone()),
         ..AgentRunContext::default()
     };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some(format!("有，路径：{resolved}").as_str())
-    );
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("path fact answer");
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=true"));
+    assert!(answer.contains(&format!("path={resolved}")));
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
@@ -246,10 +248,13 @@ fn direct_answer_formats_run_cmd_not_found_probe_as_no() {
         route_result: Some(route_result),
         ..AgentRunContext::default()
     };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("没有")
-    );
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("missing path fact answer");
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=false"));
+    assert!(answer.contains("kind=missing"));
+    assert!(answer.contains("path=rustclaw.service"));
 }
 
 #[test]

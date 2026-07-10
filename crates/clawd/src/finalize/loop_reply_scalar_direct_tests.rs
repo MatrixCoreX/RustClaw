@@ -1232,7 +1232,10 @@ fn direct_structured_finalize_answers_existence_with_path_from_single_observatio
     let (answer, summary) =
         super::direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
             .expect("single path_batch_facts observation should answer existence-with-path");
-    assert_eq!(answer, "有，路径：/tmp/rustclaw-workspace/rustclaw.service");
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=true"));
+    assert!(answer.contains("path=/tmp/rustclaw-workspace/rustclaw.service"));
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
@@ -1639,7 +1642,10 @@ fn direct_scalar_finalize_prefers_presence_plus_path_for_fs_search_presence_quer
     let (answer, summary) =
         direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
             .expect("presence+path fallback should succeed");
-    assert_eq!(answer, "有，路径：rustclaw.service");
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=true"));
+    assert!(answer.contains("path=rustclaw.service"));
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)

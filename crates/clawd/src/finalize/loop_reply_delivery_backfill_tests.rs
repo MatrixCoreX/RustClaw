@@ -895,7 +895,13 @@ async fn finalize_loop_reply_uses_latest_fs_basic_path_fact_after_repair() {
     .await
     .expect("finalize should succeed");
 
-    assert_eq!(reply.text, "/tmp/repo/configs/channels | 目录");
+    assert!(reply
+        .text
+        .contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(reply.text.contains("reason_code=path_fact_observed"));
+    assert!(reply.text.contains("exists=true"));
+    assert!(reply.text.contains("path=/tmp/repo/configs/channels"));
+    assert!(reply.text.contains("kind=dir"));
     assert!(!reply.text.contains("没能整理成可靠结论"));
     assert!(reply
         .messages
@@ -903,7 +909,7 @@ async fn finalize_loop_reply_uses_latest_fs_basic_path_fact_after_repair() {
         .all(|message| !crate::finalize::is_execution_summary_message(message)));
     assert_eq!(
         reply.messages.last().map(String::as_str),
-        Some("/tmp/repo/configs/channels | 目录")
+        Some(reply.text.as_str())
     );
     assert!(!reply.should_fail_task);
     assert!(!reply.is_llm_reply);

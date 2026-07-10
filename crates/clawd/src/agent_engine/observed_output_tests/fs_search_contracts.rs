@@ -698,11 +698,12 @@ fn fs_search_direct_answer_prefers_exact_match_before_confirmation() {
             r#"{"action":"find_name","pattern":"README.md","count":5,"results":["RUSTCLAW_SERVICE_README.md","UI/README.md","README.md","pi_app/README.md","skill_develop/README.md"],"root":""}"#,
         )
         .expect("json");
-    assert_eq!(
-        super::fs_search_direct_answer_candidate(None, &value, None, false, false, false)
-            .as_deref(),
-        Some("有，路径：README.md")
-    );
+    let answer = super::fs_search_direct_answer_candidate(None, &value, None, false, false, false)
+        .expect("exact match path fact");
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=true"));
+    assert!(answer.contains("path=README.md"));
     assert_eq!(
         super::fs_search_direct_answer_candidate(None, &value, None, false, false, true).as_deref(),
         Some("README.md")
