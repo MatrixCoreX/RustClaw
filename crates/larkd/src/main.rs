@@ -217,15 +217,30 @@ fn lark_saved_file_name(message_type: &str, content: &Value, ts: u64) -> String 
     format!("{}.{}", ts, ext)
 }
 
-fn lark_media_kind_label_en(message_type: &str) -> &'static str {
+fn lark_media_kind_token(message_type: &str) -> &'static str {
     match message_type {
-        "image" => "an image",
-        "sticker" => "a sticker",
-        "media" => "a video",
-        "audio" => "an audio message",
-        "file" => "a file",
-        _ => "a media attachment",
+        "image" => "image",
+        "sticker" => "sticker",
+        "media" => "video",
+        "audio" => "audio",
+        "file" => "file",
+        _ => "media",
     }
+}
+
+fn lark_media_agent_context(message_type: &str, rel_path: &str) -> String {
+    json!({
+        "event_type": "channel_media_saved",
+        "channel": "lark",
+        "media_kind": lark_media_kind_token(message_type),
+        "source_message_type": message_type,
+        "workspace_relative_path": rel_path,
+        "locator": {
+            "kind": "workspace_relative_path",
+            "path": rel_path
+        }
+    })
+    .to_string()
 }
 
 /// 入站媒体（图片 / 文件 / 音频 / 视频）解析结果。
@@ -632,11 +647,7 @@ async fn handle_incoming_lark_media(state: AppState, ctx: LarkMediaCtx) {
         return;
     }
 
-    let label = lark_media_kind_label_en(&ctx.message_type);
-    let hint = format!(
-        "The user sent {}. Saved under workspace-relative path: {}. Reply or use tools as appropriate.",
-        label, rel
-    );
+    let hint = lark_media_agent_context(&ctx.message_type, &rel);
     handle_text_message_to_clawd(state, ctx.open_id, ctx.chat_id, hint, Some(ident.user_key));
 }
 

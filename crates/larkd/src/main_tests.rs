@@ -1,4 +1,5 @@
-use super::{extract_bind_key_candidate, is_unbound_allowed_command};
+use super::{extract_bind_key_candidate, is_unbound_allowed_command, lark_media_agent_context};
+use serde_json::Value;
 
 #[test]
 fn unbound_plain_text_requires_binding_prompt() {
@@ -43,4 +44,20 @@ fn waiting_key_state_rejects_non_binding_commands() {
 fn unbound_media_like_empty_text_requires_binding_prompt() {
     assert!(!is_unbound_allowed_command(""));
     assert_eq!(extract_bind_key_candidate("", false), None);
+}
+
+#[test]
+fn lark_media_agent_context_uses_machine_fields() {
+    let text = lark_media_agent_context("media", "data/larkd/video/chat/file.mp4");
+    let value: Value = serde_json::from_str(&text).expect("media context json");
+    assert_eq!(value["event_type"], "channel_media_saved");
+    assert_eq!(value["channel"], "lark");
+    assert_eq!(value["media_kind"], "video");
+    assert_eq!(value["source_message_type"], "media");
+    assert_eq!(
+        value["workspace_relative_path"],
+        "data/larkd/video/chat/file.mp4"
+    );
+    assert_eq!(value["locator"]["kind"], "workspace_relative_path");
+    assert_eq!(value["locator"]["path"], "data/larkd/video/chat/file.mp4");
 }

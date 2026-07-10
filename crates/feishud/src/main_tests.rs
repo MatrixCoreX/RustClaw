@@ -2,6 +2,7 @@ use super::{
     extract_bind_key_candidate, extract_pending_bind_token_candidate, handle_incoming_feishu_text,
     is_unbound_allowed_command, AppState, FeishuConfig, FeishuSection,
 };
+use crate::media_helpers::feishu_media_agent_context;
 use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
@@ -55,6 +56,22 @@ fn waiting_key_state_rejects_non_binding_commands() {
 fn unbound_media_like_empty_text_requires_binding_prompt() {
     assert!(!is_unbound_allowed_command(""));
     assert_eq!(extract_bind_key_candidate("", false), None);
+}
+
+#[test]
+fn feishu_media_agent_context_uses_machine_fields() {
+    let text = feishu_media_agent_context("image", "data/feishud/image/chat/file.jpg");
+    let value: Value = serde_json::from_str(&text).expect("media context json");
+    assert_eq!(value["event_type"], "channel_media_saved");
+    assert_eq!(value["channel"], "feishu");
+    assert_eq!(value["media_kind"], "image");
+    assert_eq!(value["source_message_type"], "image");
+    assert_eq!(
+        value["workspace_relative_path"],
+        "data/feishud/image/chat/file.jpg"
+    );
+    assert_eq!(value["locator"]["kind"], "workspace_relative_path");
+    assert_eq!(value["locator"]["path"], "data/feishud/image/chat/file.jpg");
 }
 
 #[test]
