@@ -205,6 +205,87 @@ impl TaskJournalStepTrace {
     }
 }
 
+fn step_output_excerpt_for_journal(output: &str) -> String {
+    compact_structured_listing_output_for_journal(output)
+        .unwrap_or_else(|| crate::truncate_for_log(output))
+}
+
+fn compact_structured_listing_output_for_journal(output: &str) -> Option<String> {
+    let value = serde_json::from_str::<Value>(output.trim()).ok()?;
+    let text_json = value
+        .get("text")
+        .and_then(Value::as_str)
+        .and_then(|text| serde_json::from_str::<Value>(text.trim()).ok());
+    let source = value
+        .get("extra")
+        .filter(|extra| extra.is_object())
+        .or_else(|| text_json.as_ref())
+        .unwrap_or(&value);
+    if !value_is_structured_listing_output(source) {
+        return None;
+    }
+    let mut compact = serde_json::Map::new();
+    copy_listing_field(source, &mut compact, "action");
+    copy_listing_field(source, &mut compact, "counts");
+    copy_listing_field(source, &mut compact, "path");
+    copy_listing_field(source, &mut compact, "resolved_path");
+    copy_listing_field(source, &mut compact, "sort_by");
+    copy_listing_field(source, &mut compact, "include_hidden");
+    copy_listing_field(source, &mut compact, "dirs_only");
+    copy_listing_field(source, &mut compact, "files_only");
+    copy_listing_field(source, &mut compact, "names_by_kind");
+    if !compact.contains_key("names_by_kind") {
+        copy_listing_field(source, &mut compact, "names");
+        if let Some(entries) = compact_listing_entries(source.get("entries")) {
+            compact.insert("entries".to_string(), Value::Array(entries));
+        }
+    }
+    if compact.len() <= 1 {
+        return None;
+    }
+    serde_json::to_string(&json!({ "extra": Value::Object(compact) })).ok()
+}
+
+fn value_is_structured_listing_output(value: &Value) -> bool {
+    matches!(
+        value.get("action").and_then(Value::as_str),
+        Some("inventory_dir" | "list_dir")
+    ) || value
+        .get("names_by_kind")
+        .and_then(Value::as_object)
+        .is_some()
+        || value.get("names").and_then(Value::as_array).is_some()
+        || value.get("entries").and_then(Value::as_array).is_some()
+}
+
+fn copy_listing_field(source: &Value, compact: &mut serde_json::Map<String, Value>, field: &str) {
+    if let Some(value) = source.get(field) {
+        compact.insert(field.to_string(), value.clone());
+    }
+}
+
+fn compact_listing_entries(value: Option<&Value>) -> Option<Vec<Value>> {
+    let entries = value.and_then(Value::as_array)?;
+    let compact = entries
+        .iter()
+        .filter_map(compact_listing_entry)
+        .collect::<Vec<_>>();
+    (!compact.is_empty()).then_some(compact)
+}
+
+fn compact_listing_entry(entry: &Value) -> Option<Value> {
+    let name = entry.get("name").and_then(Value::as_str)?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let mut compact = serde_json::Map::new();
+    compact.insert("name".to_string(), Value::String(name.to_string()));
+    copy_listing_field(entry, &mut compact, "kind");
+    copy_listing_field(entry, &mut compact, "path");
+    copy_listing_field(entry, &mut compact, "hidden");
+    Some(Value::Object(compact))
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskJournalFinalizerSummary {
     pub(crate) stage: Option<TaskJournalFinalizerStage>,
@@ -1305,7 +1386,10 @@ impl TaskJournal {
             step_id: step_result.step_id.clone(),
             skill: step_result.skill.clone(),
             status: step_result.status,
-            output_excerpt: step_result.output.as_deref().map(crate::truncate_for_log),
+            output_excerpt: step_result
+                .output
+                .as_deref()
+                .map(step_output_excerpt_for_journal),
             error_excerpt: step_result.error.as_deref().map(crate::truncate_for_log),
             started_at: step_result.started_at,
             finished_at: step_result.finished_at,

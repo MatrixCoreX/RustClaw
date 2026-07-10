@@ -25,6 +25,7 @@ use super::{
     try_recover_recent_artifacts_answer_verifier_gap, try_recover_rss_news_answer_verifier_gap,
     try_recover_structured_count_answer_verifier_gap,
     try_recover_structured_evidence_table_answer_verifier_gap,
+    try_recover_structured_listing_answer_verifier_gap,
     try_recover_structured_scalar_output_format_answer_verifier_gap,
     try_recover_structured_search_answer_verifier_gap,
     try_replan_avoidable_low_risk_freeform_clarify, AgentLoopGuardPolicy, RoundOutcome,
@@ -1926,6 +1927,8 @@ mod observed_finalize;
 mod recent_artifacts_recovery;
 #[path = "loop_control_tests/soft_budget_checkpoint.rs"]
 mod soft_budget_checkpoint;
+#[path = "loop_control_tests/structured_listing_recovery.rs"]
+mod structured_listing_recovery;
 #[path = "loop_control_tests/terminal_answer_stop.rs"]
 mod terminal_answer_stop;
 #[path = "loop_control_tests/verifier_retry_suppression.rs"]

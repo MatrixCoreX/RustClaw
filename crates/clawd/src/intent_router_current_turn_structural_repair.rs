@@ -56,6 +56,9 @@ const FRESH_EVIDENCE_CONTRACT_MARKERS: &[&str] = &[
     "structured_keys",
 ];
 
+const WORKSPACE_SUMMARY_CONTRACT_MARKERS: &[&str] =
+    &["workspace_project_summary", "workspace_summary"];
+
 fn route_reason_has_machine_marker(route_reason: &str, marker: &str) -> bool {
     crate::RouteReasonMarkers::new(route_reason).has_machine_marker(marker)
 }
@@ -574,13 +577,22 @@ pub(super) fn apply_current_turn_structural_contract_repair(
                 output_contract.locator_hint = workspace_root.display().to_string();
             }
             reason = Some("current_workspace_extension_file_paths_contract_repair");
-        } else {
+        } else if route_reason_has_any_machine_marker(
+            route_reason,
+            WORKSPACE_SUMMARY_CONTRACT_MARKERS,
+        ) {
             output_contract
                 .apply_output_contract_ref(OutputContractRef::workspace_project_summary());
             if output_contract.locator_hint.trim().is_empty() {
                 output_contract.locator_hint = workspace_root.display().to_string();
             }
             reason = Some("current_workspace_summary_boundary_contract_repair");
+        } else {
+            output_contract.requires_content_evidence = false;
+            if output_contract.locator_hint.trim().is_empty() {
+                output_contract.locator_hint = workspace_root.display().to_string();
+            }
+            reason = Some("current_workspace_generic_contract_deferred_to_agent_loop");
         }
     }
 

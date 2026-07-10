@@ -1,4 +1,5 @@
 use super::{OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind};
+use crate::intent_router::contract_repair_judge::repaired_contract_wants_file_delivery;
 use crate::IntentOutputContract;
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -354,6 +355,32 @@ fn contract_repair_judge_generated_file_delivery_runtime_target_overrides_clarif
     assert!(contract.delivery_required);
     assert_eq!(contract.delivery_intent, OutputDeliveryIntent::FileSingle);
     assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+}
+
+#[test]
+fn directory_lookup_contract_repair_does_not_enable_file_delivery() {
+    let output_contract = super::IntentOutputContractOut {
+        response_shape: "free".to_string(),
+        exact_sentence_count: None,
+        requires_content_evidence: true,
+        delivery_required: true,
+        locator_kind: "current_workspace".to_string(),
+        delivery_intent: "directory_lookup".to_string(),
+        contract_marker: "none".to_string(),
+        locator_hint: String::new(),
+        scalar_count_filter: None,
+        list_selector: None,
+        self_extension: None,
+    };
+
+    assert!(!repaired_contract_wants_file_delivery(&output_contract));
+    let contract = super::parse_output_contract(Some(output_contract), false);
+    assert!(contract.delivery_required);
+    assert_eq!(
+        contract.delivery_intent,
+        OutputDeliveryIntent::DirectoryLookup
+    );
+    assert_eq!(contract.response_shape, OutputResponseShape::Free);
 }
 
 #[test]
