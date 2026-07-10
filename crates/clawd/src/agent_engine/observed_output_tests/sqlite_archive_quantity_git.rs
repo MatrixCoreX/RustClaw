@@ -46,6 +46,57 @@ fn sqlite_database_kind_judgment_is_not_hard_classified_by_observed_output() {
 }
 
 #[test]
+fn sqlite_empty_table_listing_returns_machine_fields() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "db_basic",
+        r#"{"columns":["name"],"rows":[]}"#,
+    ));
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
+        resolved_intent: "List tables in data/empty.sqlite".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "llm_contract:sqlite_table_listing".to_string(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Unknown,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::SqliteTableListing,
+            locator_hint: "data/empty.sqlite".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("expected deterministic empty sqlite table listing answer");
+    assert!(answer.contains("message_key=clawd.msg.sqlite.tables.observed"), "{answer}");
+    assert!(answer.contains("reason_code=sqlite_tables_observed"), "{answer}");
+    assert!(answer.contains("table_count=0"), "{answer}");
+    assert!(answer.contains("has_tables=false"), "{answer}");
+    assert!(answer.contains("db_kind=empty"), "{answer}");
+    assert!(answer.contains("db_path=data/empty.sqlite"), "{answer}");
+    assert!(!answer.contains("没有任何表"), "{answer}");
+    assert!(!answer.contains("no tables"), "{answer}");
+}
+
+#[test]
 fn sqlite_database_kind_judgment_uses_contract_selector_and_cites_tables() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
@@ -93,10 +144,13 @@ fn sqlite_database_kind_judgment_uses_contract_selector_and_cites_tables() {
         };
     let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
         .expect("expected deterministic sqlite database kind answer");
-    assert!(answer.contains("更像测试库"), "{answer}");
-    assert!(answer.contains("orders"), "{answer}");
-    assert!(answer.contains("service_logs"), "{answer}");
-    assert!(answer.contains("users"), "{answer}");
+    assert!(answer.contains("message_key=clawd.msg.sqlite.database_kind.observed"), "{answer}");
+    assert!(answer.contains("reason_code=sqlite_database_kind_observed"), "{answer}");
+    assert!(answer.contains("db_kind=test"), "{answer}");
+    assert!(answer.contains("classification_source=contract_selector"), "{answer}");
+    assert!(answer.contains("table.1=orders"), "{answer}");
+    assert!(answer.contains("table.2=service_logs"), "{answer}");
+    assert!(answer.contains("table.3=users"), "{answer}");
     assert!(!answer.contains("第 1 步"), "{answer}");
 }
 
@@ -148,10 +202,12 @@ fn sqlite_database_kind_judgment_uses_run_cmd_table_names_without_llm() {
         };
     let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
         .expect("expected deterministic run_cmd sqlite database kind answer");
-    assert!(answer.contains("更像测试库"), "{answer}");
-    assert!(answer.contains("orders"), "{answer}");
-    assert!(answer.contains("service_logs"), "{answer}");
-    assert!(answer.contains("users"), "{answer}");
+    assert!(answer.contains("message_key=clawd.msg.sqlite.database_kind.observed"), "{answer}");
+    assert!(answer.contains("db_kind=test"), "{answer}");
+    assert!(answer.contains("classification_source=contract_selector"), "{answer}");
+    assert!(answer.contains("table.1=orders"), "{answer}");
+    assert!(answer.contains("table.2=service_logs"), "{answer}");
+    assert!(answer.contains("table.3=users"), "{answer}");
 }
 
 #[test]
@@ -301,9 +357,11 @@ fn sqlite_database_kind_judgment_prefers_table_inventory_over_later_name_columns
         };
     let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
         .expect("expected deterministic sqlite database kind answer");
-    assert!(answer.contains("orders"), "{answer}");
-    assert!(answer.contains("service_logs"), "{answer}");
-    assert!(answer.contains("users"), "{answer}");
+    assert!(answer.contains("message_key=clawd.msg.sqlite.database_kind.observed"), "{answer}");
+    assert!(answer.contains("db_kind=test"), "{answer}");
+    assert!(answer.contains("table.1=orders"), "{answer}");
+    assert!(answer.contains("table.2=service_logs"), "{answer}");
+    assert!(answer.contains("table.3=users"), "{answer}");
     assert!(!answer.contains("Alice"), "{answer}");
     assert!(!answer.contains("Bob"), "{answer}");
 }

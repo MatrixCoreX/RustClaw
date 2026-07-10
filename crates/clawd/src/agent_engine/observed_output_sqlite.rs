@@ -81,22 +81,16 @@ fn sqlite_table_observed_output_kind(
 }
 
 pub(super) fn db_basic_tables_summary_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     route: &crate::RouteResult,
     body: &str,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     let observed_kind = sqlite_table_observed_output_kind(route)?;
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     let table_names = db_basic_table_names(&value)?;
     if table_names.is_empty() {
-        return Some(observed_t(
-            state,
-            "clawd.msg.sqlite_no_tables",
-            "这个 SQLite 文件里目前没有任何表。",
-            "This SQLite file currently has no tables.",
-            prefer_english,
-        ));
+        return Some(sqlite_table_inventory_machine_answer(route, &table_names));
     }
     if observed_kind == SqliteTableObservedOutputKind::NamesOnly {
         return Some(table_names.join("\n"));
@@ -111,12 +105,25 @@ enum SqliteDatabaseKindClass {
 }
 
 impl SqliteDatabaseKindClass {
-    fn label(self, prefer_english: bool) -> &'static str {
-        match (self, prefer_english) {
-            (Self::Business, true) => "more like a business database",
-            (Self::Business, false) => "更像业务库",
-            (Self::Test, true) => "more like a test database",
-            (Self::Test, false) => "更像测试库",
+    fn as_token(self) -> &'static str {
+        match self {
+            Self::Business => "business",
+            Self::Test => "test",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SqliteDatabaseKindSource {
+    ContractSelector,
+    LocatorHint,
+}
+
+impl SqliteDatabaseKindSource {
+    fn as_token(self) -> &'static str {
+        match self {
+            Self::ContractSelector => "contract_selector",
+            Self::LocatorHint => "locator_hint",
         }
     }
 }
@@ -173,7 +180,7 @@ pub(super) fn db_basic_database_kind_judgment_candidate(
     route: &crate::RouteResult,
     body: &str,
     request_text: Option<&str>,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if !super::output_route_policy::route_contract_marker_is(
         route,
@@ -186,55 +193,32 @@ pub(super) fn db_basic_database_kind_judgment_candidate(
     if table_names.is_empty() {
         return None;
     }
-    sqlite_database_kind_judgment_answer(route, &table_names, request_text, prefer_english)
+    sqlite_database_kind_judgment_answer(route, &table_names, request_text)
 }
 
 fn sqlite_database_kind_judgment_answer(
     route: &crate::RouteResult,
     table_names: &[String],
     request_text: Option<&str>,
-    prefer_english: bool,
 ) -> Option<String> {
     if table_names.is_empty() {
         return None;
     }
-    let kind = sqlite_database_kind_from_contract_selector(request_text)
-        .or_else(|| sqlite_database_kind_from_locator(route))?;
-    let tables = if prefer_english {
-        table_names.join(", ")
-    } else {
-        table_names.join("、")
-    };
-    let locator = route.output_contract.locator_hint.trim();
-    if prefer_english {
-        if locator.is_empty() {
-            Some(format!(
-                "{}; evidence: observed tables include {}.",
-                kind.label(true),
-                tables
-            ))
+    let (kind, source) =
+        if let Some(kind) = sqlite_database_kind_from_contract_selector(request_text) {
+            (kind, SqliteDatabaseKindSource::ContractSelector)
         } else {
-            Some(format!(
-                "{}; evidence: observed tables include {}, and the database path is `{}`.",
-                kind.label(true),
-                tables,
-                locator
-            ))
-        }
-    } else if locator.is_empty() {
-        Some(format!(
-            "{}；依据：观测到的表包括 {}。",
-            kind.label(false),
-            tables
-        ))
-    } else {
-        Some(format!(
-            "{}；依据：观测到的表包括 {}，数据库路径为 `{}`。",
-            kind.label(false),
-            tables,
-            locator
-        ))
-    }
+            (
+                sqlite_database_kind_from_locator(route)?,
+                SqliteDatabaseKindSource::LocatorHint,
+            )
+        };
+    Some(sqlite_database_kind_machine_answer(
+        route,
+        kind,
+        source,
+        table_names,
+    ))
 }
 
 fn run_cmd_sqlite_table_names(body: &str) -> Vec<String> {
@@ -281,14 +265,14 @@ pub(super) fn run_cmd_sqlite_direct_answer_candidate(
     route: &crate::RouteResult,
     body: &str,
     request_text: Option<&str>,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if super::output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
     ) {
         let table_names = run_cmd_sqlite_table_names(body);
-        sqlite_database_kind_judgment_answer(route, &table_names, request_text, prefer_english)
+        sqlite_database_kind_judgment_answer(route, &table_names, request_text)
     } else if super::output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::SqliteSchemaVersion,
@@ -315,7 +299,7 @@ pub(super) fn db_basic_database_kind_judgment_from_loop_state_candidate(
     route: &crate::RouteResult,
     loop_state: &LoopState,
     request_text: Option<&str>,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if !super::output_route_policy::route_contract_marker_is(
         route,
@@ -329,6 +313,60 @@ pub(super) fn db_basic_database_kind_judgment_from_loop_state_candidate(
         .filter(|step| step.skill == "db_basic" && step.is_ok())
         .filter_map(|step| step.output.as_deref())
         .find_map(|body| {
-            db_basic_database_kind_judgment_candidate(route, body, request_text, prefer_english)
+            db_basic_database_kind_judgment_candidate(route, body, request_text, _prefer_english)
         })
+}
+
+fn sqlite_table_inventory_machine_answer(
+    route: &crate::RouteResult,
+    table_names: &[String],
+) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.sqlite.tables.observed".to_string(),
+        "reason_code=sqlite_tables_observed".to_string(),
+        format!("table_count={}", table_names.len()),
+        format!("has_tables={}", !table_names.is_empty()),
+    ];
+    if table_names.is_empty() {
+        lines.push("db_kind=empty".to_string());
+    }
+    let locator = route.output_contract.locator_hint.trim();
+    if !locator.is_empty() {
+        push_sqlite_machine_line(&mut lines, "db_path", locator);
+    }
+    for (idx, table_name) in table_names.iter().enumerate() {
+        push_sqlite_machine_line(&mut lines, &format!("table.{}", idx + 1), table_name);
+    }
+    lines.join("\n")
+}
+
+fn sqlite_database_kind_machine_answer(
+    route: &crate::RouteResult,
+    kind: SqliteDatabaseKindClass,
+    source: SqliteDatabaseKindSource,
+    table_names: &[String],
+) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.sqlite.database_kind.observed".to_string(),
+        "reason_code=sqlite_database_kind_observed".to_string(),
+        format!("db_kind={}", kind.as_token()),
+        "confidence=heuristic".to_string(),
+        format!("classification_source={}", source.as_token()),
+        format!("table_count={}", table_names.len()),
+    ];
+    let locator = route.output_contract.locator_hint.trim();
+    if !locator.is_empty() {
+        push_sqlite_machine_line(&mut lines, "db_path", locator);
+    }
+    for (idx, table_name) in table_names.iter().enumerate() {
+        push_sqlite_machine_line(&mut lines, &format!("table.{}", idx + 1), table_name);
+    }
+    lines.join("\n")
+}
+
+fn push_sqlite_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
+    let value = crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),
+    );
+    lines.push(format!("{key}={value}"));
 }
