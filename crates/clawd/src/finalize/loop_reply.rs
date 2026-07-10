@@ -1285,13 +1285,13 @@ pub(crate) async fn finalize_loop_reply(
     replace_placeholder_delivery_with_synthesis(task, &mut loop_state);
     replace_raw_read_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
     replace_raw_observation_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
-    let replaced_service_status = run_compatibility_fallback_renderer_registry(
-        state,
+    let replaced_service_status = run_service_status_observed_fields_renderer(
         task,
         &mut loop_state,
         agent_run_context,
         &mut finalizer_summary,
-    ) || run_service_status_observed_fields_renderer(
+    ) || run_compatibility_fallback_renderer_registry(
+        state,
         task,
         &mut loop_state,
         agent_run_context,
@@ -1924,6 +1924,14 @@ pub(crate) async fn finalize_loop_reply(
         &mut finalizer_summary,
         &mut delivery_deduped,
     );
+    if replace_delivery_with_service_status_observed_answer(
+        task,
+        &mut loop_state,
+        agent_run_context,
+        &mut finalizer_summary,
+    ) {
+        delivery_deduped = loop_state.delivery_messages.clone();
+    }
 
     let final_text = final_answer_text_from_delivery(&delivery_deduped);
 

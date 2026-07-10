@@ -184,6 +184,10 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         loop_state.last_user_visible_respond = Some(current);
         return false;
     }
+    if current_delivery_is_service_control_observed_field_projection(&current) {
+        loop_state.last_user_visible_respond = Some(current);
+        return false;
+    }
     if let Some(answer) =
         latest_terminal_scalar_respond_replacement(agent_run_context, loop_state, &current, &answer)
     {
@@ -846,6 +850,28 @@ fn current_delivery_is_richer_than_requested_machine_summary(
         return false;
     }
     machine_kv_units_strictly_extend(current, requested_summary)
+}
+
+fn current_delivery_is_service_control_observed_field_projection(current: &str) -> bool {
+    let units = machine_kv_units(current);
+    if units.is_empty()
+        || !units
+            .iter()
+            .any(|unit| unit.as_str() == "source=service_control")
+    {
+        return false;
+    }
+    let has_key = |key: &str| {
+        units.iter().any(|unit| {
+            unit.split_once('=')
+                .is_some_and(|(unit_key, _)| unit_key == key)
+        })
+    };
+    has_key("target")
+        && has_key("service_name")
+        && has_key("status")
+        && has_key("verified")
+        && (has_key("post_state") || has_key("pre_state"))
 }
 
 fn current_delivery_has_conflicting_values_for_requested_keys(

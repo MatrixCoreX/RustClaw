@@ -886,6 +886,42 @@ fn requested_machine_kv_summary_restores_service_capability_terminal_delivery_wi
 }
 
 #[test]
+fn requested_machine_kv_summary_preserves_service_control_observed_field_projection() {
+    let task = claimed_task("task-machine-kv-preserve-service-control-observed-fields");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "service_control",
+        r#"{"extra":{"service_name":"telegramd","target":"telegramd","post_state":"telegramd=running","pre_state":"telegramd=running","status":"ok","verified":true,"manager_type":"rustclaw","summary":"Status: telegramd=running"}}"#,
+    ));
+    let current = concat!(
+        "target=telegramd service_name=telegramd post_state=telegramd=running ",
+        "pre_state=telegramd=running status=ok verified=true manager_type=rustclaw ",
+        "source=service_control"
+    )
+    .to_string();
+    let mut delivery_messages = vec![current.clone()];
+    loop_state.delivery_messages = delivery_messages.clone();
+    loop_state.last_user_visible_respond = Some(current.clone());
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "check whether telegramd is running right now and briefly explain the status",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![current.clone()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(current.as_str())
+    );
+}
+
+#[test]
 fn requested_machine_kv_summary_preserves_colon_field_value_delivery() {
     let task = claimed_task("task-machine-kv-summary-colon-fields");
     let mut loop_state = crate::agent_engine::LoopState::new(1);

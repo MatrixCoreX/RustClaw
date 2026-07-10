@@ -317,6 +317,14 @@ fn answer_verifier_retry_projection_field_allowed(field: &str) -> bool {
                 | "extra.member_path"
                 | "extra.content_excerpt"
                 | "extra.schema_version"
+                | "extra.manager_type"
+                | "extra.post_state"
+                | "extra.pre_state"
+                | "extra.service_name"
+                | "extra.status"
+                | "extra.summary"
+                | "extra.target"
+                | "extra.verified"
                 | "path"
         )
 }

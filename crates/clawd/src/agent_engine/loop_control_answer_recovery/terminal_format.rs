@@ -59,6 +59,10 @@ pub(in crate::agent_engine::loop_control) fn prefer_terminal_model_answer_for_ve
     if answer_is_machine_or_internal(answer.as_str()) || answer.trim() == reply.text.trim() {
         return false;
     }
+    if terminal_model_answer_is_lossy_observed_scalar(journal, answer.as_str(), reply.text.as_str())
+    {
+        return false;
+    }
     let mut messages = reply
         .messages
         .iter()
@@ -143,4 +147,93 @@ fn latest_terminal_model_answer(journal: &crate::task_journal::TaskJournal) -> O
             .filter(|answer| !answer.is_empty())
             .map(str::to_string)
     })
+}
+
+fn terminal_model_answer_is_lossy_observed_scalar(
+    journal: &crate::task_journal::TaskJournal,
+    terminal_answer: &str,
+    current_answer: &str,
+) -> bool {
+    let terminal_answer = terminal_answer.trim();
+    if terminal_answer.is_empty() || !visible_answer_is_machine_field_projection(current_answer) {
+        return false;
+    }
+    journal
+        .step_results
+        .iter()
+        .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+        .filter(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+        })
+        .filter_map(|step| step.output_excerpt.as_deref())
+        .filter_map(|output| serde_json::from_str::<serde_json::Value>(output.trim()).ok())
+        .any(|value| {
+            let mut scalars = Vec::new();
+            collect_observed_scalar_values(&value, &mut scalars);
+            scalars.iter().any(|value| value == terminal_answer)
+        })
+}
+
+fn visible_answer_is_machine_field_projection(answer: &str) -> bool {
+    let mut field_count = 0usize;
+    for token in answer.split_whitespace() {
+        let Some((key, value)) = token.split_once('=') else {
+            continue;
+        };
+        if machine_projection_field_key(key.trim()) && !value.trim().is_empty() {
+            field_count += 1;
+            if field_count >= 2 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn machine_projection_field_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.chars().all(|ch| {
+            ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '_' | '.' | '-')
+        })
+        && key.chars().any(|ch| ch.is_ascii_lowercase())
+}
+
+fn collect_observed_scalar_values(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(object) => {
+            for (key, child) in object {
+                if matches!(key.as_str(), "text" | "error_text") {
+                    continue;
+                }
+                if let Some(scalar) = json_scalar_to_string(child) {
+                    out.push(scalar);
+                }
+                collect_observed_scalar_values(child, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_observed_scalar_values(item, out);
+            }
+        }
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::String(_) => {}
+    }
+}
+
+fn json_scalar_to_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => Some(value.trim().to_string()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        serde_json::Value::Null | serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            None
+        }
+    }
+    .filter(|value| !value.is_empty())
 }
