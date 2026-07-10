@@ -166,6 +166,24 @@ fn market_quote_extra_exposes_content_excerpt() {
 }
 
 #[test]
+fn book_ticker_sources_text_uses_machine_fields() {
+    let ticker = BookTicker {
+        symbol: "BTCUSDT".to_string(),
+        bid_price: 100.0,
+        bid_qty: 1.0,
+        ask_price: 101.0,
+        ask_qty: 1.5,
+        exchange: "binance".to_string(),
+        source: "binance_api".to_string(),
+    };
+
+    let text = format_book_ticker_sources("BTCUSDT", &[("binance", Some(&ticker))]);
+    assert!(text.contains("book_ticker_sources symbol=BTCUSDT"));
+    assert!(text.contains("source=binance bid=100 ask=101"));
+    assert!(!text.contains("盘口"));
+}
+
+#[test]
 fn price_alert_trigger_logic_up_down_both() {
     let up = 3.2_f64;
     let down = -3.2_f64;

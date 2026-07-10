@@ -255,47 +255,22 @@ pub(super) fn handle_book_ticker(
             ));
         }
         let s = normalize_symbol(symbol);
-        let mut lines = vec![format!("{s} | 盘口来源：")];
-        if let Some(x) = b.as_ref() {
-            lines.push(format!(
-                "- BINANCE bid/ask={} / {}",
-                fmt_num(x.bid_price),
-                fmt_num(x.ask_price)
-            ));
-        }
-        if let Some(x) = o.as_ref() {
-            lines.push(format!(
-                "- OKX bid/ask={} / {}",
-                fmt_num(x.bid_price),
-                fmt_num(x.ask_price)
-            ));
-        }
-        if let Some(x) = g.as_ref() {
-            lines.push(format!(
-                "- GATEIO bid/ask={} / {}",
-                fmt_num(x.bid_price),
-                fmt_num(x.ask_price)
-            ));
-        }
-        if let Some(x) = cb.as_ref() {
-            lines.push(format!(
-                "- COINBASE bid/ask={} / {}",
-                fmt_num(x.bid_price),
-                fmt_num(x.ask_price)
-            ));
-        }
-        if let Some(x) = k.as_ref() {
-            lines.push(format!(
-                "- KRAKEN bid/ask={} / {}",
-                fmt_num(x.bid_price),
-                fmt_num(x.ask_price)
-            ));
-        }
-        let text = lines.join("\n");
+        let text = format_book_ticker_sources(
+            &s,
+            &[
+                ("binance", b.as_ref()),
+                ("okx", o.as_ref()),
+                ("gateio", g.as_ref()),
+                ("coinbase", cb.as_ref()),
+                ("kraken", k.as_ref()),
+            ],
+        );
         return Ok((
-            text,
+            text.clone(),
             json!({
                 "action":"book_ticker",
+                "message_key":"crypto.msg.book_ticker_sources",
+                "content_excerpt": text,
                 "symbol": s,
                 "book_ticker_by_exchange": {
                     "binance": b,
@@ -323,6 +298,25 @@ pub(super) fn handle_book_ticker(
         fmt_num(bt.ask_price)
     );
     Ok((text, json!({"action":"book_ticker","book_ticker":bt})))
+}
+
+pub(super) fn format_book_ticker_sources(
+    symbol: &str,
+    entries: &[(&str, Option<&BookTicker>)],
+) -> String {
+    let mut lines = vec![format!("book_ticker_sources symbol={symbol}")];
+    for (source, ticker) in entries {
+        let Some(ticker) = ticker else {
+            continue;
+        };
+        lines.push(format!(
+            "source={} bid={} ask={}",
+            source,
+            fmt_num(ticker.bid_price),
+            fmt_num(ticker.ask_price)
+        ));
+    }
+    lines.join("\n")
 }
 
 pub(super) fn handle_normalize_symbol(
