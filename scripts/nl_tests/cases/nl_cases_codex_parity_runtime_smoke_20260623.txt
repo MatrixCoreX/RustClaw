@@ -23,7 +23,7 @@ codex_parity_runtime_smoke|content_excerpt_read_lightweight_zh|covers:content_ex
 
 codex_parity_runtime_smoke|http_artifact_download_en|covers:http_basic,artifact_refs,event_stream;requires_tool_call=true;external_network|Make a GET request to https://example.com and save the response body to document/http/download/nl-codex-parity-example.body. Reply with the HTTP status and the saved output_path exactly.|expect=document/http/download/nl-codex-parity-example.body
 
-codex_parity_runtime_smoke|task_lifecycle_readonly_zh|covers:task_control,task_lifecycle,checkpoint_projection;requires_tool_call=true;local_readonly|查看当前 active task 队列和最近任务生命周期字段，只汇总 running、waiting、background、needs_user 的数量；不要取消任何任务。|expect=task
+codex_parity_runtime_smoke|task_lifecycle_readonly_zh|covers:task_control,task_lifecycle,checkpoint_projection;requires_tool_call=true;local_readonly|查看当前 active task 队列和最近任务生命周期字段，只汇总 running、waiting、background、needs_user 的数量；不要取消任何任务。|expect=contains:running;contains:waiting;contains:background;contains:needs_user
 
 codex_parity_runtime_smoke|subagent_review_boundary_zh|covers:subagent,skill:subagent,review,boundary,no_write,requires_tool_call=true,local_readonly|让只读 review 子代理检查 AGENTS.md 和当前计划文件的执行边界是否一致；子代理不能写文件、不能发布外部内容，最后只返回机器化边界摘要。
 
