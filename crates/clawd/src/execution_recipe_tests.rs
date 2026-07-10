@@ -522,13 +522,13 @@ fn structured_validation_success_marker_contains_requires_marker_boundary() {
     let observation = assess_validation_output(&state, "run_cmd", &args, "script says OKAY\n");
     assert_eq!(
         observation,
-        ValidationObservation::Failed("validation output missing required marker=OK".to_string())
+        ValidationObservation::Failed("validation_required_marker_missing:marker=OK".to_string())
     );
 
     let observation = assess_validation_output(&state, "run_cmd", &args, "BROKEN_OK\n");
     assert_eq!(
         observation,
-        ValidationObservation::Failed("validation output missing required marker=OK".to_string())
+        ValidationObservation::Failed("validation_required_marker_missing:marker=OK".to_string())
     );
 }
 
@@ -550,7 +550,7 @@ fn structured_validation_success_marker_rejects_missing_output_marker() {
     let observation = assess_validation_output(&state, "run_cmd", &args, "DONE\n");
     assert_eq!(
         observation,
-        ValidationObservation::Failed("validation output missing required marker=OK".to_string())
+        ValidationObservation::Failed("validation_required_marker_missing:marker=OK".to_string())
     );
 }
 
