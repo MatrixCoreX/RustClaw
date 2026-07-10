@@ -325,21 +325,18 @@ pub(super) fn normalized_find_name_pattern(pattern: Option<&str>) -> Option<Stri
 }
 
 pub(super) fn fs_search_scalar_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     value: &serde_json::Value,
     locator_hint: Option<&str>,
     auto_locator_path: Option<&str>,
     prefer_full_path: bool,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     let (mut results, count, pattern) = fs_search_find_name_results(value)?;
     if count == 0 || results.is_empty() {
-        return Some(observed_t(
-            state,
-            "clawd.msg.fs_search_no_match",
-            "没有找到匹配项",
-            "No matches found.",
-            prefer_english,
+        return Some(fs_search_no_match_machine_answer(
+            "find_name",
+            pattern.as_deref().map(|pattern| ("pattern", pattern)),
         ));
     }
     if results.len() > 1 {
@@ -440,38 +437,30 @@ pub(super) fn fs_search_direct_answer_candidate(
     }
     if let Some((results, count, ext)) = fs_search_find_ext_results(value) {
         if count == 0 || results.is_empty() {
-            return Some(observed_t_with_vars(
-                state,
-                "clawd.msg.fs_search_no_ext_match",
-                "没有找到 .{ext} 文件",
-                "No .{ext} files found.",
-                prefer_english,
-                &[("ext", &ext)],
+            return Some(fs_search_no_match_machine_answer(
+                "find_ext",
+                Some(("ext", ext.as_str())),
             ));
         }
         return Some(results.join("\n"));
     }
     let (results, count, pattern) = fs_search_find_name_results(value)?;
     if count == 0 || results.is_empty() {
-        return Some(observed_t(
-            state,
-            "clawd.msg.fs_search_no_match",
-            "没有找到匹配项",
-            "No matches found.",
-            prefer_english,
+        return Some(fs_search_no_match_machine_answer(
+            "find_name",
+            pattern.as_deref().map(|pattern| ("pattern", pattern)),
         ));
     }
     if results.len() == 1 {
         if prefer_path_only {
             return Some(results[0].clone());
         }
-        return Some(observed_t_with_vars(
-            state,
-            "clawd.msg.exists_with_path",
-            "有，路径：{path}",
-            "yes, path: {path}",
-            prefer_english,
-            &[("path", &results[0])],
+        return Some(path_fact_machine_answer(
+            Some(&results[0]),
+            true,
+            None,
+            None,
+            Some("fs_search.find_name"),
         ));
     }
     if let Some(pattern) = normalized_find_name_pattern(pattern.as_deref())
@@ -485,13 +474,12 @@ pub(super) fn fs_search_direct_answer_candidate(
             if prefer_path_only {
                 return Some(preferred);
             }
-            return Some(observed_t_with_vars(
-                state,
-                "clawd.msg.exists_with_path",
-                "有，路径：{path}",
-                "yes, path: {path}",
-                prefer_english,
-                &[("path", &preferred)],
+            return Some(path_fact_machine_answer(
+                Some(&preferred),
+                true,
+                None,
+                None,
+                Some("fs_search.find_name"),
             ));
         }
         if !ranked.is_empty() {
@@ -502,10 +490,30 @@ pub(super) fn fs_search_direct_answer_candidate(
     allow_multi_result_list.then_some(matches)
 }
 
+fn fs_search_no_match_machine_answer(action: &str, selector: Option<(&str, &str)>) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.fs_search.observed".to_string(),
+        "reason_code=fs_search_no_match".to_string(),
+        format!("action={action}"),
+        "matched=false".to_string(),
+    ];
+    if let Some((key, value)) = selector {
+        push_fs_search_machine_line(&mut lines, key, value);
+    }
+    lines.join("\n")
+}
+
+fn push_fs_search_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
+    let value = crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),
+    );
+    lines.push(format!("{key}={value}"));
+}
+
 fn fs_search_grep_text_direct_answer_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     value: &serde_json::Value,
-    prefer_english: bool,
+    _prefer_english: bool,
     allow_multi_result_list: bool,
     prefer_path_only: bool,
 ) -> Option<String> {
@@ -525,13 +533,7 @@ fn fs_search_grep_text_direct_answer_candidate(
                 });
             }
         }
-        return Some(observed_t(
-            state,
-            "clawd.msg.fs_search_no_match",
-            "没有找到匹配项",
-            "No matches found.",
-            prefer_english,
-        ));
+        return Some(fs_search_no_match_machine_answer("grep_text", None));
     }
     if allow_multi_result_list && !prefer_path_only {
         return Some(

@@ -138,23 +138,31 @@ pub(super) fn run_cmd_shell_listing_entry_names(body: &str) -> Option<Vec<String
 }
 
 pub(super) fn run_cmd_presence_with_path_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     body: &str,
     locator_hint: Option<&str>,
     auto_locator_path: Option<&str>,
-    english_answer: bool,
+    _english_answer: bool,
 ) -> Option<String> {
     let scalar = normalized_scalar_candidate(body)?;
     let normalized = scalar.trim().to_ascii_lowercase();
     match normalized.as_str() {
-        "exists" | "yes" | "true" => Some(candidate_exists_with_path_text(
-            state,
+        "exists" | "yes" | "true" => Some(path_fact_machine_answer(
             existence_with_path_target_hint(locator_hint, auto_locator_path).as_deref(),
-            english_answer,
+            true,
+            None,
+            None,
+            Some("run_cmd_presence_probe"),
         )),
-        "not_found" | "not found" | "no" | "false" => {
-            Some(candidate_not_found_text(state, english_answer))
-        }
+        "not_found" | "not found" | "no" | "false" => Some(path_fact_machine_answer(
+            existence_with_path_target_hint(locator_hint, auto_locator_path)
+                .as_deref()
+                .or(locator_hint),
+            false,
+            Some("missing"),
+            None,
+            Some("run_cmd_presence_probe"),
+        )),
         _ => None,
     }
 }
@@ -188,75 +196,124 @@ pub(super) fn existence_with_path_target_hint(
 }
 
 pub(super) fn candidate_exists_with_path_text(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     path: Option<&str>,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> String {
-    match path.map(str::trim).filter(|path| !path.is_empty()) {
-        Some(path) => observed_t_with_vars(
-            state,
-            "clawd.msg.exists_with_path",
-            "有，路径：{path}",
-            "yes, path: {path}",
-            prefer_english,
-            &[("path", path)],
-        ),
-        None => observed_t(state, "clawd.msg.exists_yes", "有", "yes", prefer_english),
-    }
+    path_fact_machine_answer(path, true, None, None, Some("path_observation"))
 }
 
 pub(super) fn candidate_exists_scalar_text(
-    state: Option<&AppState>,
-    prefer_english: bool,
+    _state: Option<&AppState>,
+    _prefer_english: bool,
 ) -> String {
-    observed_t(state, "clawd.msg.exists_yes", "有", "yes", prefer_english)
+    path_fact_machine_answer(None, true, None, None, Some("path_observation"))
 }
 
 pub(super) fn candidate_exists_with_path_and_size_text(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     path: Option<&str>,
     size_bytes: u64,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> String {
-    match path.map(str::trim).filter(|path| !path.is_empty()) {
-        Some(path) => observed_t_with_vars(
-            state,
-            "clawd.msg.exists_with_path_and_size",
-            "有，路径：{path}，大小：{size_bytes} 字节",
-            "yes, path: {path}, size: {size_bytes} bytes",
-            prefer_english,
-            &[("path", path), ("size_bytes", &size_bytes.to_string())],
-        ),
-        None => observed_t_with_vars(
-            state,
-            "clawd.msg.exists_with_size",
-            "有，大小：{size_bytes} 字节",
-            "yes, size: {size_bytes} bytes",
-            prefer_english,
-            &[("size_bytes", &size_bytes.to_string())],
-        ),
-    }
+    path_fact_machine_answer(path, true, None, Some(size_bytes), Some("path_observation"))
 }
 
-pub(super) fn candidate_not_found_text(state: Option<&AppState>, prefer_english: bool) -> String {
-    observed_t(state, "clawd.msg.exists_no", "没有", "no", prefer_english)
+pub(super) fn candidate_not_found_text(_state: Option<&AppState>, _prefer_english: bool) -> String {
+    path_fact_machine_answer(None, false, Some("missing"), None, Some("path_observation"))
 }
 
 pub(super) fn candidate_not_found_with_path_text(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     path: Option<&str>,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> String {
-    match path.map(str::trim).filter(|path| !path.is_empty()) {
-        Some(path) => observed_t_with_vars(
-            state,
-            "clawd.msg.exists_no_path_not_found",
-            "没有，路径不存在：{path}",
-            "no, path not found: {path}",
-            prefer_english,
-            &[("path", path)],
-        ),
-        None => candidate_not_found_text(state, prefer_english),
+    path_fact_machine_answer(path, false, Some("missing"), None, Some("path_observation"))
+}
+
+pub(super) fn path_fact_machine_answer(
+    path: Option<&str>,
+    exists: bool,
+    kind: Option<&str>,
+    size_bytes: Option<u64>,
+    source_action: Option<&str>,
+) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.path_fact.observed".to_string(),
+        "reason_code=path_fact_observed".to_string(),
+        format!("exists={exists}"),
+    ];
+    if let Some(path) = path.map(str::trim).filter(|path| !path.is_empty()) {
+        push_path_fact_machine_line(&mut lines, "path", path);
+    }
+    let kind = kind
+        .map(normalized_path_kind_token)
+        .or_else(|| (!exists).then(|| "missing".to_string()));
+    if let Some(kind) = kind.filter(|kind| !kind.is_empty()) {
+        lines.push(format!("kind={kind}"));
+    }
+    if let Some(size_bytes) = size_bytes {
+        lines.push(format!("size_bytes={size_bytes}"));
+    }
+    if let Some(source_action) = source_action
+        .map(str::trim)
+        .filter(|source_action| !source_action.is_empty())
+    {
+        push_path_fact_machine_line(&mut lines, "source_action", source_action);
+    }
+    lines.join("\n")
+}
+
+fn path_batch_facts_machine_answer(facts: &[serde_json::Value]) -> Option<String> {
+    let mut lines = vec![
+        "message_key=clawd.msg.path_batch_facts.observed".to_string(),
+        "reason_code=path_batch_facts_observed".to_string(),
+        format!("count={}", facts.len()),
+    ];
+    for (idx, entry) in facts.iter().enumerate() {
+        let entry = entry.as_object()?;
+        let prefix = format!("fact.{}", idx + 1);
+        let exists = entry
+            .get("exists")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        lines.push(format!("{prefix}.exists={exists}"));
+        if let Some(path) = path_batch_fact_preferred_path(entry) {
+            push_path_fact_machine_line(&mut lines, &format!("{prefix}.path"), path);
+        }
+        let kind = entry
+            .get("fact")
+            .and_then(|v| v.as_object())
+            .and_then(|fact| fact.get("kind"))
+            .and_then(|v| v.as_str())
+            .map(normalized_path_kind_token)
+            .or_else(|| (!exists).then(|| "missing".to_string()));
+        if let Some(kind) = kind.filter(|kind| !kind.is_empty()) {
+            lines.push(format!("{prefix}.kind={kind}"));
+        }
+        if let Some(size_bytes) = path_batch_fact_size_bytes(entry) {
+            lines.push(format!("{prefix}.size_bytes={size_bytes}"));
+        }
+    }
+    Some(lines.join("\n"))
+}
+
+fn push_path_fact_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
+    let value = crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),
+    );
+    lines.push(format!("{key}={value}"));
+}
+
+fn normalized_path_kind_token(kind: &str) -> String {
+    match kind.trim().to_ascii_lowercase().as_str() {
+        "dir" | "directory" => "dir".to_string(),
+        "file" => "file".to_string(),
+        "symlink" | "link" => "symlink".to_string(),
+        "missing" | "not_found" | "not found" => "missing".to_string(),
+        "other" => "other".to_string(),
+        "unknown" => "unknown".to_string(),
+        value => value.to_string(),
     }
 }
 
@@ -444,21 +501,6 @@ pub(super) fn path_batch_fact_size_bytes(
         .or_else(|| entry.get("size_bytes").and_then(|v| v.as_u64()))
 }
 
-pub(super) fn display_path_kind(kind: &str, prefer_english: bool) -> String {
-    let normalized = kind.trim().to_ascii_lowercase();
-    match (normalized.as_str(), prefer_english) {
-        ("dir" | "directory", true) => "directory".to_string(),
-        ("dir" | "directory", false) => "目录".to_string(),
-        ("file", true) => "file".to_string(),
-        ("file", false) => "文件".to_string(),
-        ("symlink", true) => "symlink".to_string(),
-        ("symlink", false) => "符号链接".to_string(),
-        ("other", true) => "other".to_string(),
-        ("other", false) => "其他".to_string(),
-        _ => kind.trim().to_string(),
-    }
-}
-
 pub(super) fn route_prefers_path_kind_fact_answer(route: &crate::RouteResult) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Strict
         && !route.output_contract.delivery_required
@@ -470,7 +512,7 @@ pub(super) fn route_prefers_path_kind_fact_answer(route: &crate::RouteResult) ->
 
 pub(super) fn path_batch_fact_path_kind_candidate(
     value: &serde_json::Value,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if value.get("action").and_then(|v| v.as_str()) != Some("path_batch_facts")
         || path_batch_facts_requests_size(value)
@@ -496,9 +538,12 @@ pub(super) fn path_batch_fact_path_kind_candidate(
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|value| !value.is_empty())?;
-    Some(format!(
-        "{path} | {}",
-        display_path_kind(kind, prefer_english)
+    Some(path_fact_machine_answer(
+        Some(path),
+        true,
+        Some(kind),
+        path_batch_fact_size_bytes(entry),
+        Some("path_batch_facts"),
     ))
 }
 
@@ -614,40 +659,9 @@ pub(super) fn system_basic_existence_with_path_candidate(
 pub(super) fn multi_path_batch_facts_candidate(
     _state: Option<&AppState>,
     facts: &[serde_json::Value],
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
-    let lines = facts
-        .iter()
-        .filter_map(|entry| {
-            let entry = entry.as_object()?;
-            let path = path_batch_fact_preferred_path(entry).unwrap_or("-");
-            let exists = entry
-                .get("exists")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            if !exists {
-                return Some(if prefer_english {
-                    format!("{path}: not found")
-                } else {
-                    format!("{path}: 不存在")
-                });
-            }
-            let kind = entry
-                .get("fact")
-                .and_then(|v| v.as_object())
-                .and_then(|fact| fact.get("kind"))
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .unwrap_or("unknown");
-            Some(if prefer_english {
-                format!("{path}: exists, type {}", display_path_kind(kind, true))
-            } else {
-                format!("{path}: 存在，类型：{}", display_path_kind(kind, false))
-            })
-        })
-        .collect::<Vec<_>>();
-    (!lines.is_empty()).then(|| lines.join("\n"))
+    path_batch_facts_machine_answer(facts)
 }
 
 pub(super) fn system_basic_scalar_existence_candidate(

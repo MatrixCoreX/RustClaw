@@ -1025,10 +1025,12 @@ fn direct_answer_formats_existence_with_path_from_system_basic_path_batch_facts(
         route_result: Some(route_result),
         ..AgentRunContext::default()
     };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("有，路径：/tmp/rustclaw-workspace/rustclaw.service")
-    );
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("path fact answer");
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=true"));
+    assert!(answer.contains("path=/tmp/rustclaw-workspace/rustclaw.service"));
 }
 
 #[test]
@@ -1049,10 +1051,13 @@ fn direct_answer_formats_strict_path_kind_from_fs_basic_path_batch_facts() {
         ..AgentRunContext::default()
     };
 
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("/tmp/repo/configs/channels | 目录")
-    );
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("path kind fact answer");
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=true"));
+    assert!(answer.contains("path=/tmp/repo/configs/channels"));
+    assert!(answer.contains("kind=dir"));
     assert!(observed_output_entries(&loop_state)
         .join("\n")
         .contains("kind=dir"));
@@ -1079,8 +1084,15 @@ fn direct_answer_formats_multi_path_facts_without_llm_synthesis() {
 
     let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
         .expect("multi path facts answer");
-    assert!(answer.contains("/tmp/repo/package.json: exists, type file"));
-    assert!(answer.contains("nope.json: not found"));
+    assert!(answer.contains("message_key=clawd.msg.path_batch_facts.observed"));
+    assert!(answer.contains("reason_code=path_batch_facts_observed"));
+    assert!(answer.contains("count=2"));
+    assert!(answer.contains("fact.1.exists=true"));
+    assert!(answer.contains("fact.1.path=/tmp/repo/package.json"));
+    assert!(answer.contains("fact.1.kind=file"));
+    assert!(answer.contains("fact.2.exists=false"));
+    assert!(answer.contains("fact.2.path=nope.json"));
+    assert!(answer.contains("fact.2.kind=missing"));
 }
 
 #[test]
@@ -1122,10 +1134,11 @@ fn direct_answer_formats_scalar_existence_without_path_from_system_basic_path_ba
         route_result: Some(route_result),
         ..AgentRunContext::default()
     };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("有")
-    );
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("scalar path existence answer");
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=true"));
 }
 
 #[test]
@@ -1146,10 +1159,13 @@ fn direct_answer_formats_path_batch_facts_requested_size() {
         ..AgentRunContext::default()
     };
 
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("yes, path: /tmp/repo/data/rustclaw.db, size: 55226368 bytes")
-    );
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("path size fact answer");
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=true"));
+    assert!(answer.contains("path=/tmp/repo/data/rustclaw.db"));
+    assert!(answer.contains("size_bytes=55226368"));
 }
 
 #[test]
@@ -1196,7 +1212,10 @@ fn direct_answer_formats_missing_path_batch_facts_with_reason() {
     let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
         .expect("missing path answer");
 
-    assert!(answer.contains("路径不存在"));
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=false"));
+    assert!(answer.contains("kind=missing"));
     assert!(answer.contains("/tmp/missing.txt"));
 }
 
@@ -1210,13 +1229,11 @@ fn direct_answer_formats_existence_with_path_from_run_cmd_yes_output() {
     std::fs::create_dir_all(&temp_dir).expect("create temp dir");
     let target = temp_dir.join("rustclaw.service");
     std::fs::write(&target, "ok").expect("write target");
-    let expected = format!(
-        "有，路径：{}",
-        target
-            .canonicalize()
-            .unwrap_or(target.clone())
-            .to_string_lossy()
-    );
+    let expected_path = target
+        .canonicalize()
+        .unwrap_or(target.clone())
+        .to_string_lossy()
+        .to_string();
 
     let mut loop_state = LoopState::new(2);
     loop_state
@@ -1255,10 +1272,12 @@ fn direct_answer_formats_existence_with_path_from_run_cmd_yes_output() {
         auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
         ..AgentRunContext::default()
     };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some(expected.as_str())
-    );
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("run_cmd yes path fact answer");
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=true"));
+    assert!(answer.contains(&format!("path={expected_path}")));
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
@@ -1272,13 +1291,11 @@ fn direct_answer_formats_existence_with_path_from_run_cmd_exists_output() {
     std::fs::create_dir_all(&temp_dir).expect("create temp dir");
     let target = temp_dir.join("rustclaw.service");
     std::fs::write(&target, "ok").expect("write target");
-    let expected = format!(
-        "有，路径：{}",
-        target
-            .canonicalize()
-            .unwrap_or(target.clone())
-            .to_string_lossy()
-    );
+    let expected_path = target
+        .canonicalize()
+        .unwrap_or(target.clone())
+        .to_string_lossy()
+        .to_string();
 
     let mut loop_state = LoopState::new(2);
     loop_state
@@ -1317,10 +1334,12 @@ fn direct_answer_formats_existence_with_path_from_run_cmd_exists_output() {
         auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
         ..AgentRunContext::default()
     };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some(expected.as_str())
-    );
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("run_cmd exists path fact answer");
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=true"));
+    assert!(answer.contains(&format!("path={expected_path}")));
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
@@ -1379,10 +1398,11 @@ fn direct_answer_formats_existence_with_path_from_system_basic_find_name_output(
         auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
         ..AgentRunContext::default()
     };
-    let expected = format!("有，路径：{resolved}");
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some(expected.as_str())
-    );
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("find_name path fact answer");
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=true"));
+    assert!(answer.contains(&format!("path={resolved}")));
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
