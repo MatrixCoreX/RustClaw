@@ -208,6 +208,7 @@ fn knowledge_fact_rows_recall_into_relevant_facts() {
         let db = state.core.db.get().expect("db lock");
         db.execute_batch(crate::INIT_SQL).expect("init base schema");
         ensure_memory_schema(&db).expect("ensure memory schema");
+        crate::repo::auth::ensure_key_auth_schema(&db).expect("ensure key auth schema");
         ensure_retrieval_schema(&db).expect("ensure retrieval schema");
         upsert_knowledge_fact(
             &db,
@@ -314,6 +315,7 @@ fn retrieval_multilingual_queries_keep_structured_preferences_and_facts() {
         let db = state.core.db.get().expect("db lock");
         db.execute_batch(crate::INIT_SQL).expect("init base schema");
         ensure_memory_schema(&db).expect("ensure memory schema");
+        crate::repo::auth::ensure_key_auth_schema(&db).expect("ensure key auth schema");
         ensure_retrieval_schema(&db).expect("ensure retrieval schema");
         db.execute(
             "INSERT INTO user_preferences
@@ -428,6 +430,81 @@ fn retrieval_index_rows_record_embedding_version() {
         assert_eq!(row.1, spec.dims as i64);
         assert_eq!(row.2, spec.version);
     }
+}
+
+#[test]
+fn retrieval_excludes_legacy_safety_signal_index_rows() {
+    let state = test_state();
+    let user_id = 1001;
+    let chat_id = 2002;
+    let user_key = "user:test";
+    let safety_memory_id = {
+        let db = state.core.db.get().expect("db lock");
+        db.execute_batch(crate::INIT_SQL).expect("init base schema");
+        ensure_memory_schema(&db).expect("ensure memory schema");
+        crate::repo::auth::ensure_key_auth_schema(&db).expect("ensure key auth schema");
+        ensure_retrieval_schema(&db).expect("ensure retrieval schema");
+        db.execute(
+            "INSERT INTO memories
+             (user_id, chat_id, user_key, channel, role, content, created_at, created_at_ts, memory_type, salience, is_instructional, safety_flag)
+             VALUES (?1, ?2, ?3, 'ui', 'user', 'policy-sensitive legacy memory', '1000', ?4, ?5, 0.2, 0, ?6)",
+            rusqlite::params![
+                user_id,
+                chat_id,
+                user_key,
+                1_775_301_800_i64,
+                crate::memory::MEMORY_TYPE_SAFETY_SIGNAL,
+                crate::memory::MEMORY_SAFETY_FLAG_INJECTION_LIKE
+            ],
+        )
+        .expect("insert safety memory");
+        let memory_id = db.last_insert_rowid();
+        db.execute(
+            "INSERT INTO memory_retrieval_index (
+                source_kind, source_memory_id, source_pref_key, source_ref, user_id, chat_id, user_key,
+                memory_kind, role, search_text, trigger_text, topic_tags, vector_json, metadata_json,
+                salience, success_state, tool_or_skill_name, created_at_ts, updated_at_ts
+             )
+             VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, 'user', ?8, NULL, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)",
+            rusqlite::params![
+                crate::memory::RETRIEVAL_SOURCE_MEMORY,
+                memory_id,
+                crate::memory::retrieval_source_ref_for_memory(memory_id),
+                user_id,
+                chat_id,
+                user_key,
+                crate::memory::RETRIEVAL_KIND_EPISODIC_EVENT,
+                "policy-sensitive legacy memory",
+                crate::memory::retrieval::build_topic_tags("policy-sensitive legacy memory"),
+                crate::memory::retrieval::vector_to_json(
+                    &crate::memory::embedding::embed_text_locally(
+                        "policy-sensitive legacy memory",
+                    ),
+                ),
+                r#"{"scope_kind":"chat"}"#,
+                0.9_f32,
+                crate::memory::RETRIEVAL_SUCCESS_STATE_NEUTRAL,
+                crate::memory::RETRIEVAL_PRODUCER_MEMORY_PIPELINE,
+                1_775_301_800_i64,
+            ],
+        )
+        .expect("insert legacy index row");
+        memory_id
+    };
+
+    let recall = retrieve_indexed_memories(
+        &state,
+        Some(user_key),
+        user_id,
+        chat_id,
+        "policy-sensitive legacy memory",
+    )
+    .expect("retrieve indexed memories");
+    let joined = format!("{recall:?}");
+    assert!(
+        !joined.contains("policy-sensitive legacy memory"),
+        "safety memory {safety_memory_id} must not be recalled: {joined}"
+    );
 }
 
 #[test]

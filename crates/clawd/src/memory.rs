@@ -84,13 +84,12 @@ pub(crate) const MEMORY_SCOPE_USER: &str = "user";
 // `tool_or_skill_name` is a best-effort producer label for debugging/analytics.
 pub(crate) const RETRIEVAL_PRODUCER_KB: &str = "kb";
 pub(crate) const RETRIEVAL_PRODUCER_MEMORY_PIPELINE: &str = RETRIEVAL_SOURCE_MEMORY;
-const AGENT_DISPLAY_NAME_INVALID_VALUES: &[&str] = &[
-    "executor",
-    "assistant",
+const AGENT_DISPLAY_NAME_RESERVED_TOKENS: &[&str] = &[
+    MEMORY_ROLE_SYSTEM,
+    MEMORY_ROLE_ASSISTANT,
+    MEMORY_ROLE_USER,
     "agent",
-    "系统",
-    "身份",
-    "formal identity",
+    "executor",
 ];
 
 pub(crate) fn retrieval_source_is_knowledge(source_kind: &str) -> bool {
@@ -370,15 +369,9 @@ pub(crate) fn insert_memory(
     }
 
     let safety_flag = classify_memory_safety_flag(&trimmed, &state.policy.memory);
-    let is_instructional = detect_instructional_text(&trimmed, &state.policy.memory);
+    let is_instructional = false;
     let memory_type = infer_memory_type(role, is_instructional, &safety_flag, write_kind);
-    let salience = estimate_memory_salience(
-        &trimmed,
-        is_instructional,
-        &safety_flag,
-        &state.policy.memory,
-        write_kind,
-    );
+    let salience = estimate_memory_salience(&trimmed, is_instructional, &safety_flag, write_kind);
 
     let now_text = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
@@ -793,28 +786,7 @@ pub(crate) fn upsert_long_term_summary(
 }
 
 fn sanitize_memory_text_for_prompt(text: &str) -> String {
-    let policy_markers = [
-        "no code generation",
-        "all code generation is forbidden",
-        "all executable code is forbidden",
-        "pure text only",
-        "only pure-text",
-        "不能提供可执行代码",
-        "禁止生成任何可执行代码",
-        "不提供java代码示例",
-        "不提供可执行的java",
-        "根据当前策略，不能提供可执行代码",
-        "当前策略明确禁止",
-        "including teaching examples",
-    ];
-    let kept = text
-        .lines()
-        .filter(|line| {
-            let lower = line.trim().to_ascii_lowercase();
-            !policy_markers.iter().any(|m| lower.contains(m))
-        })
-        .collect::<Vec<_>>();
-    kept.join("\n").trim().to_string()
+    text.trim().to_string()
 }
 
 pub(crate) fn repeated_entries_ratio(entries: &[(i64, String, String, String)]) -> f32 {
@@ -849,25 +821,15 @@ fn contains_any_marker(norm_text: &str, markers: &[String]) -> bool {
 
 fn should_skip_memory_write(
     content: &str,
-    role: &str,
+    _role: &str,
     min_chars: usize,
-    cfg: &MemoryConfig,
+    _cfg: &MemoryConfig,
 ) -> bool {
     let text = content.trim();
     if text.is_empty() {
         return true;
     }
     if text.chars().count() < min_chars && extract_delivery_file_tokens(text).is_empty() {
-        return true;
-    }
-    let tiny = text.to_ascii_lowercase();
-    if role == MEMORY_ROLE_ASSISTANT
-        && cfg
-            .rules
-            .assistant_ack_skip
-            .iter()
-            .any(|m| tiny == m.trim().to_ascii_lowercase())
-    {
         return true;
     }
     false
@@ -893,12 +855,6 @@ fn is_duplicate_recent_memory(
         )
         .optional()?;
     Ok(last.is_some_and(|v| v.trim() == content.trim()))
-}
-
-fn detect_instructional_text(text: &str, cfg: &MemoryConfig) -> bool {
-    let norm = text.to_ascii_lowercase();
-    contains_any_marker(&norm, &cfg.rules.salience_boost_markers)
-        && contains_any_marker(&norm, &cfg.rules.instruction_markers)
 }
 
 fn classify_memory_safety_flag(text: &str, cfg: &MemoryConfig) -> String {
@@ -934,10 +890,9 @@ fn infer_memory_type(
 }
 
 fn estimate_memory_salience(
-    text: &str,
+    _text: &str,
     is_instructional: bool,
     safety_flag: &str,
-    cfg: &MemoryConfig,
     write_kind: MemoryWriteKind,
 ) -> f32 {
     let mut score: f32 = if is_instructional { 0.72 } else { 0.48 };
@@ -945,12 +900,6 @@ fn estimate_memory_salience(
         MemoryWriteKind::AssistantOutcome => score += 0.12,
         MemoryWriteKind::UnfinishedGoal => score += 0.2,
         MemoryWriteKind::Default => {}
-    }
-    if contains_any_marker(
-        &text.to_ascii_lowercase(),
-        &cfg.rules.salience_boost_markers,
-    ) {
-        score += 0.16;
     }
     if safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE {
         score = 0.12;
@@ -980,9 +929,14 @@ fn normalize_agent_display_name(raw: &str) -> Option<String> {
     if candidate.is_empty() {
         return None;
     }
-    if AGENT_DISPLAY_NAME_INVALID_VALUES
+    if AGENT_DISPLAY_NAME_RESERVED_TOKENS
         .iter()
-        .any(|value| candidate.eq_ignore_ascii_case(value) || candidate.contains(value))
+        .any(|value| candidate.eq_ignore_ascii_case(value))
+        || candidate.chars().any(char::is_control)
+        || candidate.starts_with('{')
+        || candidate.starts_with('[')
+        || candidate.contains('/')
+        || candidate.contains('\\')
     {
         return None;
     }

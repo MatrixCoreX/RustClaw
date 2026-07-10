@@ -7,10 +7,10 @@ use serde::Deserialize;
 use crate::memory::{
     retrieval_kind_is_fact_bucket, retrieval_kind_is_knowledge_doc_bucket,
     retrieval_source_is_knowledge, MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_USER,
-    RETRIEVAL_KIND_ASSISTANT_RESULT, RETRIEVAL_KIND_EPISODIC_EVENT, RETRIEVAL_KIND_TRIGGER_ANCHOR,
-    RETRIEVAL_KIND_UNFINISHED_GOAL, RETRIEVAL_SOURCE_KB_DOC, RETRIEVAL_SOURCE_KNOWLEDGE_FACT,
-    RETRIEVAL_SOURCE_MEMORY_FACT, RETRIEVAL_SUCCESS_STATE_FAILED,
-    RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
+    MEMORY_TYPE_SAFETY_SIGNAL, RETRIEVAL_KIND_ASSISTANT_RESULT, RETRIEVAL_KIND_EPISODIC_EVENT,
+    RETRIEVAL_KIND_TRIGGER_ANCHOR, RETRIEVAL_KIND_UNFINISHED_GOAL, RETRIEVAL_SOURCE_KB_DOC,
+    RETRIEVAL_SOURCE_KNOWLEDGE_FACT, RETRIEVAL_SOURCE_MEMORY, RETRIEVAL_SOURCE_MEMORY_FACT,
+    RETRIEVAL_SUCCESS_STATE_FAILED, RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
 };
 use crate::AppState;
 
@@ -564,14 +564,23 @@ fn fetch_recent_candidates(
     limit: usize,
 ) -> anyhow::Result<Vec<RetrievalRow>> {
     let mut stmt = db.prepare(
-        "SELECT id, source_kind, memory_kind, role, search_text, vector_json,
-                embedding_model, embedding_dims, embedding_version, metadata_json, salience, success_state,
-                COALESCE(updated_at_ts, created_at_ts, 0)
-         FROM memory_retrieval_index
-         WHERE (user_id = ?1 AND chat_id = ?2 AND COALESCE(user_key, '') = ?3)
-           OR (source_kind IN (?4, ?5) AND COALESCE(user_key, '') = ?3)
-         ORDER BY COALESCE(updated_at_ts, created_at_ts, 0) DESC, id DESC
-         LIMIT ?6",
+        "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
+                i.embedding_model, i.embedding_dims, i.embedding_version, i.metadata_json, i.salience, i.success_state,
+                COALESCE(i.updated_at_ts, i.created_at_ts, 0)
+         FROM memory_retrieval_index i
+         WHERE (
+             (i.user_id = ?1 AND i.chat_id = ?2 AND COALESCE(i.user_key, '') = ?3)
+             OR (i.source_kind IN (?4, ?5) AND COALESCE(i.user_key, '') = ?3)
+         )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM memories m
+             WHERE i.source_kind = ?6
+               AND i.source_memory_id = m.id
+               AND m.memory_type = ?7
+           )
+         ORDER BY COALESCE(i.updated_at_ts, i.created_at_ts, 0) DESC, i.id DESC
+         LIMIT ?8",
     )?;
     let rows = stmt.query_map(
         params![
@@ -580,6 +589,8 @@ fn fetch_recent_candidates(
             user_key,
             RETRIEVAL_SOURCE_KNOWLEDGE_FACT,
             RETRIEVAL_SOURCE_MEMORY_FACT,
+            RETRIEVAL_SOURCE_MEMORY,
+            MEMORY_TYPE_SAFETY_SIGNAL,
             limit as i64
         ],
         |row| {
@@ -666,7 +677,14 @@ fn fetch_fts_candidates(
            OR (i.source_kind = ?5 AND COALESCE(i.user_key, '') = ?3)
            OR (i.source_kind = ?6 AND COALESCE(i.user_key, '') = ?3))
            AND f.memory_retrieval_index_fts MATCH ?7
-         LIMIT ?8",
+           AND NOT EXISTS (
+             SELECT 1
+             FROM memories m
+             WHERE i.source_kind = ?8
+               AND i.source_memory_id = m.id
+               AND m.memory_type = ?9
+           )
+         LIMIT ?10",
     ) {
         Ok(stmt) => stmt,
         Err(_) => return Ok(Vec::new()),
@@ -680,6 +698,8 @@ fn fetch_fts_candidates(
             RETRIEVAL_SOURCE_KNOWLEDGE_FACT,
             RETRIEVAL_SOURCE_MEMORY_FACT,
             query,
+            RETRIEVAL_SOURCE_MEMORY,
+            MEMORY_TYPE_SAFETY_SIGNAL,
             limit as i64
         ],
         |row| {

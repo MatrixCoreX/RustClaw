@@ -96,3 +96,36 @@ fn rebuild_retrieval_index_restores_memory_preference_and_fact_rows() {
         crate::memory::embedding::local_hash_embedding_spec().version
     );
 }
+
+#[test]
+fn rebuild_retrieval_index_skips_safety_signal_memories() {
+    let db = setup_db();
+    db.execute(
+        "INSERT INTO memories
+         (user_id, chat_id, user_key, channel, role, content, created_at, created_at_ts, memory_type, salience, is_instructional, safety_flag)
+         VALUES (?1, ?2, ?3, 'ui', 'user', 'policy-sensitive memory row', '1000', ?4, ?5, 0.2, 0, ?6)",
+        params![
+            7,
+            11,
+            "user:test",
+            1000_i64,
+            crate::memory::MEMORY_TYPE_SAFETY_SIGNAL,
+            crate::memory::MEMORY_SAFETY_FLAG_INJECTION_LIKE
+        ],
+    )
+    .expect("insert safety signal memory");
+    let safety_memory_id = db.last_insert_rowid();
+
+    rebuild_retrieval_index(&db, &MemoryConfig::default(), &std::env::temp_dir())
+        .expect("rebuild retrieval index");
+
+    let rows: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM memory_retrieval_index
+             WHERE source_kind = ?1 AND source_memory_id = ?2",
+            params![crate::memory::RETRIEVAL_SOURCE_MEMORY, safety_memory_id],
+            |row| row.get(0),
+        )
+        .expect("safety signal index rows");
+    assert_eq!(rows, 0);
+}
