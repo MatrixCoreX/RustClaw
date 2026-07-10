@@ -299,6 +299,61 @@ fn existing_observed_context_synthesis_allows_terminal_judgment_respond() {
 }
 
 #[test]
+fn active_bound_context_allows_conversation_evidence_terminal_respond() {
+    let target = "/tmp/rustclaw/fixtures/device_local/README.md";
+    let mut route = route_result(
+        crate::AskMode::act_with_chat_finalizer(),
+        false,
+        OutputResponseShape::OneSentence,
+    );
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = target.to_string();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "active_bound_targets".to_string(),
+        serde_json::to_string(&vec![target]).unwrap(),
+    );
+    let actions = vec![AgentAction::Respond {
+        content: "summary from prior observed content".to_string(),
+    }];
+
+    assert!(!should_force_actionable_plan_repair(
+        &test_state(),
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+}
+
+#[test]
+fn active_bound_context_mismatched_locator_still_forces_terminal_respond_repair() {
+    let mut route = route_result(
+        crate::AskMode::act_with_chat_finalizer(),
+        false,
+        OutputResponseShape::OneSentence,
+    );
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/tmp/rustclaw/fixtures/current.md".to_string();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "active_bound_targets".to_string(),
+        serde_json::to_string(&vec!["/tmp/rustclaw/fixtures/previous.md"]).unwrap(),
+    );
+    let actions = vec![AgentAction::Respond {
+        content: "summary from unstated content".to_string(),
+    }];
+
+    assert!(should_force_actionable_plan_repair(
+        &test_state(),
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+}
+
+#[test]
 fn existing_observed_context_synthesis_still_requires_explicit_content_evidence() {
     let mut route = route_result(
         crate::AskMode::act_with_chat_finalizer(),
