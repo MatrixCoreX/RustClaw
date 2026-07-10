@@ -101,6 +101,9 @@ pub(crate) fn route_matches_config_risk_output_contract(route: &crate::RouteResu
             == Some(crate::evidence_policy::FinalAnswerShape::RiskAssessment)
 }
 
+// Legacy scrub markers only. Production no longer builds user-visible
+// execution-summary prose; these prefixes are retained so old delivery/history
+// entries can be detected and removed before publishing final answers.
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX: &str = "**执行过程**";
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX_EN: &str = "**Execution**";
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX_JA: &str = "**実行過程**";
