@@ -102,6 +102,8 @@ struct AudioSynthesizeConfig {
     #[serde(default)]
     mimo_models: Option<Vec<String>>,
     #[serde(default)]
+    mimo_voices: Option<Vec<String>>,
+    #[serde(default)]
     native_models: Option<Vec<String>>,
     #[serde(default)]
     custom_models: Option<Vec<String>>,
@@ -297,6 +299,7 @@ fn execute_synthesize(
         vendor,
         requested_voice,
         cfg.audio_synthesize.default_voice.as_deref(),
+        &cfg.audio_synthesize,
     );
 
     let output_path = resolve_output_path(
@@ -672,17 +675,7 @@ const QWEN_TTS_VOICES: &[&str] = &[
     "Stella",
 ];
 
-const MIMO_TTS_VOICES: &[&str] = &[
-    "mimo_default",
-    "冰糖",
-    "茉莉",
-    "苏打",
-    "白桦",
-    "Mia",
-    "Chloe",
-    "Milo",
-    "Dean",
-];
+const MIMO_TTS_VOICES: &[&str] = &["mimo_default", "Mia", "Chloe", "Milo", "Dean"];
 
 fn minimax_audio_format(response_format: &str) -> &'static str {
     match response_format.trim().to_ascii_lowercase().as_str() {
@@ -713,6 +706,18 @@ fn canonical_voice_name<'a>(voices: &'a [&'a str], voice: &str) -> Option<&'a st
         .find(|candidate| candidate.eq_ignore_ascii_case(trimmed))
 }
 
+fn canonical_config_voice_name(voices: Option<&[String]>, voice: &str) -> Option<String> {
+    let trimmed = voice.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    voices?
+        .iter()
+        .map(|candidate| candidate.trim())
+        .find(|candidate| candidate.eq_ignore_ascii_case(trimmed))
+        .map(str::to_string)
+}
+
 fn default_voice_for_vendor(vendor: VendorKind) -> &'static str {
     match vendor {
         VendorKind::OpenAI
@@ -727,7 +732,11 @@ fn default_voice_for_vendor(vendor: VendorKind) -> &'static str {
     }
 }
 
-fn normalize_voice_for_vendor(vendor: VendorKind, voice: &str) -> Option<String> {
+fn normalize_voice_for_vendor(
+    vendor: VendorKind,
+    voice: &str,
+    cfg: &AudioSynthesizeConfig,
+) -> Option<String> {
     let trimmed = voice.trim();
     if trimmed.is_empty() {
         return None;
@@ -743,7 +752,8 @@ fn normalize_voice_for_vendor(vendor: VendorKind, voice: &str) -> Option<String>
         VendorKind::Google => canonical_voice_name(GOOGLE_TTS_VOICES, trimmed).map(str::to_string),
         VendorKind::Qwen => canonical_voice_name(QWEN_TTS_VOICES, trimmed).map(str::to_string),
         VendorKind::MiniMax => Some(minimax_voice_id(trimmed)),
-        VendorKind::Mimo => canonical_voice_name(MIMO_TTS_VOICES, trimmed).map(str::to_string),
+        VendorKind::Mimo => canonical_config_voice_name(cfg.mimo_voices.as_deref(), trimmed)
+            .or_else(|| canonical_voice_name(MIMO_TTS_VOICES, trimmed).map(str::to_string)),
     }
 }
 
@@ -751,11 +761,13 @@ fn resolve_voice_for_vendor(
     vendor: VendorKind,
     requested_voice: Option<&str>,
     configured_default_voice: Option<&str>,
+    cfg: &AudioSynthesizeConfig,
 ) -> String {
     requested_voice
-        .and_then(|voice| normalize_voice_for_vendor(vendor, voice))
+        .and_then(|voice| normalize_voice_for_vendor(vendor, voice, cfg))
         .or_else(|| {
-            configured_default_voice.and_then(|voice| normalize_voice_for_vendor(vendor, voice))
+            configured_default_voice
+                .and_then(|voice| normalize_voice_for_vendor(vendor, voice, cfg))
         })
         .unwrap_or_else(|| default_voice_for_vendor(vendor).to_string())
 }
