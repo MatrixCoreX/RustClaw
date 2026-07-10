@@ -149,6 +149,45 @@ fn extract_text_message_falls_back_to_voice_transcript() {
 }
 
 #[test]
+fn quoted_text_uses_language_neutral_marker() {
+    let msg = WeixinMessage {
+        from_user_id: Some("u1".to_string()),
+        _to_user_id: None,
+        create_time_ms: None,
+        item_list: Some(vec![MessageItem {
+            r#type: Some(1),
+            ref_msg: Some(super::RefMessage {
+                title: Some("previous".to_string()),
+                message_item: Some(Box::new(MessageItem {
+                    r#type: Some(1),
+                    ref_msg: None,
+                    text_item: Some(TextItem {
+                        text: Some("old body".to_string()),
+                    }),
+                    voice_item: None,
+                    image_item: None,
+                    video_item: None,
+                    file_item: None,
+                })),
+            }),
+            text_item: Some(TextItem {
+                text: Some("new body".to_string()),
+            }),
+            voice_item: None,
+            image_item: None,
+            video_item: None,
+            file_item: None,
+        }]),
+        context_token: None,
+    };
+
+    assert_eq!(
+        extract_text_message(&msg).as_deref(),
+        Some("[quote: previous | old body]\nnew body")
+    );
+}
+
+#[test]
 fn unbound_plain_text_requires_binding_prompt() {
     assert!(!is_unbound_allowed_command("hello"));
     assert_eq!(extract_bind_key_candidate("hello", false), None);
