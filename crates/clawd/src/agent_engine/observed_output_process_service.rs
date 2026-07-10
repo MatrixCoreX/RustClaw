@@ -744,9 +744,9 @@ struct ProcessBasicPsRow {
 }
 
 fn process_basic_ps_inventory_direct_answer_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     rows: &[&str],
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     let rows = rows
         .iter()
@@ -756,35 +756,31 @@ fn process_basic_ps_inventory_direct_answer_candidate(
         return None;
     }
     let top = rows.first()?;
-    let list = rows
-        .iter()
-        .enumerate()
-        .map(|(idx, row)| {
-            format!(
-                "{}. {} CPU {}% MEM {}% PID {}",
-                idx + 1,
-                row.comm,
-                row.cpu,
-                row.mem,
-                row.pid
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    Some(observed_t_with_vars(
-        state,
-        "clawd.msg.process_basic_ps_inventory_summary",
-        "当前 CPU 占用最高的 {count} 个进程：{list}。最值得注意的是 {top_comm}（CPU {top_cpu}%，PID {top_pid}）。",
-        "Top {count} processes by CPU: {list}. Most notable: {top_comm} (CPU {top_cpu}%, PID {top_pid}).",
-        prefer_english,
-        &[
-            ("count", &rows.len().to_string()),
-            ("list", &list),
-            ("top_comm", top.comm.as_str()),
-            ("top_cpu", top.cpu.as_str()),
-            ("top_pid", top.pid.as_str()),
-        ],
-    ))
+    let mut lines = vec![
+        "message_key=clawd.msg.process_basic.ps_inventory.observed".to_string(),
+        "reason_code=process_basic_ps_inventory_observed".to_string(),
+        "selection_reason=ranked_by_cpu".to_string(),
+        format!("process_count={}", rows.len()),
+    ];
+    push_process_basic_machine_line(&mut lines, "top_process.pid", &top.pid);
+    push_process_basic_machine_line(&mut lines, "top_process.name", &top.comm);
+    push_process_basic_machine_line(&mut lines, "top_process.cpu_percent", &top.cpu);
+    push_process_basic_machine_line(&mut lines, "top_process.mem_percent", &top.mem);
+    for (idx, row) in rows.iter().enumerate() {
+        let prefix = format!("process.{}", idx + 1);
+        push_process_basic_machine_line(&mut lines, &format!("{prefix}.pid"), &row.pid);
+        push_process_basic_machine_line(&mut lines, &format!("{prefix}.name"), &row.comm);
+        push_process_basic_machine_line(&mut lines, &format!("{prefix}.cpu_percent"), &row.cpu);
+        push_process_basic_machine_line(&mut lines, &format!("{prefix}.mem_percent"), &row.mem);
+    }
+    Some(lines.join("\n"))
+}
+
+fn push_process_basic_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
+    let value = crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),
+    );
+    lines.push(format!("{key}={value}"));
 }
 
 fn process_basic_ps_row(row: &str) -> Option<ProcessBasicPsRow> {
