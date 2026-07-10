@@ -31,6 +31,10 @@ pub(super) fn current_turn_extension_inventory_file_paths_repair_applies(
     if output_contract.delivery_required
         || !output_contract.requires_content_evidence
         || !output_contract.semantic_kind_is_unclassified()
+        || matches!(
+            output_contract.response_shape,
+            OutputResponseShape::Free | OutputResponseShape::OneSentence
+        )
         || req_surface.has_filename_candidates()
         || req_surface.has_structured_target_refinement()
         || !matches!(

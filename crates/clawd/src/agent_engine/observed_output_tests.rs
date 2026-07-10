@@ -114,4 +114,5 @@ include!("observed_output_tests/system_archive_path_package.rs");
 include!("observed_output_tests/sqlite_archive_quantity_git.rs");
 include!("observed_output_tests/raw_health_service_http_log.rs");
 include!("observed_output_tests/raw_health_service_http_log_tail.rs");
+include!("observed_output_tests/run_cmd_command_output.rs");
 include!("observed_output_tests/text_parsing.rs");

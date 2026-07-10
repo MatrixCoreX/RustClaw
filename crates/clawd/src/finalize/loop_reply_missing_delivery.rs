@@ -205,6 +205,67 @@ fn observed_execution_facts_for_missing_delivery(
     facts
 }
 
+async fn observed_answer_reply_from_missing_delivery_context(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<AskReply> {
+    if !crate::agent_engine::observed_output::has_observed_answer_candidates(loop_state) {
+        return None;
+    }
+    let (answer, summary) =
+        match crate::agent_engine::observed_output::try_synthesize_answer_from_observed_output(
+            state,
+            task,
+            user_text,
+            loop_state,
+            agent_run_context,
+        )
+        .await
+        {
+            Ok(Some(outcome)) => outcome,
+            Ok(None) => return None,
+            Err(err) => {
+                tracing::warn!(
+                    "missing_delivery_observed_answer_retry_unavailable task_id={} err={}",
+                    task.task_id,
+                    err
+                );
+                return None;
+            }
+        };
+    let answer = answer.trim();
+    if answer.is_empty()
+        || !matches!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        )
+        || summary.completion_ok == Some(false)
+    {
+        return None;
+    }
+    let delivery_messages = vec![answer.to_string()];
+    let delivery_consistent =
+        crate::task_journal::delivery_payload_consistent(answer, &delivery_messages);
+    let journal = build_loop_journal(
+        task,
+        user_text,
+        loop_state,
+        agent_run_context,
+        Some(summary),
+        delivery_consistent,
+        answer,
+        crate::task_journal::TaskJournalFinalStatus::Success,
+    );
+    Some(
+        AskReply::non_llm(answer.to_string())
+            .with_messages(delivery_messages)
+            .with_task_journal(journal),
+    )
+}
+
 async fn missing_delivery_after_observation_message(
     state: &AppState,
     task: &ClaimedTask,
@@ -446,6 +507,19 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
                 .with_messages(delivery_messages)
                 .with_task_journal(journal),
         );
+    }
+    if !has_deterministic_answer {
+        if let Some(reply) = observed_answer_reply_from_missing_delivery_context(
+            state,
+            task,
+            user_text,
+            loop_state,
+            agent_run_context,
+        )
+        .await
+        {
+            return Some(reply);
+        }
     }
     let observed_contract_evidence_complete = observed_execution_has_complete_contract_evidence(
         task,
