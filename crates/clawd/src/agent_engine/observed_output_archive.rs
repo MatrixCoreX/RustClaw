@@ -265,73 +265,24 @@ pub(super) fn parse_plain_archive_listing_entries(output: &str) -> Vec<ArchiveLi
         .collect()
 }
 
-pub(super) fn archive_entry_display(entry: &ArchiveListEntry, prefer_english: bool) -> String {
-    match entry.size_bytes {
-        Some(size) if prefer_english => format!("{} ({size} bytes)", entry.name),
-        Some(size) => format!("{}（{size} 字节）", entry.name),
-        None => entry.name.clone(),
-    }
-}
-
 pub(super) fn archive_list_summary_direct_answer(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     summary: &ArchiveListSummary,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if summary.entries.is_empty() {
         return None;
     }
-    let shown = summary
-        .entries
-        .iter()
-        .take(8)
-        .map(|entry| archive_entry_display(entry, prefer_english))
-        .collect::<Vec<_>>();
-    if shown.is_empty() {
-        return None;
-    }
-    let omitted = summary.entries.len().saturating_sub(shown.len());
-    let separator = if prefer_english { ", " } else { "、" };
-    let entries = shown.join(separator);
-    let count = summary.entries.len().to_string();
-    let count_label = if prefer_english {
-        if summary.entries.len() == 1 {
-            "1 entry".to_string()
-        } else {
-            format!("{} entries", summary.entries.len())
-        }
-    } else {
-        format!("{} 个条目", summary.entries.len())
-    };
-    let more = if omitted == 0 {
-        String::new()
-    } else if prefer_english {
-        format!(", plus {omitted} more")
-    } else {
-        format!("，另有 {omitted} 个未列出")
-    };
-    Some(observed_t_with_vars(
-        state,
-        "clawd.msg.archive_list_summary",
-        "压缩包包含 {count_label}：{entries}{more}。",
-        "The archive contains {count_label}: {entries}{more}.",
-        prefer_english,
-        &[
-            ("count", &count),
-            ("count_label", &count_label),
-            ("entries", &entries),
-            ("more", &more),
-        ],
-    ))
+    Some(archive_list_summary_machine_answer(summary, 8))
 }
 
 pub(super) fn archive_entry_existence_direct_answer(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     route: &crate::RouteResult,
     request_text: Option<&str>,
     summary: &ArchiveListSummary,
     archive_hint: Option<&str>,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if !super::output_route_policy::route_contract_marker_is(
         route,
@@ -349,26 +300,82 @@ pub(super) fn archive_entry_existence_direct_answer(
         });
     let target = archive_entry_target_for_observed_route(route, request_text, archive_path)?;
     let exists = archive_list_contains_requested_entry(summary, &target)?;
-    let vars = [("entry", target.as_str())];
-    Some(if exists {
-        observed_t_with_vars(
-            state,
-            "clawd.msg.archive_entry_exists",
-            "压缩包中存在 {entry}。",
-            "Yes, {entry} exists in the archive.",
-            prefer_english,
-            &vars,
-        )
-    } else {
-        observed_t_with_vars(
-            state,
-            "clawd.msg.archive_entry_missing",
-            "压缩包中不存在 {entry}。",
-            "No, {entry} does not exist in the archive.",
-            prefer_english,
-            &vars,
-        )
-    })
+    Some(archive_entry_presence_machine_answer(
+        archive_path,
+        &target,
+        exists,
+    ))
+}
+
+fn archive_list_summary_machine_answer(summary: &ArchiveListSummary, limit: usize) -> String {
+    let shown_count = summary.entries.len().min(limit);
+    let mut lines = vec![
+        "message_key=clawd.msg.archive_list.observed".to_string(),
+        "reason_code=archive_list_observed".to_string(),
+        format!("entry_count={}", summary.entries.len()),
+        format!("shown_count={shown_count}"),
+        format!(
+            "omitted_count={}",
+            summary.entries.len().saturating_sub(shown_count)
+        ),
+    ];
+    if let Some(archive) = summary
+        .archive
+        .as_deref()
+        .map(str::trim)
+        .filter(|archive| !archive.is_empty())
+    {
+        push_archive_machine_line(&mut lines, "archive", archive);
+    }
+    for (idx, entry) in summary.entries.iter().take(limit).enumerate() {
+        let prefix = format!("entry.{}", idx + 1);
+        push_archive_machine_line(&mut lines, &format!("{prefix}.name"), &entry.name);
+        if let Some(size_bytes) = entry.size_bytes {
+            lines.push(format!("{prefix}.size_bytes={size_bytes}"));
+        }
+    }
+    lines.join("\n")
+}
+
+fn archive_entry_presence_machine_answer(
+    archive_path: Option<&str>,
+    entry: &str,
+    exists: bool,
+) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.archive_entry_presence.observed".to_string(),
+        "reason_code=archive_entry_presence_observed".to_string(),
+        format!("exists={exists}"),
+    ];
+    if let Some(archive) = archive_path
+        .map(str::trim)
+        .filter(|archive| !archive.is_empty())
+    {
+        push_archive_machine_line(&mut lines, "archive", archive);
+    }
+    push_archive_machine_line(&mut lines, "entry", entry);
+    lines.join("\n")
+}
+
+fn archive_unpack_machine_answer(dest: &str, members: &[String]) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.archive_unpack.observed".to_string(),
+        "reason_code=archive_unpack_observed".to_string(),
+        "extracted=true".to_string(),
+        format!("member_count={}", members.len()),
+    ];
+    push_archive_machine_line(&mut lines, "dest", dest);
+    for (idx, member) in members.iter().enumerate() {
+        push_archive_machine_line(&mut lines, &format!("member.{}", idx + 1), member);
+    }
+    lines.join("\n")
+}
+
+fn push_archive_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
+    let value = crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),
+    );
+    lines.push(format!("{key}={value}"));
 }
 
 pub(super) fn archive_entry_target_for_observed_route(
@@ -647,7 +654,7 @@ pub(super) fn archive_basic_observed_candidate(value: &serde_json::Value) -> Opt
 pub(super) fn archive_unpack_direct_answer_candidate(
     route: Option<&crate::RouteResult>,
     body: &str,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     let route = route?;
     if !super::output_route_policy::route_contract_marker_is(
@@ -659,23 +666,7 @@ pub(super) fn archive_unpack_direct_answer_candidate(
     let dest =
         archive_basic_path_value_from_body(body, &["dest", "dest_path", "destination", "path"])?;
     let members = archive_unpack_members_from_body(body, &dest);
-    if !members.is_empty() {
-        let joined = if prefer_english {
-            members.join(", ")
-        } else {
-            members.join("、")
-        };
-        return if prefer_english {
-            Some(format!("Unpacked to {dest}; extracted {joined}."))
-        } else {
-            Some(format!("已解压到 {dest}，包含 {joined}。"))
-        };
-    }
-    if prefer_english {
-        Some(format!("Unpacked to {dest}."))
-    } else {
-        Some(format!("已解压到 {dest}。"))
-    }
+    Some(archive_unpack_machine_answer(&dest, &members))
 }
 
 pub(super) fn archive_unpack_members_from_body(body: &str, dest: &str) -> Vec<String> {

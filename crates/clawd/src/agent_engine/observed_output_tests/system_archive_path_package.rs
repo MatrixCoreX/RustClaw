@@ -408,10 +408,14 @@ fn archive_unpack_contract_returns_one_sentence_destination_summary() {
         ..AgentRunContext::default()
     };
 
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("已解压到 /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked，包含 notes.txt。")
-    );
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("archive unpack machine answer");
+    assert!(answer.contains("message_key=clawd.msg.archive_unpack.observed"));
+    assert!(answer.contains("reason_code=archive_unpack_observed"));
+    assert!(answer.contains("extracted=true"));
+    assert!(answer.contains("dest=/tmp/rustclaw-workspace/tmp/contract_matrix_unpacked"));
+    assert!(answer.contains("member_count=1"));
+    assert!(answer.contains("member.1=notes.txt"));
 }
 
 #[test]
