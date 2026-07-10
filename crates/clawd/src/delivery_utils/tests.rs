@@ -467,6 +467,24 @@ fn sync_output_payload_preserves_model_language_summary_before_markdown_table() 
 }
 
 #[test]
+fn sync_output_payload_preserves_compound_answer_before_markdown_table() {
+    let contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        ..IntentOutputContract::default()
+    };
+    let mut text = "**1. Log analysis**\n- WARN=2 and ERROR=1\n\n**2. Document summary**\n- The service exposes a control panel and writes structured logs.\n\n**3. Sorted scores**\n\n| name | score |\n| --- | --- |\n| beta | 12 |\n| gamma | 9 |\n| alpha | 7 |".to_string();
+    let mut messages = vec![text.clone()];
+
+    sync_output_payload(&contract, &mut text, &mut messages);
+
+    assert!(text.contains("Log analysis"));
+    assert!(text.contains("Document summary"));
+    assert!(text.contains("| beta | 12 |"));
+    assert_eq!(messages, vec![text]);
+}
+
+#[test]
 fn directory_lookup_contract_does_not_replace_synthesized_answer() {
     let mut state = test_state_with_i18n(&[]);
     let isolated = TempDirGuard::new("directory_lookup_preserve_answer");
