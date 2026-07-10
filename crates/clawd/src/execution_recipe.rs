@@ -202,7 +202,7 @@ fn structured_success_marker_observation(args: &Value, output: &str) -> Validati
         ValidationObservation::Passed
     } else {
         ValidationObservation::Failed(format!(
-            "validation output missing required marker={}",
+            "validation_required_marker_missing:marker={}",
             spec.marker
         ))
     }
@@ -960,8 +960,8 @@ fn assess_service_control_validation(output: &str) -> ValidationObservation {
             .get("failure_reason")
             .and_then(|v| v.as_str())
             .filter(|text| !text.trim().is_empty())
-            .or_else(|| value.get("summary").and_then(|v| v.as_str()))
-            .unwrap_or("service_control reported an error");
+            .or_else(|| value.get("error_code").and_then(|v| v.as_str()))
+            .unwrap_or("service_control_error");
         return ValidationObservation::Failed(detail.to_string());
     }
     if value
@@ -973,10 +973,9 @@ fn assess_service_control_validation(output: &str) -> ValidationObservation {
             .get("failure_reason")
             .and_then(|v| v.as_str())
             .filter(|text| !text.trim().is_empty())
-            .or_else(|| value.get("summary").and_then(|v| v.as_str()))
             .or_else(|| value.get("post_state").and_then(|v| v.as_str()))
             .or_else(|| value.get("pre_state").and_then(|v| v.as_str()))
-            .unwrap_or("service verification did not pass");
+            .unwrap_or("service_verification_failed");
         return ValidationObservation::Failed(detail.to_string());
     }
     let state = value
@@ -1014,10 +1013,10 @@ fn assess_health_check_validation(output: &str) -> ValidationObservation {
         .get("clawd_health_port_open")
         .and_then(|v| v.as_bool());
     if clawd_count == Some(0) || clawd_port_open == Some(false) {
-        return ValidationObservation::Failed("clawd health check is not passing yet".to_string());
+        return ValidationObservation::Failed("clawd_health_check_failed".to_string());
     }
     if telegramd_count == Some(0) {
-        return ValidationObservation::Failed("telegramd is not running".to_string());
+        return ValidationObservation::Failed("telegramd_process_not_running".to_string());
     }
     if clawd_count.is_some() && clawd_port_open.is_some() {
         return ValidationObservation::Passed;
@@ -1168,7 +1167,9 @@ fn assess_http_probe_validation(command: &str, output: &str) -> ValidationObserv
         if let Ok(code) = status_line.trim().parse::<u16>() {
             return match code {
                 200..=399 => ValidationObservation::Passed,
-                _ => ValidationObservation::Failed(format!("http returned status={code}")),
+                _ => {
+                    ValidationObservation::Failed(format!("http_status_not_success:status={code}"))
+                }
             };
         }
     }
@@ -1193,9 +1194,9 @@ fn assess_socket_listing_validation(output: &str) -> ValidationObservation {
     let second = second_nonempty_line(output);
     match (first, second) {
         (Some(_header), Some(_row)) => ValidationObservation::Passed,
-        (Some(_header), None) => ValidationObservation::Failed(
-            "validation command returned no matching rows".to_string(),
-        ),
+        (Some(_header), None) => {
+            ValidationObservation::Failed("socket_listing_no_matching_rows".to_string())
+        }
         _ => ValidationObservation::Inconclusive,
     }
 }
@@ -1262,11 +1263,13 @@ fn assess_http_basic_validation(args: &Value, output: &str) -> ValidationObserva
                     return ValidationObservation::Passed;
                 }
                 return ValidationObservation::Failed(format!(
-                    "http returned status={code}, expected status={expected_status}"
+                    "http_status_mismatch:status={code}:expected_status={expected_status}"
                 ));
             }
             if http_basic_expect_success(args) && !(200..=299).contains(&code) {
-                return ValidationObservation::Failed(format!("http returned status={code}"));
+                return ValidationObservation::Failed(format!(
+                    "http_status_not_success:status={code}"
+                ));
             }
             let expected = args
                 .get("expect_contains")
@@ -1275,14 +1278,16 @@ fn assess_http_basic_validation(args: &Value, output: &str) -> ValidationObserva
                 .filter(|value| !value.is_empty());
             if let Some(expected) = expected {
                 if !(200..=299).contains(&code) && !http_basic_accept_non_success(args) {
-                    return ValidationObservation::Failed(format!("http returned status={code}"));
+                    return ValidationObservation::Failed(format!(
+                        "http_status_not_success:status={code}"
+                    ));
                 }
                 let body = output.lines().skip(1).collect::<Vec<_>>().join("\n");
                 if body.contains(expected) {
                     return ValidationObservation::Passed;
                 } else {
                     return ValidationObservation::Failed(format!(
-                        "http response missing expected text={expected}"
+                        "http_expected_body_marker_missing:marker={expected}"
                     ));
                 }
             }
@@ -1347,7 +1352,7 @@ fn structured_validation_result(value: &Value) -> ValidationObservation {
                 .or_else(|| value.get("error"))
                 .and_then(Value::as_str)
                 .filter(|text| !text.trim().is_empty())
-                .unwrap_or("structured validation failed");
+                .unwrap_or("structured_validation_failed");
             return ValidationObservation::Failed(detail.to_string());
         }
         _ => {}
@@ -1367,7 +1372,7 @@ fn structured_validation_result(value: &Value) -> ValidationObservation {
             .or_else(|| value.get("error"))
             .and_then(Value::as_str)
             .filter(|text| !text.trim().is_empty())
-            .unwrap_or("structured validation failed");
+            .unwrap_or("structured_validation_failed");
         return ValidationObservation::Failed(detail.to_string());
     }
     ValidationObservation::Inconclusive

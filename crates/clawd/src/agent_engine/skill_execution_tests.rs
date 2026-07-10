@@ -1661,7 +1661,7 @@ async fn validation_failure_records_failed_output_and_advances_recipe_repair() {
         ..Default::default()
     };
 
-    let detail = "http response missing expected text=ops-repair-ok";
+    let detail = "http_expected_body_marker_missing:marker=ops-repair-ok";
     let output = "status=200\nops-repair-bad\n";
     let outcome = handle_skill_step_success(
         &state,
@@ -1722,7 +1722,7 @@ async fn validation_failure_records_failed_output_and_advances_recipe_repair() {
         .history_compact
         .iter()
         .any(|line| line.contains("validation_failed")
-            && line.contains("http response missing expected text=ops-repair-ok")));
+            && line.contains("http_expected_body_marker_missing:marker=ops-repair-ok")));
     assert!(loop_state.successful_action_fingerprints.is_empty());
     assert_eq!(loop_state.executed_step_results.len(), 1);
     assert!(
