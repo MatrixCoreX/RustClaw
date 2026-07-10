@@ -485,6 +485,50 @@ fn current_workspace_dirs_overview_replaces_incomplete_generic_synthesis() {
 }
 
 #[test]
+fn current_workspace_dirs_overview_preserves_publishable_hidden_entries_answer() {
+    let state = test_state();
+    let task = claimed_task("task-current-workspace-hidden-entries-preserve");
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\"}","error_text":null,"extra":{"action":"inventory_dir","counts":{"dirs":3,"files":2,"hidden":5,"total":5},"entries":[{"hidden":true,"kind":"dir","name":".git","path":".git"},{"hidden":true,"kind":"file","name":".gitignore","path":".gitignore"},{"hidden":false,"kind":"file","name":"README.md","path":"README.md"}],"include_hidden":true,"names":[".git",".gitignore","README.md"],"path":"."}}"#,
+    ));
+    let answer = "有，例如：.gitignore、.codex、.git";
+    loop_state.delivery_messages.push(answer.to_string());
+    loop_state.last_user_visible_respond = Some(answer.to_string());
+    loop_state.last_publishable_synthesis_output = Some(answer.to_string());
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut summary = None;
+
+    assert!(
+        !replace_delivery_with_deterministic_current_workspace_dirs_overview_answer(
+            &state,
+            &task,
+            "看一下当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
+            &mut loop_state,
+            Some(&ctx),
+            &mut summary,
+        )
+    );
+
+    assert_eq!(loop_state.delivery_messages, vec![answer.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(answer)
+    );
+    assert!(summary.is_none());
+}
+
+#[test]
 fn current_workspace_dirs_overview_does_not_replace_after_wrapped_read_range_evidence() {
     let state = test_state();
     let task = claimed_task("task-current-workspace-dirs-read-range");

@@ -5,8 +5,8 @@ use crate::{AppState, ClaimedTask};
 
 use super::{
     current_delivery_is_latest_publishable_synthesis, log_deterministic_delivery_record,
-    path_batch_size_facts, step_output_is_read_range, structured_json_values_from_output,
-    truncate_with_ellipsis,
+    path_batch_size_facts, planned_delivery_is_publishable_model_language_answer,
+    step_output_is_read_range, structured_json_values_from_output, truncate_with_ellipsis,
 };
 
 pub(super) fn direct_directory_purpose_summary_from_size_facts(
@@ -1312,6 +1312,47 @@ fn observed_current_workspace_top_level_dirs(loop_state: &LoopState) -> Option<V
         })
 }
 
+fn latest_inventory_observation_has_hidden_entry_signal(loop_state: &LoopState) -> bool {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && matches!(step.skill.as_str(), "system_basic" | "fs_basic"))
+        .filter_map(|step| step.output.as_deref())
+        .flat_map(structured_json_values_from_output)
+        .any(|value| inventory_value_has_hidden_entry_signal(&value))
+}
+
+fn inventory_value_has_hidden_entry_signal(value: &serde_json::Value) -> bool {
+    if value.get("action").and_then(|value| value.as_str()) != Some("inventory_dir") {
+        return false;
+    }
+    value
+        .get("include_hidden")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+        || value
+            .get("has_hidden")
+            .and_then(|value| value.as_bool())
+            .is_some()
+        || value
+            .get("counts")
+            .and_then(|value| value.get("hidden"))
+            .and_then(|value| value.as_u64())
+            .is_some()
+        || value
+            .get("entries")
+            .and_then(|value| value.as_array())
+            .is_some_and(|entries| {
+                entries.iter().any(|entry| {
+                    entry
+                        .get("hidden")
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false)
+                })
+            })
+}
+
 pub(super) fn direct_current_workspace_top_level_dirs_overview_answer(
     _state: &AppState,
     _user_text: &str,
@@ -1319,6 +1360,11 @@ pub(super) fn direct_current_workspace_top_level_dirs_overview_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    let current_delivery = loop_state
+        .delivery_messages
+        .last()
+        .map(String::as_str)
+        .unwrap_or_default();
     if route.output_contract.locator_kind != crate::OutputLocatorKind::CurrentWorkspace
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
@@ -1337,6 +1383,9 @@ pub(super) fn direct_current_workspace_top_level_dirs_overview_answer(
             .executed_step_results
             .iter()
             .any(step_output_is_read_range)
+        || (latest_inventory_observation_has_hidden_entry_signal(loop_state)
+            && (current_delivery_is_latest_publishable_synthesis(loop_state, current_delivery)
+                || planned_delivery_is_publishable_model_language_answer(current_delivery)))
     {
         return None;
     }
