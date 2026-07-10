@@ -183,11 +183,7 @@ pub(super) fn minimax_vision(
     let mut content = String::from(prompt);
     for (idx, image) in images.iter().enumerate() {
         let encoded = image_base64_payload(image, max_input_bytes)?;
-        content.push_str("\n\nimage ");
-        content.push_str(&(idx + 1).to_string());
-        content.push_str(":\n[图片base64:");
-        content.push_str(&encoded);
-        content.push(']');
+        append_text_base64_image(&mut content, idx + 1, &encoded);
     }
     let body = json!({
         "model": model,
@@ -383,6 +379,14 @@ pub(super) fn image_base64_payload(
         }
         ImageSource::Base64(s) => Ok(strip_base64_data_url(s).to_string()),
     }
+}
+
+pub(super) fn append_text_base64_image(content: &mut String, index: usize, encoded: &str) {
+    content.push_str("\n\nimage ");
+    content.push_str(&index.to_string());
+    content.push_str(":\n[image_base64:");
+    content.push_str(encoded);
+    content.push(']');
 }
 
 pub(super) fn openai_compat_vision(

@@ -56,6 +56,15 @@ fn strip_base64_data_url_returns_payload_only() {
 }
 
 #[test]
+fn text_base64_image_marker_is_language_neutral() {
+    let mut content = String::from("inspect");
+    append_text_base64_image(&mut content, 1, "abc123");
+
+    assert!(content.contains("[image_base64:abc123]"));
+    assert!(!content.contains("图片"));
+}
+
+#[test]
 fn parse_action_normalizes_analyze_alias_to_describe() {
     let mut obj = Map::new();
     obj.insert("action".to_string(), Value::String("analyze".to_string()));
