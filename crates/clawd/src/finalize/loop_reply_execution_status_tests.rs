@@ -871,3 +871,44 @@ fn deterministic_observed_execution_status_replaces_raw_success_output() {
         Some(true)
     );
 }
+
+#[test]
+fn deterministic_observed_execution_status_replaces_underinformative_service_status() {
+    let state = test_state();
+    let task = claimed_task("task-deterministic-observed-service-status-replace");
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.delivery_messages.push("status=ok".to_string());
+    loop_state.last_user_visible_respond = Some("status=ok".to_string());
+    loop_state.last_publishable_synthesis_output = Some("status=ok".to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "service_control",
+        r#"{"status":"ok","target":"telegramd","service_name":"telegramd","manager_type":"rustclaw","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=running","post_state":"telegramd=running","verified":true,"key_evidence":["telegramd process_count=1 memory_rss_bytes=Some(53248)"],"failure_reason":"","next_step":"","summary":"Status: telegramd=running"}"#,
+    ));
+    let mut finalizer_summary = None;
+
+    assert!(
+        replace_delivery_with_deterministic_observed_execution_status_answer(
+            &state,
+            &task,
+            "Tell me whether telegramd is running and include the evidence.",
+            &mut loop_state,
+            &mut finalizer_summary,
+        )
+    );
+
+    assert_eq!(loop_state.delivery_messages.len(), 1);
+    let answer = &loop_state.delivery_messages[0];
+    assert!(answer.contains("target=telegramd"), "{answer}");
+    assert!(answer.contains("post_state=telegramd=running"), "{answer}");
+    assert!(answer.contains("verified=true"), "{answer}");
+    assert!(
+        answer.contains("evidence.1=telegramd process_count=1 memory_rss_bytes=Some(53248)"),
+        "{answer}"
+    );
+    assert_ne!(answer.trim(), "status=ok");
+    assert_eq!(
+        finalizer_summary.and_then(|summary| summary.completion_ok),
+        Some(true)
+    );
+}
