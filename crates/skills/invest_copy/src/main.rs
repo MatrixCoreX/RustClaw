@@ -1,6 +1,6 @@
-//! invest_copy：单行 JSON stdin → 单行 JSON stdout。
-//! 默认通过 **与 clawd 一致的 OpenAI 兼容端点**（`OPENAI_*` 环境变量，由 skill-runner 注入）
-//! 调用主程序当前 `openai_compat` 模型生成投教向文稿；可选 `use_heuristic=true` 走离线规则摘要。
+//! invest_copy: single-line JSON stdin -> single-line JSON stdout.
+//! LLM mode uses the same OpenAI-compatible gateway as clawd when available.
+//! Heuristic mode returns structured evidence for downstream rendering.
 
 mod llm_client;
 
@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 const MAX_DATA_CHARS: usize = 12_000;
@@ -17,6 +18,7 @@ const MIN_DATA_CHARS: usize = 10;
 const SHORT_SUMMARY_MAX: usize = 4;
 const ARTICLE_SUMMARY_MAX: usize = 7;
 const SKILL_NAME: &str = "invest_copy";
+const CONFIG_REL: &str = "configs/invest_copy.toml";
 
 static PERSONAS_TOML: &str = include_str!("../personas.toml");
 
@@ -34,13 +36,29 @@ struct PersonaToml {
     facets_zh: Vec<String>,
     #[serde(default)]
     prefer_zh: Vec<String>,
-    #[serde(default)]
-    avoid_zh: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct PersonaRegistry {
     personas: Vec<PersonaToml>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct InvestCopyRootConfig {
+    #[serde(default)]
+    invest_copy: InvestCopyConfig,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+struct InvestCopyConfig {
+    #[serde(default)]
+    compliance_sensitive_terms: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct PolicyMatch {
+    term_index: usize,
+    reason_code: &'static str,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,6 +82,44 @@ struct SkillResp {
 fn sentence_split_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"[。\.\!?;；\n\r\t]+").expect("regex"))
+}
+
+fn runtime_config() -> &'static InvestCopyConfig {
+    static CFG: OnceLock<InvestCopyConfig> = OnceLock::new();
+    CFG.get_or_init(load_runtime_config)
+}
+
+fn load_runtime_config() -> InvestCopyConfig {
+    let Some(root) = find_workspace_root() else {
+        return InvestCopyConfig::default();
+    };
+    let path = root.join(CONFIG_REL);
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return InvestCopyConfig::default();
+    };
+    toml::from_str::<InvestCopyRootConfig>(&raw)
+        .map(|root| root.invest_copy)
+        .unwrap_or_default()
+}
+
+fn find_workspace_root() -> Option<PathBuf> {
+    if let Ok(raw) = std::env::var("WORKSPACE_ROOT") {
+        let path = PathBuf::from(raw.trim());
+        if config_exists(path.as_path()) {
+            return Some(path);
+        }
+    }
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        if config_exists(dir.as_path()) {
+            return Some(dir);
+        }
+        dir = dir.parent()?.to_path_buf();
+    }
+}
+
+fn config_exists(root: &Path) -> bool {
+    root.join(CONFIG_REL).is_file()
 }
 
 fn main() -> anyhow::Result<()> {
@@ -276,12 +332,16 @@ fn draft(
         }
     };
 
-    if forbidden_peddlers(pdata, brief) {
+    if let Some(policy_match) = compliance_policy_match(pdata, brief, runtime_config()) {
         return error_resp(
             request_id,
             "compliance_sensitive_input",
             "code=compliance_sensitive_input",
-            Some(json!({ "policy": "compliance_sensitive_input" })),
+            Some(json!({
+                "policy": "compliance_sensitive_input",
+                "reason_code": policy_match.reason_code,
+                "term_index": policy_match.term_index,
+            })),
         );
     }
 
@@ -333,26 +393,41 @@ fn draft(
 
     if use_heuristic {
         let bullets = summarize_bullets(body_for_summary, max_bullets);
-        let text = assemble_report(en, &p, &bullets, brief, source_note, truncated, compliance);
-        let word_count = text.chars().count();
+        let text = draft_machine_text(&p.slug, "heuristic", bullets.len(), truncated, compliance);
+        let word_count = bullets
+            .iter()
+            .map(|item| item.chars().count())
+            .sum::<usize>();
         return SkillResp {
             request_id,
             status: "ok",
             text,
             extra: Some(json!({
+                "schema_version": 1,
+                "source_skill": SKILL_NAME,
+                "status": "ok",
+                "message_key": "skill.invest_copy.draft_ready",
                 "action": "draft",
                 "person_slug": p.slug,
                 "summary_mode": "heuristic",
                 "data_truncated": truncated,
                 "summary_bullet_count": bullets.len(),
+                "summary_bullets": bullets,
+                "brief": brief,
+                "source_note": source_note,
                 "compliance": compliance,
+                "disclaimer_required": true,
+                "rendering": {
+                    "requires_language_rendering": true,
+                    "recommended_owner": "finalizer_i18n_or_llm"
+                },
                 "word_count": word_count
             })),
             error_text: None,
         };
     }
 
-    let system = build_llm_system_prompt(en, compliance);
+    let system = build_llm_system_prompt(locale, compliance);
     let user = build_llm_user_prompt(
         en,
         &p,
@@ -376,22 +451,21 @@ fn draft(
         }
     };
 
-    if forbidden_peddlers(&generated.text, "") {
+    if let Some(policy_match) = compliance_policy_match(&generated.text, "", runtime_config()) {
         return error_resp(
             request_id,
             "compliance_sensitive_output",
             "code=compliance_sensitive_output offline_arg=use_heuristic",
-            Some(json!({ "offline_arg": "use_heuristic" })),
+            Some(json!({
+                "offline_arg": "use_heuristic",
+                "policy": "compliance_sensitive_output",
+                "reason_code": policy_match.reason_code,
+                "term_index": policy_match.term_index,
+            })),
         );
     }
 
-    let header_zh = "【以下内容使用系统当前配置的 OpenAI 兼容大模型生成，仅供信息与投教阅读；不构成投资建议，亦不暗示公众人物背书】\n\n";
-    let header_en = "_Generated using the system's default OpenAI-compatible model. Educational context only; not investment advice; no endorsement implied._\n\n";
-    let text = format!(
-        "{}{}",
-        if en { header_en } else { header_zh },
-        generated.text.trim()
-    );
+    let text = generated.text.trim().to_string();
     let word_count = text.chars().count();
 
     SkillResp {
@@ -399,6 +473,10 @@ fn draft(
         status: "ok",
         text,
         extra: Some(json!({
+            "schema_version": 1,
+            "source_skill": SKILL_NAME,
+            "status": "ok",
+            "message_key": "skill.invest_copy.draft_ready",
             "action": "draft",
             "person_slug": p.slug,
             "summary_mode": "llm",
@@ -408,31 +486,27 @@ fn draft(
             },
             "data_truncated": truncated,
             "compliance": compliance,
+            "disclaimer_required": true,
             "word_count": word_count
         })),
         error_text: None,
     }
 }
 
-fn build_llm_system_prompt(en: bool, compliance: &str) -> String {
-    if en {
-        return format!(
-            "You help produce investor-education copy (NOT personalized advice).\n\
-Rules:\n\
-1) Faithfully summarize only what appears in USER_MATERIAL; do not invent facts, symbols, codes, prices, or performance guarantees.\n\
-2) Style section borrows publicly known *thinking lenses* tied to the named persona — do not impersonate them or imply endorsement.\n\
-3) No buy/sell/hold directions, no ticker picks, no return promises.\n\
-4) Output Markdown with headings exactly: ### Data highlights, ### Style-inspired commentary, ### Limitations, ### Disclaimer\n\
-5) compliance={compliance}: if `standard`, mention third-party excerpt risks (terms/copyright) briefly in Disclaimer."
-        );
-    }
+fn build_llm_system_prompt(locale: Option<&str>, compliance: &str) -> String {
+    let output_language = locale
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("match_user_material");
     format!(
-        "你是投教文稿助手（不是投顾）。必须遵守：\n\
-1) 仅根据用户材料做摘要与讨论，不得编造材料中不存在的数字、标的或结论。\n\
-2) 「风格化解读」只借用该人物公开思想中常见的**观察角度**，不得声称本人撰写或背书。\n\
-3) 禁止给出买卖/加减仓/具体证券代码建议，不得承诺或暗示收益。\n\
-4) 使用 Markdown，且必须依次包含小节标题（与下列一致）：### 数据摘要、### 风格化解读（灵感来源）、### 局限与未覆盖、### 风险提示与免责声明\n\
-5) 当前免责强度 compliance={compliance}：`standard` 时免责段需提示第三方摘录的版权与网站条款风险；`light` 时可较短。"
+        "You produce investor-education copy, not personalized advice.\n\
+Output_language={output_language}\n\
+Rules:\n\
+1) Faithfully summarize only facts present in USER_MATERIAL; do not invent facts, symbols, prices, or performance outcomes.\n\
+2) The style section may borrow public thinking lenses associated with the persona, but must not impersonate the person or imply endorsement.\n\
+3) Do not provide buy/sell/hold directions, ticker picks, position sizing, leverage advice, or return promises.\n\
+4) Use Markdown with natural section headings in Output_language for data highlights, style-inspired commentary, limitations, and disclaimer.\n\
+5) compliance={compliance}: if standard, briefly mention third-party excerpt, terms, copyright, and regional suitability limitations in the disclaimer."
     )
 }
 
@@ -447,37 +521,22 @@ fn build_llm_user_prompt(
     _max_bullets_hint: usize,
 ) -> String {
     let facets = p.facets_zh.join(" / ");
-    if en {
-        let disp_en = if p.display_name_en.trim().is_empty() {
-            p.display_name_zh.as_str()
-        } else {
-            p.display_name_en.as_str()
-        };
-        return format!(
-            "Persona display: {}\nSlug: {}\nOne-liner: {}\nFacets:\n{}\nPreferred wording hints: {}\nChannel preference: {}\nTruncated_input: {}\nFocus (optional): {}\nSource note (optional): {}\n\nUSER_MATERIAL:\n{}",
-            disp_en,
-            p.slug,
-            p.one_liner_zh,
-            facets,
-            p.prefer_zh.join(", "),
-            channel,
-            truncated,
-            brief,
-            source_note.unwrap_or("(none)"),
-            data
-        );
-    }
+    let disp = if en && !p.display_name_en.trim().is_empty() {
+        p.display_name_en.as_str()
+    } else {
+        p.display_name_zh.as_str()
+    };
     format!(
-        "人物展示名：{}\nSlug：`{}`\n定位：{}\n观察维度（参考）：\n{}\n措辞偏好：{}\n篇幅偏好 channel：{}\n材料是否被截断：{}\n用户侧重（可空）：{}\n来源备注（可空）：{}\n\n—— 用户材料 ——\n{}",
-        p.display_name_zh,
+        "Persona display: {}\nSlug: {}\nOne-liner: {}\nFacets:\n{}\nPreferred wording hints: {}\nChannel preference: {}\nTruncated_input: {}\nFocus_optional: {}\nSource_note_optional: {}\n\nUSER_MATERIAL:\n{}",
+        disp,
         p.slug,
         p.one_liner_zh,
         facets,
-        p.prefer_zh.join("、"),
+        p.prefer_zh.join(", "),
         channel,
         truncated,
         brief,
-        source_note.unwrap_or("无"),
+        source_note.unwrap_or("(none)"),
         data
     )
 }
@@ -490,29 +549,39 @@ fn truncate_owned(s: &str) -> (String, bool) {
     (s.chars().take(MAX_DATA_CHARS).collect::<String>(), true)
 }
 
-fn forbidden_peddlers(data: &str, brief: &str) -> bool {
+fn draft_machine_text(
+    person_slug: &str,
+    summary_mode: &str,
+    bullet_count: usize,
+    truncated: bool,
+    compliance: &str,
+) -> String {
+    format!(
+        "message_key=skill.invest_copy.draft_ready person_slug={person_slug} summary_mode={summary_mode} summary_bullet_count={bullet_count} data_truncated={truncated} compliance={compliance}"
+    )
+}
+
+fn compliance_policy_match(data: &str, brief: &str, cfg: &InvestCopyConfig) -> Option<PolicyMatch> {
     let pack = format!("{}{}", data, brief);
-    let zh = [
-        "保证收益",
-        "保本保收益",
-        "稳赚",
-        "稳赚不赔",
-        "一夜暴富",
-        "必买",
-        "闭眼买",
-        "满仓干",
-        "加杠杆满仓",
-        "坐庄",
-        "内幕消息",
-        "无风险高收益",
-    ];
-    if zh.iter().any(|p| pack.contains(p)) {
-        return true;
-    }
-    let low = pack.to_ascii_lowercase();
-    ["guaranteed return", "risk-free return", "must buy ticker"]
+    let pack_ascii_lower = pack.to_ascii_lowercase();
+    cfg.compliance_sensitive_terms
         .iter()
-        .any(|p| low.contains(p))
+        .enumerate()
+        .find_map(|(idx, term)| {
+            let normalized = term.trim();
+            if normalized.is_empty() {
+                return None;
+            }
+            let matched = if normalized.is_ascii() {
+                pack_ascii_lower.contains(&normalized.to_ascii_lowercase())
+            } else {
+                pack.contains(normalized)
+            };
+            matched.then_some(PolicyMatch {
+                term_index: idx,
+                reason_code: "configured_compliance_term",
+            })
+        })
 }
 
 fn split_sentences(s: &str) -> Vec<String> {
@@ -593,185 +662,6 @@ fn summarize_bullets(text: &str, max_items: usize) -> Vec<String> {
 
 fn norm_space(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn assemble_report(
-    en: bool,
-    p: &PersonaToml,
-    bullets: &[String],
-    brief: &str,
-    source_note: Option<&str>,
-    truncated: bool,
-    compliance: &str,
-) -> String {
-    let name_display = if en && !p.display_name_en.is_empty() {
-        p.display_name_en.as_str()
-    } else {
-        p.display_name_zh.as_str()
-    };
-    let h_summary = if en {
-        "### Data highlights"
-    } else {
-        "### 数据摘要（来自您提供的材料）"
-    };
-    let h_style = if en {
-        "### Style-inspired commentary (education only)"
-    } else {
-        "### 风格化解读（灵感来源）"
-    };
-    let h_gap = if en {
-        "### Limitations"
-    } else {
-        "### 局限与未覆盖信息"
-    };
-    let h_risk = if en {
-        "### Disclaimer"
-    } else {
-        "### 风险提示与免责声明"
-    };
-
-    let mut out = Vec::new();
-    if en {
-        out.push(format!(
-            "_Style inspiration:_ **{}**. This text is algorithmically composed for readability and investor education tone; it **does not** represent the cited figure, imply endorsement, or provide personalized investment advice.",
-            name_display
-        ));
-    } else {
-        out.push(format!(
-            "【说明】以下内容按「{}」的公众表述与常见思考维度做结构化扩写（非该人士撰写或背书），仅供信息与投教语境下的阅读。**不构成**任何投资建议或可执行交易结论。",
-            name_display
-        ));
-    }
-    if truncated {
-        out.push(if en {
-            "- Note: Input was truncated to the maximum supported length.".to_string()
-        } else {
-            "- **提示**：您提供的正文较长，已对输入截取后再做摘要。「数据摘要」条目仅覆盖剩余可见片段中的重要句子。" .to_string()
-        });
-    }
-    if bullets.is_empty() {
-        out.push(if en {
-            "- Insufficient distinctive sentences extracted; consider providing denser factual content.".to_string()
-        } else {
-            "- （信息不足以形成明确要点罗列；以下为极为有限的概括占位。）可补充更具体的事实句或数据来源说明。"
-                .to_string()
-        });
-    } else {
-        out.push(h_summary.to_string());
-        for b in bullets {
-            out.push(format!("- {}", b));
-        }
-    }
-
-    let mut style_body = Vec::new();
-    if !brief.trim().is_empty() {
-        style_body.push(if en {
-            format!("User focus: {}", brief)
-        } else {
-            format!(
-                "您希望侧重的方向：**{}**。以下解读围绕该侧重点与材料对齐，但仍停留在方法与框架层面。",
-                brief
-            )
-        });
-    }
-    let facet_take = if en {
-        (3usize).min(p.facets_zh.len()).max(1)
-    } else {
-        p.facets_zh.len().min(4).max(1)
-    };
-    for (i, facet) in p.facets_zh.iter().take(facet_take).enumerate() {
-        let ref_line = bullets
-            .get(i % bullets.len().max(1))
-            .map(|s| truncate_line(s, 120))
-            .unwrap_or_else(|| "(no bullet)".to_string());
-        if en {
-            style_body.push(format!(
-                "- **Perspective {}**: `{}` — relate this lens to observable phrases (example snippet: {}). Stay descriptive; avoid buy/sell instructions.",
-                i + 1,
-                facet,
-                ref_line
-            ));
-        } else {
-            style_body.push(format!(
-                "- **{}**\n在您提供的材料中可以优先对照这样一句话或一类信息：「{}」。下文仅用于帮助读者把零散表述串成可被反复核对的问题清单，而非替您做账户层面的判断。",
-                facet, ref_line
-            ));
-        }
-    }
-    if !p.prefer_zh.is_empty() && !en {
-        let mut line = format!(
-            "（可与该框架协同的措辞习惯包括但不限于：{}。",
-            p.prefer_zh.join("、")
-        );
-        if !p.avoid_zh.is_empty() {
-            line.push_str(&format!(
-                " 建议避免情绪化或促销式用词：{}。",
-                p.avoid_zh.join("、")
-            ));
-        }
-        line.push_str("）");
-        style_body.push(line);
-    }
-    out.push(format!("{}\n{}", h_style, style_body.join("\n")));
-
-    let mut gap = Vec::new();
-    gap.push(if en {
-        "- This skill does not verify third-party excerpts; treat numbers and claims as potentially incomplete.".to_string()
-    } else {
-        "- 本技能不会对第三方摘录做独立核查；请自行核对数据来源与时效。".to_string()
-    });
-    if let Some(sn) = source_note {
-        gap.push(if en {
-            format!("Source note (user/agent supplied): {}", sn)
-        } else {
-            format!("材料来源备注（用户提供或编排填入）：{}", sn)
-        });
-    }
-    out.push(format!("{}\n{}", h_gap, gap.join("\n")));
-
-    let disc = disclaimer_block(en, compliance);
-    out.push(format!("{}\n{}", h_risk, disc));
-
-    out.join("\n\n")
-}
-
-fn truncate_line(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut t = String::new();
-    for (i, ch) in s.chars().enumerate() {
-        if i >= max {
-            break;
-        }
-        t.push(ch);
-    }
-    t.push('…');
-    t
-}
-
-fn disclaimer_block(en: bool, compliance: &str) -> String {
-    let base_zh =
-        "市场有风险，入市需谨慎。以上为教学与信息组织用途，不提供证券买卖、仓位或收益承诺。";
-    let base_en = "Markets involve risk; this output is educational and organizational only. It does not provide buy/sell instructions, position advice, or return guarantees.";
-    if en {
-        return if compliance == "light" {
-            base_en.to_string()
-        } else {
-            format!(
-                "{} If you rely on scraped content, additionally respect site terms/copyright/trading constraints applicable to your region.",
-                base_en
-            )
-        };
-    }
-    if compliance == "light" {
-        base_zh.to_string()
-    } else {
-        format!(
-            "{} **若正文来自网页/第三方抓取**：请一并遵守数据来源网站的使用条款与不侵权要求；本输出不取代律师、合规顾问或投顾意见。",
-            base_zh
-        )
-    }
 }
 
 #[cfg(test)]

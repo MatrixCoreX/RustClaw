@@ -1,5 +1,5 @@
-//! 经 clawd 调用时优先走内部文本 LLM 网关，默认使用系统 `[llm]` 选择；
-//! 单独运行二进制时回退到 `OPENAI_*` 或 `WORKSPACE_ROOT/configs/config.toml`。
+//! Prefer the internal clawd text LLM gateway when invoked by clawd.
+//! Standalone execution falls back to `OPENAI_*` or `WORKSPACE_ROOT/configs/config.toml`.
 
 use reqwest::blocking::Client;
 use serde::Deserialize;
@@ -100,8 +100,8 @@ fn find_workspace_root() -> Option<PathBuf> {
     None
 }
 
-/// 优先：非空 `OPENAI_API_KEY` + `OPENAI_BASE_URL`（缺省 `https://api.openai.com/v1`）+ `OPENAI_MODEL`。
-/// 否则：解析 `configs/config.toml` 中 `[llm.selected_vendor]` 对应子表（需非空 api_key）。
+/// Prefer non-empty `OPENAI_API_KEY` + `OPENAI_BASE_URL` + `OPENAI_MODEL`.
+/// Otherwise read the selected vendor table from `configs/config.toml`.
 pub fn resolve_llm_credentials() -> Result<LlmCreds, String> {
     let key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
     let key = key.trim();
@@ -267,7 +267,7 @@ fn internal_chat_completion(system: &str, user: &str) -> Option<Result<LlmTextOu
     Some(result)
 }
 
-/// OpenAI 兼容 `POST /chat/completions`
+/// OpenAI-compatible `POST /chat/completions`.
 pub fn chat_completion(creds: &LlmCreds, system: &str, user: &str) -> Result<String, String> {
     let url = format!("{}/chat/completions", creds.base_url);
     let body = json!({
@@ -282,7 +282,7 @@ pub fn chat_completion(creds: &LlmCreds, system: &str, user: &str) -> Result<Str
     let client = Client::builder()
         .timeout(Duration::from_secs(creds.timeout_secs.max(5)))
         .build()
-        .map_err(|e| format!("http client: {e}"))?;
+        .map_err(|e| format!("code=llm_client_build_failed error={e}"))?;
     let resp = client
         .post(&url)
         .bearer_auth(&creds.api_key)

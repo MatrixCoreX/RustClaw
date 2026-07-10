@@ -51,6 +51,60 @@ fn list_investors_uses_machine_header() {
 }
 
 #[test]
+fn compliance_terms_come_from_config_metadata() {
+    let cfg = InvestCopyConfig {
+        compliance_sensitive_terms: vec!["稳赚".to_string(), "guaranteed return".to_string()],
+    };
+
+    let zh_match = compliance_policy_match("这个策略稳赚不赔", "", &cfg).expect("zh policy");
+    assert_eq!(zh_match.term_index, 0);
+    assert_eq!(zh_match.reason_code, "configured_compliance_term");
+
+    let en_match =
+        compliance_policy_match("This has a GUARANTEED RETURN.", "", &cfg).expect("en policy");
+    assert_eq!(en_match.term_index, 1);
+}
+
+#[test]
+fn heuristic_draft_returns_structured_rendering_contract() {
+    let persona = PersonaToml {
+        slug: "sample".to_string(),
+        aliases: vec!["sample".to_string()],
+        display_name_zh: "样例投资者".to_string(),
+        display_name_en: "Sample Investor".to_string(),
+        one_liner_zh: "关注事实和风险".to_string(),
+        facets_zh: vec!["现金流".to_string()],
+        prefer_zh: vec!["长期".to_string()],
+    };
+    let personas = vec![persona];
+    let lookup = build_persona_lookup(&personas);
+
+    let resp = draft(
+        "req-heuristic".to_string(),
+        &json!({
+            "action": "draft",
+            "person": "sample",
+            "data": "公司2024年营收同比上升12%。毛利率改善，现金流保持稳定。",
+            "use_heuristic": true
+        }),
+        &lookup,
+        &personas,
+    );
+
+    assert_eq!(resp.status, "ok");
+    assert!(resp
+        .text
+        .starts_with("message_key=skill.invest_copy.draft_ready"));
+    let extra = resp.extra.expect("extra");
+    assert_eq!(extra["message_key"], "skill.invest_copy.draft_ready");
+    assert_eq!(extra["summary_mode"], "heuristic");
+    assert_eq!(extra["rendering"]["requires_language_rendering"], true);
+    assert!(extra["summary_bullets"]
+        .as_array()
+        .is_some_and(|v| !v.is_empty()));
+}
+
+#[test]
 fn bullets_non_empty_from_sample() {
     let sample =
         "本公司2024年一季度营收同比上升12%。毛利率改善。\n风险提示：海外市场波动可能影响出口业务。";
