@@ -596,9 +596,9 @@ pub(super) fn push_unique_case_insensitive_string(values: &mut Vec<String>, valu
 }
 
 pub(super) fn validate_structured_direct_answer_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     value: &serde_json::Value,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if value.get("action").and_then(|v| v.as_str()) != Some("validate_structured") {
         return None;
@@ -611,27 +611,45 @@ pub(super) fn validate_structured_direct_answer_candidate(
         .filter(|v| !v.is_empty())
         .unwrap_or("structured");
     if valid {
-        return Some(observed_t_with_vars(
-            state,
-            "clawd.msg.validate_structured_pass",
-            "通过：{format} 解析成功",
-            "pass: {format} parsed successfully",
-            prefer_english,
-            &[("format", format)],
-        ));
+        return Some(validate_structured_machine_answer(true, format, None));
     }
     let reason = value
         .get("error_text")
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|v| !v.is_empty())
-        .unwrap_or("parse failed");
-    Some(observed_t_with_vars(
-        state,
-        "clawd.msg.validate_structured_fail",
-        "失败：{reason}",
-        "fail: {reason}",
-        prefer_english,
-        &[("reason", reason)],
+        .unwrap_or("parse_failed");
+    Some(validate_structured_machine_answer(
+        false,
+        format,
+        Some(reason),
     ))
+}
+
+fn validate_structured_machine_answer(valid: bool, format: &str, reason: Option<&str>) -> String {
+    let mut lines = vec![
+        format!(
+            "message_key={}",
+            if valid {
+                "clawd.msg.validate_structured_pass"
+            } else {
+                "clawd.msg.validate_structured_fail"
+            }
+        ),
+        format!(
+            "reason_code={}",
+            if valid {
+                "validate_structured_pass"
+            } else {
+                "validate_structured_fail"
+            }
+        ),
+        "final_answer_shape=structured_validation".to_string(),
+        format!("valid={valid}"),
+    ];
+    push_observed_machine_line(&mut lines, "format", format);
+    if let Some(reason) = reason {
+        push_observed_machine_line(&mut lines, "reason", reason);
+    }
+    lines.join("\n")
 }
