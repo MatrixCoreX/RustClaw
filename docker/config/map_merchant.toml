@@ -4,11 +4,14 @@ default_radius_meters = 3000
 default_top_k = 5
 max_fetch_candidates = 12
 default_sort_by = "balanced"
+google_language_code = "zh-CN"
 distance_weight = 0.40
 rating_weight = 0.30
 price_weight = 0.15
 keyword_weight = 0.15
 default_keyword = "商户"
+amap_aliases = ["高德", "高德地图"]
+google_aliases = ["谷歌", "谷歌地图", "Google Maps"]
 
 [map_merchant.amap]
 enabled = true

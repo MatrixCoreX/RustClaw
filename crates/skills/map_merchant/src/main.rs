@@ -1,4 +1,4 @@
-//! 多地图商户推荐技能：支持高德与 Google Maps provider。
+//! Merchant recommendation skill backed by map providers.
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -15,14 +15,14 @@ mod config;
 mod formatting;
 
 use config::{resolve_runtime_config, RuntimeConfig};
-use formatting::{round3, round6, trim_float, utf8_safe_prefix};
+use formatting::{round3, round6, utf8_safe_prefix};
 
 const AMAP_GEOCODE_URL: &str = "https://restapi.amap.com/v3/geocode/geo";
 const AMAP_AROUND_URL: &str = "https://restapi.amap.com/v3/place/around";
 const GOOGLE_GEOCODE_URL: &str = "https://maps.googleapis.com/maps/api/geocode/json";
 const GOOGLE_TEXT_SEARCH_URL: &str = "https://places.googleapis.com/v1/places:searchText";
 const DEFAULT_PROVIDER: &str = "amap";
-const DEFAULT_KEYWORD: &str = "商户";
+const DEFAULT_KEYWORD: &str = "merchant";
 const MIN_RADIUS_METERS: u32 = 500;
 const MAX_RADIUS_METERS: u32 = 50_000;
 const DEFAULT_TIMEOUT_SECONDS: u64 = 20;
@@ -101,13 +101,13 @@ enum PricePreference {
 struct RankedMerchant {
     provider: MapProvider,
     name: String,
-    address: String,
+    address: Option<String>,
     distance_meters: Option<u32>,
     rating: Option<f64>,
     average_cost: Option<f64>,
     score: f64,
-    reasons: Vec<String>,
-    category: String,
+    reason_codes: Vec<String>,
+    category: Option<String>,
     phone: Option<String>,
     location: Option<Value>,
     navigation_links: Option<Value>,
@@ -240,7 +240,7 @@ fn main() -> anyhow::Result<()> {
                 status: "error".to_string(),
                 text: String::new(),
                 extra: Some(error_extra("invalid_input")),
-                error_text: Some(format!("invalid input: {err}")),
+                error_text: Some(format!("code=invalid_input detail={err}")),
             },
         };
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
@@ -264,7 +264,7 @@ fn execute(req: &Req, cfg: &RuntimeConfig) -> Result<(String, Value), String> {
     let args = req
         .args
         .as_object()
-        .ok_or_else(|| "args must be object".to_string())?;
+        .ok_or_else(|| "code=args_not_object".to_string())?;
     let action = args
         .get("action")
         .and_then(Value::as_str)
@@ -273,24 +273,25 @@ fn execute(req: &Req, cfg: &RuntimeConfig) -> Result<(String, Value), String> {
         .to_ascii_lowercase();
     if action != "recommend" {
         return Err(format!(
-            "unsupported action `{action}`; only `recommend` is supported"
+            "code=unsupported_action action={action} expected=recommend"
         ));
     }
 
     let ctx_provider = context_string(req.context.as_ref(), &["provider"]);
-    let provider = parse_provider(
-        args.get("provider")
-            .and_then(Value::as_str)
-            .or(ctx_provider.as_deref()),
-    )
-    .unwrap_or(cfg.default_provider);
+    let provider_input = args
+        .get("provider")
+        .and_then(Value::as_str)
+        .or(ctx_provider.as_deref());
+    let provider = provider_input
+        .and_then(|raw| parse_provider(Some(raw)).or_else(|| cfg.provider_for_alias(raw)))
+        .unwrap_or(cfg.default_provider);
     ensure_provider_ready(provider, cfg)?;
 
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECONDS))
         .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECONDS))
         .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
+        .map_err(|e| format!("code=http_client_build_failed detail={e}"))?;
 
     let query = build_query(args, req.context.as_ref(), cfg, provider, &client)?;
     let merchants = match provider {
@@ -299,16 +300,21 @@ fn execute(req: &Req, cfg: &RuntimeConfig) -> Result<(String, Value), String> {
     };
     if merchants.is_empty() {
         return Err(format!(
-            "没有在{}附近找到符合“{}”的商户，建议换一个地点、扩大距离，或放宽关键词。",
+            "code=no_matching_merchants anchor_label={} keyword={}",
             query.anchor_text, query.keyword
         ));
     }
     let top_list: Vec<RankedMerchant> = merchants.into_iter().take(query.top_k).collect();
     let text = render_text(&query, &top_list);
     let extra = json!({
+        "schema_version": 1,
+        "source_skill": SKILL_NAME,
+        "status": "ok",
+        "message_key": "skill.map_merchant.recommendation_ready",
         "action": "recommend",
         "mode": "merchant_recommendation",
         "provider": query.provider,
+        "provider_token": provider_token(query.provider),
         "anchor": {
             "source": query.anchor_source,
             "label": query.anchor_text,
@@ -381,7 +387,7 @@ fn build_query(
             provider,
             anchor_lat: lat,
             anchor_lon: lon,
-            anchor_text: format!("纬度 {:.4} / 经度 {:.4}", lat, lon),
+            anchor_text: format!("lat={:.4} lon={:.4}", lat, lon),
             anchor_source: "coordinates".to_string(),
             city,
             district,
@@ -405,7 +411,7 @@ fn build_query(
     ]);
     if anchor_query.is_empty() {
         return Err(
-            "请至少提供 `latitude`/`longitude`，或提供 `city`/`district`/`address`/`place` 之一来定位推荐范围。"
+            "code=missing_anchor required_any=latitude_longitude,city,district,address,place"
                 .to_string(),
         );
     }
@@ -456,18 +462,18 @@ fn fetch_amap_merchants(
     ];
     let res = send_with_retry(
         || client.get(AMAP_AROUND_URL).query(&params).send(),
-        "调用高德周边搜索失败",
+        "amap_nearby_request_failed",
     )?;
     if !res.status().is_success() {
         let status = res.status();
         let preview = res.text().unwrap_or_default();
         return Err(format!(
-            "高德周边搜索返回 HTTP {}: {}",
+            "code=amap_nearby_http_status status={} preview={}",
             status,
             utf8_safe_prefix(&preview, 200)
         ));
     }
-    let body = parse_json_response(res, "解析高德周边搜索响应失败")?;
+    let body = parse_json_response(res, "amap_nearby_json_parse_failed")?;
     ensure_amap_success_value(&body)?;
     let pois = amap_pois_from_value(&body);
 
@@ -510,26 +516,26 @@ fn fetch_amap_merchants(
             keyword_score,
         );
         let category = display_category(&poi.type_);
-        let reasons = build_reasons(
+        let reason_codes = build_reasons(
             distance_meters,
             rating,
             average_cost,
             &query.price_pref,
             keyword_score,
             &tokens,
-            &category,
+            category.as_deref(),
         );
         let name = poi.name.clone();
         let navigation_links = build_amap_navigation_links(&name, &poi.location);
         ranked.push(RankedMerchant {
             provider: MapProvider::Amap,
             name,
-            address: display_address_value(&poi.address),
+            address: normalized_address_value(&poi.address),
             distance_meters,
             rating,
             average_cost,
             score: round3(total_score),
-            reasons,
+            reason_codes,
             category,
             phone: optional_string_value(&poi.tel),
             location: parse_location_value(&poi.location),
@@ -539,9 +545,7 @@ fn fetch_amap_merchants(
     }
     sort_ranked_merchants(&mut ranked);
     if ranked.is_empty() {
-        return Err(
-            "高德返回了结果，但没有解析出可用商户；可能是上游字段结构发生变化。".to_string(),
-        );
+        return Err("code=amap_no_usable_candidates".to_string());
     }
     Ok(ranked)
 }
@@ -566,7 +570,7 @@ fn fetch_google_merchants(
         .json(&json!({
             "textQuery": text_query,
             "maxResultCount": query.fetch_candidates.min(20),
-            "languageCode": "zh-CN",
+            "languageCode": cfg.google_language_code,
             "rankPreference": if matches!(query.sort_by, SortBy::Distance) { "DISTANCE" } else { "RELEVANCE" },
             "locationBias": {
                 "circle": {
@@ -579,19 +583,19 @@ fn fetch_google_merchants(
             }
         }))
         .send()
-        .map_err(|e| format!("调用 Google Places Text Search 失败: {e}"))?;
+        .map_err(|e| format!("code=google_places_request_failed detail={e}"))?;
     if !res.status().is_success() {
         let status = res.status();
         let preview = res.text().unwrap_or_default();
         return Err(format!(
-            "Google Places Text Search 返回 HTTP {}: {}",
+            "code=google_places_http_status status={} preview={}",
             status,
             utf8_safe_prefix(&preview, 200)
         ));
     }
     let body: GoogleTextSearchResponse = res
         .json()
-        .map_err(|e| format!("解析 Google Places Text Search 响应失败: {e}"))?;
+        .map_err(|e| format!("code=google_places_json_parse_failed detail={e}"))?;
 
     let tokens = keyword_tokens(
         &query.keyword,
@@ -642,16 +646,15 @@ fn fetch_google_merchants(
             .as_ref()
             .map(|v| v.text.trim().to_string())
             .filter(|v| !v.is_empty())
-            .or_else(|| place.primary_type.clone())
-            .unwrap_or_else(|| "商户".to_string());
-        let reasons = build_reasons(
+            .or_else(|| place.primary_type.clone());
+        let reason_codes = build_reasons(
             distance_meters,
             rating,
             average_cost,
             &query.price_pref,
             keyword_score,
             &tokens,
-            &category,
+            category.as_deref(),
         );
         ranked.push(RankedMerchant {
             provider: MapProvider::Google,
@@ -659,13 +662,12 @@ fn fetch_google_merchants(
             address: place
                 .formatted_address
                 .as_deref()
-                .map(display_address)
-                .unwrap_or_else(|| "地址未标注".to_string()),
+                .and_then(normalized_address),
             distance_meters,
             rating,
             average_cost,
             score: round3(total_score),
-            reasons,
+            reason_codes,
             category,
             phone: place
                 .national_phone_number
@@ -704,14 +706,14 @@ fn ensure_provider_ready(provider: MapProvider, cfg: &RuntimeConfig) -> Result<(
     };
     if !p.enabled {
         return Err(format!(
-            "{} provider 当前未启用。",
-            provider_display_name(provider)
+            "code=provider_disabled provider={}",
+            provider_token(provider)
         ));
     }
     if p.api_key.trim().is_empty() {
         return Err(format!(
-            "未配置 {} API Key。请在环境变量或 `configs/map_merchant.toml` 中补齐。",
-            provider_display_name(provider)
+            "code=provider_api_key_missing provider={} config=configs/map_merchant.toml",
+            provider_token(provider)
         ));
     }
     Ok(())
@@ -732,23 +734,23 @@ fn geocode_amap_anchor(
     }
     let res = send_with_retry(
         || client.get(AMAP_GEOCODE_URL).query(&params).send(),
-        "调用高德地理编码失败",
+        "amap_geocode_request_failed",
     )?;
     if !res.status().is_success() {
         let status = res.status();
         let preview = res.text().unwrap_or_default();
         return Err(format!(
-            "高德地理编码返回 HTTP {}: {}",
+            "code=amap_geocode_http_status status={} preview={}",
             status,
             utf8_safe_prefix(&preview, 200)
         ));
     }
-    let body = parse_json_response(res, "解析高德地理编码响应失败")?;
+    let body = parse_json_response(res, "amap_geocode_json_parse_failed")?;
     ensure_amap_success_value(&body)?;
-    let (formatted_address, location_text) =
-        first_amap_geocode(&body).ok_or_else(|| format!("高德地理编码未找到地点：{address}"))?;
+    let (formatted_address, location_text) = first_amap_geocode(&body)
+        .ok_or_else(|| format!("code=amap_geocode_not_found address={address}"))?;
     let (lon, lat) = parse_lon_lat(&location_text)
-        .ok_or_else(|| format!("高德地理编码返回了无效坐标：{location_text}"))?;
+        .ok_or_else(|| format!("code=amap_geocode_invalid_location raw={location_text}"))?;
     Ok((
         lon,
         lat,
@@ -769,28 +771,28 @@ fn geocode_google_anchor(
         .get(GOOGLE_GEOCODE_URL)
         .query(&[("address", address), ("key", api_key)])
         .send()
-        .map_err(|e| format!("调用 Google Geocoding 失败: {e}"))?;
+        .map_err(|e| format!("code=google_geocode_request_failed detail={e}"))?;
     if !res.status().is_success() {
-        return Err(format!("Google Geocoding 返回 HTTP {}", res.status()));
+        return Err(format!(
+            "code=google_geocode_http_status status={}",
+            res.status()
+        ));
     }
     let body: GoogleGeocodeResponse = res
         .json()
-        .map_err(|e| format!("解析 Google Geocoding 响应失败: {e}"))?;
+        .map_err(|e| format!("code=google_geocode_json_parse_failed detail={e}"))?;
     if body.status != "OK" {
         return Err(format!(
-            "Google Geocoding 返回失败：{}{}",
+            "code=google_geocode_status status={} message={}",
             body.status,
-            body.error_message
-                .as_deref()
-                .map(|v| format!(" ({v})"))
-                .unwrap_or_default()
+            body.error_message.as_deref().unwrap_or("")
         ));
     }
     let first = body
         .results
         .into_iter()
         .next()
-        .ok_or_else(|| format!("Google Geocoding 未找到地点：{address}"))?;
+        .ok_or_else(|| format!("code=google_geocode_not_found address={address}"))?;
     Ok((
         first.geometry.location.lng,
         first.geometry.location.lat,
@@ -811,7 +813,7 @@ fn ensure_amap_success(
         return Ok(());
     }
     Err(format!(
-        "高德接口返回失败：{} (infocode={})",
+        "code=amap_api_status info={} infocode={}",
         info.as_deref().unwrap_or("unknown error"),
         infocode.as_deref().unwrap_or("-")
     ))
@@ -825,55 +827,15 @@ fn ensure_amap_success_value(body: &Value) -> Result<(), String> {
 }
 
 fn render_text(query: &MerchantQuery, merchants: &[RankedMerchant]) -> String {
-    let mut parts = vec![format!(
-        "已按“{}”为你在{}附近筛出 {} 家更值得优先看的商户（地图源：{}）：",
-        query.keyword,
-        query.anchor_text,
+    format!(
+        "message_key=skill.map_merchant.recommendation_ready provider={} returned={} anchor_source={} radius_meters={} sort_by={} keyword={}",
+        provider_token(query.provider),
         merchants.len(),
-        provider_display_name(query.provider)
-    )];
-    for (idx, merchant) in merchants.iter().enumerate() {
-        let distance = merchant
-            .distance_meters
-            .map(|v| format!("距你约{}米", v))
-            .unwrap_or_else(|| "距离未知".to_string());
-        let rating = merchant
-            .rating
-            .map(|v| format!("评分{v:.1}"))
-            .unwrap_or_else(|| "评分暂无".to_string());
-        let cost = merchant
-            .average_cost
-            .map(|v| format!("人均{}元", trim_float(v)))
-            .unwrap_or_else(|| "价格未标注".to_string());
-        let reason = if merchant.reasons.is_empty() {
-            "综合表现均衡".to_string()
-        } else {
-            merchant.reasons.join("，")
-        };
-        parts.push(format!(
-            "{}. {}（{}，{}，{}）地址：{}。推荐理由：{}。",
-            idx + 1,
-            merchant.name,
-            distance,
-            rating,
-            cost,
-            merchant.address,
-            reason
-        ));
-        if let Some(url) = merchant
-            .navigation_links
-            .as_ref()
-            .and_then(|v| v.get("walk"))
-            .and_then(Value::as_str)
-        {
-            parts.push(format!(
-                "BUTTON: 使用{}导航：{}",
-                provider_nav_button_label(merchant.provider),
-                url
-            ));
-        }
-    }
-    parts.join(" ")
+        query.anchor_source,
+        query.radius_meters,
+        sort_token(query.sort_by),
+        query.keyword
+    )
 }
 
 fn build_reasons(
@@ -883,41 +845,43 @@ fn build_reasons(
     price_pref: &PricePreference,
     keyword_score: f64,
     tokens: &[String],
-    category: &str,
+    category: Option<&str>,
 ) -> Vec<String> {
     let mut reasons = Vec::new();
     if let Some(distance) = distance_meters {
         if distance <= 800 {
-            reasons.push("离你很近".to_string());
+            reasons.push("distance.very_near".to_string());
         } else if distance <= 2000 {
-            reasons.push("通勤距离较友好".to_string());
+            reasons.push("distance.near".to_string());
         }
     }
     if let Some(value) = rating {
         if value >= 4.5 {
-            reasons.push("评分较高".to_string());
+            reasons.push("rating.high".to_string());
         } else if value >= 4.0 {
-            reasons.push("口碑稳定".to_string());
+            reasons.push("rating.stable".to_string());
         }
     }
     if let Some(cost) = average_cost {
         match price_pref {
-            PricePreference::Cheap if cost <= 50.0 => reasons.push("价格偏实惠".to_string()),
+            PricePreference::Cheap if cost <= 50.0 => reasons.push("price.cheap_match".to_string()),
             PricePreference::Mid if (40.0..=120.0).contains(&cost) => {
-                reasons.push("价格区间匹配".to_string())
+                reasons.push("price.mid_match".to_string())
             }
-            PricePreference::Premium if cost >= 120.0 => reasons.push("适合高预算".to_string()),
+            PricePreference::Premium if cost >= 120.0 => {
+                reasons.push("price.premium_match".to_string())
+            }
             PricePreference::Any => {}
             _ => {}
         }
     }
     if keyword_score >= 0.85 {
-        reasons.push("和你的关键词高度匹配".to_string());
+        reasons.push("keyword.strong".to_string());
     } else if keyword_score >= 0.55 && !tokens.is_empty() {
-        reasons.push("类型比较贴合".to_string());
+        reasons.push("keyword.partial".to_string());
     }
-    if reasons.is_empty() && !category.trim().is_empty() {
-        reasons.push(format!("属于{}", category.trim()));
+    if reasons.is_empty() && category.map(str::trim).is_some_and(|v| !v.is_empty()) {
+        reasons.push("category.present".to_string());
     }
     reasons
 }
@@ -1017,7 +981,9 @@ fn amap_keyword_component(poi: &AmapPoi, tokens: &[String]) -> f64 {
         "{} {} {} {}",
         poi.name.to_lowercase(),
         poi.type_.to_lowercase(),
-        display_address_value(&poi.address).to_lowercase(),
+        normalized_address_value(&poi.address)
+            .unwrap_or_default()
+            .to_lowercase(),
         poi.type_code.to_lowercase()
     );
     keyword_match_score(&haystack, tokens)
@@ -1097,34 +1063,35 @@ fn parse_sort_by(raw: Option<&str>, default_value: &str) -> SortBy {
         .to_ascii_lowercase()
         .as_str()
     {
-        "distance" | "nearest" => SortBy::Distance,
-        "rating" | "score" => SortBy::Rating,
-        "price" | "budget" => SortBy::Price,
+        "distance" => SortBy::Distance,
+        "rating" => SortBy::Rating,
+        "price" => SortBy::Price,
+        "balanced" => SortBy::Balanced,
         _ => SortBy::Balanced,
     }
 }
 
 fn parse_provider(raw: Option<&str>) -> Option<MapProvider> {
     match raw?.trim().to_ascii_lowercase().as_str() {
-        "amap" | "gaode" | "高德" => Some(MapProvider::Amap),
-        "google" | "google_maps" | "googlemaps" | "谷歌" | "谷歌地图" => {
-            Some(MapProvider::Google)
-        }
+        "amap" | "gaode" => Some(MapProvider::Amap),
+        "google" | "google_maps" | "googlemaps" => Some(MapProvider::Google),
         _ => None,
     }
 }
 
-fn provider_display_name(provider: MapProvider) -> &'static str {
+fn provider_token(provider: MapProvider) -> &'static str {
     match provider {
-        MapProvider::Amap => "高德地图",
-        MapProvider::Google => "Google Maps",
+        MapProvider::Amap => "amap",
+        MapProvider::Google => "google",
     }
 }
 
-fn provider_nav_button_label(provider: MapProvider) -> &'static str {
-    match provider {
-        MapProvider::Amap => "高德",
-        MapProvider::Google => "Google地图",
+fn sort_token(sort_by: SortBy) -> &'static str {
+    match sort_by {
+        SortBy::Balanced => "balanced",
+        SortBy::Distance => "distance",
+        SortBy::Rating => "rating",
+        SortBy::Price => "price",
     }
 }
 
@@ -1147,13 +1114,10 @@ fn parse_price_pref(value: Option<&Value>) -> PricePreference {
         .to_ascii_lowercase()
         .as_str()
     {
-        "cheap" | "budget" | "economy" | "low" | "平价" | "便宜" | "实惠" => {
-            PricePreference::Cheap
-        }
-        "mid" | "medium" | "standard" | "normal" | "中等" | "适中" => PricePreference::Mid,
-        "premium" | "high" | "expensive" | "高端" | "高预算" | "贵" => {
-            PricePreference::Premium
-        }
+        "cheap" => PricePreference::Cheap,
+        "mid" => PricePreference::Mid,
+        "premium" => PricePreference::Premium,
+        "any" => PricePreference::Any,
         _ => PricePreference::Any,
     }
 }
@@ -1241,7 +1205,7 @@ where
         }
     }
     Err(format!(
-        "{}: {}",
+        "code={} detail={}",
         label,
         last_err
             .map(|err| err.to_string())
@@ -1256,10 +1220,10 @@ fn retry_backoff_delay_ms(attempt: usize) -> u64 {
 }
 
 fn parse_json_response(res: reqwest::blocking::Response, label: &str) -> Result<Value, String> {
-    let body = res.text().map_err(|e| format!("{label}: {e}"))?;
+    let body = res.text().map_err(|e| format!("code={label} detail={e}"))?;
     serde_json::from_str::<Value>(&body).map_err(|e| {
         format!(
-            "{label}: {e}; 原始响应片段: {}",
+            "code={label} detail={e} preview={}",
             utf8_safe_prefix(&body, 240)
         )
     })
@@ -1419,38 +1383,39 @@ fn json_to_f64(value: &Value) -> Option<f64> {
         .or_else(|| value.as_str().and_then(|v| v.trim().parse::<f64>().ok()))
 }
 
-fn display_address(raw: &str) -> String {
+fn normalized_address(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        "地址未标注".to_string()
+        None
     } else {
-        trimmed.to_string()
+        Some(trimmed.to_string())
     }
 }
 
-fn display_address_value(value: &Value) -> String {
+fn normalized_address_value(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => display_address(s),
+        Value::String(s) => normalized_address(s),
         Value::Array(items) => items
             .iter()
             .find_map(|item| item.as_str())
-            .map(display_address)
-            .unwrap_or_else(|| "地址未标注".to_string()),
-        _ => "地址未标注".to_string(),
+            .and_then(normalized_address),
+        _ => None,
     }
 }
 
-fn display_category(raw: &str) -> String {
+fn display_category(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        "商户".to_string()
+        None
     } else {
-        trimmed
-            .split(';')
-            .next()
-            .unwrap_or(trimmed)
-            .trim()
-            .to_string()
+        Some(
+            trimmed
+                .split(';')
+                .next()
+                .unwrap_or(trimmed)
+                .trim()
+                .to_string(),
+        )
     }
 }
 
