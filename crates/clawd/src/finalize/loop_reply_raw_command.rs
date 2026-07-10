@@ -95,7 +95,8 @@ fn looks_like_multiline_machine_field_projection(answer: &str) -> bool {
             || value.starts_with('[')
             || matches!(
                 key,
-                "async_poll_adapter_result"
+                "async_cancel_adapter_result"
+                    | "async_poll_adapter_result"
                     | "dry_run"
                     | "job_id"
                     | "model"

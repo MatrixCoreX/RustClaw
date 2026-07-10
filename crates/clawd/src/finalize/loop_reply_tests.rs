@@ -631,6 +631,49 @@ fn requested_machine_kv_summary_preserves_structured_media_dry_run_projection() 
 }
 
 #[test]
+fn requested_machine_kv_summary_preserves_async_cancel_adapter_projection() {
+    let task = claimed_task("task-machine-kv-async-cancel-projection");
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "image_generate",
+        r#"{"text":"IMAGE_CANCEL_DRY_RUN","extra":{"async_cancel_adapter_result":{"adapter_kind":"media_job_poll","job_id":"image-job-001","status":"cancelled","cancellation_result_json":{"task_id":"image-task-001","job_id":"image-job-001","status":"cancelled","dry_run":true}}}}"#,
+    ));
+    let current = concat!(
+        "task_id=image-task-001\n",
+        "job_id=image-job-001\n",
+        "status=cancelled\n",
+        "async_cancel_adapter_result={\"adapter_kind\":\"media_job_poll\",\"job_id\":\"image-job-001\",\"status\":\"cancelled\"}"
+    );
+    let mut delivery_messages = vec![current.to_string()];
+    loop_state.last_user_visible_respond = Some(current.to_string());
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "return task_id job_id cancelled status and async_cancel_adapter_result",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![current.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(current)
+    );
+}
+
+#[test]
 fn requested_machine_kv_summary_preserves_publishable_command_summary() {
     let task = claimed_task("task-machine-kv-summary-command-summary");
     let mut loop_state = crate::agent_engine::LoopState::new(1);

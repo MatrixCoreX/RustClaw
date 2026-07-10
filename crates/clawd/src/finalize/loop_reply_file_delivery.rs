@@ -662,18 +662,6 @@ pub(super) fn direct_generated_file_path_report_from_written_path(
     Some((path, matrix_observed_shape_summary(loop_state)))
 }
 
-fn route_allows_generated_file_path_report_payload(
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .is_some_and(|route| {
-            !route.effective_output_contract().delivery_required
-                && route
-                    .output_contract_marker_is(crate::OutputSemanticKind::GeneratedFilePathReport)
-        })
-}
-
 fn route_allows_dry_run_generated_file_path_report_payload(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
@@ -782,17 +770,20 @@ fn generated_file_path_report_from_dry_run_value(value: &serde_json::Value) -> O
     Some(fields.join("\n"))
 }
 
-pub(super) fn async_poll_result_report_from_value(value: &serde_json::Value) -> Option<String> {
+pub(super) fn async_adapter_result_report_from_value(value: &serde_json::Value) -> Option<String> {
     let extra = value.get("extra").unwrap_or(value);
-    let adapter_result = extra
-        .get("async_poll_adapter_result")
-        .filter(|value| value.is_object())?;
+    let (adapter_result_key, adapter_result) = async_adapter_result_field(extra)?;
     let mut fields = Vec::new();
     if let Some(task_id) = extra
         .get("task_id")
         .or_else(|| {
             adapter_result
                 .get("final_result_json")
+                .and_then(|result| result.get("task_id"))
+        })
+        .or_else(|| {
+            adapter_result
+                .get("cancellation_result_json")
                 .and_then(|result| result.get("task_id"))
         })
         .and_then(clean_machine_field_value)
@@ -807,6 +798,11 @@ pub(super) fn async_poll_result_report_from_value(value: &serde_json::Value) -> 
                 .get("final_result_json")
                 .and_then(|result| result.get("job_id"))
         })
+        .or_else(|| {
+            adapter_result
+                .get("cancellation_result_json")
+                .and_then(|result| result.get("job_id"))
+        })
         .and_then(clean_machine_field_value)
     {
         fields.push(format!("job_id={job_id}"));
@@ -814,20 +810,45 @@ pub(super) fn async_poll_result_report_from_value(value: &serde_json::Value) -> 
     if let Some(status) = extra
         .get("status")
         .or_else(|| adapter_result.get("status"))
+        .or_else(|| {
+            adapter_result
+                .get("final_result_json")
+                .and_then(|result| result.get("status"))
+        })
+        .or_else(|| {
+            adapter_result
+                .get("cancellation_result_json")
+                .and_then(|result| result.get("status"))
+        })
         .and_then(clean_machine_field_value)
     {
         fields.push(format!("status={status}"));
     }
     let adapter_json = compact_machine_json(adapter_result)?;
-    fields.push(format!("async_poll_adapter_result={adapter_json}"));
+    fields.push(format!("{adapter_result_key}={adapter_json}"));
     (fields.len() >= 2).then(|| fields.join("\n"))
+}
+
+fn async_adapter_result_field(
+    extra: &serde_json::Value,
+) -> Option<(&'static str, &serde_json::Value)> {
+    extra
+        .get("async_cancel_adapter_result")
+        .filter(|value| value.is_object())
+        .map(|value| ("async_cancel_adapter_result", value))
+        .or_else(|| {
+            extra
+                .get("async_poll_adapter_result")
+                .filter(|value| value.is_object())
+                .map(|value| ("async_poll_adapter_result", value))
+        })
 }
 
 pub(super) fn direct_async_poll_result_report_from_payload(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route_allows_generated_file_path_report_payload(agent_run_context) {
+    if !route_allows_dry_run_generated_file_path_report_payload(agent_run_context) {
         return None;
     }
     for step in loop_state.executed_step_results.iter().rev() {
@@ -850,7 +871,7 @@ pub(super) fn direct_async_poll_result_report_from_payload(
         let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
             continue;
         };
-        if let Some(answer) = async_poll_result_report_from_value(&value) {
+        if let Some(answer) = async_adapter_result_report_from_value(&value) {
             return Some((answer, matrix_observed_shape_summary(loop_state)));
         }
     }
