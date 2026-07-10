@@ -80,9 +80,9 @@ fn inventory_dir_grouped_contract_uses_names_by_kind() {
     let answer = inventory_dir_direct_answer_candidate(None, Some(&route), &value, false)
         .expect("grouped inventory answer");
 
-    assert!(answer.contains("目录:"));
+    assert!(answer.contains("dirs:"));
     assert!(answer.contains("- src"));
-    assert!(answer.contains("文件:"));
+    assert!(answer.contains("files:"));
     assert!(answer.contains("- Cargo.toml"));
     assert!(answer.contains("- README.md"));
 }
@@ -156,9 +156,9 @@ fn direct_answer_groups_inventory_dir_for_chat_wrapped_directory_entry_contract(
     let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&context))
         .expect("inventory_dir should produce grouped direct answer");
 
-    assert!(answer.contains("目录:") || answer.contains("Directories:"));
+    assert!(answer.contains("dirs:"));
     assert!(answer.contains("- docs"));
-    assert!(answer.contains("文件:") || answer.contains("Files:"));
+    assert!(answer.contains("files:"));
     assert!(answer.contains("- README.md"));
 }
 
@@ -200,7 +200,8 @@ fn tree_summary_direct_answer_lists_top_level_groups_without_false_truncation() 
 
     let answer = tree_summary_direct_answer_candidate(None, &value, false).expect("answer");
 
-    assert!(answer.contains("顶层结构"), "answer: {answer}");
+    assert!(answer.contains("message_key=clawd.msg.tree_summary.observed"), "answer: {answer}");
+    assert!(answer.contains("reason_code=tree_summary_observed"), "answer: {answer}");
     assert!(answer.contains("configs/"), "answer: {answer}");
     assert!(answer.contains("logs/"), "answer: {answer}");
     assert!(answer.contains("package.json"), "answer: {answer}");
@@ -311,10 +312,8 @@ fn direct_count_inventory_answer_uses_file_count_and_explanation_for_one_sentenc
         ..AgentRunContext::default()
     };
 
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("count_inventory should produce a direct count answer");
-
-    assert!(answer.contains("53"));
-    assert!(answer.contains("普通文件"));
-    assert!(!answer.contains("无法计数"));
+    assert!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).is_none(),
+        "one-sentence count explanations should be rendered by finalizer/model, not fixed runtime prose"
+    );
 }
