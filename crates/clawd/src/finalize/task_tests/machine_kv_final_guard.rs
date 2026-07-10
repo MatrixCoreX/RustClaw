@@ -42,6 +42,38 @@ fn requested_machine_kv_summary_final_guard_preserves_terminal_scalar_respond() 
 }
 
 #[test]
+fn requested_machine_kv_summary_final_guard_replaces_scalar_path_when_explicit_pair_is_observed() {
+    let prompt = "只读定位 AGENTS.md 中包含 check_no_nl_hardmatch.py 的规则行或邻近行，最终只保留机器字段 no_hardmatch_guard=check_no_nl_hardmatch.py；不要修改文件。";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "AGENTS.md".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-machine-kv-path-scalar", "ask", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"grep_text","matches":[{"line":244,"path":"AGENTS.md","text":"run `python3 scripts/check_no_nl_hardmatch.py` after boundary changes"}],"query":"check_no_nl_hardmatch.py","results":["AGENTS.md"],"root":"AGENTS.md"},"text":"AGENTS.md"}"#,
+        ));
+    let mut answer_text = "AGENTS.md".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert_eq!(answer_text, "no_hardmatch_guard=check_no_nl_hardmatch.py");
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
+    assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
+}
+
+#[test]
 fn requested_machine_kv_summary_final_guard_preserves_observed_empty_string_scalar() {
     let prompt = "Read ./Cargo.toml workspace.package.repository and output only the value.";
     let mut route = route_result(crate::AskMode::act_plain());
