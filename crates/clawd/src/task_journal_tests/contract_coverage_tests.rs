@@ -909,7 +909,7 @@ fn raw_command_output_error_step_supplies_command_output_evidence() {
 }
 
 #[test]
-fn summary_json_includes_user_readable_task_outcome() {
+fn summary_json_includes_machine_readable_task_outcome() {
     let mut journal = TaskJournal::for_task("task-outcome", "ask", "列出文件名");
     let mut route = crate::RouteResult {
         ask_mode: crate::AskMode::act_plain(),
@@ -965,11 +965,20 @@ fn summary_json_includes_user_readable_task_outcome() {
             .and_then(Value::as_u64),
         Some(0)
     );
-    assert!(outcome.get("message_zh").and_then(Value::as_str).is_some());
-    assert!(outcome
-        .get("next_step_en")
-        .and_then(Value::as_str)
-        .is_some());
+    assert_eq!(
+        outcome.get("message_key").and_then(Value::as_str),
+        Some("clawd.task_outcome.completed")
+    );
+    assert_eq!(
+        outcome.get("next_action_kind").and_then(Value::as_str),
+        Some("review_result")
+    );
+    assert_eq!(
+        outcome.get("render_owner").and_then(Value::as_str),
+        Some("finalizer_or_ui_i18n")
+    );
+    assert!(outcome.get("message_zh").is_none());
+    assert!(outcome.get("next_step_en").is_none());
 }
 
 #[test]

@@ -294,53 +294,31 @@ pub(super) fn task_outcome_summary_json(journal: &TaskJournal) -> Value {
         Some(TaskJournalFinalStatus::Failure | TaskJournalFinalStatus::ResumeFailure) => "failed",
         None => "in_progress",
     };
-    let (message_zh, message_en, next_step_zh, next_step_en) = match state {
-        "completed" => (
-            "任务已完成。",
-            "The task completed.",
-            "可以直接查看结果。",
-            "You can review the result.",
-        ),
+    let (message_key, next_action_kind) = match state {
+        "completed" => ("clawd.task_outcome.completed", "review_result"),
         "needs_attention" => (
-            "任务已返回结果，但证据没有完全匹配。",
-            "The task returned a result, but evidence did not fully match.",
-            "请展开技术详情确认缺少的证据，必要时补充目标后重试。",
-            "Open technical details to check missing evidence, then add the target and retry if needed.",
+            "clawd.task_outcome.needs_attention",
+            "inspect_missing_evidence",
         ),
-        "needs_input" => (
-            "任务需要你补充信息。",
-            "The task needs more information.",
-            "请按提示补充目标、路径或确认信息。",
-            "Provide the requested target, path, or confirmation.",
-        ),
+        "needs_input" => ("clawd.task_outcome.needs_input", "provide_user_input"),
         "failed" if missing_count > 0 => (
-            "任务没有完成，缺少必要证据。",
-            "The task did not complete because required evidence is missing.",
-            "请补充明确目标后重试。",
-            "Add a clearer target and retry.",
+            "clawd.task_outcome.failed_missing_evidence",
+            "provide_clearer_target",
         ),
-        "failed" => (
-            "任务没有完成。",
-            "The task did not complete.",
-            "请根据错误信息处理后重试；技术详情已保留在下方。",
-            "Use the error message to decide the next step, then retry. Technical details are available below.",
-        ),
-        _ => (
-            "任务正在处理。",
-            "The task is in progress.",
-            "稍后重新查询任务状态。",
-            "Query the task again shortly.",
-        ),
+        "failed" => ("clawd.task_outcome.failed", "inspect_error"),
+        _ => ("clawd.task_outcome.in_progress", "poll_task"),
     };
     json!({
         "schema_version": 1,
         "state": state,
-        "message_zh": message_zh,
-        "message_en": message_en,
-        "next_step_zh": next_step_zh,
-        "next_step_en": next_step_en,
+        "message_key": message_key,
+        "next_action_kind": next_action_kind,
+        "render_owner": "finalizer_or_ui_i18n",
+        "requires_user_input": state == "needs_input",
+        "terminal": matches!(state, "completed" | "needs_attention" | "needs_input" | "failed"),
         "final_answer_shape": final_shape,
         "missing_evidence_count": missing_count,
+        "missing_evidence": missing_evidence,
         "has_technical_details": true,
     })
 }
