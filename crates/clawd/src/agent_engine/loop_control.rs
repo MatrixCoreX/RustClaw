@@ -1548,6 +1548,10 @@ pub(super) async fn run_agent_with_loop_seeded(
         .await?;
         let answer_contract_route_result =
             answer_contract_route_result_for_reply(agent_run_context, &reply);
+        prefer_terminal_model_answer_for_verifier_candidate(
+            &mut reply,
+            answer_contract_route_result.as_ref(),
+        );
         attach_answer_verifier_if_missing(
             state,
             task,

@@ -405,9 +405,25 @@ pub(super) fn route_prefers_content_evidence_synthesis(
         contract.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
     );
+    let constrained_sentence_summary_contract = contract.requires_content_evidence
+        && !contract.delivery_required
+        && (contract.response_shape == crate::OutputResponseShape::OneSentence
+            || contract.exact_sentence_count.is_some())
+        && (route.output_contract_is_unclassified()
+            || route.output_contract_marker_is_any(&[
+                crate::OutputSemanticKind::ContentExcerptSummary,
+                crate::OutputSemanticKind::ContentExcerptWithSummary,
+                crate::OutputSemanticKind::ExcerptKindJudgment,
+                crate::OutputSemanticKind::WorkspaceProjectSummary,
+                crate::OutputSemanticKind::CommandOutputSummary,
+                crate::OutputSemanticKind::DirectoryPurposeSummary,
+                crate::OutputSemanticKind::GitRepositoryState,
+            ]));
     if !contract.requires_content_evidence
         || contract.delivery_required
-        || (output_contract_requests_exact_delivery(route) && !content_summary_contract)
+        || (output_contract_requests_exact_delivery(route)
+            && !content_summary_contract
+            && !constrained_sentence_summary_contract)
         || synthesis.trim().is_empty()
         || crate::finalize::parse_delivery_token(synthesis).is_some()
         || crate::finalize::looks_like_planner_artifact(synthesis)
@@ -415,7 +431,7 @@ pub(super) fn route_prefers_content_evidence_synthesis(
     {
         return false;
     }
-    content_summary_contract
+    content_summary_contract || constrained_sentence_summary_contract
 }
 pub(super) async fn discard_meta_respond_placeholder_for_content_evidence(
     state: &AppState,
