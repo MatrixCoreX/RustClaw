@@ -178,6 +178,7 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
     if current_delivery_satisfies_service_status_selector(agent_run_context, &current)
         || current_delivery_is_execution_recipe_closeout(&current)
         || current_delivery_is_structured_json_answer(&current)
+        || current_delivery_is_generated_file_report_machine_projection(&current)
     {
         loop_state.last_user_visible_respond = Some(current);
         return false;
@@ -491,6 +492,24 @@ fn current_delivery_is_structured_json_answer(current: &str) -> bool {
         }
         _ => false,
     }
+}
+
+fn current_delivery_is_generated_file_report_machine_projection(current: &str) -> bool {
+    let current = current.trim();
+    if current.is_empty() {
+        return false;
+    }
+    let units = machine_kv_units(current);
+    if units.is_empty() {
+        return false;
+    }
+    units.iter().any(|unit| {
+        unit.strip_prefix("output_path=")
+            .is_some_and(|value| !value.is_empty())
+    }) && units.iter().any(|unit| {
+        unit.strip_prefix("planned_outputs=")
+            .is_some_and(|value| value.starts_with('[') && !value.is_empty())
+    })
 }
 
 fn delivery_contains_agent_loop_control_envelope(

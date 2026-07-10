@@ -651,6 +651,44 @@ fn generated_file_path_report_projects_media_dry_run_payload() {
         "answer: {audio_answer}"
     );
     assert!(audio_summary.contract_ok);
+
+    let mut music_loop_state = crate::agent_engine::LoopState::new(3);
+    music_loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "music_generate",
+        r#"{"text":"MUSIC_GENERATE_DRY_RUN","extra":{"adapter_kind":"media_job_poll","dry_run":true,"provider":"minimax","model":"music-2.6","model_kind":"minimax_native","output_path":"/home/guagua/rustclaw/document/media_dry_run/ambient_loop.mp3","planned_outputs":[{"type":"audio_file","path":"/home/guagua/rustclaw/document/media_dry_run/ambient_loop.mp3"}],"pending_async_job_contract":{"job_id":"provider:music_generate:minimax:dry_run","status":"accepted","poll_after_seconds":5,"expires_at":1999999999,"cancel_ref":"provider:music_generate:minimax:dry_run","message_key":"clawd.task.async_job_pending","poll_adapter":{"kind":"media_job_poll","skill_name":"music_generate","args":{"action":"poll","task_id":"dry_run","dry_run":true}}},"outputs":[],"request":{"audio_setting":{"format":"mp3"},"output_format":"hex"}}}"#,
+    ));
+    let (music_answer, music_summary) = direct_generated_file_path_report_from_dry_run_payload(
+        &music_loop_state,
+        Some(&free_context),
+    )
+    .expect("music dry_run payload should project planned output");
+    assert!(
+        music_answer.contains("dry_run=true"),
+        "answer: {music_answer}"
+    );
+    assert!(
+        music_answer.contains("provider=minimax"),
+        "answer: {music_answer}"
+    );
+    assert!(
+        music_answer.contains("model=music-2.6"),
+        "answer: {music_answer}"
+    );
+    assert!(
+        music_answer
+            .contains("output_path=/home/guagua/rustclaw/document/media_dry_run/ambient_loop.mp3"),
+        "answer: {music_answer}"
+    );
+    assert!(
+        music_answer.contains(
+            r#"planned_outputs=[{"path":"/home/guagua/rustclaw/document/media_dry_run/ambient_loop.mp3","type":"audio_file"}]"#
+        ),
+        "answer: {music_answer}"
+    );
+    assert!(music_answer.contains("pending_async_job_contract="));
+    assert!(!music_answer.contains("output_format=hex"));
+    assert!(music_summary.contract_ok);
 }
 
 #[test]
