@@ -24,6 +24,8 @@ LOG_ROOT="${ROOT_DIR}/scripts/nl_suite_logs/client_like_continuous"
 PROMPT_REPLY_ONLY=1
 QUALITY_GUARD=0
 CASE_FILE_VALUE=""
+CASE_FILE_LOADER_VALUE=""
+CASE_FILE_VALUES=()
 CASE_JSONL_VALUE=""
 CASE_LIMIT_VALUE=""
 CASE_GROUP_LIMIT_VALUE="${CASE_GROUP_LIMIT:-}"
@@ -99,6 +101,21 @@ need_cmd() {
   }
 }
 
+join_case_files() {
+  local sep="$1"
+  shift
+  local out=""
+  local path
+  for path in "$@"; do
+    if [[ -z "$out" ]]; then
+      out="$path"
+    else
+      out="${out}${sep}${path}"
+    fi
+  done
+  printf "%s" "$out"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base-url)
@@ -150,7 +167,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --case-file)
-      CASE_FILE_VALUE="${2:-}"
+      CASE_FILE_VALUES+=("${2:-}")
       shift 2
       ;;
     --case-jsonl)
@@ -158,7 +175,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --full-nl)
-      CASE_FILE_VALUE="${ROOT_DIR}/scripts/nl_tests/cases/nl_cases_full.txt"
+      CASE_FILE_VALUES=("${ROOT_DIR}/scripts/nl_tests/cases/nl_cases_full.txt")
       shift
       ;;
     --case-limit)
@@ -1353,7 +1370,7 @@ import re
 import sys
 from pathlib import Path
 
-case_file = Path(sys.argv[1])
+case_files = [Path(part) for part in sys.argv[1].split("\x1e") if part]
 limit_raw = sys.argv[2].strip()
 start_raw = sys.argv[3].strip()
 exclude_tags = [token.strip() for token in sys.argv[4].split(",") if token.strip()]
@@ -1417,30 +1434,31 @@ def group_key_for_name(name: str, tags: str) -> str:
     return f"{safe or 'case'}-{digest}"
 
 rows = []
-for raw in case_file.read_text(encoding="utf-8").splitlines():
-    line = raw.strip()
-    if not line or line.startswith("#"):
-        continue
-    parts = line.split("|", 3)
-    if len(parts) < 4:
-        continue
-    suite, name, tags, prompt = parts
-    expect = ""
-    expect_marker = "|expect="
-    if expect_marker in prompt:
-        prompt, expect = prompt.rsplit(expect_marker, 1)
-        expect = expect.strip()
-    seen += 1
-    group_key = group_key_for_name(name, tags)
-    rows.append({
-        "seen": seen,
-        "suite": suite,
-        "name": name,
-        "tags": tags,
-        "prompt": prompt,
-        "expect": expect,
-        "group_key": group_key,
-    })
+for case_file in case_files:
+    for raw in case_file.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("|", 3)
+        if len(parts) < 4:
+            continue
+        suite, name, tags, prompt = parts
+        expect = ""
+        expect_marker = "|expect="
+        if expect_marker in prompt:
+            prompt, expect = prompt.rsplit(expect_marker, 1)
+            expect = expect.strip()
+        seen += 1
+        group_key = group_key_for_name(name, tags)
+        rows.append({
+            "seen": seen,
+            "suite": suite,
+            "name": name,
+            "tags": tags,
+            "prompt": prompt,
+            "expect": expect,
+            "group_key": group_key,
+        })
 
 selected_groups = set()
 matched_group_max_seen = {}
@@ -2008,22 +2026,28 @@ POLL_INTERVAL_SECONDS="$POLL_SECONDS_VALUE"
 PRINT_LLM_TRACE="$PRINT_LLM_TRACE_VALUE"
 PRINT_LLM_TRACE_MAX_CHARS="$PRINT_LLM_TRACE_MAX_CHARS_VALUE"
 DB_PATH_VALUE="$(resolve_db_path)"
-if [[ -n "${CASE_FILE_VALUE:-}" && -n "${CASE_JSONL_VALUE:-}" ]]; then
+if [[ "${#CASE_FILE_VALUES[@]}" -gt 0 && -n "${CASE_JSONL_VALUE:-}" ]]; then
   echo "Use only one of --case-file or --case-jsonl." >&2
   exit 2
 fi
 
-if [[ -n "${CASE_FILE_VALUE:-}" ]]; then
-  if [[ ! -f "$CASE_FILE_VALUE" ]]; then
-    echo "Case file not found: $CASE_FILE_VALUE" >&2
-    exit 2
-  fi
-  CASE_FILE_VALUE="$(python3 - "$CASE_FILE_VALUE" <<'PY'
+if [[ "${#CASE_FILE_VALUES[@]}" -gt 0 ]]; then
+  resolved_case_files=()
+  for case_file_path in "${CASE_FILE_VALUES[@]}"; do
+    if [[ ! -f "$case_file_path" ]]; then
+      echo "Case file not found: $case_file_path" >&2
+      exit 2
+    fi
+    resolved_case_files+=("$(python3 - "$case_file_path" <<'PY'
 from pathlib import Path
 import sys
 print(Path(sys.argv[1]).resolve())
 PY
-  )"
+    )")
+  done
+  CASE_FILE_VALUES=("${resolved_case_files[@]}")
+  CASE_FILE_VALUE="$(join_case_files "," "${CASE_FILE_VALUES[@]}")"
+  CASE_FILE_LOADER_VALUE="$(join_case_files $'\x1e' "${CASE_FILE_VALUES[@]}")"
 fi
 if [[ -n "${CASE_JSONL_VALUE:-}" ]]; then
   if [[ ! -f "$CASE_JSONL_VALUE" ]]; then
@@ -2114,13 +2138,17 @@ if [[ "$RUN_BUILTIN_SMOKE" -eq 1 ]]; then
   done
 fi
 
-if [[ -n "${CASE_FILE_VALUE:-}" || -n "${CASE_JSONL_VALUE:-}" ]]; then
+if [[ "${#CASE_FILE_VALUES[@]}" -gt 0 || -n "${CASE_JSONL_VALUE:-}" ]]; then
   if [[ -n "${CASE_JSONL_VALUE:-}" ]]; then
     case_row_loader=(load_case_rows_jsonl "$CASE_JSONL_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE" "$CASE_EXCLUDE_TAGS_VALUE" "$CASE_INCLUDE_TAGS_VALUE" "$CASE_INCLUDE_GROUPS_VALUE" "$CASE_GROUP_LIMIT_VALUE" "$CASE_INCLUDE_GROUP_CONTEXT_VALUE" "$CASE_INCLUDE_ANY_TAGS_VALUE")
     resume_case_arg="--case-jsonl ${CASE_JSONL_VALUE}"
   else
-    case_row_loader=(load_case_rows "$CASE_FILE_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE" "$CASE_EXCLUDE_TAGS_VALUE" "$CASE_INCLUDE_TAGS_VALUE" "$CASE_INCLUDE_GROUPS_VALUE" "$CASE_GROUP_LIMIT_VALUE" "$CASE_INCLUDE_GROUP_CONTEXT_VALUE" "$CASE_INCLUDE_ANY_TAGS_VALUE")
-    resume_case_arg="--case-file ${CASE_FILE_VALUE}"
+    case_row_loader=(load_case_rows "$CASE_FILE_LOADER_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE" "$CASE_EXCLUDE_TAGS_VALUE" "$CASE_INCLUDE_TAGS_VALUE" "$CASE_INCLUDE_GROUPS_VALUE" "$CASE_GROUP_LIMIT_VALUE" "$CASE_INCLUDE_GROUP_CONTEXT_VALUE" "$CASE_INCLUDE_ANY_TAGS_VALUE")
+    resume_case_arg=""
+    for case_file_path in "${CASE_FILE_VALUES[@]}"; do
+      resume_case_arg="${resume_case_arg} --case-file ${case_file_path}"
+    done
+    resume_case_arg="${resume_case_arg# }"
   fi
   while IFS=$'\x1f' read -r case_index case_group_key case_name case_tags case_prompt case_expect; do
     [[ -n "${case_index:-}" ]] || continue
