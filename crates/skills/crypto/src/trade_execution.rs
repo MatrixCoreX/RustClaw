@@ -37,13 +37,11 @@ pub(super) fn parse_trade_input(
         .or_else(|| obj.get("amount_usd").and_then(value_to_f64))
         .or_else(|| obj.get("notional_usd").and_then(value_to_f64));
     let qty_value = trade_qty_value(obj);
-    let qty_all = qty_value
-        .and_then(|v| v.as_str())
-        .map(|s| {
-            let n = s.trim().to_ascii_lowercase();
-            matches!(n.as_str(), "all" | "max" | "全部" | "全仓")
-        })
-        .unwrap_or(false);
+    let qty_all = obj.get("qty_all").and_then(Value::as_bool).unwrap_or(false)
+        || qty_value
+            .and_then(Value::as_str)
+            .map(is_language_neutral_qty_all_token)
+            .unwrap_or(false);
     let mut qty = qty_value.and_then(value_to_f64).unwrap_or(0.0);
     if let Some(v) = quote_qty_usd {
         if v <= 0.0 {
@@ -119,6 +117,10 @@ pub(super) fn trade_qty_value<'a>(obj: &'a serde_json::Map<String, Value>) -> Op
         .or_else(|| obj.get("amount"))
         .or_else(|| obj.get("base_qty"))
         .or_else(|| obj.get("base_quantity"))
+}
+
+fn is_language_neutral_qty_all_token(value: &str) -> bool {
+    matches!(value.trim().to_ascii_lowercase().as_str(), "all" | "max")
 }
 
 pub(super) fn risk_checks(

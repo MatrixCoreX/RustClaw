@@ -119,6 +119,37 @@ fn parse_trade_accepts_camel_case_trade_aliases() {
 }
 
 #[test]
+fn parse_trade_accepts_structured_qty_all_bool() {
+    let cfg = RootConfig::default();
+    let mut m = serde_json::Map::new();
+    m.insert("exchange".to_string(), json!("binance"));
+    m.insert("symbol".to_string(), json!("BTCUSDT"));
+    m.insert("side".to_string(), json!("sell"));
+    m.insert("qty_all".to_string(), json!(true));
+
+    let trade = parse_trade_input(&m, &cfg).unwrap();
+    assert!(trade.qty_all);
+    assert_eq!(trade.qty, 0.0);
+}
+
+#[test]
+fn parse_trade_no_longer_accepts_natural_language_qty_all_tokens() {
+    let cfg = RootConfig::default();
+    for token in ["全部", "全仓"] {
+        let mut m = serde_json::Map::new();
+        m.insert("exchange".to_string(), json!("binance"));
+        m.insert("symbol".to_string(), json!("BTCUSDT"));
+        m.insert("side".to_string(), json!("sell"));
+        m.insert("qty".to_string(), json!(token));
+
+        assert!(
+            parse_trade_input(&m, &cfg).is_err(),
+            "production parser must consume qty_all=true, not NL token {token}"
+        );
+    }
+}
+
+#[test]
 fn quote_symbol_mapping_for_new_exchanges() {
     assert_eq!(to_gateio_pair("BTCUSDT"), "BTC_USDT");
     assert_eq!(to_coinbase_product("BTCUSDT"), "BTC-USD");
