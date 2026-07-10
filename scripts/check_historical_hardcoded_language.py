@@ -105,6 +105,60 @@ class Finding:
     migration: str
 
 
+@dataclasses.dataclass(frozen=True)
+class AllowedLanguageLiteral:
+    path: str
+    kind: str
+    literal: str
+    line_fragment: str
+    category: str
+    owner: str
+    migration: str
+
+
+ALLOWED_LANGUAGE_LITERALS: tuple[AllowedLanguageLiteral, ...] = (
+    AllowedLanguageLiteral(
+        path="crates/clawd/src/finalize/helpers.rs",
+        kind="string_literal",
+        literal="**执行过程**",
+        line_fragment="EXECUTION_SUMMARY_MESSAGE_PREFIX",
+        category="allowed_legacy_scrub_marker",
+        owner="finalizer-history-scrub",
+        migration=(
+            "Legacy execution-summary removal marker only; production emits "
+            "clawd.msg.execution.summary machine JSON and this literal is used "
+            "only to strip historical delivery text before final answer output."
+        ),
+    ),
+    AllowedLanguageLiteral(
+        path="crates/clawd/src/finalize/helpers.rs",
+        kind="string_literal",
+        literal="**実行過程**",
+        line_fragment="EXECUTION_SUMMARY_MESSAGE_PREFIX_JA",
+        category="allowed_legacy_scrub_marker",
+        owner="finalizer-history-scrub",
+        migration=(
+            "Legacy execution-summary removal marker only; production emits "
+            "clawd.msg.execution.summary machine JSON and this literal is used "
+            "only to strip historical delivery text before final answer output."
+        ),
+    ),
+    AllowedLanguageLiteral(
+        path="crates/clawd/src/finalize/helpers.rs",
+        kind="string_literal",
+        literal="**실행 과정**",
+        line_fragment="EXECUTION_SUMMARY_MESSAGE_PREFIX_KO",
+        category="allowed_legacy_scrub_marker",
+        owner="finalizer-history-scrub",
+        migration=(
+            "Legacy execution-summary removal marker only; production emits "
+            "clawd.msg.execution.summary machine JSON and this literal is used "
+            "only to strip historical delivery text before final answer output."
+        ),
+    ),
+)
+
+
 def rel(path: Path) -> str:
     resolved = path.resolve()
     try:
@@ -226,6 +280,15 @@ def build_line_offsets(lines: list[str]) -> list[int]:
 
 
 def classify(path_rel: str, line: str, kind: str, literal: str) -> tuple[str, str, str]:
+    for allowed in ALLOWED_LANGUAGE_LITERALS:
+        if (
+            path_rel == allowed.path
+            and kind == allowed.kind
+            and literal == allowed.literal
+            and allowed.line_fragment in line
+        ):
+            return allowed.category, allowed.owner, allowed.migration
+
     if kind in {"contains_match", "regex_match"}:
         if any(hint in path_rel for hint in I18N_HINTS):
             return (
@@ -434,6 +497,15 @@ def print_text_report(findings: list[Finding], max_items: int) -> None:
 
 
 def run_self_test() -> int:
+    for item in ALLOWED_LANGUAGE_LITERALS:
+        assert item.path.startswith("crates/"), item
+        assert item.kind, item
+        assert item.category.startswith("allowed_"), item
+        assert item.owner, item
+        assert item.migration, item
+        assert item.line_fragment, item
+        assert has_user_language(item.literal), item
+
     samples = {
         REPO_ROOT / "crates/clawd/src/finalize/example.rs": 'fn f() { let s = "处理完成。"; }\n',
         REPO_ROOT / "crates/clawd/src/delivery_utils/example.rs": (
