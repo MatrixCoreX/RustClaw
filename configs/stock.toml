@@ -13,6 +13,23 @@ enable_llm_name_correction = true
 llm_timeout_seconds = 15
 # 送给 LLM 的候选名称数；越大越稳，越慢
 max_llm_candidates = 8
+# 名称归一化清理词元属于领域 metadata，不应写进 Rust 生产代码。
+cleanup_tokens = [
+  "股票代码",
+  "股票代号",
+  "股票名称",
+  "股票",
+  "股价",
+  "行情",
+  "A股",
+  "a股",
+  "股份有限公司",
+  "股份",
+  "有限公司",
+  "集团",
+  "控股",
+  "公司",
+]
 
 # 可维护的股票名称 / 别名 -> A 股代码映射（含沪深300成分股及常用别名）
 # key 支持公司名、简称、常用别名；value 为 6 位 A 股代码

@@ -25,6 +25,15 @@ fn parse_llm_alias_response_rejects_name_field_json_fallback() {
 }
 
 #[test]
+fn stock_name_cleanup_tokens_come_from_config() {
+    assert_eq!(normalize_stock_name("贵州茅台股票", &[]), "贵州茅台股票");
+    assert_eq!(
+        normalize_stock_name("贵州茅台股票", &["股票".to_string()]),
+        "贵州茅台"
+    );
+}
+
+#[test]
 fn parse_sina_hq_returns_structured_quote_extra() {
     let body = r#"var hq_str_sh600519="贵州茅台,1500.00,1490.00,1519.80,1525.00,1488.00,0,0,123456,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2026-07-07,15:00:00,00";"#;
     let correction = SymbolCorrection {

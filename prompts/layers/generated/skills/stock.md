@@ -13,7 +13,7 @@
 - 仅读、不涉及交易或下单。
 
 ## Config Entry Points (from interface)
-- `configs/stock.toml` controls aliases and LLM typo correction.
+- `configs/stock.toml` controls aliases, name-normalization cleanup metadata, and LLM typo correction.
 - Text LLM fallback uses the system default `[llm].selected_vendor` / `selected_model` by default.
 - `stock.llm_vendor` / `stock.llm_model` are optional dedicated overrides and should stay commented unless stock name correction needs a separate text model.
 
