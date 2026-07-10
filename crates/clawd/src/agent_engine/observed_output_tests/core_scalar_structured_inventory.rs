@@ -1022,7 +1022,7 @@ fn direct_answer_formats_config_basic_validate_result_as_pass_fail() {
 
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("pass: toml parsed successfully")
+        Some("message_key=clawd.msg.validate_structured_pass\nreason_code=validate_structured_pass\nfinal_answer_shape=structured_validation\nvalid=true\nformat=toml")
     );
 }
 
@@ -1051,7 +1051,7 @@ fn direct_scalar_formats_config_validation_result_in_request_language() {
             Some(&agent_run_context)
         )
         .as_deref(),
-        Some("通过：toml 解析成功")
+        Some("message_key=clawd.msg.validate_structured_pass\nreason_code=validate_structured_pass\nfinal_answer_shape=structured_validation\nvalid=true\nformat=toml")
     );
 }
 

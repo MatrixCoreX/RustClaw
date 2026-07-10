@@ -1804,7 +1804,7 @@ fn synthesize_route_allows_direct_fallback_for_config_validation_contract() {
     assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
     assert_eq!(
         synthesize_direct_observed_fallback_answer(&state, &loop_state, Some(&ctx)).as_deref(),
-        Some("pass: toml parsed successfully")
+        Some("message_key=clawd.msg.validate_structured_pass\nreason_code=validate_structured_pass\nfinal_answer_shape=structured_validation\nvalid=true\nformat=toml")
     );
 }
 
