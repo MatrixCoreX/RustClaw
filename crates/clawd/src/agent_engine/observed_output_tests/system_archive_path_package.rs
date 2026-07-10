@@ -1280,7 +1280,7 @@ fn direct_answer_formats_package_manager_detect_summary() {
     };
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("检测到的包管理器是 brew，依据是 package_manager 返回了 package_manager=brew。")
+        Some("message_key=clawd.msg.package_manager_detected\nreason_code=package_manager_observed\nfinal_answer_shape=package_manager_summary\nmanager=brew\nobserved_field=package_manager\nobserved_value=brew")
     );
 }
 
@@ -1325,7 +1325,7 @@ fn direct_answer_formats_package_manager_matrix_basis_summary() {
     };
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("检测到的包管理器是 apt-get，依据是 package_manager 返回了 package_manager=apt-get。")
+        Some("message_key=clawd.msg.package_manager_detected\nreason_code=package_manager_observed\nfinal_answer_shape=package_manager_summary\nmanager=apt-get\nobserved_field=package_manager\nobserved_value=apt-get")
     );
 }
 

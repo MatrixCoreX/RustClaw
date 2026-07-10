@@ -848,7 +848,7 @@ fn package_manager_summary_uses_structured_detect_answer() {
             .as_ref()
             .map(|(answer, _summary)| answer.as_str()),
         Some(
-            "Detected package manager: brew. Basis: package_manager returned package_manager=brew."
+            "message_key=clawd.msg.package_manager_detected\nreason_code=package_manager_observed\nfinal_answer_shape=package_manager_summary\nmanager=brew\nobserved_field=package_manager\nobserved_value=brew"
         ),
         "package manager summary should use structured skill evidence"
     );

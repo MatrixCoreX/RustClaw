@@ -1505,7 +1505,7 @@ fn direct_scalar_reports_missing_extract_field_as_readable_message() {
         ));
     assert_eq!(
         extract_direct_scalar_from_generic_output(&loop_state, None).as_deref(),
-        Some("未找到 name 字段")
+        Some("message_key=clawd.msg.extract_field_missing\nreason_code=extract_field_missing\nfinal_answer_shape=missing_structured_field\nexists=false\nfield_path=name")
     );
 }
 
@@ -1527,7 +1527,7 @@ fn internal_missing_sentinel_uses_structured_extract_field_evidence() {
             None
         )
         .as_deref(),
-        Some("未找到 package.name 字段")
+        Some("message_key=clawd.msg.extract_field_missing\nreason_code=extract_field_missing\nfinal_answer_shape=missing_structured_field\nexists=false\nfield_path=package.name")
     );
     assert_eq!(
         replace_internal_missing_sentinel_with_structured_observation(
@@ -1537,7 +1537,7 @@ fn internal_missing_sentinel_uses_structured_extract_field_evidence() {
             None
         )
         .as_deref(),
-        Some("未找到 package.name 字段")
+        Some("message_key=clawd.msg.extract_field_missing\nreason_code=extract_field_missing\nfinal_answer_shape=missing_structured_field\nexists=false\nfield_path=package.name")
     );
 }
 
@@ -1592,6 +1592,6 @@ fn direct_scalar_missing_field_language_uses_original_request_before_resolved_pr
             Some(&agent_run_context),
         )
         .as_deref(),
-        Some("未找到 name 字段")
+        Some("message_key=clawd.msg.extract_field_missing\nreason_code=extract_field_missing\nfinal_answer_shape=missing_structured_field\nexists=false\nfield_path=name")
     );
 }

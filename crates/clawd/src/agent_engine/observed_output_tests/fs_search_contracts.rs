@@ -980,7 +980,7 @@ fn observed_bilingual_templates_defer_non_bilingual_missing_field_answers() {
             true,
         )
         .as_deref(),
-        Some("未找到 package.no_such_key_100_matrix 字段")
+        Some("message_key=clawd.msg.extract_field_missing\nreason_code=extract_field_missing\nfinal_answer_shape=missing_structured_field\nexists=false\nfield_path=package.no_such_key_100_matrix")
     );
     assert!(extract_field_direct_answer_candidate(
         None,
