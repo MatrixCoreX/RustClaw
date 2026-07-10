@@ -582,3 +582,56 @@ fn answer_verifier_exhaustion_does_not_recover_same_rejected_terminal_respond() 
         &mut reply
     ));
 }
+
+#[test]
+fn unsupported_claims_gap_requests_observed_content_rewrite() {
+    let verifier = crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["unsupported_claims".to_string()],
+        answer_incomplete_reason: "candidate added unobserved facts".to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite from observed evidence".to_string(),
+        confidence: 0.88,
+    };
+
+    assert!(answer_verifier_gap_requests_observed_content_rewrite(
+        &verifier
+    ));
+}
+
+#[test]
+fn observed_content_rewrite_gate_uses_only_successful_nonterminal_evidence() {
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-content-rewrite", "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::new(
+            "step_1",
+            "system_basic",
+            StepExecutionStatus::Error,
+            None,
+            Some(
+                r#"{"error_text":"content_excerpt is not machine evidence on failed steps"}"#
+                    .to_string(),
+            ),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "respond",
+            "terminal answer with content_excerpt wording is not observation evidence",
+        ));
+
+    assert!(!answer_verifier_gap_has_observed_content_evidence(&journal));
+
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3",
+            "fs_basic",
+            r#"{"extra":{"action":"read_range","path":"README.md","excerpt":"1|# RustClaw\n2|local runtime"}}"#,
+        ));
+
+    assert!(answer_verifier_gap_has_observed_content_evidence(&journal));
+}
