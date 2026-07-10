@@ -318,6 +318,17 @@ print(path.resolve())
 PY
 }
 
+normalize_llm_trace_max_chars() {
+  local value="${1:-1200}"
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    value=1200
+  fi
+  if (( value < 240 )); then
+    value=240
+  fi
+  printf "%s" "$value"
+}
+
 extract_json_field() {
   local file="$1"
   local field="$2"
@@ -2024,7 +2035,7 @@ USER_KEY="$USER_KEY_VALUE"
 MAX_WAIT_SECONDS="$WAIT_SECONDS_VALUE"
 POLL_INTERVAL_SECONDS="$POLL_SECONDS_VALUE"
 PRINT_LLM_TRACE="$PRINT_LLM_TRACE_VALUE"
-PRINT_LLM_TRACE_MAX_CHARS="$PRINT_LLM_TRACE_MAX_CHARS_VALUE"
+PRINT_LLM_TRACE_MAX_CHARS="$(normalize_llm_trace_max_chars "$PRINT_LLM_TRACE_MAX_CHARS_VALUE")"
 DB_PATH_VALUE="$(resolve_db_path)"
 if [[ "${#CASE_FILE_VALUES[@]}" -gt 0 && -n "${CASE_JSONL_VALUE:-}" ]]; then
   echo "Use only one of --case-file or --case-jsonl." >&2
