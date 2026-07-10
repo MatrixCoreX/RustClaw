@@ -1296,14 +1296,19 @@ fn direct_answer_formats_process_basic_multi_row_cpu_inventory() {
     )
     .expect("multi-row process inventory should produce a data-grounded summary");
 
-    assert!(answer.contains("WebKitWebProces"));
-    assert!(answer.contains("ptyxis"));
-    assert!(answer.contains("gnome-shell"));
-    assert!(answer.contains("codex"));
-    assert!(answer.contains("chrome"));
-    assert!(answer.contains("6.4"));
-    assert!(answer.contains("最值得注意的是 WebKitWebProces"));
+    assert!(answer.contains("message_key=clawd.msg.process_basic.ps_inventory.observed"));
+    assert!(answer.contains("reason_code=process_basic_ps_inventory_observed"));
+    assert!(answer.contains("selection_reason=ranked_by_cpu"));
+    assert!(answer.contains("process_count=5"));
+    assert!(answer.contains("top_process.name=WebKitWebProces"));
+    assert!(answer.contains("top_process.cpu_percent=6.4"));
+    assert!(answer.contains("process.1.name=WebKitWebProces"));
+    assert!(answer.contains("process.2.name=ptyxis"));
+    assert!(answer.contains("process.3.name=gnome-shell"));
+    assert!(answer.contains("process.4.name=codex"));
+    assert!(answer.contains("process.5.name=chrome"));
     assert!(!answer.contains("PID PPID"));
+    assert!(!answer.contains("最值得注意"));
 }
 
 #[test]
