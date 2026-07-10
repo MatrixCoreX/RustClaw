@@ -100,7 +100,41 @@ fn strip_preamble_before_markdown_table(text: &str) -> String {
     if !looks_like_markdown_table_separator(separator) {
         return text.to_string();
     }
+    if !markdown_table_preamble_is_label_only(&lines[..table_start]) {
+        return text.to_string();
+    }
     lines[table_start..].join("\n").trim().to_string()
+}
+
+fn markdown_table_preamble_is_label_only(preamble: &[&str]) -> bool {
+    let nonempty = preamble
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if nonempty.is_empty() {
+        return true;
+    }
+    if nonempty.len() > 2 {
+        return false;
+    }
+    if nonempty.iter().any(|line| {
+        line.starts_with('#')
+            || line.starts_with("- ")
+            || line.starts_with("* ")
+            || line.starts_with("+ ")
+            || line.starts_with('>')
+            || line.starts_with("```")
+            || line.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+                && line
+                    .chars()
+                    .nth(1)
+                    .is_some_and(|ch| matches!(ch, '.' | ')'))
+    }) {
+        return false;
+    }
+    let joined = nonempty.join(" ");
+    joined.chars().count() <= 160
 }
 
 fn should_strip_preamble_before_markdown_table(output_contract: &IntentOutputContract) -> bool {
