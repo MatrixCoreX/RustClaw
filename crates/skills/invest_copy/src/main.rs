@@ -548,10 +548,18 @@ fn score_sentence(s: &str) -> i32 {
     if s.contains('？') || s.contains('?') {
         score += 1;
     }
-    if s.contains('元') || s.contains("万元") || s.contains('亿') {
+    if contains_currency_marker(s) {
         score += 2;
     }
     score
+}
+
+fn contains_currency_marker(s: &str) -> bool {
+    let lower = s.to_ascii_lowercase();
+    s.chars().any(|c| matches!(c, '$' | '€' | '£' | '¥'))
+        || ["cny", "rmb", "usd", "eur", "gbp", "jpy"]
+            .iter()
+            .any(|token| lower.contains(token))
 }
 
 fn summarize_bullets(text: &str, max_items: usize) -> Vec<String> {

@@ -44,3 +44,9 @@ fn bullets_non_empty_from_sample() {
     let b = summarize_bullets(sample, 5);
     assert!(!b.is_empty());
 }
+
+#[test]
+fn sentence_scoring_uses_currency_markers_without_language_units() {
+    assert!(score_sentence("Revenue reached CNY 120m") > score_sentence("Revenue improved"));
+    assert!(score_sentence("Revenue reached ¥120m") > score_sentence("Revenue improved"));
+}
