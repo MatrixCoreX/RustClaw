@@ -52,6 +52,9 @@ use delivery_record::log_deterministic_delivery_record;
 #[path = "loop_reply_delivery_text.rs"]
 mod delivery_text;
 #[cfg(test)]
+#[path = "loop_reply_delivery_text_tests.rs"]
+mod delivery_text_tests;
+#[cfg(test)]
 use delivery_text::single_publishable_delivery_message;
 use delivery_text::{delivery_is_single_line_text, final_answer_text_from_delivery};
 
