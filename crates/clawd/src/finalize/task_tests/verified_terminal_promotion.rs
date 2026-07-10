@@ -75,6 +75,43 @@ fn verifier_pass_promotes_latest_terminal_text_over_stale_machine_projection() {
 }
 
 #[test]
+fn verifier_recovered_terminal_answer_is_not_overwritten_by_stale_step_answer() {
+    let prompt = "Read the title of ALPHA_DOC. Output only the title.";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-verified-retry-stale-step", "ask", prompt);
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    journal.record_final_stop_signal(
+        crate::task_journal::ANSWER_VERIFIER_RECOVERED_TERMINAL_STOP_SIGNAL,
+    );
+    journal.record_final_answer("Service Notes");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "respond",
+            "The title of ALPHA_DOC is \"Service Notes\".",
+        ));
+
+    let mut answer_text = "Service Notes".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!promote_verified_terminal_answer_after_verifier_pass(
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+    assert_eq!(answer_text, "Service Notes");
+    assert_eq!(answer_messages, vec!["Service Notes".to_string()]);
+    assert_eq!(journal.final_answer.as_deref(), Some("Service Notes"));
+}
+
+#[test]
 fn verifier_pass_does_not_promote_terminal_text_when_machine_summary_is_required() {
     let prompt = "Return branch machine fields.";
     let mut route = route_result(crate::AskMode::act_plain());

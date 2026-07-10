@@ -175,6 +175,14 @@ fn insert_boundary_envelope_for_schema(obj: &mut serde_json::Map<String, Value>,
             Value::String(hint.to_string())
         }
     };
+    let language_hint = boundary_string_for_schema(
+        model_boundary
+            .get("language_hint")
+            .or_else(|| obj.get("language_hint")),
+        BoundaryStringKind::Reference,
+    )
+    .map(Value::String)
+    .unwrap_or(language_hint);
     let active_task_reference = obj
         .get("target_task_policy")
         .and_then(Value::as_str)

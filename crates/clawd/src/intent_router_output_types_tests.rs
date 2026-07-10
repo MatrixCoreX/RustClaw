@@ -147,3 +147,38 @@ fn boundary_envelope_merges_model_machine_fields_without_overriding_runtime_auth
     assert_eq!(envelope.session_binding.as_deref(), Some("resume_execute"));
     assert_eq!(envelope.safety_budget_hint.as_deref(), Some("bounded"));
 }
+
+#[test]
+fn boundary_envelope_uses_model_language_hint_only_when_runtime_hint_is_unclear() {
+    let clear_envelope = BoundaryEnvelope {
+        language_hint: Some("en".to_string()),
+        ..BoundaryEnvelope::from_request(
+            "read x",
+            None,
+            false,
+            &crate::IntentOutputContract::default(),
+            None,
+            crate::ResumeBehavior::None,
+        )
+    }
+    .merge_model_machine_fields(Some(&serde_json::json!({
+        "language_hint": "zh"
+    })));
+    assert_eq!(clear_envelope.language_hint.as_deref(), Some("en"));
+
+    let mixed_envelope = BoundaryEnvelope {
+        language_hint: Some("mixed".to_string()),
+        ..BoundaryEnvelope::from_request(
+            "读取 scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+            None,
+            false,
+            &crate::IntentOutputContract::default(),
+            None,
+            crate::ResumeBehavior::None,
+        )
+    }
+    .merge_model_machine_fields(Some(&serde_json::json!({
+        "language_hint": "zh"
+    })));
+    assert_eq!(mixed_envelope.language_hint.as_deref(), Some("zh"));
+}

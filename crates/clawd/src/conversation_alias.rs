@@ -112,6 +112,7 @@ pub(crate) fn session_alias_bindings_from_state_patch(
         for item in alias_bindings {
             let Some(alias) = item
                 .get("alias")
+                .or_else(|| item.get("alias_key"))
                 .or_else(|| item.get("surface"))
                 .or_else(|| item.get("name"))
                 .or_else(|| item.get("alias_name"))
@@ -250,10 +251,42 @@ pub(crate) fn state_patch_is_alias_bindings_only(state_patch: &Value) -> bool {
 
 fn alias_bindings_metadata_is_ignorable(key: &str, value: &Value) -> bool {
     match key {
-        "forbidden_visible_literals" | "required_visible_literals" => true,
-        "primary_task_update" => primary_task_update_value_is_inactive(value),
+        "forbidden_visible_literals"
+        | "required_content_literals"
+        | "required_visible_literals" => true,
+        "primary_task_update" => {
+            primary_task_update_value_is_inactive(value)
+                || primary_task_update_value_is_alias_binding_metadata(value)
+                || primary_task_update_value_is_alias_ack_projection(value)
+        }
         _ => false,
     }
+}
+
+fn primary_task_update_value_is_alias_ack_projection(value: &Value) -> bool {
+    let Some(map) = value.as_object() else {
+        return false;
+    };
+    !map.is_empty()
+        && map.keys().all(|key| {
+            matches!(
+                key.as_str(),
+                "last_primary_task_prompt" | "last_primary_task_output"
+            )
+        })
+}
+
+fn primary_task_update_value_is_alias_binding_metadata(value: &Value) -> bool {
+    let Some(action) = value
+        .as_object()
+        .and_then(|map| map.get("action"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(|action| action.to_ascii_lowercase())
+    else {
+        return false;
+    };
+    matches!(action.as_str(), "alias_update" | "alias_rebind")
 }
 
 fn primary_task_update_value_is_inactive(value: &Value) -> bool {
@@ -276,6 +309,7 @@ fn alias_bindings_value_is_well_formed(value: &Value) -> bool {
             && items.iter().all(|item| {
                 let alias = item
                     .get("alias")
+                    .or_else(|| item.get("alias_key"))
                     .or_else(|| item.get("surface"))
                     .or_else(|| item.get("name"))
                     .or_else(|| item.get("alias_name"))
@@ -310,6 +344,7 @@ fn alias_binding_target_value(item: &Value) -> Option<&str> {
         .or_else(|| item.get("locator_value"))
         .or_else(|| item.get("target_value"))
         .or_else(|| item.get("target_abs"))
+        .or_else(|| item.get("alias_target"))
         .or_else(|| item.get("absolute_path"))
         .or_else(|| item.get("alias_target_path"))
         .or_else(|| item.get("alias_target_abs"))
@@ -318,17 +353,20 @@ fn alias_binding_target_value(item: &Value) -> Option<&str> {
 
 fn alias_binding_record_map_present(map: &serde_json::Map<String, Value>) -> bool {
     map.contains_key("alias")
+        || map.contains_key("alias_key")
         || map.contains_key("surface")
         || map.contains_key("name")
         || map.contains_key("alias_name")
         || map.contains_key("action")
         || map.contains_key("target")
+        || map.contains_key("alias_target")
         || map.contains_key("target_abs")
 }
 
 fn alias_binding_record_from_map(map: &serde_json::Map<String, Value>) -> Option<(String, String)> {
     let alias = map
         .get("alias")
+        .or_else(|| map.get("alias_key"))
         .or_else(|| map.get("surface"))
         .or_else(|| map.get("name"))
         .or_else(|| map.get("alias_name"))
@@ -385,6 +423,7 @@ fn state_patch_schema_key(key: &str) -> bool {
             | "forbidden_visible_literals"
             | "primary_task_update"
             | "quantity_comparison"
+            | "required_content_literals"
             | "required_visible_literals"
             | "scope"
             | "target"
@@ -400,9 +439,15 @@ fn compatibility_alias_target(value: &Value) -> Option<&str> {
         .and_then(|obj| {
             obj.get("target")
                 .or_else(|| obj.get("path"))
+                .or_else(|| obj.get("value"))
                 .or_else(|| obj.get("locator"))
                 .or_else(|| obj.get("locator_value"))
                 .or_else(|| obj.get("target_value"))
+                .or_else(|| obj.get("alias_target"))
+                .or_else(|| obj.get("target_abs"))
+                .or_else(|| obj.get("absolute_path"))
+                .or_else(|| obj.get("alias_target_path"))
+                .or_else(|| obj.get("alias_target_abs"))
         })
         .and_then(Value::as_str)
 }

@@ -164,6 +164,7 @@ pub(super) fn normalize_intent_normalizer_top_level_for_schema(
         .or_insert_with(|| Value::from(0.8));
     obj.entry("output_contract".to_string())
         .or_insert_with(|| serde_json::json!({}));
+    promote_top_level_output_contract_fields(obj);
     obj.entry("execution_recipe".to_string())
         .or_insert_with(|| {
             serde_json::json!({
@@ -186,6 +187,39 @@ pub(super) fn normalize_intent_normalizer_top_level_for_schema(
     obj.entry("attachment_processing_required".to_string())
         .or_insert(Value::Bool(false));
     normalize_bool_field_with_default(obj, "attachment_processing_required", false);
+}
+
+fn promote_top_level_output_contract_fields(obj: &mut serde_json::Map<String, Value>) {
+    let mut promoted = serde_json::Map::new();
+    for key in [
+        "requires_content_evidence",
+        "delivery_required",
+        "locator_kind",
+        "locator_hint",
+        "delivery_intent",
+        "contract_marker",
+    ] {
+        let Some(value) = obj.get(key).cloned() else {
+            continue;
+        };
+        if value.is_null() {
+            continue;
+        }
+        promoted.insert(key.to_string(), value);
+    }
+    if promoted.is_empty() {
+        return;
+    }
+    match obj.get_mut("output_contract") {
+        Some(Value::Object(contract)) => {
+            for (key, value) in promoted {
+                contract.entry(key).or_insert(value);
+            }
+        }
+        _ => {
+            obj.insert("output_contract".to_string(), Value::Object(promoted));
+        }
+    }
 }
 
 pub(super) fn retain_intent_normalizer_top_level_schema_fields(
