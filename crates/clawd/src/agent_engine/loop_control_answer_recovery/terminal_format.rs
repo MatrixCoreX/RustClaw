@@ -178,8 +178,14 @@ fn terminal_model_answer_is_lossy_observed_scalar(
 }
 
 fn visible_answer_is_machine_field_projection(answer: &str) -> bool {
+    let answer = answer.trim();
+    if answer.is_empty() {
+        return false;
+    }
     let mut field_count = 0usize;
+    let mut token_count = 0usize;
     for token in answer.split_whitespace() {
+        token_count += 1;
         let Some((key, value)) = token.split_once('=') else {
             continue;
         };
@@ -190,7 +196,7 @@ fn visible_answer_is_machine_field_projection(answer: &str) -> bool {
             }
         }
     }
-    false
+    field_count == 1 && token_count == 1
 }
 
 fn machine_projection_field_key(key: &str) -> bool {
