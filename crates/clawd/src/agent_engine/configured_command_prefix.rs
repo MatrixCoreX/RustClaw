@@ -1241,6 +1241,14 @@ pub(super) fn normalize_planned_actions_with_original_and_context(
     let actions = crate::capability_resolver::resolve_agent_actions_for_state(state, actions);
     let actions = normalize_action_arg_aliases(state, actions);
     let actions = annotate_readonly_cli_surface_run_cmds(state, actions);
+    let actions = ensure_clawcli_resume_surface_help_for_required_machine_field(
+        state,
+        route_result,
+        user_text,
+        original_user_text,
+        plan_context,
+        actions,
+    );
     let terminal_mixed_last_output_content = terminal_mixed_last_output_respond_content(&actions);
     let actions = replace_scalar_path_respond_only_with_auto_locator_observation(
         route_result,
@@ -1537,6 +1545,145 @@ fn shell_word_tokens(command_lower: &str) -> Vec<&str> {
         .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
         .filter(|token| !token.is_empty())
         .collect()
+}
+
+fn ensure_clawcli_resume_surface_help_for_required_machine_field(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    plan_context: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if !run_cmd_available_for_plan(state)
+        || !clawcli_resume_required_machine_surface_requested(
+            route_result,
+            user_text,
+            original_user_text,
+            plan_context,
+        )
+    {
+        return actions;
+    }
+    if actions
+        .iter()
+        .any(|action| run_cmd_action_has_clawcli_resume_help(state, action))
+    {
+        return ensure_terminal_last_output_delivery(actions);
+    }
+    info!("plan_inject_clawcli_resume_help_for_required_machine_field");
+    clawcli_resume_surface_help_actions()
+}
+
+fn clawcli_resume_required_machine_surface_requested(
+    route_result: Option<&RouteResult>,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    plan_context: Option<&str>,
+) -> bool {
+    if route_result.is_some_and(route_marks_clawcli_resume_surface) {
+        return true;
+    }
+    [Some(user_text), original_user_text, plan_context]
+        .into_iter()
+        .flatten()
+        .any(clawcli_resume_required_machine_tokens_present)
+}
+
+fn route_marks_clawcli_resume_surface(route: &RouteResult) -> bool {
+    let markers = crate::RouteReasonMarkers::new(&route.route_reason);
+    markers
+        .machine_value("surface")
+        .is_some_and(|value| value.eq_ignore_ascii_case("clawcli"))
+        && markers
+            .machine_value("subcommand")
+            .is_some_and(|value| value.eq_ignore_ascii_case("resume"))
+}
+
+fn clawcli_resume_required_machine_tokens_present(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let tokens = shell_word_tokens(&lower);
+    tokens.iter().any(|token| clawcli_token(token))
+        && tokens.iter().any(|token| *token == "resume")
+        && tokens.iter().any(|token| *token == "resume_task_id")
+}
+
+fn run_cmd_action_has_clawcli_resume_help(state: &AppState, action: &AgentAction) -> bool {
+    let Some(command) = run_cmd_action_command(state, action) else {
+        return false;
+    };
+    command_is_clawcli_resume_help(command)
+}
+
+fn run_cmd_action_command<'a>(state: &AppState, action: &'a AgentAction) -> Option<&'a str> {
+    if !action_is_run_cmd(state, action) {
+        return None;
+    }
+    let args = match action {
+        AgentAction::CallSkill { args, .. } | AgentAction::CallTool { args, .. } => args,
+        AgentAction::CallCapability { .. }
+        | AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::Think { .. } => return None,
+    };
+    args.get("command")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+}
+
+fn command_is_clawcli_resume_help(command: &str) -> bool {
+    let lower = command.to_ascii_lowercase();
+    let tokens = shell_word_tokens(&lower);
+    tokens.iter().any(|token| clawcli_token(token))
+        && tokens.iter().any(|token| *token == "resume")
+        && (tokens.iter().any(|token| *token == "--help")
+            || tokens.iter().any(|token| *token == "-h"))
+}
+
+fn clawcli_token(token: &str) -> bool {
+    token == "clawcli" || token == "clawcli.sh"
+}
+
+fn ensure_terminal_last_output_delivery(mut actions: Vec<AgentAction>) -> Vec<AgentAction> {
+    if !actions
+        .iter()
+        .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. }))
+    {
+        actions.push(AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        });
+    }
+    if !actions
+        .iter()
+        .any(|action| matches!(action, AgentAction::Respond { .. }))
+    {
+        actions.push(AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        });
+    }
+    actions
+}
+
+fn clawcli_resume_surface_help_actions() -> Vec<AgentAction> {
+    vec![
+        AgentAction::CallTool {
+            tool: "run_cmd".to_string(),
+            args: serde_json::json!({
+                "action": "inspect_cli_help",
+                "command": "scripts/clawcli.sh resume --help",
+                "timeout_seconds": 10,
+                "idle_timeout_seconds": 5,
+                "max_output_bytes": 24000
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ]
 }
 
 fn ensure_run_cmd_async_start_for_runtime_async_job_contract(

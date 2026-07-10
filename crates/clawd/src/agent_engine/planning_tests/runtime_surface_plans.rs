@@ -353,6 +353,61 @@ fn clawcli_resume_surface_ignores_user_text_tokens_without_machine_tokens() {
 }
 
 #[test]
+fn clawcli_resume_required_machine_field_replaces_broad_probe_with_help_call() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    let loop_state = LoopState::new(1);
+
+    let normalized = normalize_runtime_surface_actions(
+        &state,
+        &route,
+        &loop_state,
+        "clawcli resume resume_task_id",
+        vec![
+            AgentAction::CallTool {
+                tool: "run_cmd".to_string(),
+                args: json!({
+                    "command": "which clawcli 2>/dev/null; ls -la /home/guagua/rustclaw 2>/dev/null | head -50; find /home/guagua/rustclaw -maxdepth 3 -name 'clawcli*' -o -name 'CLAWCLI*' 2>/dev/null | head -20",
+                    "timeout_seconds": 15,
+                    "max_output_bytes": 8192
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "run_cmd".to_string(),
+                args: json!({
+                    "command": "ls /home/guagua/rustclaw/crates 2>/dev/null; ls /home/guagua/rustclaw/src 2>/dev/null; ls /home/guagua/rustclaw/bin 2>/dev/null; find /home/guagua/rustclaw -maxdepth 4 -type d -name 'cli' 2>/dev/null | head -10",
+                    "timeout_seconds": 15,
+                    "max_output_bytes": 8192
+                }),
+            },
+        ],
+    );
+
+    assert_eq!(normalized.len(), 3, "{normalized:?}");
+    let cmd_args = find_tool_call(&normalized, "run_cmd");
+    assert_eq!(
+        cmd_args.get("action").and_then(Value::as_str),
+        Some("inspect_cli_help")
+    );
+    let command = cmd_args
+        .get("command")
+        .and_then(Value::as_str)
+        .expect("command");
+    assert_eq!(command, "scripts/clawcli.sh resume --help");
+    assert!(!command.contains("/src"), "{command}");
+    assert!(matches!(
+        normalized.get(1),
+        Some(AgentAction::SynthesizeAnswer { .. })
+    ));
+    assert!(matches!(
+        normalized.get(2),
+        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+    ));
+}
+
+#[test]
 fn subagent_review_boundary_surface_uses_readonly_machine_envelope() {
     let state = test_state_with_enabled_skills(&["fs_basic"]);
     let plan_dir = state.skill_rt.workspace_root.join("plan");
