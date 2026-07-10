@@ -1,5 +1,6 @@
-use super::{extract_bind_key_candidate, is_unbound_allowed_command};
+use super::{extract_bind_key_candidate, is_unbound_allowed_command, TextCatalog};
 use claw_core::channel_commands::ChannelCommandCatalog;
+use std::path::Path;
 
 fn default_catalog() -> ChannelCommandCatalog {
     ChannelCommandCatalog::default()
@@ -50,4 +51,34 @@ fn unbound_media_like_empty_text_requires_binding_prompt() {
     let catalog = default_catalog();
     assert!(!is_unbound_allowed_command(&catalog, "telegram", ""));
     assert_eq!(extract_bind_key_candidate("", false), None);
+}
+
+#[test]
+fn binding_i18n_keys_are_locale_specific_with_key_fallback() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let zh = TextCatalog::load(
+        root.join("configs/i18n/telegramd.zh-CN.toml")
+            .to_string_lossy()
+            .as_ref(),
+    )
+    .expect("load zh telegram i18n");
+    let en = TextCatalog::load(
+        root.join("configs/i18n/telegramd.en-US.toml")
+            .to_string_lossy()
+            .as_ref(),
+    )
+    .expect("load en telegram i18n");
+
+    assert!(zh.t("telegram.msg.bind_success").contains("绑定成功"));
+    assert!(!zh
+        .t("telegram.msg.bind_key_required_for_chat")
+        .contains("Please send"));
+    assert!(en.t("telegram.msg.bind_success").contains("Key bound"));
+    assert!(!en
+        .t("telegram.msg.bind_key_required_for_chat")
+        .contains("请先"));
+    assert_eq!(
+        TextCatalog::fallback().t("telegram.msg.bind_success"),
+        "telegram.msg.bind_success"
+    );
 }
