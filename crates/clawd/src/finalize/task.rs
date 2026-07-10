@@ -1109,6 +1109,63 @@ fn answer_verifier_recovery_already_terminal(journal: &crate::task_journal::Task
             .is_some_and(crate::task_journal::is_answer_verifier_recovered_terminal_stop_signal)
 }
 
+fn turn_analysis_requires_machine_summary(
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    let Some(state_patch) = turn_analysis.and_then(|analysis| analysis.state_patch.as_ref()) else {
+        return false;
+    };
+    state_patch.get("required_machine_fields").is_some()
+        || state_patch
+            .get("output_format")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|format| format == "machine_summary")
+}
+
+fn route_allows_verified_terminal_answer_promotion(
+    route_result: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    if route_result.wants_file_delivery
+        || route_result.output_contract.delivery_required
+        || matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+        || turn_analysis_requires_machine_summary(journal.turn_analysis.as_ref())
+    {
+        return false;
+    }
+    crate::evidence_policy::final_answer_shape_for_route(route_result)
+        .is_some_and(|shape| shape.allows_model_language())
+        || matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
+        )
+}
+
+pub(super) fn promote_verified_terminal_answer_after_verifier_pass(
+    route_result: &crate::RouteResult,
+    journal: &mut crate::task_journal::TaskJournal,
+    answer_text: &mut String,
+    answer_messages: &mut Vec<String>,
+) -> bool {
+    if !route_allows_verified_terminal_answer_promotion(route_result, journal) {
+        return false;
+    }
+    let Some(recovered_answer) = verified_terminal_answer_after_verifier_pass(journal) else {
+        return false;
+    };
+    if recovered_answer.trim() == answer_text.trim() {
+        return false;
+    }
+    *answer_text = recovered_answer;
+    answer_messages.clear();
+    answer_messages.push(answer_text.clone());
+    journal.record_final_answer(answer_text.as_str());
+    true
+}
+
 pub(crate) async fn finalize_ask_result(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -1492,6 +1549,21 @@ pub(crate) async fn finalize_ask_result(
                 semantic_clarify = false;
                 info!(
                     "finalize_raw_command_machine_fields_recovered task_id={} answer={}",
+                    task.task_id,
+                    crate::truncate_for_log(&answer_text)
+                );
+            }
+            if !semantic_clarify
+                && promote_verified_terminal_answer_after_verifier_pass(
+                    route_result,
+                    &mut journal,
+                    &mut answer_text,
+                    &mut answer_messages,
+                )
+            {
+                failure_reply = false;
+                info!(
+                    "finalize_verified_terminal_answer_promoted task_id={} answer={}",
                     task.task_id,
                     crate::truncate_for_log(&answer_text)
                 );
