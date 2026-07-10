@@ -95,11 +95,40 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         journal.record_final_answer(answer_text.as_str());
         return false;
     }
-    if final_answer_preserves_terminal_scalar_contract(route_result, journal, answer_text) {
+    let request_surfaces = task_machine_kv_request_surfaces(prompt, route_result, journal);
+    let requested_summary = requested_machine_kv_summary_from_task_final_answer_with_surfaces(
+        &request_surfaces,
+        route_result,
+        journal,
+        answer_text,
+        answer_messages,
+    );
+    let requested_summary_missing_from_answer =
+        requested_summary.as_deref().is_some_and(|summary| {
+            answer_text.trim() != summary
+                && !final_answer_preserves_structured_machine_projection(
+                    answer_text,
+                    answer_messages,
+                    summary,
+                )
+                && !final_answer_has_values_for_requested_marker_summary(
+                    answer_text,
+                    answer_messages,
+                    summary,
+                )
+        });
+    let requested_summary_overrides_scalar_delivery = requested_summary_missing_from_answer
+        && requested_summary.as_deref().is_some_and(|summary| {
+            request_surfaces_explicitly_request_kv_summary(&request_surfaces, summary)
+        });
+    if !requested_summary_overrides_scalar_delivery
+        && final_answer_preserves_terminal_scalar_contract(route_result, journal, answer_text)
+    {
         journal.record_final_answer(answer_text.as_str());
         return false;
     }
     if !force_structured
+        && !requested_summary_overrides_scalar_delivery
         && final_answer_preserves_grounded_summary_delivery(
             route_result,
             journal,
@@ -110,13 +139,7 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         journal.record_final_answer(answer_text.as_str());
         return false;
     }
-    let Some(summary) = requested_machine_kv_summary_from_task_final_answer(
-        prompt,
-        route_result,
-        journal,
-        answer_text,
-        answer_messages,
-    ) else {
+    let Some(summary) = requested_summary else {
         journal.record_final_answer(answer_text.as_str());
         return false;
     };
@@ -900,8 +923,26 @@ fn valid_machine_marker_key(key: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
 }
 
+#[cfg(test)]
 fn requested_machine_kv_summary_from_task_final_answer(
     prompt: &str,
+    route_result: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    answer_text: &str,
+    answer_messages: &[String],
+) -> Option<String> {
+    let request_surfaces = task_machine_kv_request_surfaces(prompt, route_result, journal);
+    requested_machine_kv_summary_from_task_final_answer_with_surfaces(
+        &request_surfaces,
+        route_result,
+        journal,
+        answer_text,
+        answer_messages,
+    )
+}
+
+fn requested_machine_kv_summary_from_task_final_answer_with_surfaces(
+    request_surfaces: &[String],
     route_result: &crate::RouteResult,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &str,
@@ -921,7 +962,6 @@ fn requested_machine_kv_summary_from_task_final_answer(
     }
     observed_texts.sort();
     observed_texts.dedup();
-    let request_surfaces = task_machine_kv_request_surfaces(prompt, route_result, journal);
     if route_requests_service_status_machine_kv_summary(route_result) {
         let service_control_texts =
             observed_machine_text_fragments_from_journal_skill(journal, "service_control");
@@ -940,6 +980,23 @@ fn requested_machine_kv_summary_from_task_final_answer(
         request_surfaces.iter().map(String::as_str),
         &observed_texts,
     )
+}
+
+fn request_surfaces_explicitly_request_kv_summary(
+    request_surfaces: &[String],
+    requested_summary: &str,
+) -> bool {
+    let summary_units = machine_kv_units(requested_summary);
+    !summary_units.is_empty()
+        && request_surfaces.iter().any(|surface| {
+            let surface_units = machine_kv_units(surface);
+            !surface_units.is_empty()
+                && summary_units.iter().any(|unit| {
+                    surface_units
+                        .iter()
+                        .any(|surface_unit| surface_unit == unit)
+                })
+        })
 }
 
 fn route_requests_service_status_machine_kv_summary(route: &crate::RouteResult) -> bool {
