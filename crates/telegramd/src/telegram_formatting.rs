@@ -1,16 +1,5 @@
 use super::*;
 
-pub(super) fn is_image_saved_preface(text: &str) -> bool {
-    let t = text.trim().to_ascii_lowercase();
-    t.starts_with("image saved")
-        || t.starts_with("images saved")
-        || t.starts_with("generated successfully and saved:")
-        || t.starts_with("edited successfully and saved:")
-        || text.trim().starts_with("图片已保存：")
-        || text.trim().starts_with("图片生成成功并已保存：")
-        || text.trim().starts_with("图片编辑成功并已保存：")
-}
-
 pub(super) async fn send_text_or_image(
     bot: &Bot,
     state: &BotState,
@@ -96,9 +85,7 @@ pub(super) async fn send_text_or_image(
                 sent.id.0,
                 text_preview_for_log(&text_without_tokens, 120)
             );
-            if state.ephemeral_image_saved_seconds > 0
-                && (ephemeral_image_saved_hint || is_image_saved_preface(&text_without_tokens))
-            {
+            if state.ephemeral_image_saved_seconds > 0 && ephemeral_image_saved_hint {
                 let bot_clone = bot.clone();
                 let msg_id = sent.id;
                 let secs = state.ephemeral_image_saved_seconds;
@@ -138,9 +125,10 @@ pub(super) async fn send_text_or_image(
                 "phase=deliver_media_missing_file chat_id={} missing_paths={:?}",
                 chat_id.0, missing_explicit_file_tokens
             );
-            let missing_text = format!(
-                "文件发送失败：找不到以下路径，请先写入文件后再用 FILE: 发送。\n{}",
-                missing_explicit_file_tokens.join("\n")
+            let missing_paths = missing_explicit_file_tokens.join("\n");
+            let missing_text = state.i18n.t_with(
+                "telegram.msg.delivery_file_missing",
+                &[("paths", &missing_paths)],
             );
             let _ = send_telegram_text(bot, chat_id, &missing_text).await;
         }
