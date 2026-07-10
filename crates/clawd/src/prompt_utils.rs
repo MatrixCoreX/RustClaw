@@ -973,19 +973,57 @@ pub(crate) fn parse_agent_action_json_with_repair(
     Ok(normalize_agent_action_shape(parsed, state))
 }
 
+pub(crate) fn is_agent_action_type_token(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "think"
+            | "call_tool"
+            | "call_skill"
+            | "call_capability"
+            | "synthesize_answer"
+            | "respond"
+            | "run_cmd"
+            | "reply"
+            | "answer"
+            | "final"
+    )
+}
+
 fn is_agent_action_candidate(candidate: &str) -> bool {
     if let Ok(v) = serde_json::from_str::<Value>(candidate) {
-        return v.get("type").is_some()
-            || v.get("action").is_some()
-            || v.get("tool").is_some()
-            || v.get("skill").is_some()
-            || v.get("capability").is_some();
+        let Some(obj) = v.as_object() else {
+            return false;
+        };
+        let has_args_shape = ["args", "arguments", "parameters", "input", "action_input"]
+            .into_iter()
+            .any(|key| obj.get(key).is_some());
+        return obj.get("steps").and_then(Value::as_array).is_some()
+            || ["type", "action_type"].into_iter().any(|key| {
+                obj.get(key)
+                    .and_then(Value::as_str)
+                    .is_some_and(is_agent_action_type_token)
+            })
+            || obj
+                .get("action")
+                .and_then(Value::as_str)
+                .is_some_and(|value| is_agent_action_type_token(value) || has_args_shape)
+            || (["tool", "skill", "capability"]
+                .into_iter()
+                .any(|key| obj.get(key).is_some())
+                && has_args_shape);
     }
     candidate.contains("\"type\"")
+        || candidate.contains("\"action_type\"")
         || candidate.contains("\"action\"")
-        || candidate.contains("\"tool\"")
-        || candidate.contains("\"skill\"")
-        || candidate.contains("\"capability\"")
+        || candidate.contains("\"steps\"")
+        || ((candidate.contains("\"tool\"")
+            || candidate.contains("\"skill\"")
+            || candidate.contains("\"capability\""))
+            && (candidate.contains("\"args\"")
+                || candidate.contains("\"arguments\"")
+                || candidate.contains("\"parameters\"")
+                || candidate.contains("\"input\"")
+                || candidate.contains("\"action_input\"")))
 }
 
 fn repair_invalid_json_escapes(raw: &str) -> String {

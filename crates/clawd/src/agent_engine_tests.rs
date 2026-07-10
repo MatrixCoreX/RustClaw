@@ -877,6 +877,32 @@ fn test_classify_planner_artifact_detects_tool_call_and_action_json() {
                 | crate::finalize::PlannerArtifactKind::PlannerObject
         )
     ));
+    assert!(matches!(
+        crate::finalize::classify_planner_artifact(
+            r#"{"tool":"read_file","args":{"path":"/tmp/a.txt"}}"#
+        ),
+        Some(
+            crate::finalize::PlannerArtifactKind::ActionObject
+                | crate::finalize::PlannerArtifactKind::PlannerObject
+        )
+    ));
+}
+
+#[test]
+fn test_classify_planner_artifact_allows_recovery_observation_json() {
+    let payload = r#"{"retryable":true,"error_code":"tool_transient_failure","recovery_action":"retry_with_backoff","forbidden_repeat_signature":"sha256:example","attempt":1,"max_attempts":3,"remaining_attempts":2,"tool":"run_cmd","observed_at":"2026-07-11T00:00:00Z"}"#;
+    assert_eq!(crate::finalize::classify_planner_artifact(payload), None);
+    assert!(!crate::finalize::looks_like_planner_artifact(payload));
+
+    let typed_observation =
+        r#"{"type":"observation","tool":"run_cmd","status_code":"retryable_failure"}"#;
+    assert_eq!(
+        crate::finalize::classify_planner_artifact(typed_observation),
+        None
+    );
+    assert!(!crate::finalize::looks_like_planner_artifact(
+        typed_observation
+    ));
 }
 
 #[test]
