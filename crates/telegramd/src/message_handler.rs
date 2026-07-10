@@ -54,21 +54,15 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
                 {
                     set_expect_key_reply(&state, platform_chat_id, false);
                     store_bound_identity(&state, platform_chat_id, &identity);
-                    bot.send_message(
-                        msg.chat.id,
-                        "Key 绑定成功，请重新发送刚才的消息。\nKey bound successfully. Please send your previous message again.",
-                    )
-                    .await
-                    .context("send key bind success failed")?;
+                    bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.bind_success"))
+                        .await
+                        .context("send key bind success failed")?;
                     return Ok(());
                 } else {
                     set_expect_key_reply(&state, platform_chat_id, true);
-                    bot.send_message(
-                        msg.chat.id,
-                        "Key 无效，请重新输入。\nInvalid key. Please try again.",
-                    )
-                    .await
-                    .context("send invalid key failed")?;
+                    bot.send_message(msg.chat.id, state.i18n.t("telegram.msg.bind_invalid"))
+                        .await
+                        .context("send invalid key failed")?;
                     return Ok(());
                 }
             }
