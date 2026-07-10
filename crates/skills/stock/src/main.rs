@@ -125,7 +125,14 @@ struct InternalLlmTextData {
 #[derive(Debug, Clone)]
 struct ResolvedSymbol {
     code: String,
-    correction_note: Option<String>,
+    correction: Option<SymbolCorrection>,
+}
+
+#[derive(Debug, Clone)]
+struct SymbolCorrection {
+    input: String,
+    matched_name: String,
+    used_llm: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -209,11 +216,16 @@ fn execute(args: Value, runtime: &RuntimeConfig) -> Result<(String, Value), Stri
                 .and_then(|v| v.as_str())
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
-                .ok_or_else(|| "args.symbol 或 args.code 或 args.name 必填，例如 600519、000001、sh600519、sz000001、中国移动".to_string())?;
+                .ok_or_else(|| {
+                    "code=missing_symbol required_any=symbol|code|name example=600519".to_string()
+                })?;
             let resolved = resolve_symbol(symbol, runtime)?;
             quote_a_share(&resolved)
         }
-        _ => Err("不支持的 action，仅支持 quote|query".to_string()),
+        _ => Err(format!(
+            "code=unsupported_action action={} allowed=quote|query",
+            action
+        )),
     }
 }
 
@@ -284,24 +296,24 @@ fn resolve_symbol(input: &str, runtime: &RuntimeConfig) -> Result<ResolvedSymbol
     if looks_like_stock_code(input) {
         return Ok(ResolvedSymbol {
             code: normalize_code(input),
-            correction_note: None,
+            correction: None,
         });
     }
 
     if !runtime.stock.enable_name_lookup {
-        return Err("当前仅支持按股票代码查询，请在 configs/stock.toml 中开启名称映射".to_string());
+        return Err("code=name_lookup_disabled config=configs/stock.toml".to_string());
     }
 
     let alias_map = build_alias_map(&runtime.stock.aliases);
     let normalized_input = normalize_stock_name(input);
     if normalized_input.is_empty() {
-        return Err("未识别到可用的股票代码或名称".to_string());
+        return Err("code=symbol_unrecognized reason=empty_normalized_name".to_string());
     }
 
     if let Some((alias, code)) = alias_map.get(&normalized_input) {
         return Ok(ResolvedSymbol {
             code: code.clone(),
-            correction_note: correction_note(input, alias, false),
+            correction: symbol_correction(input, alias, false),
         });
     }
 
@@ -313,7 +325,7 @@ fn resolve_symbol(input: &str, runtime: &RuntimeConfig) -> Result<ResolvedSymbol
     if let Some(best) = choose_direct_candidate(input, &normalized_input, &candidates) {
         return Ok(ResolvedSymbol {
             code: best.code.clone(),
-            correction_note: correction_note(input, &best.alias, false),
+            correction: symbol_correction(input, &best.alias, false),
         });
     }
 
@@ -321,7 +333,7 @@ fn resolve_symbol(input: &str, runtime: &RuntimeConfig) -> Result<ResolvedSymbol
         if let Some(best) = choose_candidate_via_llm(input, &candidates, runtime)? {
             return Ok(ResolvedSymbol {
                 code: best.code.clone(),
-                correction_note: correction_note(input, &best.alias, true),
+                correction: symbol_correction(input, &best.alias, true),
             });
         }
     }
@@ -333,14 +345,14 @@ fn resolve_symbol(input: &str, runtime: &RuntimeConfig) -> Result<ResolvedSymbol
         .collect::<Vec<_>>();
     if suggestions.is_empty() {
         Err(format!(
-            "未找到“{}”对应的 A 股代码，请检查名称，或在 configs/stock.toml 的 [stock.aliases] 中补充映射",
+            "code=symbol_alias_not_found input={} config=configs/stock.toml",
             input.trim()
         ))
     } else {
         Err(format!(
-            "未找到“{}”对应的 A 股代码。你可以确认是否想查：{}；也可在 configs/stock.toml 的 [stock.aliases] 中补充映射",
+            "code=symbol_alias_not_found input={} suggestions={} config=configs/stock.toml",
             input.trim(),
-            suggestions.join("、")
+            suggestions.join("|")
         ))
     }
 }
@@ -351,22 +363,26 @@ fn quote_a_share(resolved: &ResolvedSymbol) -> Result<(String, Value), String> {
     let client = Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
-        .map_err(|e| format!("创建请求客户端失败: {e}"))?;
+        .map_err(|e| format!("code=http_client_build_failed detail={e}"))?;
 
     let resp = client
         .get(&url)
         .header("Referer", SINA_REFERER)
         .header("User-Agent", "RustClaw-Stock-Skill/1.0")
         .send()
-        .map_err(|e| format!("请求行情失败: {e}"))?;
+        .map_err(|e| format!("code=quote_request_failed detail={e}"))?;
 
     if !resp.status().is_success() {
-        return Err(format!("行情接口返回 HTTP {}", resp.status()));
+        return Err(format!("code=quote_http_status status={}", resp.status()));
     }
 
-    let body = decode_sina_body(&resp.bytes().map_err(|e| format!("读取响应失败: {e}"))?);
+    let body = decode_sina_body(
+        &resp
+            .bytes()
+            .map_err(|e| format!("code=quote_response_read_failed detail={e}"))?,
+    );
 
-    parse_sina_hq(&body, &code, resolved.correction_note.as_deref())
+    parse_sina_hq(&body, &code, resolved.correction.as_ref())
 }
 
 fn decode_sina_body(bytes: &[u8]) -> String {
@@ -379,29 +395,37 @@ fn decode_sina_body(bytes: &[u8]) -> String {
 }
 
 /// 解析新浪 var hq_str_sh600519="name,open,prev,current,...";
-fn parse_sina_hq(body: &str, code: &str, note: Option<&str>) -> Result<(String, Value), String> {
+fn parse_sina_hq(
+    body: &str,
+    code: &str,
+    correction: Option<&SymbolCorrection>,
+) -> Result<(String, Value), String> {
     let prefix = "var hq_str_";
     let start = body
         .find(prefix)
-        .ok_or_else(|| "响应中未找到行情数据".to_string())?;
+        .ok_or_else(|| "code=sina_hq_missing".to_string())?;
     let rest = &body[start + prefix.len()..];
-    rest.find('=').ok_or_else(|| "响应格式异常".to_string())?;
-    let content_start = rest.find('"').ok_or_else(|| "响应格式异常".to_string())? + 1;
+    rest.find('=')
+        .ok_or_else(|| "code=sina_hq_format_invalid missing=equals".to_string())?;
+    let content_start = rest
+        .find('"')
+        .ok_or_else(|| "code=sina_hq_format_invalid missing=opening_quote".to_string())?
+        + 1;
     let content_end = content_start
         + rest[content_start..]
             .find('"')
-            .ok_or_else(|| "响应格式异常".to_string())?;
+            .ok_or_else(|| "code=sina_hq_format_invalid missing=closing_quote".to_string())?;
     let content = rest[content_start..content_end].trim();
     if content.is_empty() {
-        return Err(format!(
-            "未获取到 {code} 的行情，请检查代码是否正确或是否 A 股",
-            code = code
-        ));
+        return Err(format!("code=quote_empty symbol={code}", code = code));
     }
 
     let parts: Vec<&str> = content.split(',').map(str::trim).collect();
     if parts.len() < 4 {
-        return Err("行情字段不足".to_string());
+        return Err(format!(
+            "code=quote_fields_insufficient count={}",
+            parts.len()
+        ));
     }
     let name = parts[0];
     let open = parts.get(1).unwrap_or(&"");
@@ -414,24 +438,51 @@ fn parse_sina_hq(body: &str, code: &str, note: Option<&str>) -> Result<(String, 
     let time = parts.get(31).unwrap_or(&"");
 
     let mut lines = vec![
-        format!("【{}】{}", code.to_uppercase(), name),
-        format!("现价 {}  今开 {}  昨收 {}", current, open, prev_close),
-        format!("最高 {}  最低 {}", high, low),
-        format!("成交量 {}  日期 {} {}", volume, date, time),
+        "message_key=stock.msg.quote".to_string(),
+        "reason_code=stock_quote_observed".to_string(),
+        format!("code={}", code.to_uppercase()),
+        format!("symbol={code}"),
+        format!("name={name}"),
+        format!("current={current}"),
+        format!("open={open}"),
+        format!("prev_close={prev_close}"),
+        format!("high={high}"),
+        format!("low={low}"),
+        format!("volume={volume}"),
+        format!("date={date}"),
+        format!("time={time}"),
     ];
-    if let Some(note) = note {
-        lines.insert(0, note.to_string());
+    if let Some(correction) = correction {
+        lines.push(format!("correction.input={}", correction.input));
+        lines.push(format!(
+            "correction.matched_name={}",
+            correction.matched_name
+        ));
+        lines.push(format!("correction.used_llm={}", correction.used_llm));
     }
     let mut change_pct_value = None;
     if let (Ok(c), Ok(p)) = (current.parse::<f64>(), prev_close.parse::<f64>()) {
         if p > 0.0 {
             let pct = (c - p) / p * 100.0;
             change_pct_value = Some(pct);
-            let sign = if pct >= 0.0 { "+" } else { "" };
-            lines.insert(2, format!("涨跌幅 {} {:.2}%", sign, pct));
+            lines.push(format!("change_pct={pct:.4}"));
         }
     }
+    let correction_value = correction.map(|correction| {
+        json!({
+            "input": correction.input.clone(),
+            "matched_name": correction.matched_name.clone(),
+            "used_llm": correction.used_llm,
+            "reason_code": if correction.used_llm {
+                "llm_alias_correction"
+            } else {
+                "alias_match"
+            }
+        })
+    });
     let extra = json!({
+        "message_key": "stock.msg.quote",
+        "reason_code": "stock_quote_observed",
         "action": "quote",
         "source_skill": "stock",
         "status": "ok",
@@ -447,7 +498,21 @@ fn parse_sina_hq(body: &str, code: &str, note: Option<&str>) -> Result<(String, 
         "date": date,
         "time": time,
         "change_pct": change_pct_value,
-        "correction_note": note,
+        "correction": correction_value,
+        "quote": {
+            "code": code.to_uppercase(),
+            "symbol": code,
+            "name": name,
+            "open": open,
+            "prev_close": prev_close,
+            "current": current,
+            "high": high,
+            "low": low,
+            "volume": volume,
+            "date": date,
+            "time": time,
+            "change_pct": change_pct_value
+        }
     });
     Ok((lines.join("\n"), extra))
 }
@@ -873,16 +938,16 @@ fn parse_alias_from_json_value(value: &Value) -> Option<String> {
     Some(alias.to_string())
 }
 
-fn correction_note(input: &str, matched_name: &str, used_llm: bool) -> Option<String> {
+fn symbol_correction(input: &str, matched_name: &str, used_llm: bool) -> Option<SymbolCorrection> {
     let raw = input.trim();
     if raw.is_empty() {
         return None;
     }
-    if used_llm {
-        Some(format!("已按“{}”纠正查询。", matched_name))
-    } else {
-        Some(format!("已按“{}”匹配查询。", matched_name))
-    }
+    Some(SymbolCorrection {
+        input: raw.to_string(),
+        matched_name: matched_name.trim().to_string(),
+        used_llm,
+    })
 }
 
 fn shared_chars(a: &str, b: &str) -> usize {
