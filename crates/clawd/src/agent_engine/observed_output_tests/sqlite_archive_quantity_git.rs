@@ -603,7 +603,11 @@ fn archive_raw_passthrough_replacement_uses_structured_summary() {
     let state = AppState::test_default_with_fixture_provider();
     let replacement = archive_list_raw_passthrough_replacement(body, &state, &loop_state, "zh-CN")
         .expect("raw archive output should be replaced");
-    assert!(replacement.contains("压缩包包含 2 个条目"));
+    assert!(replacement.contains("message_key=clawd.msg.archive_list.observed"));
+    assert!(replacement.contains("reason_code=archive_list_observed"));
+    assert!(replacement.contains("entry_count=2"));
+    assert!(replacement.contains("shown_count=2"));
+    assert!(replacement.contains("omitted_count=0"));
     assert!(replacement.contains("notes.txt"));
     assert!(replacement.contains("nested/config.ini"));
     assert!(!replacement.contains("Archive:"));
