@@ -132,13 +132,9 @@ pub(super) fn rewrite_single_target_file_read_to_auto_locator(
     if current_path == target_path {
         return actions;
     }
-    if action_path_is_concrete_locator(&current_path) {
-        return actions;
-    }
 
-    // 当前轮 route/ordinal/auto-locator 已解析成一个具体文件时，这个路径比 LLM
-    // 在厚上下文里“顺手抄到的旧文件路径”更权威。这里只在单目标读文件链路上收口，
-    // 避免把多文件 read 计划错误折叠成同一个 target。
+    // A route/auto-locator target is authoritative for this single-read action.
+    // Multi-read plans are rejected by single_file_read_action() above.
     let mut rewritten = actions;
     let Some(action) = rewritten.get_mut(idx) else {
         return rewritten;

@@ -45,65 +45,12 @@ fn size_comparison_answer_style(
 
 fn compare_paths_size_ratio_answer_with_style(
     body: &str,
-    prefer_english: bool,
+    _prefer_english: bool,
     style: SizeComparisonAnswerStyle,
 ) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
-    if value.get("action").and_then(|value| value.as_str()) != Some("compare_paths") {
-        return None;
-    }
-    let left = value.get("left")?;
-    let right = value.get("right")?;
-    let left_size = left.get("size_bytes").and_then(|value| value.as_u64())?;
-    let right_size = right.get("size_bytes").and_then(|value| value.as_u64())?;
-    let left_label = path_display_label(left, "left");
-    let right_label = path_display_label(right, "right");
-    if style == SizeComparisonAnswerStyle::DeltaOnly {
-        if left_size == right_size {
-            return Some(if prefer_english {
-                format!("{left_label} and {right_label}: 0 bytes")
-            } else {
-                format!("{left_label} 和 {right_label}：0 字节")
-            });
-        }
-        let (larger_label, delta) = if left_size > right_size {
-            (left_label, left_size - right_size)
-        } else {
-            (right_label, right_size - left_size)
-        };
-        return Some(if prefer_english {
-            format!("{larger_label}: {delta} bytes")
-        } else {
-            format!("{larger_label}：{delta} 字节")
-        });
-    }
-    if left_size == right_size {
-        return Some(if prefer_english {
-            format!("They are the same size: {left_label} and {right_label} are both {left_size} bytes.")
-        } else {
-            format!("{left_label} 和 {right_label} 一样大，都是 {left_size} 字节。")
-        });
-    }
-    let (larger_label, larger_size, smaller_label, smaller_size) = if left_size > right_size {
-        (left_label, left_size, right_label, right_size)
-    } else {
-        (right_label, right_size, left_label, left_size)
-    };
-    let ratio = (smaller_size > 0).then(|| larger_size as f64 / smaller_size as f64);
-    Some(match (prefer_english, ratio) {
-        (true, Some(ratio)) => format!(
-            "`{larger_label}` is larger: {larger_size} bytes, about {ratio:.2}x `{smaller_label}` ({smaller_size} bytes)."
-        ),
-        (true, None) => format!(
-            "`{larger_label}` is larger: {larger_size} bytes; `{smaller_label}` is 0 bytes."
-        ),
-        (false, Some(ratio)) => format!(
-            "`{larger_label}` 更大：{larger_size} 字节，大约是 `{smaller_label}`（{smaller_size} 字节）的 {ratio:.2} 倍。"
-        ),
-        (false, None) => format!(
-            "`{larger_label}` 更大：{larger_size} 字节；`{smaller_label}` 为 0 字节。"
-        )
-    })
+    let facts = compare_paths_size_facts(&value)?;
+    quantity_size_comparison_machine_answer(facts, style)
 }
 
 #[cfg(test)]
@@ -434,11 +381,21 @@ fn strict_quantity_comparison_json_answer(body: &str) -> Option<String> {
 
 fn path_batch_size_comparison_answer_with_style(
     body: &str,
-    prefer_english: bool,
+    _prefer_english: bool,
     style: SizeComparisonAnswerStyle,
 ) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
-    let mut facts = path_batch_size_facts(&value)?;
+    let facts = path_batch_size_facts(&value)?;
+    quantity_size_comparison_machine_answer(facts, style)
+}
+
+fn quantity_size_comparison_machine_answer(
+    mut facts: Vec<PathSizeFact>,
+    style: SizeComparisonAnswerStyle,
+) -> Option<String> {
+    if facts.len() < 2 {
+        return None;
+    }
     facts.sort_by(|a, b| {
         b.size_bytes
             .cmp(&a.size_bytes)
@@ -446,61 +403,43 @@ fn path_batch_size_comparison_answer_with_style(
     });
     let largest = facts.first()?;
     let runner_up = facts.get(1)?;
-    if largest.size_bytes == runner_up.size_bytes {
-        let tied = facts
-            .iter()
-            .filter(|fact| fact.size_bytes == largest.size_bytes)
-            .map(|fact| fact.label.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Some(if prefer_english {
-            if style == SizeComparisonAnswerStyle::DeltaOnly {
-                format!("{tied}: 0 bytes")
-            } else {
-                format!(
-                    "They are the same size: {tied} are all {} bytes.",
-                    largest.size_bytes
-                )
+    let delta = largest.size_bytes.saturating_sub(runner_up.size_bytes);
+    let same_size = delta == 0;
+    let ratio = (!same_size && runner_up.size_bytes > 0)
+        .then(|| largest.size_bytes as f64 / runner_up.size_bytes as f64);
+    let mut lines = vec![
+        "message_key=clawd.msg.quantity.size_comparison.observed".to_string(),
+        "reason_code=quantity_size_comparison_observed".to_string(),
+        format!(
+            "style={}",
+            match style {
+                SizeComparisonAnswerStyle::DeltaOnly => "delta_only",
+                SizeComparisonAnswerStyle::ExplainRatio => "explain_ratio",
             }
-        } else {
-            if style == SizeComparisonAnswerStyle::DeltaOnly {
-                format!("{tied}：0 字节")
-            } else {
-                format!("它们一样大：{tied} 都是 {} 字节。", largest.size_bytes)
-            }
-        });
+        ),
+        format!("same_size={same_size}"),
+        format!("delta_bytes={delta}"),
+    ];
+    push_quantity_machine_line(&mut lines, "largest.label", &largest.label);
+    lines.push(format!("largest.size_bytes={}", largest.size_bytes));
+    push_quantity_machine_line(&mut lines, "runner_up.label", &runner_up.label);
+    lines.push(format!("runner_up.size_bytes={}", runner_up.size_bytes));
+    if let Some(ratio) = ratio {
+        lines.push(format!("ratio={ratio:.6}"));
     }
-    if style == SizeComparisonAnswerStyle::DeltaOnly {
-        let delta = largest.size_bytes.saturating_sub(runner_up.size_bytes);
-        return Some(if prefer_english {
-            format!("{}: {} bytes", largest.label, delta)
-        } else {
-            format!("{}：{} 字节", largest.label, delta)
-        });
+    for (idx, fact) in facts.iter().enumerate() {
+        let prefix = format!("item.{}", idx + 1);
+        push_quantity_machine_line(&mut lines, &format!("{prefix}.label"), &fact.label);
+        lines.push(format!("{prefix}.size_bytes={}", fact.size_bytes));
     }
-    let ratio = if runner_up.size_bytes == 0 {
-        None
-    } else {
-        Some(largest.size_bytes as f64 / runner_up.size_bytes as f64)
-    };
-    Some(match (prefer_english, ratio) {
-        (true, Some(ratio)) => format!(
-            "`{}` is larger: {} bytes, about {:.2}x `{}` ({} bytes).",
-            largest.label, largest.size_bytes, ratio, runner_up.label, runner_up.size_bytes
-        ),
-        (true, None) => format!(
-            "`{}` is larger: {} bytes; `{}` is 0 bytes.",
-            largest.label, largest.size_bytes, runner_up.label
-        ),
-        (false, Some(ratio)) => format!(
-            "`{}` 更大：{} 字节，大约是 `{}`（{} 字节）的 {:.2} 倍。",
-            largest.label, largest.size_bytes, runner_up.label, runner_up.size_bytes, ratio
-        ),
-        (false, None) => format!(
-            "`{}` 更大：{} 字节；`{}` 为 0 字节。",
-            largest.label, largest.size_bytes, runner_up.label
-        ),
-    })
+    Some(lines.join("\n"))
+}
+
+fn push_quantity_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
+    let value = crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),
+    );
+    lines.push(format!("{key}={value}"));
 }
 
 fn compact_binary_size(bytes: u64) -> String {
