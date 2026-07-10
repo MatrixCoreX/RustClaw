@@ -489,6 +489,12 @@ pub(super) fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
+    if route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && route.output_contract.requires_content_evidence
+        && current_workspace_inventory_fields_present(observed_fields, observed_canonical)
+    {
+        observed_canonical.insert("field_value".to_string());
+    }
     let docker_route_shape =
         route_has_docker_answer_shape(route) || route_has_unshaped_docker_compat_marker(route);
     let observed_textual_runtime_output = observed_canonical.contains("command_output")
@@ -541,6 +547,21 @@ pub(super) fn observed_field_with_prefix(observed_fields: &BTreeSet<String>, pre
     observed_fields
         .iter()
         .any(|field| field.starts_with(prefix))
+}
+
+fn current_workspace_inventory_fields_present(
+    observed_fields: &BTreeSet<String>,
+    observed_canonical: &BTreeSet<String>,
+) -> bool {
+    (observed_canonical.contains("directory_structure")
+        || observed_canonical.contains("candidates")
+        || observed_canonical.contains("count"))
+        && (observed_field_present(observed_fields, "names_by_kind")
+            || observed_field_with_prefix(observed_fields, "names_by_kind.")
+            || observed_field_with_prefix(observed_fields, "extra.names_by_kind.")
+            || observed_field_present(observed_fields, "counts")
+            || observed_field_with_prefix(observed_fields, "counts.")
+            || observed_field_with_prefix(observed_fields, "extra.counts."))
 }
 
 fn route_final_answer_shape(

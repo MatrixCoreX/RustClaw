@@ -911,6 +911,48 @@ fn generic_path_content_list_dir_candidates_satisfy_directory_evidence() {
 }
 
 #[test]
+fn current_workspace_inventory_names_by_kind_satisfies_field_value_evidence() {
+    let mut journal = TaskJournal::for_task(
+        "task-current-workspace-inventory-field-value",
+        "ask",
+        "group current workspace top-level entries",
+    );
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    journal.record_route_result(&route);
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "inventory_dir",
+                "counts": {"dirs": 2, "files": 3, "total": 5},
+                "names_by_kind": {
+                    "dirs": ["configs", "docs"],
+                    "files": ["AGENTS.md", "Cargo.toml", "README.md"],
+                    "other": []
+                },
+                "path": "."
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let coverage = evidence_coverage_for_route(&route, &journal);
+    assert!(coverage.is_complete(), "coverage: {coverage:?}");
+    assert!(coverage.observed_canonical.contains("candidates"));
+    assert!(coverage.observed_canonical.contains("directory_structure"));
+    assert!(coverage.observed_canonical.contains("field_value"));
+}
+
+#[test]
 fn generic_path_content_find_entries_result_path_satisfies_path_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-generic-path-find-entry",

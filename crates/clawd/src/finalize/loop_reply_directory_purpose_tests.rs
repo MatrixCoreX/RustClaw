@@ -428,8 +428,51 @@ fn current_workspace_dirs_overview_reads_wrapped_inventory_dir_output() {
 
     assert!(answer.contains("configs"));
     assert!(answer.contains("docs"));
-    assert!(answer.contains("workspace.top_level_dirs.count=2"));
+    assert!(answer.contains("field_value.workspace.top_level.dirs.count=2"));
+    assert!(answer.contains("field_value.workspace.top_level.files=README.md"));
+    assert!(answer.contains("workspace.top_level.dirs.count=2"));
+    assert!(answer.contains("workspace.top_level.files.count=1"));
+    assert!(answer.contains("- README.md"));
     assert!(answer.contains("workspace.overview.kind=repository_sections_by_purpose"));
+    assert_eq!(summary.completion_ok, Some(true));
+}
+
+#[test]
+fn current_workspace_inventory_overview_supports_free_listing_contract() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","counts":{"dirs":2,"files":3,"total":5},"names_by_kind":{"dirs":["configs","docs"],"files":["AGENTS.md","Cargo.toml","README.md"],"other":[]},"path":"."}"#,
+    ));
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let (answer, summary) = direct_current_workspace_top_level_dirs_overview_answer(
+        &state,
+        "group the top-level entries",
+        &loop_state,
+        Some(&ctx),
+    )
+    .expect("free current workspace inventory answer");
+
+    assert!(answer.contains("workspace.top_level.dirs.count=2"));
+    assert!(answer.contains("field_value.workspace.top_level.dirs=configs,docs"));
+    assert!(answer.contains("- configs"));
+    assert!(answer.contains("- docs"));
+    assert!(answer.contains("workspace.top_level.files.count=3"));
+    assert!(answer.contains("field_value.workspace.top_level.files=AGENTS.md,Cargo.toml,README.md"));
+    assert!(answer.contains("- AGENTS.md"));
+    assert!(answer.contains("- Cargo.toml"));
+    assert!(answer.contains("- README.md"));
     assert_eq!(summary.completion_ok, Some(true));
 }
 
@@ -474,11 +517,13 @@ fn current_workspace_dirs_overview_replaces_incomplete_generic_synthesis() {
     );
 
     let answer = loop_state.delivery_messages.join("\n");
+    assert!(answer.contains("workspace.top_level.dirs.count=4"));
+    assert!(answer.contains("workspace.top_level.files.count=1"));
     assert!(answer.contains("UI"));
     assert!(answer.contains("configs"));
     assert!(answer.contains("crates"));
     assert!(answer.contains("docs"));
-    assert!(answer.contains("workspace.top_level_dirs.count=4"));
+    assert!(answer.contains("README.md"));
     assert!(answer.contains("workspace.overview.section_hints="));
     assert!(!answer.contains("标准的 Rust 项目"));
     assert!(summary.is_some());
