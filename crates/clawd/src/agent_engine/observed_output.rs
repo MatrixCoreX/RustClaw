@@ -52,9 +52,9 @@ use output_system_inventory::{
     dir_compare_direct_answer_candidate, inventory_dir_direct_answer_candidate,
     inventory_dir_names, inventory_dir_observed_candidate, inventory_dir_scalar_path_candidate,
     system_basic_existence_with_path_value, system_basic_info_scalar_path_candidate,
-    system_basic_info_value, system_basic_structured_doc_observed_body,
-    system_basic_structured_doc_value, system_basic_value_looks_like_info,
-    tree_summary_direct_answer_candidate,
+    system_basic_info_value, system_basic_inventory_dir_value,
+    system_basic_structured_doc_observed_body, system_basic_structured_doc_value,
+    system_basic_value_looks_like_info, tree_summary_direct_answer_candidate,
 };
 
 #[path = "observed_output_fs_search.rs"]

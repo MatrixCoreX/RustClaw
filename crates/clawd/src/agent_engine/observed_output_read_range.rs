@@ -117,12 +117,12 @@ pub(super) fn find_content_presence_match_line(
 }
 
 pub(super) fn doc_parse_content_presence_direct_answer_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     route: &crate::RouteResult,
     body: &str,
     request_text: Option<&str>,
     path_hint: Option<&str>,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if !super::output_route_policy::route_contract_marker_is(
         route,
@@ -137,7 +137,6 @@ pub(super) fn doc_parse_content_presence_direct_answer_candidate(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| route.output_contract.locator_hint.trim());
-    let _ = state;
     if let Some((line, matched_text)) =
         find_content_presence_match_line(&text, &query, case_insensitive)
     {
@@ -146,23 +145,50 @@ pub(super) fn doc_parse_content_presence_direct_answer_candidate(
         } else {
             format!("{path}:{line}")
         };
-        return Some(if prefer_english {
-            format!("Contains `{query}`; evidence: {location} `{matched_text}`.")
-        } else {
-            format!("包含 `{query}`，依据：{location} `{matched_text}`。")
-        });
+        return Some(content_presence_machine_answer(
+            &query,
+            path,
+            case_insensitive,
+            Some((line, &location, &matched_text)),
+        ));
     }
-    Some(if path.is_empty() {
-        if prefer_english {
-            format!("Does not contain `{query}`.")
-        } else {
-            format!("不包含 `{query}`。")
-        }
-    } else if prefer_english {
-        format!("Does not contain `{query}`. Path: {path}")
-    } else {
-        format!("不包含 `{query}`。路径：{path}")
-    })
+    Some(content_presence_machine_answer(
+        &query,
+        path,
+        case_insensitive,
+        None,
+    ))
+}
+
+fn content_presence_machine_answer(
+    query: &str,
+    path: &str,
+    case_insensitive: bool,
+    match_info: Option<(u64, &str, &str)>,
+) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.content_presence.observed".to_string(),
+        "reason_code=content_presence_observed".to_string(),
+        format!("contains={}", match_info.is_some()),
+        format!("case_insensitive={case_insensitive}"),
+    ];
+    push_content_presence_machine_line(&mut lines, "query", query);
+    if !path.trim().is_empty() {
+        push_content_presence_machine_line(&mut lines, "path", path);
+    }
+    if let Some((line, location, matched_text)) = match_info {
+        lines.push(format!("line={line}"));
+        push_content_presence_machine_line(&mut lines, "location", location);
+        push_content_presence_machine_line(&mut lines, "matched_text", matched_text);
+    }
+    lines.join("\n")
+}
+
+fn push_content_presence_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
+    let value = crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),
+    );
+    lines.push(format!("{key}={value}"));
 }
 
 pub(crate) fn normalize_read_range_excerpt(excerpt: &str) -> Option<String> {

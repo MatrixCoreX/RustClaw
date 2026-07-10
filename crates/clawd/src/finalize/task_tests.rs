@@ -849,13 +849,9 @@ fn answer_verifier_failure_err_json_triggers_user_message_path() {
 }
 
 #[test]
-fn answer_verifier_failure_uses_i18n_without_fallback_llm() {
+fn answer_verifier_failure_returns_machine_payload_without_fallback_llm() {
     let mut state = crate::AppState::test_default_with_fixture_provider();
     state.policy.schedule.locale = "en-US".to_string();
-    state.policy.schedule.i18n_dict.insert(
-        "clawd.msg.answer_verifier_required_evidence_block".to_string(),
-        "verifier blocked: {missing_evidence_fields}".to_string(),
-    );
     let task = crate::ClaimedTask {
         task_id: "task-verifier-i18n".to_string(),
         user_id: 1,
@@ -875,7 +871,22 @@ fn answer_verifier_failure_uses_i18n_without_fallback_llm() {
         r#"{"message_key":"answer_verifier_required_evidence_block","missing_evidence_fields":["output_format"]}"#,
     );
 
-    assert_eq!(visible, "verifier blocked: output_format");
+    let payload: serde_json::Value =
+        serde_json::from_str(&visible).expect("verifier failure should stay machine-readable");
+    assert_eq!(
+        payload
+            .get("message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("answer_verifier_required_evidence_block")
+    );
+    assert_eq!(
+        payload
+            .get("missing_evidence_fields")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(serde_json::Value::as_str),
+        Some("output_format")
+    );
 }
 
 #[test]

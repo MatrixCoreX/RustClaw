@@ -1050,19 +1050,45 @@ pub(super) fn step_output_source_action_refs(
         return refs;
     }
     if let Ok(value) = serde_json::from_str::<Value>(output) {
-        push_source_action_ref(&mut refs, &skill, Some(&value));
+        let value_has_action = value.get("action").and_then(Value::as_str).is_some();
+        let extra_action_preferred =
+            matches!(skill.as_str(), "fs_basic" | "config_basic" | "system_basic");
+        let extra_value = value
+            .get("extra")
+            .filter(|extra| extra.is_object())
+            .cloned();
+        if value_has_action {
+            push_source_action_ref(&mut refs, &skill, Some(&value));
+        } else if !extra_action_preferred {
+            push_source_action_ref(&mut refs, &skill, Some(&value));
+        }
+        if let Some(extra) = extra_value.as_ref() {
+            push_source_action_ref(&mut refs, &skill, Some(extra));
+        }
         if skill == "system_basic"
             && value.get("action").and_then(Value::as_str).is_none()
             && value_looks_like_system_basic_info(&value)
         {
             push_unique_source_action_ref(&mut refs, "system_basic.info".to_string());
         }
+        if !value_has_action && extra_action_preferred {
+            push_source_action_ref(&mut refs, &skill, Some(&value));
+        }
         push_canonical_source_action_ref(&mut refs, &skill, value.clone());
+        if let Some(extra) = extra_value.as_ref() {
+            push_canonical_source_action_ref(&mut refs, &skill, extra.clone());
+        }
         if skill == "fs_basic" {
             push_canonical_source_action_ref(&mut refs, "fs_search", value.clone());
+            if let Some(extra) = extra_value.as_ref() {
+                push_canonical_source_action_ref(&mut refs, "fs_search", extra.clone());
+            }
         }
         if matches!(skill.as_str(), "fs_basic" | "config_basic" | "system_basic") {
             push_canonical_source_action_ref(&mut refs, "system_basic", value);
+            if let Some(extra) = extra_value.as_ref() {
+                push_canonical_source_action_ref(&mut refs, "system_basic", extra.clone());
+            }
         }
     }
     push_source_action_ref(&mut refs, &skill, None);
@@ -1090,10 +1116,11 @@ pub(super) fn push_source_action_ref(refs: &mut Vec<String>, skill: &str, value:
         .and_then(|value| value.get("action"))
         .and_then(Value::as_str)
     {
-        Some(action) => format!(
-            "{skill}.{}",
-            normalize_machine_token(action).replace('-', "_")
-        ),
+        Some(action) => {
+            let action = normalize_machine_token(action).replace('-', "_");
+            let action = canonical_evidence_source_action_token_for_skill(skill, action);
+            format!("{skill}.{action}")
+        }
         None => skill.to_string(),
     };
     if let Some(source) = normalize_source_action_ref(&source) {
@@ -1126,6 +1153,16 @@ pub(super) fn canonical_source_action_ref(skill: &str, args: &Value) -> Option<S
         Some(action) => format!("{skill}.{action}"),
         None => skill,
     })
+}
+
+pub(super) fn canonical_evidence_source_action_token_for_skill(
+    skill: &str,
+    action: String,
+) -> String {
+    match (skill, action.as_str()) {
+        ("fs_basic", "inventory_dir") => "list_dir".to_string(),
+        _ => action,
+    }
 }
 
 pub(super) fn normalize_source_action_ref(raw: &str) -> Option<String> {

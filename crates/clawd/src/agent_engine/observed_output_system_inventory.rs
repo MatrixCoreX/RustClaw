@@ -61,6 +61,17 @@ pub(super) fn system_basic_existence_with_path_value(
     .then_some(value)
 }
 
+pub(super) fn system_basic_inventory_dir_value(
+    skill: &str,
+    body: &str,
+) -> Option<serde_json::Value> {
+    if skill != "system_basic" {
+        return None;
+    }
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    (value.get("action").and_then(|v| v.as_str()) == Some("inventory_dir")).then_some(value)
+}
+
 pub(super) fn system_basic_structured_doc_value(
     skill: &str,
     body: &str,
