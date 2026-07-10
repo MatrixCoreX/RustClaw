@@ -88,7 +88,7 @@ fn direct_answer_formats_structured_keys_presence_without_llm() {
     };
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("不包含 negative_markers 字段")
+        Some("message_key=clawd.msg.structured_keys_missing_key\nreason_code=structured_key_presence\nfinal_answer_shape=structured_presence\ncontains=false\nkey=negative_markers")
     );
 }
 
@@ -136,7 +136,7 @@ fn direct_answer_formats_structured_array_identity_presence_without_llm() {
     };
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("包含 fs_basic")
+        Some("message_key=clawd.msg.structured_array_identity_contains_value\nreason_code=structured_array_identity_presence\nfinal_answer_shape=structured_presence\ncontains=true\nvalue=fs_basic")
     );
 }
 

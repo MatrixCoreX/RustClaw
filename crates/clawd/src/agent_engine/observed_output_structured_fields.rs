@@ -192,10 +192,10 @@ pub(super) fn extract_field_direct_answer_candidate(
 }
 
 pub(super) fn enum_field_direct_answer_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     field_path: &str,
     value: &serde_json::Value,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     let enum_value = match value {
         serde_json::Value::Object(map) => map.get("enum")?,
@@ -217,14 +217,9 @@ pub(super) fn enum_field_direct_answer_candidate(
     if rendered_values.is_empty() {
         return None;
     }
-    let values_text = rendered_values.join(", ");
-    Some(observed_t_with_vars(
-        state,
-        "clawd.msg.enum_field_values",
-        "{field_path} 的枚举值是：{values}",
-        "`{field_path}` enum values: {values}",
-        prefer_english,
-        &[("field_path", field_path), ("values", &values_text)],
+    Some(enum_field_values_machine_answer(
+        field_path,
+        &rendered_values,
     ))
 }
 
@@ -249,21 +244,16 @@ pub(super) fn structured_keys_direct_answer_candidate(
         .unwrap_or(false);
     if !exists {
         return Some(if field_path.is_empty() {
-            observed_t(
-                state,
+            structured_keys_missing_machine_answer(
                 "clawd.msg.structured_keys_root_missing",
-                "没有可列出的顶层键。",
-                "No top-level keys are available to list.",
-                prefer_english,
+                "structured_keys_root_missing",
+                None,
             )
         } else {
-            observed_t_with_vars(
-                state,
+            structured_keys_missing_machine_answer(
                 "clawd.msg.structured_keys_field_missing",
-                "{field_path} 字段不存在。",
-                "Field `{field_path}` does not exist.",
-                prefer_english,
-                &[("field_path", field_path)],
+                "structured_keys_field_missing",
+                Some(field_path),
             )
         });
     }
@@ -370,77 +360,128 @@ pub(super) fn structured_keys_direct_answer_candidate(
         _ => {}
     }
     Some(if field_path.is_empty() {
-        observed_t(
-            state,
+        structured_keys_non_container_machine_answer(
             "clawd.msg.structured_keys_non_container_root",
-            "这个位置不是对象或数组，没有可列出的键。",
-            "This value is not an object or array, so there are no keys to list.",
-            prefer_english,
+            None,
+            container_type,
         )
     } else {
-        observed_t_with_vars(
-            state,
+        structured_keys_non_container_machine_answer(
             "clawd.msg.structured_keys_non_container_field",
-            "{field_path} 不是对象或数组，没有可列出的键。",
-            "`{field_path}` is not an object or array, so there are no keys to list.",
-            prefer_english,
-            &[("field_path", field_path)],
+            Some(field_path),
+            container_type,
         )
     })
 }
 
 pub(super) fn structured_keys_presence_answer(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     key: &str,
     contains: bool,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> String {
-    if contains {
-        observed_t_with_vars(
-            state,
-            "clawd.msg.structured_keys_contains_key",
-            "包含 {key} 字段",
-            "Contains field `{key}`",
-            prefer_english,
-            &[("key", key)],
-        )
-    } else {
-        observed_t_with_vars(
-            state,
-            "clawd.msg.structured_keys_missing_key",
-            "不包含 {key} 字段",
-            "Does not contain field `{key}`",
-            prefer_english,
-            &[("key", key)],
-        )
-    }
+    structured_presence_machine_answer(
+        if contains {
+            "clawd.msg.structured_keys_contains_key"
+        } else {
+            "clawd.msg.structured_keys_missing_key"
+        },
+        "structured_key_presence",
+        "key",
+        key,
+        contains,
+    )
 }
 
 pub(super) fn structured_array_identity_presence_answer(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     value: &str,
     contains: bool,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> String {
-    if contains {
-        observed_t_with_vars(
-            state,
-            "clawd.msg.structured_array_identity_contains_value",
-            "包含 {value}",
-            "Contains `{value}`",
-            prefer_english,
-            &[("value", value)],
-        )
-    } else {
-        observed_t_with_vars(
-            state,
-            "clawd.msg.structured_array_identity_missing_value",
-            "不包含 {value}",
-            "Does not contain `{value}`",
-            prefer_english,
-            &[("value", value)],
-        )
+    structured_presence_machine_answer(
+        if contains {
+            "clawd.msg.structured_array_identity_contains_value"
+        } else {
+            "clawd.msg.structured_array_identity_missing_value"
+        },
+        "structured_array_identity_presence",
+        "value",
+        value,
+        contains,
+    )
+}
+
+fn enum_field_values_machine_answer(field_path: &str, values: &[String]) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.enum_field_values".to_string(),
+        "reason_code=enum_field_values_observed".to_string(),
+        "final_answer_shape=enum_field_values".to_string(),
+    ];
+    push_observed_machine_line(&mut lines, "field_path", field_path);
+    lines.push(format!("value_count={}", values.len()));
+    for (idx, value) in values.iter().enumerate() {
+        push_observed_machine_line(&mut lines, &format!("value.{}", idx + 1), value);
     }
+    lines.join("\n")
+}
+
+fn structured_keys_missing_machine_answer(
+    message_key: &str,
+    reason_code: &str,
+    field_path: Option<&str>,
+) -> String {
+    let mut lines = vec![
+        format!("message_key={message_key}"),
+        format!("reason_code={reason_code}"),
+        "final_answer_shape=structured_keys_unavailable".to_string(),
+        "exists=false".to_string(),
+    ];
+    if let Some(field_path) = field_path {
+        push_observed_machine_line(&mut lines, "field_path", field_path);
+    } else {
+        lines.push("field_path=".to_string());
+        lines.push("root=true".to_string());
+    }
+    lines.join("\n")
+}
+
+fn structured_keys_non_container_machine_answer(
+    message_key: &str,
+    field_path: Option<&str>,
+    container_type: &str,
+) -> String {
+    let mut lines = vec![
+        format!("message_key={message_key}"),
+        "reason_code=structured_keys_non_container".to_string(),
+        "final_answer_shape=structured_keys_unavailable".to_string(),
+        "exists=true".to_string(),
+    ];
+    if let Some(field_path) = field_path {
+        push_observed_machine_line(&mut lines, "field_path", field_path);
+    } else {
+        lines.push("field_path=".to_string());
+        lines.push("root=true".to_string());
+    }
+    push_observed_machine_line(&mut lines, "container_type", container_type);
+    lines.join("\n")
+}
+
+fn structured_presence_machine_answer(
+    message_key: &str,
+    reason_code: &str,
+    item_key: &str,
+    item_value: &str,
+    contains: bool,
+) -> String {
+    let mut lines = vec![
+        format!("message_key={message_key}"),
+        format!("reason_code={reason_code}"),
+        "final_answer_shape=structured_presence".to_string(),
+        format!("contains={contains}"),
+    ];
+    push_observed_machine_line(&mut lines, item_key, item_value);
+    lines.join("\n")
 }
 
 pub(super) fn structured_keys_presence_target_from_request(
