@@ -111,7 +111,7 @@ fn structured_listing_recovery_accepts_directory_lookup_legacy_delivery_flags_fr
         .expect("journal excerpt");
     assert!(excerpt.contains(r#""names_by_kind""#));
     assert!(excerpt.contains("USAGE.md"));
-    assert!(!excerpt.contains("modified_ts"));
+    assert!(excerpt.contains("modified_ts"));
 
     let mut route = route_result(OutputResponseShape::Free);
     route.wants_file_delivery = true;

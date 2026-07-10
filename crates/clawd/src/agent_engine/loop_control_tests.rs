@@ -573,6 +573,12 @@ fn log_analyze_verifier_exhaustion_recovers_with_structural_summary() {
     ));
 
     assert!(!reply.should_fail_task);
+    assert!(reply
+        .text
+        .contains("message_key=clawd.msg.log_analyze.summary"));
+    assert!(reply
+        .text
+        .contains("reason_code=log_analyze_observed_summary"));
     assert!(reply.text.contains("model_io.log.2026-05-13"));
     assert!(reply.text.contains("clawd.run.log"));
     assert!(reply.text.contains("error 115"));
@@ -625,7 +631,10 @@ fn structured_search_verifier_exhaustion_recovers_with_full_candidate_list() {
     ));
 
     assert!(!reply.should_fail_task);
-    assert!(reply.text.contains("Found 3 candidates"));
+    assert!(reply
+        .text
+        .contains("message_key=clawd.msg.structured_search.candidates"));
+    assert!(reply.text.contains("count=3"));
     assert!(reply.text.contains("README.md"));
     assert!(reply.text.contains("UI/README.md"));
     assert!(reply.text.contains("docs/README.md"));

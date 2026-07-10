@@ -1,10 +1,9 @@
 use super::*;
 
 pub(super) fn deterministic_log_analyze_summary_text(
-    user_text: &str,
+    _user_text: &str,
     findings: &[LogAnalyzeFinding],
 ) -> String {
-    let prefer_english = crate::language_policy::request_language_hint(user_text) == "en";
     let mut sorted = findings.to_vec();
     sorted.sort_by(|left, right| {
         right
@@ -13,33 +12,33 @@ pub(super) fn deterministic_log_analyze_summary_text(
             .then_with(|| left.path.cmp(&right.path))
     });
     let top = &sorted[0];
-    let overview = sorted
-        .iter()
-        .take(4)
-        .map(|finding| {
-            format!(
-                "{}: {}",
-                display_log_path(&finding.path),
-                format_keyword_counts(&finding.keyword_counts)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(if prefer_english { "; " } else { "；" });
-    if prefer_english {
-        format!(
-            "Most notable: `{}` has the heaviest recent signal ({}). Also checked other log files in the directory; summary: {}.",
-            display_log_path(&top.path),
-            format_keyword_counts(&top.keyword_counts),
-            overview
-        )
-    } else {
-        format!(
-            "最值得注意的是 `{}`：{}，这是当前已分析日志里异常信号最重的文件；同时也看了 logs 目录里的其他日志，简要汇总：{}。",
-            display_log_path(&top.path),
-            format_keyword_counts(&top.keyword_counts),
-            overview
-        )
+    let mut lines = vec![
+        "message_key=clawd.msg.log_analyze.summary".to_string(),
+        "reason_code=log_analyze_observed_summary".to_string(),
+        format!("analyzed_log_count={}", sorted.len()),
+        format!("top_total_hits={}", top.total_hits),
+    ];
+    push_machine_line(&mut lines, "top_path", display_log_path(&top.path));
+    push_machine_line(
+        &mut lines,
+        "top_keyword_counts",
+        &format_keyword_counts(&top.keyword_counts),
+    );
+    for (idx, finding) in sorted.iter().take(4).enumerate() {
+        let prefix = format!("finding.{}", idx + 1);
+        push_machine_line(
+            &mut lines,
+            &format!("{prefix}.path"),
+            display_log_path(&finding.path),
+        );
+        lines.push(format!("{prefix}.total_hits={}", finding.total_hits));
+        push_machine_line(
+            &mut lines,
+            &format!("{prefix}.keyword_counts"),
+            &format_keyword_counts(&finding.keyword_counts),
+        );
     }
+    lines.join("\n")
 }
 
 pub(super) fn deterministic_structured_search_summary_text(
