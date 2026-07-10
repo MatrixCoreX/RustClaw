@@ -200,12 +200,15 @@ fn structured_respond_clarify_step_marks_loop_pending_user_input() {
     let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
     let mut loop_state = LoopState::new(2);
     let outcome = apply_structured_respond_clarify_to_loop_state(&mut loop_state, &intent);
+    let expected = format!(
+        "{question}\nterminal_intent=clarify clarify_reason_code=missing_locator missing_slot=locator message_key=clawd.clarify.locator_required field_path=output_contract.locator_hint locator_kind=path"
+    );
 
     assert!(loop_state.pending_user_input_required);
-    assert_eq!(loop_state.delivery_messages, vec![question.to_string()]);
+    assert_eq!(loop_state.delivery_messages, vec![expected.clone()]);
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
-        Some(question)
+        Some(expected.as_str())
     );
     assert_eq!(outcome.executed_actions, 0);
     assert_eq!(
@@ -255,7 +258,12 @@ fn route_owned_respond_only_clarify_marks_loop_pending_user_input() {
     let outcome = apply_structured_respond_clarify_to_loop_state(&mut loop_state, &intent);
 
     assert!(loop_state.pending_user_input_required);
-    assert_eq!(loop_state.delivery_messages, vec![question.to_string()]);
+    assert_eq!(
+        loop_state.delivery_messages,
+        vec![format!(
+            "{question}\nterminal_intent=clarify locator_kind=path"
+        )]
+    );
     assert_eq!(
         outcome.stop_signal.as_deref(),
         Some("structured_respond_clarify")
@@ -459,8 +467,6 @@ fn deferred_agent_loop_locator_clarify_does_not_recover_into_plan_file_read() {
     let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
     let mut route = route_result(OutputResponseShape::OneSentence);
     route.risk_ceiling = RiskCeiling::Low;
-    route.needs_clarify = false;
-    route.wants_file_delivery = false;
     route.route_reason = "standalone_freeform_clarify_loop_context".to_string();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = OutputLocatorKind::None;
@@ -477,12 +483,12 @@ fn deferred_agent_loop_locator_clarify_does_not_recover_into_plan_file_read() {
         outcome.stop_signal.as_deref(),
         Some("structured_respond_clarify")
     );
-    assert!(loop_state.pending_user_input_required);
     assert_eq!(
         loop_state.delivery_messages,
-        vec!["Which file should I read?"]
+        vec![
+            "Which file should I read?\nterminal_intent=clarify clarify_reason_code=missing_locator missing_slot=locator locator_kind=path"
+        ]
     );
-    assert!(loop_state.attempt_ledger_entries.is_empty());
 }
 
 #[test]

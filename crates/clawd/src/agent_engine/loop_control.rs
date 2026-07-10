@@ -518,8 +518,9 @@ fn apply_structured_respond_clarify_to_loop_state(
         .map(str::trim)
         .filter(|text| !text.is_empty())
     {
-        loop_state.delivery_messages.push(content.to_string());
-        loop_state.last_user_visible_respond = Some(content.to_string());
+        let content = append_structured_clarify_machine_line(content, intent);
+        loop_state.delivery_messages.push(content.clone());
+        loop_state.last_user_visible_respond = Some(content);
     }
     record_structured_clarify_machine_fields(loop_state, intent);
     loop_state.history_compact.push(format!(
