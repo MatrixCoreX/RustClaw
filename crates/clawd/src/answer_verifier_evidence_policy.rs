@@ -1201,6 +1201,9 @@ pub(super) fn collect_observed_strict_list_items_from_value(
     value: &serde_json::Value,
     items: &mut BTreeSet<String>,
 ) {
+    if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
+        collect_observed_strict_list_items_from_value(extra, items);
+    }
     push_string_array_values(
         value,
         items,

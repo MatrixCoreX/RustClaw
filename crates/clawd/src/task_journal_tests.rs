@@ -1533,6 +1533,41 @@ fn structured_listing_journal_compact_prefers_names_by_kind_over_redundant_names
 }
 
 #[test]
+fn structured_listing_journal_compact_preserves_entry_size_metadata() {
+    let output = json!({
+        "action": "inventory_dir",
+        "path": "/tmp/logs",
+        "resolved_path": "/tmp/logs",
+        "names": ["clawd.log"],
+        "entries": [
+            {
+                "name": "clawd.log",
+                "kind": "file",
+                "size_bytes": 2035,
+                "modified_ts": 1780000000
+            }
+        ]
+    })
+    .to_string();
+
+    let compact = super::compact_structured_listing_output_for_journal(&output)
+        .expect("structured listing should compact");
+    let value: Value = serde_json::from_str(&compact).expect("compact json");
+    assert_eq!(
+        value
+            .pointer("/extra/entries/0/size_bytes")
+            .and_then(Value::as_u64),
+        Some(2035)
+    );
+    assert_eq!(
+        value
+            .pointer("/extra/entries/0/modified_ts")
+            .and_then(Value::as_u64),
+        Some(1780000000)
+    );
+}
+
+#[test]
 fn structured_listing_journal_compact_unwraps_text_json_when_extra_is_missing() {
     let text = json!({
         "action": "inventory_dir",

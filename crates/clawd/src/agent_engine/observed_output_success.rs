@@ -86,6 +86,7 @@ pub(super) fn extract_latest_generic_successful_output_with_state(
                 || super::structured_observed_body(&step.skill, body).is_some())
             || super::market_quote_output_has_scalar_price(state, &step.skill, body)
             || super::system_basic_info_value(&step.skill, body).is_some()
+            || super::system_basic_inventory_dir_value(&step.skill, body).is_some()
             || super::system_basic_structured_doc_value(&step.skill, body).is_some()
             || super::system_basic_existence_with_path_value(&step.skill, body).is_some()
     })?;

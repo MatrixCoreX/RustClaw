@@ -565,10 +565,10 @@ fn fs_search_grep_text_direct_answer_candidate(
 }
 
 pub(super) fn fs_search_content_presence_direct_answer_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     route: &crate::RouteResult,
     value: &serde_json::Value,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if !super::output_route_policy::route_contract_marker_is(
         route,
@@ -595,18 +595,12 @@ pub(super) fn fs_search_content_presence_direct_answer_candidate(
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or(route.output_contract.locator_hint.trim());
-        if path.is_empty() {
-            return Some(if prefer_english {
-                format!("Does not contain `{query}`.")
-            } else {
-                format!("不包含 `{query}`。")
-            });
-        }
-        return Some(if prefer_english {
-            format!("Does not contain `{query}`. Path: {path}")
-        } else {
-            format!("不包含 `{query}`。路径：{path}")
-        });
+        return Some(fs_search_content_presence_machine_answer(
+            &query,
+            path,
+            None,
+            &[],
+        ));
     }
     let mut paths = Vec::new();
     let mut first_match: Option<(String, u64, String)> = None;
@@ -621,25 +615,56 @@ pub(super) fn fs_search_content_presence_direct_answer_candidate(
     if paths.is_empty() {
         return None;
     }
-    let path_text = paths.into_iter().take(8).collect::<Vec<_>>().join("\n");
-    let _ = state;
+    let path_list = paths.into_iter().take(8).collect::<Vec<_>>();
     if let Some((path, line, text)) = first_match {
         let location = if line > 0 {
             format!("{path}:{line}")
         } else {
             path
         };
-        return Some(if prefer_english {
-            format!("Contains `{query}`; evidence: {location} `{text}`.")
-        } else {
-            format!("包含 `{query}`，依据：{location} `{text}`。")
-        });
+        return Some(fs_search_content_presence_machine_answer(
+            &query,
+            "",
+            Some((line, &location, &text)),
+            &path_list,
+        ));
     }
-    Some(if prefer_english {
-        format!("Contains `{query}`. Path:\n{path_text}")
-    } else {
-        format!("包含 `{query}`。路径：\n{path_text}")
-    })
+    Some(fs_search_content_presence_machine_answer(
+        &query, "", None, &path_list,
+    ))
+}
+
+fn fs_search_content_presence_machine_answer(
+    query: &str,
+    path: &str,
+    match_info: Option<(u64, &str, &str)>,
+    paths: &[String],
+) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.content_presence.observed".to_string(),
+        "reason_code=content_presence_observed".to_string(),
+        format!("contains={}", match_info.is_some() || !paths.is_empty()),
+    ];
+    push_content_presence_machine_line(&mut lines, "query", query);
+    if !path.trim().is_empty() {
+        push_content_presence_machine_line(&mut lines, "path", path);
+    }
+    if let Some((line, location, matched_text)) = match_info {
+        lines.push(format!("line={line}"));
+        push_content_presence_machine_line(&mut lines, "location", location);
+        push_content_presence_machine_line(&mut lines, "matched_text", matched_text);
+    }
+    for (idx, path) in paths.iter().enumerate() {
+        push_content_presence_machine_line(&mut lines, &format!("path.{}", idx + 1), path);
+    }
+    lines.join("\n")
+}
+
+fn push_content_presence_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
+    let value = crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),
+    );
+    lines.push(format!("{key}={value}"));
 }
 
 fn normalized_scope_text(value: &str) -> Option<String> {

@@ -234,9 +234,12 @@ fn compact_structured_listing_output_for_journal(output: &str) -> Option<String>
     copy_listing_field(source, &mut compact, "dirs_only");
     copy_listing_field(source, &mut compact, "files_only");
     copy_listing_field(source, &mut compact, "names_by_kind");
-    if !compact.contains_key("names_by_kind") {
+    let has_names_by_kind = compact.contains_key("names_by_kind");
+    if !has_names_by_kind {
         copy_listing_field(source, &mut compact, "names");
-        if let Some(entries) = compact_listing_entries(source.get("entries")) {
+    }
+    if let Some(entries) = compact_listing_entries(source.get("entries")) {
+        if !has_names_by_kind || entries.iter().any(compact_listing_entry_has_metadata) {
             compact.insert("entries".to_string(), Value::Array(entries));
         }
     }
@@ -283,7 +286,15 @@ fn compact_listing_entry(entry: &Value) -> Option<Value> {
     copy_listing_field(entry, &mut compact, "kind");
     copy_listing_field(entry, &mut compact, "path");
     copy_listing_field(entry, &mut compact, "hidden");
+    copy_listing_field(entry, &mut compact, "size_bytes");
+    copy_listing_field(entry, &mut compact, "modified_ts");
     Some(Value::Object(compact))
+}
+
+fn compact_listing_entry_has_metadata(entry: &Value) -> bool {
+    entry
+        .as_object()
+        .is_some_and(|entry| entry.contains_key("size_bytes") || entry.contains_key("modified_ts"))
 }
 
 #[derive(Debug, Clone, Default)]

@@ -387,6 +387,10 @@ fn content_presence_direct_answer_includes_matching_text_evidence() {
     assert!(answer.contains("release"));
     assert!(answer.contains("release_checklist.md:1"));
     assert!(answer.contains("# Release Checklist"));
+    assert!(answer.contains("message_key=clawd.msg.content_presence.observed"));
+    assert!(answer.contains("contains=true"));
+    assert!(!answer.contains("Contains"), "answer: {answer}");
+    assert!(!answer.contains("包含"), "answer: {answer}");
 }
 
 #[test]
@@ -415,6 +419,35 @@ fn content_presence_direct_answer_uses_name_results_when_content_empty() {
         answer,
         "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"
     );
+}
+
+#[test]
+fn content_presence_direct_answer_no_match_uses_machine_fields() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r##"{"action":"grep_text","query":"missing-token","case_insensitive":true,"count":0,"match_count":0,"matches":[],"root":"docs"}"##,
+    ));
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
+    route_result.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
+    route_result.output_contract.requires_content_evidence = true;
+    route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+    route_result.output_contract.locator_hint = "docs".to_string();
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
+
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("content presence no-match should produce a direct grounded answer");
+
+    assert!(answer.contains("message_key=clawd.msg.content_presence.observed"));
+    assert!(answer.contains("contains=false"));
+    assert!(answer.contains("query=missing-token"));
+    assert!(answer.contains("path=docs"));
+    assert!(!answer.contains("Does not contain"), "answer: {answer}");
+    assert!(!answer.contains("不包含"), "answer: {answer}");
 }
 
 #[test]
@@ -448,6 +481,10 @@ fn doc_parse_content_presence_uses_machine_selector_without_llm() {
     assert!(answer.contains("release"));
     assert!(answer.contains("release_checklist.md:1"));
     assert!(answer.contains("# Release Checklist"));
+    assert!(answer.contains("message_key=clawd.msg.content_presence.observed"));
+    assert!(answer.contains("contains=true"));
+    assert!(!answer.contains("Contains"), "answer: {answer}");
+    assert!(!answer.contains("包含"), "answer: {answer}");
     assert!(!answer.contains("不包含"));
 }
 
