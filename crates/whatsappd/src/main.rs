@@ -41,18 +41,19 @@ const WA_I18N_TASK_FAILED_FALLBACK_ERROR_KEY: &str =
 const WA_I18N_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str =
     "whatsapp_cloud.msg.request_timeout_retry_later";
 
-const WA_BIND_REQUIRED_FALLBACK: &str =
-    "请先发送你的 key 进行绑定，然后再继续聊天或使用功能。\nPlease send your key first to bind this account before chatting or using features.";
-const WA_BIND_SUCCESS_FALLBACK: &str =
-    "Key 绑定成功，请重新发送刚才的消息。\nKey bound successfully. Please send your previous message again.";
-const WA_BIND_INVALID_FALLBACK: &str = "Key 无效，请重新输入。\nInvalid key. Please try again.";
-const WA_BIND_HELP_FALLBACK: &str = "欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定，然后再继续聊天或使用功能。\nWelcome to RustClaw.\nPlease send /key <your_key> first to bind this account before chatting or using features.";
-const WA_RUN_USAGE_FALLBACK: &str = "Usage: /run <skill_name> <args>";
-const WA_PROCESS_FAILED_WITH_ERROR_FALLBACK: &str = "处理失败：{error}";
-const WA_TASK_DONE_FALLBACK_TEXT_FALLBACK: &str = "done";
-const WA_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str = "task failed";
+const WA_BIND_REQUIRED_FALLBACK: &str = "message_key=whatsapp_cloud.msg.bind_key_required_for_chat";
+const WA_BIND_SUCCESS_FALLBACK: &str = "message_key=whatsapp_cloud.msg.bind_success";
+const WA_BIND_INVALID_FALLBACK: &str = "message_key=whatsapp_cloud.msg.bind_invalid";
+const WA_BIND_HELP_FALLBACK: &str = "message_key=whatsapp_cloud.msg.bind_help";
+const WA_RUN_USAGE_FALLBACK: &str = "message_key=whatsapp_cloud.msg.run_usage";
+const WA_PROCESS_FAILED_WITH_ERROR_FALLBACK: &str =
+    "message_key=whatsapp_cloud.msg.process_failed_with_error error={error}";
+const WA_TASK_DONE_FALLBACK_TEXT_FALLBACK: &str =
+    "message_key=whatsapp_cloud.msg.task_done_fallback_text";
+const WA_TASK_FAILED_FALLBACK_ERROR_FALLBACK: &str =
+    "message_key=whatsapp_cloud.msg.task_failed_fallback_error";
 const WA_REQUEST_TIMEOUT_RETRY_LATER_FALLBACK: &str =
-    "你的任务正在持续执行（任务编号：{task_id}），执行完了给你回复。";
+    "message_key=whatsapp_cloud.msg.request_timeout_retry_later task_id={task_id}";
 
 #[derive(Clone)]
 struct AppState {
