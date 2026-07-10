@@ -197,6 +197,43 @@ fn media_poll_machine_tokens_repair_command_summary_contract() {
 }
 
 #[test]
+fn media_poll_machine_tokens_in_request_clear_file_delivery_contract() {
+    let request = "image.poll dry_run=true task_id=image-task-001 job_id=image-job-001 output_path=document/media_dry_run/image_status_card.png async_poll_adapter_result";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: true,
+        delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "document/media_dry_run/image_status_card.png".to_string(),
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        "scalar_locator_requires_evidence",
+        &mut contract,
+        request,
+        &surface,
+        std::path::Path::new("/workspace"),
+        None,
+        None,
+    );
+
+    assert_eq!(reason, Some("media_generation_path_report_contract_repair"));
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::GeneratedFilePathReport
+    );
+    assert!(contract.requires_content_evidence);
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.delivery_intent, crate::OutputDeliveryIntent::None);
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+}
+
+#[test]
 fn media_poll_machine_tokens_override_service_status_contract() {
     let request = "capability=image.poll dry_run=true task_id=image-task-001 job_id=image-job-001 output_path=document/media_dry_run/image_status_card.png async_poll_adapter_result";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(request);

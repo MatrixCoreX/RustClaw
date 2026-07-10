@@ -441,9 +441,11 @@ pub(super) fn apply_current_turn_structural_contract_repair(
     {
         reason = Some(repair_reason);
     }
-    if let Some(repair_reason) =
-        apply_media_generation_path_report_machine_contract_repair(output_contract, route_reason)
-    {
+    let media_generation_machine_context = format!("{route_reason}\n{req}");
+    if let Some(repair_reason) = apply_media_generation_path_report_machine_contract_repair(
+        output_contract,
+        &media_generation_machine_context,
+    ) {
         reason = Some(repair_reason);
     }
 
