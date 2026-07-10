@@ -1,8 +1,9 @@
 use super::{
     build_login_status_response, extract_bind_key_candidate, extract_text_message,
-    is_unbound_allowed_command, qr_render_content, qr_svg_data_url, wechat_media_agent_context,
-    wechat_runtime_status_file_path, workspace_root_from_config_path, ActiveLogin, MessageItem,
-    QRCodeResponse, TextItem, VoiceItem, WechatRuntimeStatus, WeixinMessage,
+    is_unbound_allowed_command, qr_render_content, qr_svg_data_url, task_success_messages,
+    wechat_media_agent_context, wechat_runtime_status_file_path, wechat_t,
+    workspace_root_from_config_path, ActiveLogin, MessageItem, QRCodeResponse, TaskQueryResponse,
+    TaskStatus, TextItem, VoiceItem, WechatRuntimeStatus, WechatSection, WeixinMessage,
 };
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -190,6 +191,78 @@ fn waiting_key_state_rejects_non_binding_commands() {
 fn unbound_media_like_empty_text_requires_binding_prompt() {
     assert!(!is_unbound_allowed_command(""));
     assert_eq!(extract_bind_key_candidate("", false), None);
+}
+
+fn test_wechat_section(language: &str, i18n_path: String) -> WechatSection {
+    WechatSection {
+        enabled: true,
+        listen: "127.0.0.1:0".to_string(),
+        clawd_base_url: "http://127.0.0.1:8787".to_string(),
+        api_base_url: "https://ilinkai.weixin.qq.com".to_string(),
+        language: language.to_string(),
+        i18n_path,
+        bot_token: String::new(),
+        wechat_uin_base64: String::new(),
+        request_timeout_seconds: 30,
+        task_delivery_timeout_seconds: 600,
+        longpoll_timeout_ms: 35_000,
+        text_chunk_chars: 1200,
+        sk_route_tag: String::new(),
+        typing_refresh_interval_secs: 5,
+        cdn_base_url: "https://novac2c.cdn.weixin.qq.com/c2c".to_string(),
+        image_inbox_dir: "data/wechatd/image".to_string(),
+        video_inbox_dir: "data/wechatd/video".to_string(),
+        audio_inbox_dir: "data/wechatd/audio".to_string(),
+        file_inbox_dir: "data/wechatd/file".to_string(),
+    }
+}
+
+#[test]
+fn wechat_i18n_binding_keys_are_locale_specific_with_key_fallback() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let zh = test_wechat_section(
+        "zh-CN",
+        root.join("configs/i18n/wechatd.zh-CN.toml")
+            .to_string_lossy()
+            .to_string(),
+    );
+    let en = test_wechat_section(
+        "en-US",
+        root.join("configs/i18n/wechatd.en-US.toml")
+            .to_string_lossy()
+            .to_string(),
+    );
+    let missing = test_wechat_section("missing", "/tmp/rustclaw-no-such-i18n.toml".to_string());
+
+    assert!(wechat_t(&zh, "wechat.msg.bind_success").contains("绑定成功"));
+    assert!(!wechat_t(&zh, "wechat.msg.bind_key_required_for_chat").contains("Please send"));
+    assert!(wechat_t(&en, "wechat.msg.bind_success").contains("Key bound"));
+    assert!(!wechat_t(&en, "wechat.msg.bind_key_required_for_chat").contains("请先"));
+    assert_eq!(
+        wechat_t(&missing, "wechat.msg.bind_success"),
+        "wechat.msg.bind_success"
+    );
+}
+
+#[test]
+fn wechat_task_success_fallback_uses_i18n() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let en = test_wechat_section(
+        "en-US",
+        root.join("configs/i18n/wechatd.en-US.toml")
+            .to_string_lossy()
+            .to_string(),
+    );
+    let task = TaskQueryResponse {
+        task_id: Default::default(),
+        status: TaskStatus::Succeeded,
+        execution_state: None,
+        result_json: None,
+        error_text: None,
+        lifecycle: None,
+    };
+
+    assert_eq!(task_success_messages(&task, &en), vec!["Done.".to_string()]);
 }
 
 #[test]

@@ -41,7 +41,7 @@ use claw_core::wechat_reply_media::{
     WechatOutboundMedia, WechatOutboundSource,
 };
 use config_cache::WeixinConfigManager;
-use config_section::{AppConfig, WechatSection};
+use config_section::{wechat_t, wechat_t_with, AppConfig, WechatSection};
 use qrcodegen::{QrCode, QrCodeEcc};
 use regex::Regex;
 use reqwest::Client;

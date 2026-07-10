@@ -1,6 +1,13 @@
 use super::*;
 
-pub(super) fn task_success_messages(task: &TaskQueryResponse) -> Vec<String> {
+const WECHAT_TASK_DONE_FALLBACK_TEXT_KEY: &str = "wechat.msg.task_done_fallback_text";
+const WECHAT_TASK_FAILED_FALLBACK_ERROR_KEY: &str = "wechat.msg.task_failed_fallback_error";
+const WECHAT_REQUEST_TIMEOUT_RETRY_LATER_KEY: &str = "wechat.msg.request_timeout_retry_later";
+
+pub(super) fn task_success_messages(
+    task: &TaskQueryResponse,
+    config: &WechatSection,
+) -> Vec<String> {
     if let Some(messages) = task
         .result_json
         .as_ref()
@@ -26,7 +33,7 @@ pub(super) fn task_success_messages(task: &TaskQueryResponse) -> Vec<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| "处理完成。".to_string())]
+        .unwrap_or_else(|| wechat_t(config, WECHAT_TASK_DONE_FALLBACK_TEXT_KEY))]
 }
 
 /// Refresh `ilink/bot/sendtyping` while clawd runs (`keepaliveIntervalMs` ≈ 5s in OpenClaw weixin).
@@ -370,9 +377,10 @@ pub(super) async fn submit_wechat_task_with_payload(
     let started = std::time::Instant::now();
     let delivery_timeout_secs = state.config.task_delivery_timeout_seconds.max(1);
     let poll_interval = Duration::from_millis(1500);
-    let running_notice_text = format!(
-        "你的任务正在持续执行（任务编号：{}），执行完了给你回复。",
-        task_id
+    let running_notice_text = wechat_t_with(
+        &state.config,
+        WECHAT_REQUEST_TIMEOUT_RETRY_LATER_KEY,
+        &[("task_id", &task_id)],
     );
     let mut timeout_notice_sent = false;
     let mut last_seen_status: Option<TaskStatus> = None;
@@ -538,7 +546,7 @@ pub(super) async fn submit_wechat_task_with_payload(
                 continue;
             }
             TaskStatus::Succeeded => {
-                for reply_text in task_success_messages(&task) {
+                for reply_text in task_success_messages(&task, &state.config) {
                     deliver_wechat_clawd_reply(
                         &state,
                         &from_user_id,
@@ -550,9 +558,9 @@ pub(super) async fn submit_wechat_task_with_payload(
                 break;
             }
             TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
-                let error_text = task
-                    .error_text
-                    .unwrap_or_else(|| "请求处理失败，请稍后重试。".to_string());
+                let error_text = task.error_text.unwrap_or_else(|| {
+                    wechat_t(&state.config, WECHAT_TASK_FAILED_FALLBACK_ERROR_KEY)
+                });
                 send_text_reply_via_session(
                     &state,
                     &from_user_id,

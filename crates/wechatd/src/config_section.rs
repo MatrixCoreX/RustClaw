@@ -1,5 +1,8 @@
 //! WeChat channel TOML (`configs/channels/wechat.toml`).
 
+use std::path::Path;
+
+use claw_core::channel_i18n::{text_from_path, text_with_vars_from_path};
 use serde::Deserialize;
 
 fn default_typing_refresh_secs() -> u64 {
@@ -30,6 +33,14 @@ fn default_file_inbox_dir() -> String {
     "data/wechatd/file".to_string()
 }
 
+fn default_language() -> String {
+    "zh-CN".to_string()
+}
+
+fn default_i18n_path() -> String {
+    "configs/i18n/wechatd.zh-CN.toml".to_string()
+}
+
 #[derive(Clone, Deserialize)]
 pub struct AppConfig {
     pub wechat: WechatSection,
@@ -41,6 +52,10 @@ pub struct WechatSection {
     pub listen: String,
     pub clawd_base_url: String,
     pub api_base_url: String,
+    #[serde(default = "default_language")]
+    pub language: String,
+    #[serde(default = "default_i18n_path")]
+    pub i18n_path: String,
     #[serde(default)]
     pub bot_token: String,
     #[serde(default)]
@@ -69,4 +84,25 @@ pub struct WechatSection {
     pub audio_inbox_dir: String,
     #[serde(default = "default_file_inbox_dir")]
     pub file_inbox_dir: String,
+}
+
+pub fn resolve_wechat_i18n_path(language: &str, configured_path: &str) -> String {
+    let lang = language.trim();
+    if !lang.is_empty() {
+        let candidate = format!("configs/i18n/wechatd.{lang}.toml");
+        if Path::new(&candidate).exists() {
+            return candidate;
+        }
+    }
+    configured_path.to_string()
+}
+
+pub fn wechat_t(config: &WechatSection, key: &str) -> String {
+    let path = resolve_wechat_i18n_path(&config.language, &config.i18n_path);
+    text_from_path(&path, key, key)
+}
+
+pub fn wechat_t_with(config: &WechatSection, key: &str, vars: &[(&str, &str)]) -> String {
+    let path = resolve_wechat_i18n_path(&config.language, &config.i18n_path);
+    text_with_vars_from_path(&path, key, vars, key)
 }

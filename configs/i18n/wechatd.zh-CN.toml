@@ -1,0 +1,12 @@
+locale = "zh-CN"
+
+[dict]
+"wechat.msg.bind_key_required_for_chat" = "请先发送你的 key 进行绑定，然后再继续聊天或使用功能。"
+"wechat.msg.bind_help" = "欢迎使用 RustClaw。\n请先发送 /key <your_key> 完成绑定。"
+"wechat.msg.bind_success" = "绑定成功，请重新发送刚才的消息。"
+"wechat.msg.bind_invalid" = "key 无效，请重新输入。"
+"wechat.msg.bind_request_failed" = "绑定请求失败，请稍后重试。"
+"wechat.msg.media_decode_or_unsupported" = "收到媒体消息但未能完成 CDN 解密或类型不受支持。"
+"wechat.msg.task_done_fallback_text" = "处理完成。"
+"wechat.msg.task_failed_fallback_error" = "请求处理失败，请稍后重试。"
+"wechat.msg.request_timeout_retry_later" = "你的任务正在持续执行（任务编号：{task_id}），执行完了给你回复。"
