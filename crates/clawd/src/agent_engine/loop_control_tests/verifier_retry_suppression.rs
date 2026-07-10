@@ -1,7 +1,8 @@
 use super::{
-    answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_summary, ok_step,
-    prefer_terminal_model_answer_for_verifier_candidate, route_result,
-    suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
+    answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_summary,
+    commit_answer_verifier_retry_answer, ok_step,
+    prefer_terminal_model_answer_for_verifier_candidate, retry_verifier_accepts_rewritten_answer,
+    route_result, suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
     suppress_answer_verifier_retry_if_structurally_satisfied,
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
 };
@@ -34,6 +35,71 @@ fn output_format_machine_payload_gap_detects_structured_reply_only() {
         &verifier,
         "configs/config.toml has one observed risk."
     ));
+}
+
+#[test]
+fn retry_verifier_pass_accepts_rewritten_answer() {
+    let accepted = crate::answer_verifier::AnswerVerifierOut {
+        pass: true,
+        missing_evidence_fields: Vec::new(),
+        answer_incomplete_reason: String::new(),
+        should_retry: false,
+        retry_instruction: String::new(),
+        confidence: 0.95,
+    };
+    let rejected = crate::answer_verifier::AnswerVerifierOut {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "candidate still violates the requested shape".to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite the terminal answer".to_string(),
+        confidence: 0.95,
+    };
+
+    assert!(retry_verifier_accepts_rewritten_answer(&accepted));
+    assert!(!retry_verifier_accepts_rewritten_answer(&rejected));
+}
+
+#[test]
+fn verifier_retry_commit_replaces_stale_visible_reply() {
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-verifier-retry-commit", "ask", "prompt");
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "candidate omitted the requested terminal shape".to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite the final answer from observed evidence".to_string(),
+        confidence: 0.96,
+    });
+    let mut reply = AskReply::non_llm("stale raw observation".to_string())
+        .with_messages(vec!["stale raw observation".to_string()])
+        .with_task_journal(journal);
+
+    commit_answer_verifier_retry_answer(&mut reply, "grounded rewritten answer".to_string());
+
+    assert_eq!(reply.text, "grounded rewritten answer");
+    assert_eq!(
+        reply.messages,
+        vec!["grounded rewritten answer".to_string()]
+    );
+    assert!(!reply.should_fail_task);
+    assert!(reply.error_text.is_none());
+    assert!(reply.is_llm_reply);
+    let journal = reply.task_journal.as_ref().expect("journal");
+    assert!(journal.answer_verifier_summary.is_none());
+    assert_eq!(
+        journal.final_answer.as_deref(),
+        Some("grounded rewritten answer")
+    );
+    assert_eq!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+    assert_eq!(
+        journal.final_stop_signal.as_deref(),
+        Some(crate::task_journal::ANSWER_VERIFIER_RECOVERED_TERMINAL_STOP_SIGNAL)
+    );
 }
 
 #[test]

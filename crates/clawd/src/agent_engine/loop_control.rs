@@ -192,6 +192,35 @@ fn answer_verifier_summary_to_out(
     .normalized()
 }
 
+fn retry_verifier_accepts_rewritten_answer(
+    verifier: &crate::answer_verifier::AnswerVerifierOut,
+) -> bool {
+    verifier.pass && !verifier.high_confidence_gap()
+}
+
+fn commit_answer_verifier_retry_answer(reply: &mut AskReply, retried_answer: String) {
+    let mut messages = reply
+        .messages
+        .iter()
+        .filter(|message| crate::finalize::is_execution_summary_message(message))
+        .cloned()
+        .collect::<Vec<_>>();
+    messages.push(retried_answer.clone());
+    if let Some(journal) = reply.task_journal.as_mut() {
+        journal.answer_verifier_summary = None;
+        journal.record_final_answer(&retried_answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        journal.record_final_stop_signal(
+            crate::task_journal::ANSWER_VERIFIER_RECOVERED_TERMINAL_STOP_SIGNAL,
+        );
+    }
+    reply.text = retried_answer;
+    reply.messages = messages;
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    reply.is_llm_reply = true;
+}
+
 async fn try_rewrite_exhausted_answer_verifier_gap_with_observed_evidence(
     state: &AppState,
     task: &ClaimedTask,
@@ -240,31 +269,17 @@ async fn try_rewrite_exhausted_answer_verifier_gap_with_observed_evidence(
     )
     .await
     {
+        if retry_verifier_accepts_rewritten_answer(&retry_verifier) {
+            commit_answer_verifier_retry_answer(reply, retried_answer);
+            info!("answer_verifier_retry_exhausted_rewritten_with_observed_evidence");
+            return true;
+        }
         if let Some(journal) = reply.task_journal.as_mut() {
             journal.record_answer_verifier_summary(retry_verifier);
         }
         return false;
     }
-    let mut messages = reply
-        .messages
-        .iter()
-        .filter(|message| crate::finalize::is_execution_summary_message(message))
-        .cloned()
-        .collect::<Vec<_>>();
-    messages.push(retried_answer.clone());
-    if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&retried_answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-        journal.record_final_stop_signal(
-            crate::task_journal::ANSWER_VERIFIER_RECOVERED_TERMINAL_STOP_SIGNAL,
-        );
-    }
-    reply.text = retried_answer;
-    reply.messages = messages;
-    reply.should_fail_task = false;
-    reply.error_text = None;
-    reply.is_llm_reply = true;
+    commit_answer_verifier_retry_answer(reply, retried_answer);
     info!("answer_verifier_retry_exhausted_rewritten_with_observed_evidence");
     true
 }
@@ -1597,31 +1612,18 @@ pub(super) async fn run_agent_with_loop_seeded(
                         )
                         .await;
                         if let Some(retry_verifier) = retry_verifier {
+                            if retry_verifier_accepts_rewritten_answer(&retry_verifier) {
+                                commit_answer_verifier_retry_answer(&mut reply, retried_answer);
+                                info!(
+                                    "answer_verifier_machine_payload_rewritten_to_visible_answer"
+                                );
+                                return Ok(reply);
+                            }
                             if let Some(journal) = reply.task_journal.as_mut() {
                                 journal.record_answer_verifier_summary(retry_verifier);
                             }
                         } else {
-                            let mut messages = reply
-                                .messages
-                                .iter()
-                                .filter(|message| {
-                                    crate::finalize::is_execution_summary_message(message)
-                                })
-                                .cloned()
-                                .collect::<Vec<_>>();
-                            messages.push(retried_answer.clone());
-                            if let Some(journal) = reply.task_journal.as_mut() {
-                                journal.answer_verifier_summary = None;
-                                journal.record_final_answer(&retried_answer);
-                                journal.record_final_status(
-                                    crate::task_journal::TaskJournalFinalStatus::Success,
-                                );
-                            }
-                            reply.text = retried_answer;
-                            reply.messages = messages;
-                            reply.should_fail_task = false;
-                            reply.error_text = None;
-                            reply.is_llm_reply = true;
+                            commit_answer_verifier_retry_answer(&mut reply, retried_answer);
                             info!("answer_verifier_machine_payload_rewritten_to_visible_answer");
                             return Ok(reply);
                         }
