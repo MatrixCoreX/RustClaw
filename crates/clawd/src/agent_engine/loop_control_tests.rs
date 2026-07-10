@@ -4,6 +4,7 @@ use super::{
     apply_structured_respond_clarify_to_loop_state, evaluate_round_outcome,
     initial_execution_recipe_spec, machine_status_visible_output_format_gap,
     mark_reply_failed_after_answer_verifier_exhausted, parse_log_analyze_finding,
+    prefer_terminal_model_answer_for_verifier_candidate,
     record_agent_loop_decision_envelope_output_vars, selected_contract_structured_evidence_gap,
     should_stop_for_observed_finalize, structured_respond_terminal_intent_from_plan,
     structured_respond_terminal_intent_from_route_owned_clarify,

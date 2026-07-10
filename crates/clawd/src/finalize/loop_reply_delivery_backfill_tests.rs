@@ -748,6 +748,56 @@ async fn finalize_loop_reply_replaces_raw_read_delivery_with_latest_synthesis() 
 }
 
 #[tokio::test]
+async fn finalize_loop_reply_prefers_exact_sentence_synthesis_over_raw_read() {
+    let state = test_state();
+    let task = claimed_task("task-exact-sentence-read-summary");
+    let raw_read = serde_json::json!({
+        "extra": {
+            "action": "read_range",
+            "mode": "head",
+            "requested_n": 20,
+            "path": "README.md",
+        },
+        "text": "# RustClaw\n\nRustClaw is a local Rust agent runtime centered on clawd.",
+    })
+    .to_string();
+    let synthesis =
+        "RustClaw is a local Rust agent runtime. It is centered on clawd. It supports channel and skill execution.";
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "fs_basic", &raw_read));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", synthesis));
+    loop_state.delivery_messages.push(raw_read);
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.exact_sentence_count = Some(3);
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "read README head and summarize in three sentences",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should use exact-sentence synthesis");
+
+    assert_eq!(reply.text, synthesis);
+    assert_eq!(reply.messages, vec![synthesis.to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_keeps_strict_raw_tail_read_delivery_over_synthesis() {
     let state = test_state();
     let task = claimed_task("task-strict-raw-tail-keeps-observed");

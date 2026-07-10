@@ -2,8 +2,12 @@ use super::*;
 
 #[path = "loop_control_answer_recovery/structured_evidence_table.rs"]
 mod structured_evidence_table;
+#[path = "loop_control_answer_recovery/terminal_format.rs"]
+mod terminal_format;
 
 pub(super) use structured_evidence_table::try_recover_structured_evidence_table_answer_verifier_gap;
+pub(super) use terminal_format::prefer_terminal_model_answer_for_verifier_candidate;
+use terminal_format::terminal_model_output_format_gap_satisfies_contract;
 
 pub(super) fn answer_verifier_retry_summary<'a>(
     reply: &'a AskReply,
@@ -312,6 +316,9 @@ pub(super) fn answer_verifier_gap_is_structurally_satisfied(
         return quantity_comparison_reply_has_derived_numeric_answer(reply);
     }
     if terminal_content_access_blocker_reply_satisfies_contract(reply, route) {
+        return true;
+    }
+    if terminal_model_output_format_gap_satisfies_contract(reply, route) {
         return true;
     }
     if let (Some(journal), Some(answer)) = (

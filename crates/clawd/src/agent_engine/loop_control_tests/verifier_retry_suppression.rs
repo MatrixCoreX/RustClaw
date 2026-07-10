@@ -1,12 +1,13 @@
 use super::{
     answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_summary, ok_step,
-    route_result, suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
+    prefer_terminal_model_answer_for_verifier_candidate, route_result,
+    suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
     suppress_answer_verifier_retry_if_structurally_satisfied,
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
 };
 use crate::{
-    executor::StepExecutionStatus, AskReply, OutputDeliveryIntent, OutputResponseShape,
-    OutputSemanticKind,
+    executor::StepExecutionStatus, AskReply, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputSemanticKind,
 };
 use serde_json::json;
 
@@ -380,6 +381,114 @@ fn quantity_comparison_suppression_reads_total_size_bytes() {
         Some(&route)
     ));
     assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_none());
+}
+
+#[test]
+fn terminal_model_answer_suppresses_output_format_only_verifier_retry() {
+    let answer = "RustClaw combines the local clawd runtime, channel entry points, and skill dispatch into one deployable stack.";
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+    journal.push_step_result(&ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","excerpt":"RustClaw runtime overview","path":"README.md"},"text":"RustClaw runtime overview"}"#,
+    ));
+    journal.push_step_result(&ok_step("step_2", "synthesize_answer", answer));
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason: "terminal answer shape mismatch".to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite terminal answer".to_string(),
+        confidence: 0.9,
+    });
+    let mut reply = AskReply::non_llm(answer.to_string())
+        .with_messages(vec![answer.to_string()])
+        .with_task_journal(journal);
+
+    assert!(suppress_answer_verifier_retry_if_structurally_satisfied(
+        &mut reply,
+        Some(&route)
+    ));
+    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_none());
+}
+
+#[test]
+fn terminal_model_answer_does_not_suppress_non_format_evidence_gap() {
+    let answer = "RustClaw combines the local clawd runtime, channel entry points, and skill dispatch into one deployable stack.";
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+    journal.push_step_result(&ok_step("step_1", "synthesize_answer", answer));
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string(), "content_excerpt".to_string()],
+        answer_incomplete_reason: "content evidence is still missing".to_string(),
+        should_retry: true,
+        retry_instruction: "collect content evidence".to_string(),
+        confidence: 0.9,
+    });
+    let mut reply = AskReply::non_llm(answer.to_string())
+        .with_messages(vec![answer.to_string()])
+        .with_task_journal(journal);
+
+    assert!(!suppress_answer_verifier_retry_if_structurally_satisfied(
+        &mut reply,
+        Some(&route)
+    ));
+    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_some());
+}
+
+#[test]
+fn terminal_model_answer_replaces_raw_observation_before_verifier() {
+    let raw_readme = "# RustClaw\n\nRustClaw is a local Rust agent runtime centered on `clawd`.";
+    let answer = "RustClaw 是以 `clawd` 为核心的本地 Rust 智能体运行时。它整合多渠道聊天、任务执行、工具和技能路由等能力。它面向通过聊天应用或浏览器完成日常使用和管理。";
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.output_contract.exact_sentence_count = Some(3);
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+    let read_step_output = json!({
+        "extra": {
+            "action": "read_range",
+            "excerpt": raw_readme,
+            "path": "README.md",
+        },
+        "text": raw_readme,
+    })
+    .to_string();
+    journal.push_step_result(&ok_step("step_1", "fs_basic", &read_step_output));
+    journal.push_step_result(&ok_step("step_2", "respond", answer));
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+    let mut reply = AskReply::non_llm(raw_readme.to_string())
+        .with_messages(vec![raw_readme.to_string()])
+        .with_task_journal(journal);
+
+    assert!(prefer_terminal_model_answer_for_verifier_candidate(
+        &mut reply,
+        Some(&route)
+    ));
+    assert_eq!(reply.text, answer);
 }
 
 #[test]
