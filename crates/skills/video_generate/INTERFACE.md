@@ -30,7 +30,7 @@
 | generate | `first_frame_image` / `first_frame` / `image` | no | string/object | - | Public URL, data URL, base64 object, or workspace path used as the first frame. |
 | generate | `last_frame_image` / `last_frame` | no | string/object | - | Public URL, data URL, base64 object, or workspace path used as the last frame. |
 | generate | `duration` | no | integer | `6` | Video duration in seconds; current implementation accepts `6` or `10`. |
-| generate | `resolution` | no | string | config default | One of `512P`, `720P`, `768P`, `1080P`; exact support depends on the selected adapter/model. |
+| generate | `resolution` | no | string | config default | One of `512P`, `720P`, `768P`, `1080P`; common machine dimension aliases such as `1280x720` normalize to the matching provider token. Exact support depends on the selected adapter/model. |
 | generate | `output_path` | no | string(path) | auto | Workspace output path for downloaded video. |
 | generate | `wait_for_completion` | no | boolean | `false` | If true, wait for provider completion and optionally download; otherwise return the provider task id without polling. |
 | generate | `download` | no | boolean | config default | If false, return the completed task/file id without downloading. |

@@ -73,6 +73,44 @@ fn dry_run_returns_request_payload_without_key() {
 }
 
 #[test]
+fn dry_run_normalizes_dimension_resolution_alias() {
+    let root = unique_temp_root("video-dry-run-resolution-alias");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "prompt": "A compact status dashboard animation",
+            "duration": 6,
+            "resolution": "1280x720",
+            "dry_run": true
+        }),
+    )
+    .expect("dry run");
+
+    assert_eq!(extra["request"]["resolution"], "720P");
+    assert_eq!(extra["dry_run"], true);
+    assert_eq!(extra["adapter_kind"], "media_job_poll");
+}
+
+#[test]
+fn empty_resolution_argument_falls_back_to_default_token() {
+    let root = unique_temp_root("video-dry-run-empty-resolution");
+    let (_, extra) = execute(
+        &RootConfig::default(),
+        &root,
+        json!({
+            "prompt": "A compact status dashboard animation",
+            "duration": 6,
+            "resolution": "",
+            "dry_run": true
+        }),
+    )
+    .expect("dry run");
+
+    assert_eq!(extra["request"]["resolution"], DEFAULT_RESOLUTION);
+}
+
+#[test]
 fn dedicated_provider_empty_key_falls_back_to_shared_minimax_key() {
     let mut cfg = RootConfig::default();
     cfg.llm.minimax = Some(VendorConfig {

@@ -280,13 +280,21 @@ fn execute_generate(
     if !matches!(duration, 6 | 10) {
         return Err("duration must be 6 or 10 seconds".to_string());
     }
-    let resolution = obj
+    let resolution_source = obj
         .get("resolution")
         .and_then(Value::as_str)
-        .or(cfg.video_generation.default_resolution.as_deref())
-        .unwrap_or(DEFAULT_RESOLUTION)
-        .trim()
-        .to_ascii_uppercase();
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            cfg.video_generation
+                .default_resolution
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or(DEFAULT_RESOLUTION);
+    let resolution = normalize_resolution(resolution_source)
+        .ok_or_else(|| "resolution must be 512P, 720P, 768P, or 1080P".to_string())?;
     if !matches!(resolution.as_str(), "512P" | "720P" | "768P" | "1080P") {
         return Err("resolution must be 512P, 720P, 768P, or 1080P".to_string());
     }
@@ -519,6 +527,40 @@ fn wait_for_completion_arg(obj: &Map<String, Value>) -> bool {
 
 fn poll_after_seconds_from_interval_ms(poll_interval_ms: u64) -> u64 {
     poll_interval_ms.div_ceil(1000).max(1)
+}
+
+fn normalize_resolution(value: &str) -> Option<String> {
+    let upper = value.trim().to_ascii_uppercase();
+    if matches!(upper.as_str(), "512P" | "720P" | "768P" | "1080P") {
+        return Some(upper);
+    }
+
+    let compact: String = upper
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace() && *ch != '_')
+        .collect();
+    if let Ok(number) = compact.parse::<u64>() {
+        return canonical_resolution_token(number);
+    }
+
+    let dimensions = compact
+        .split(|ch: char| !ch.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .take(2)
+        .filter_map(|part| part.parse::<u64>().ok())
+        .collect::<Vec<_>>();
+    if dimensions.len() == 2 {
+        return canonical_resolution_token(dimensions[0].min(dimensions[1]));
+    }
+
+    None
+}
+
+fn canonical_resolution_token(short_edge: u64) -> Option<String> {
+    match short_edge {
+        512 | 720 | 768 | 1080 => Some(format!("{short_edge}P")),
+        _ => None,
+    }
 }
 
 fn provider_video_job_id(provider: &str, task_id: &str) -> String {
