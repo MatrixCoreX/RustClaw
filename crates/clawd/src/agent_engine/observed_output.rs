@@ -205,51 +205,6 @@ const OBSERVED_ANSWER_FALLBACK_COMPACT_PROMPT_LOGICAL_PATH: &str =
     "prompts/observed_answer_fallback_compact_prompt.md";
 const MARKET_QUOTE_SCALAR_SEMANTIC_TAG: &str = "market_quote_scalar";
 
-fn render_observed_vars(mut text: String, vars: &[(&str, &str)]) -> String {
-    for (name, value) in vars {
-        text = text.replace(&format!("{{{name}}}"), value);
-    }
-    text
-}
-
-fn observed_t(
-    state: Option<&AppState>,
-    key: &str,
-    default_zh: &str,
-    default_en: &str,
-    prefer_english: bool,
-) -> String {
-    observed_t_with_vars(state, key, default_zh, default_en, prefer_english, &[])
-}
-
-fn observed_t_with_vars(
-    state: Option<&AppState>,
-    key: &str,
-    default_zh: &str,
-    default_en: &str,
-    prefer_english: bool,
-    vars: &[(&str, &str)],
-) -> String {
-    match state {
-        Some(state) => crate::bilingual_t_with_default_vars(
-            state,
-            key,
-            default_zh,
-            default_en,
-            prefer_english,
-            vars,
-        ),
-        None => render_observed_vars(
-            if prefer_english {
-                default_en.to_string()
-            } else {
-                default_zh.to_string()
-            },
-            vars,
-        ),
-    }
-}
-
 fn is_internal_missing_scalar_sentinel(text: &str) -> bool {
     let trimmed = text.trim();
     trimmed == "<missing>" || trimmed.ends_with(": <missing>")

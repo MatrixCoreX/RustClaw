@@ -167,9 +167,9 @@ fn inventory_dir_names_by_kind(value: &serde_json::Value, kind: &str) -> Vec<Str
 }
 
 fn inventory_dir_grouped_names_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     value: &serde_json::Value,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     let files = inventory_dir_names_by_kind(value, "files");
     let dirs = inventory_dir_names_by_kind(value, "dirs");
@@ -185,30 +185,9 @@ fn inventory_dir_grouped_names_candidate(
         lines.push(format!("{title}:"));
         lines.extend(items.into_iter().map(|name| format!("- {name}")));
     };
-    let dirs_title = observed_t(
-        state,
-        "clawd.msg.directory_group_dirs",
-        "目录",
-        "Directories",
-        prefer_english,
-    );
-    let files_title = observed_t(
-        state,
-        "clawd.msg.directory_group_files",
-        "文件",
-        "Files",
-        prefer_english,
-    );
-    let other_title = observed_t(
-        state,
-        "clawd.msg.directory_group_other",
-        "其它",
-        "Other",
-        prefer_english,
-    );
-    push_group(&dirs_title, dirs);
-    push_group(&files_title, files);
-    push_group(&other_title, other);
+    push_group("dirs", dirs);
+    push_group("files", files);
+    push_group("other", other);
     normalized_listing_text(&lines.join("\n"))
 }
 
@@ -296,9 +275,9 @@ fn tree_summary_display_name(entry: &serde_json::Value) -> Option<String> {
 }
 
 pub(super) fn tree_summary_direct_answer_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     value: &serde_json::Value,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if value.get("action").and_then(|v| v.as_str()) != Some("tree_summary") {
         return None;
@@ -330,63 +309,16 @@ pub(super) fn tree_summary_direct_answer_candidate(
         }
     }
     if dirs.is_empty() && files.is_empty() && other.is_empty() {
-        return Some(observed_t(
-            state,
-            "clawd.msg.tree_summary_empty",
-            "顶层为空",
-            "Top level is empty",
-            prefer_english,
-        ));
+        return Some(tree_summary_empty_machine_answer());
     }
-    let mut parts = Vec::new();
-    if !dirs.is_empty() {
-        parts.push(format!(
-            "{} {}",
-            observed_t(
-                state,
-                "clawd.msg.tree_summary_dirs",
-                "目录",
-                "directories",
-                prefer_english,
-            ),
-            dirs.join(", ")
-        ));
-    }
-    if !files.is_empty() {
-        parts.push(format!(
-            "{} {}",
-            observed_t(
-                state,
-                "clawd.msg.tree_summary_files",
-                "文件",
-                "files",
-                prefer_english,
-            ),
-            files.join(", ")
-        ));
-    }
-    if !other.is_empty() {
-        parts.push(format!(
-            "{} {}",
-            observed_t(
-                state,
-                "clawd.msg.tree_summary_other",
-                "其它",
-                "other",
-                prefer_english,
-            ),
-            other.join(", ")
-        ));
-    }
-    let prefix = observed_t(
-        state,
-        "clawd.msg.tree_summary_top_level",
-        "顶层结构：",
-        "Top level: ",
-        prefer_english,
-    );
-    let separator = if prefer_english { "; " } else { "；" };
-    let mut answer = format!("{prefix}{}", parts.join(separator));
+    let mut lines = vec![
+        "message_key=clawd.msg.tree_summary.observed".to_string(),
+        "reason_code=tree_summary_observed".to_string(),
+        "final_answer_shape=tree_summary".to_string(),
+    ];
+    push_machine_string_list(&mut lines, "top_level.dirs", &dirs);
+    push_machine_string_list(&mut lines, "top_level.files", &files);
+    push_machine_string_list(&mut lines, "top_level.other", &other);
     let truncated_nodes = value
         .get("truncated_nodes")
         .and_then(|v| v.as_u64())
@@ -396,17 +328,12 @@ pub(super) fn tree_summary_direct_answer_candidate(
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
     if truncated_nodes > 0 || root_omitted > 0 {
-        let count = truncated_nodes.max(root_omitted).to_string();
-        answer.push_str(&observed_t_with_vars(
-            state,
-            "clawd.msg.tree_summary_partial",
-            "（另有 {count} 项未显示）",
-            " ({count} more not shown)",
-            prefer_english,
-            &[("count", &count)],
+        lines.push(format!(
+            "omitted_count={}",
+            truncated_nodes.max(root_omitted)
         ));
     }
-    Some(answer)
+    Some(lines.join("\n"))
 }
 
 fn tree_summary_rows_machine_answer(value: &serde_json::Value) -> Option<String> {
@@ -723,10 +650,10 @@ pub(super) fn count_inventory_breakdown_value(
 }
 
 pub(super) fn count_inventory_direct_answer_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     value: &serde_json::Value,
     response_shape: Option<crate::OutputResponseShape>,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     let (count, count_key) = count_inventory_count_value(value)?;
     let has_component_breakdown = count_inventory_breakdown_value(value).is_some();
@@ -736,37 +663,7 @@ pub(super) fn count_inventory_direct_answer_candidate(
     if response_shape.is_none() && count_key == "total" && has_component_breakdown {
         return None;
     }
-    let noun = match count_key {
-        "files" => observed_t(
-            state,
-            "clawd.msg.count_inventory_noun_files",
-            "普通文件",
-            "regular files",
-            prefer_english,
-        ),
-        "dirs" => observed_t(
-            state,
-            "clawd.msg.count_inventory_noun_dirs",
-            "目录",
-            "directories",
-            prefer_english,
-        ),
-        _ => observed_t(
-            state,
-            "clawd.msg.count_inventory_noun_items",
-            "项目",
-            "items",
-            prefer_english,
-        ),
-    };
-    Some(observed_t_with_vars(
-        state,
-        "clawd.msg.count_inventory_direct_answer",
-        "{count}，当前范围内共有 {count} 个{noun}。",
-        "{count}: there are {count} {noun} in the requested scope.",
-        prefer_english,
-        &[("count", &count), ("noun", &noun)],
-    ))
+    Some(count_inventory_machine_answer(&count, count_key))
 }
 
 fn plan_requests_count_inventory_file_dir_breakdown(loop_state: &LoopState) -> bool {
@@ -816,20 +713,54 @@ fn latest_count_inventory_file_dir_breakdown(
 }
 
 pub(super) fn count_inventory_planned_file_dir_breakdown_answer(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     loop_state: &LoopState,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if !plan_requests_count_inventory_file_dir_breakdown(loop_state) {
         return None;
     }
     let (files, dirs, _total) = latest_count_inventory_file_dir_breakdown(loop_state)?;
-    Some(observed_t_with_vars(
-        state,
-        "clawd.msg.count_inventory_file_dir_breakdown",
-        "文件：{files} 个\n文件夹：{dirs} 个",
-        "Files: {files}\nDirectories: {dirs}",
-        prefer_english,
-        &[("files", &files), ("dirs", &dirs)],
+    Some(count_inventory_file_dir_breakdown_machine_answer(
+        &files, &dirs,
     ))
+}
+
+fn tree_summary_empty_machine_answer() -> String {
+    [
+        "message_key=clawd.msg.tree_summary_empty".to_string(),
+        "reason_code=tree_summary_empty".to_string(),
+        "final_answer_shape=tree_summary".to_string(),
+        "empty=true".to_string(),
+    ]
+    .join("\n")
+}
+
+fn count_inventory_machine_answer(count: &str, count_key: &str) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.count_inventory_direct_answer".to_string(),
+        "reason_code=count_inventory_observed".to_string(),
+        "final_answer_shape=count_inventory".to_string(),
+    ];
+    push_observed_machine_line(&mut lines, "count_key", count_key);
+    push_observed_machine_line(&mut lines, "count", count);
+    lines.join("\n")
+}
+
+fn count_inventory_file_dir_breakdown_machine_answer(files: &str, dirs: &str) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.count_inventory_file_dir_breakdown".to_string(),
+        "reason_code=count_inventory_file_dir_breakdown".to_string(),
+        "final_answer_shape=count_inventory_breakdown".to_string(),
+    ];
+    push_observed_machine_line(&mut lines, "files", files);
+    push_observed_machine_line(&mut lines, "dirs", dirs);
+    lines.join("\n")
+}
+
+fn push_machine_string_list(lines: &mut Vec<String>, key: &str, values: &[String]) {
+    if values.is_empty() {
+        return;
+    }
+    push_observed_machine_line(lines, key, &values.join(","));
 }
