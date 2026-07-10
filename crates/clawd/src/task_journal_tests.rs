@@ -1493,3 +1493,70 @@ fn trace_json_includes_contract_policy_for_contract_rejection() {
         Some("candidates")
     );
 }
+
+#[test]
+fn structured_listing_journal_compact_prefers_names_by_kind_over_redundant_names() {
+    let names = (0..80)
+        .map(|idx| Value::String(format!("file_{idx:02}.md")))
+        .collect::<Vec<_>>();
+    let files = names.clone();
+    let output = json!({
+        "text": "raw fallback",
+        "extra": {
+            "action": "inventory_dir",
+            "counts": {"dirs": 0, "files": 80, "hidden": 0, "total": 80},
+            "path": ".",
+            "resolved_path": "/tmp/repo",
+            "names": names,
+            "names_by_kind": {
+                "dirs": [],
+                "files": files,
+                "other": []
+            },
+            "entries": []
+        }
+    })
+    .to_string();
+
+    let compact = super::compact_structured_listing_output_for_journal(&output)
+        .expect("structured listing should compact");
+    let value: Value = serde_json::from_str(&compact).expect("compact json");
+    let extra = value.get("extra").expect("extra");
+    assert!(extra.get("names").is_none());
+    assert_eq!(
+        extra
+            .pointer("/names_by_kind/files")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(80)
+    );
+}
+
+#[test]
+fn structured_listing_journal_compact_unwraps_text_json_when_extra_is_missing() {
+    let text = json!({
+        "action": "inventory_dir",
+        "counts": {"dirs": 1, "files": 1, "hidden": 0, "total": 2},
+        "path": ".",
+        "resolved_path": "/tmp/repo",
+        "names_by_kind": {
+            "dirs": ["crates"],
+            "files": ["README.md"],
+            "other": []
+        },
+        "names": ["crates", "README.md"]
+    })
+    .to_string();
+    let output = json!({ "text": text }).to_string();
+
+    let compact = super::compact_structured_listing_output_for_journal(&output)
+        .expect("text json should compact");
+    let value: Value = serde_json::from_str(&compact).expect("compact json");
+    assert_eq!(
+        value
+            .pointer("/extra/names_by_kind/dirs/0")
+            .and_then(Value::as_str),
+        Some("crates")
+    );
+    assert!(value.pointer("/extra/names").is_none());
+}

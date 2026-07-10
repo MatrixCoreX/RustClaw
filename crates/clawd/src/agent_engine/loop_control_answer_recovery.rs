@@ -2,10 +2,13 @@ use super::*;
 
 #[path = "loop_control_answer_recovery/structured_evidence_table.rs"]
 mod structured_evidence_table;
+#[path = "loop_control_answer_recovery/structured_listing.rs"]
+mod structured_listing;
 #[path = "loop_control_answer_recovery/terminal_format.rs"]
 mod terminal_format;
 
 pub(super) use structured_evidence_table::try_recover_structured_evidence_table_answer_verifier_gap;
+pub(super) use structured_listing::try_recover_structured_listing_answer_verifier_gap;
 pub(super) use terminal_format::prefer_terminal_model_answer_for_verifier_candidate;
 use terminal_format::terminal_model_output_format_gap_satisfies_contract;
 
@@ -1036,10 +1039,12 @@ pub(super) fn try_recover_latest_synthesis_answer_verifier_gap(
 fn verifier_requires_structured_visible_rewrite(
     verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
 ) -> bool {
-    verifier
-        .missing_evidence_fields
-        .iter()
-        .any(|field| matches!(field.as_str(), "output_format" | "field_value"))
+    verifier.missing_evidence_fields.iter().any(|field| {
+        matches!(
+            field.as_str(),
+            "output_format" | "field_value" | "candidates"
+        )
+    })
 }
 
 struct TerminalAnswerCandidate {

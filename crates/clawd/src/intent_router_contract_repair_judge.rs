@@ -424,14 +424,15 @@ fn contract_repair_reason_requires_missing_locator_clarify(reason: &str) -> bool
         .any(|token| token == "execution_recipe_untrusted_text_ignored_and_turn_binding_missing_for_content_read")
 }
 
-fn repaired_contract_wants_file_delivery(contract: &IntentOutputContractOut) -> bool {
-    contract.delivery_required
-        || matches!(
-            parse_output_response_shape(&contract.response_shape),
-            OutputResponseShape::FileToken
-        )
-        || !matches!(
-            parse_output_delivery_intent(&contract.delivery_intent),
-            OutputDeliveryIntent::None
-        )
+pub(super) fn repaired_contract_wants_file_delivery(contract: &IntentOutputContractOut) -> bool {
+    matches!(
+        parse_output_response_shape(&contract.response_shape),
+        OutputResponseShape::FileToken
+    ) || matches!(
+        parse_output_delivery_intent(&contract.delivery_intent),
+        OutputDeliveryIntent::FileSingle | OutputDeliveryIntent::DirectoryBatchFiles
+    ) || matches!(
+        parse_output_semantic_kind(&contract.contract_marker),
+        OutputSemanticKind::GeneratedFileDelivery | OutputSemanticKind::GeneratedFilePathReport
+    )
 }

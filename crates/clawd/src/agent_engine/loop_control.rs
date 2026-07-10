@@ -1628,6 +1628,9 @@ pub(super) async fn run_agent_with_loop_seeded(
                     }
                 }
             }
+            if try_recover_structured_listing_answer_verifier_gap(route_result, &mut reply) {
+                return Ok(reply);
+            }
             if answer_verifier_retry_budget_available(&policy, answer_verifier_retry_count) {
                 loop_state = pre_finalize_loop_state;
                 answer_verifier_retry_count += 1;
@@ -1672,6 +1675,9 @@ pub(super) async fn run_agent_with_loop_seeded(
                 policy.answer_verifier_retry_limit,
                 crate::truncate_for_log(&verifier.answer_incomplete_reason)
             );
+            if try_recover_structured_listing_answer_verifier_gap(route_result, &mut reply) {
+                return Ok(reply);
+            }
             if try_recover_latest_synthesis_answer_verifier_gap(route_result, &mut reply) {
                 return Ok(reply);
             }

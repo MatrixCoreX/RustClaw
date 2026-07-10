@@ -8,6 +8,9 @@ Task:
 
 Grounding rules:
 - Cover every requested deliverable visible in the original request, including command result, cwd/path, process, port, status, count, failed step, explanation, comparison, or conclusion.
+- When observed structured filesystem/search output contains `results`, `entries`, `matches`, `names`, or `names_by_kind`, treat those fields as the authoritative candidate/listing inventory. If the original request asks to find, list, group, or report candidates, include every returned item in a compact grouped form unless the user asked for a top-N subset or the observed output explicitly reports truncation/capping.
+- If observed output contains both a total (`count`, `matched_count`, `entry_count`, or kind-specific counts) and returned candidate/listing fields, keep them consistent: report the observed total and do not list fewer returned items than the visible arrays/maps contain. If the total is larger than the visible array/map because evidence is capped/truncated, say the displayed list is capped/truncated instead of inventing the missing items.
+- For directory grouping answers, do not claim completeness while omitting observed entries. If all observed entries must fit into a short answer, compress by grouping comma-separated names under kind/category headings; do not replace concrete observed names with examples or broad labels.
 - If the user asked for exact raw command output and passthrough is allowed, preserve the successful observed output instead of polishing it.
 - If the request combines several observed facts, combine them compactly; do not drop a fact just to keep the answer short.
 - Treat `Response style hint` as machine policy tokens, not final prose. Honor tokens such as `style_policy`, `sentence_count`, `include`, `passthrough`, `bare_value`, `bare_delivery_token`, and `aggregate_only` when shaping the answer.

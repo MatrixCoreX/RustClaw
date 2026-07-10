@@ -529,7 +529,7 @@ fn current_workspace_generic_summary_contract_repair_uses_workspace_project_summ
     };
 
     let repair = apply_current_turn_structural_contract_repair(
-        "",
+        "workspace_project_summary",
         &mut contract,
         request,
         &surface,
@@ -553,6 +553,45 @@ fn current_workspace_generic_summary_contract_repair_uses_workspace_project_summ
     );
     assert!(contract.requires_content_evidence);
     assert!(!contract.delivery_required);
+}
+
+#[test]
+fn current_workspace_generic_contract_without_summary_marker_defers_to_agent_loop() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let request = "List the current workspace top-level entries.";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::None,
+        locator_hint: String::new(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = apply_current_turn_structural_contract_repair(
+        "",
+        &mut contract,
+        request,
+        &surface,
+        &state.skill_rt.workspace_root,
+        None,
+        None,
+    );
+
+    assert_eq!(
+        repair,
+        Some("current_workspace_generic_contract_deferred_to_agent_loop")
+    );
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert!(!contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+    assert_eq!(
+        contract.locator_hint,
+        state.skill_rt.workspace_root.display().to_string()
+    );
 }
 
 #[test]
