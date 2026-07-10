@@ -1248,38 +1248,72 @@ fn candidate_document_file_tokens(text: &str) -> Vec<String> {
     .collect()
 }
 
-fn inventory_top_level_dirs_from_value(value: &serde_json::Value) -> Option<Vec<String>> {
+#[derive(Clone, Debug, Default)]
+struct CurrentWorkspaceTopLevelInventory {
+    dirs: Vec<String>,
+    files: Vec<String>,
+    other: Vec<String>,
+}
+
+impl CurrentWorkspaceTopLevelInventory {
+    fn total_len(&self) -> usize {
+        self.dirs.len() + self.files.len() + self.other.len()
+    }
+}
+
+fn inventory_top_level_names_from_value(
+    value: &serde_json::Value,
+) -> Option<CurrentWorkspaceTopLevelInventory> {
     if value.get("action").and_then(|value| value.as_str()) != Some("inventory_dir") {
         return None;
     }
-    let mut dirs = Vec::<String>::new();
-    if let Some(names) = value
+    let mut inventory = CurrentWorkspaceTopLevelInventory::default();
+    if let Some(names_by_kind) = value
         .get("names_by_kind")
         .and_then(serde_json::Value::as_object)
-        .and_then(|names_by_kind| names_by_kind.get("dirs"))
-        .and_then(serde_json::Value::as_array)
     {
-        for name in names {
-            if let Some(name) = name.as_str() {
-                push_unique_inventory_dir_name(name, &mut dirs);
-            }
-        }
+        push_inventory_names_by_kind(names_by_kind.get("dirs"), &mut inventory.dirs);
+        push_inventory_names_by_kind(names_by_kind.get("files"), &mut inventory.files);
+        push_inventory_names_by_kind(names_by_kind.get("other"), &mut inventory.other);
     }
     if let Some(entries) = value.get("entries").and_then(serde_json::Value::as_array) {
         for entry in entries {
-            if !entry
+            let Some(name) = entry.get("name").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            match entry
                 .get("kind")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("dir"))
+                .map(str::trim)
             {
-                continue;
-            }
-            if let Some(name) = entry.get("name").and_then(serde_json::Value::as_str) {
-                push_unique_inventory_dir_name(name, &mut dirs);
+                Some(kind) if kind.eq_ignore_ascii_case("dir") => {
+                    push_unique_inventory_dir_name(name, &mut inventory.dirs);
+                }
+                Some(kind) if kind.eq_ignore_ascii_case("directory") => {
+                    push_unique_inventory_dir_name(name, &mut inventory.dirs);
+                }
+                Some(kind) if kind.eq_ignore_ascii_case("folder") => {
+                    push_unique_inventory_dir_name(name, &mut inventory.dirs);
+                }
+                Some(kind) if kind.eq_ignore_ascii_case("file") => {
+                    push_unique_inventory_dir_name(name, &mut inventory.files);
+                }
+                _ => push_unique_inventory_dir_name(name, &mut inventory.other),
             }
         }
     }
-    (!dirs.is_empty()).then_some(dirs)
+    (inventory.total_len() > 0).then_some(inventory)
+}
+
+fn push_inventory_names_by_kind(value: Option<&serde_json::Value>, names: &mut Vec<String>) {
+    let Some(items) = value.and_then(serde_json::Value::as_array) else {
+        return;
+    };
+    for item in items {
+        if let Some(name) = item.as_str() {
+            push_unique_inventory_dir_name(name, names);
+        }
+    }
 }
 
 fn push_unique_inventory_dir_name(raw: &str, dirs: &mut Vec<String>) {
@@ -1296,7 +1330,9 @@ fn push_unique_inventory_dir_name(raw: &str, dirs: &mut Vec<String>) {
     dirs.push(name.to_string());
 }
 
-fn observed_current_workspace_top_level_dirs(loop_state: &LoopState) -> Option<Vec<String>> {
+fn observed_current_workspace_top_level_inventory(
+    loop_state: &LoopState,
+) -> Option<CurrentWorkspaceTopLevelInventory> {
     loop_state
         .executed_step_results
         .iter()
@@ -1308,7 +1344,7 @@ fn observed_current_workspace_top_level_dirs(loop_state: &LoopState) -> Option<V
             let output = step.output.as_deref()?;
             structured_json_values_from_output(output)
                 .iter()
-                .find_map(inventory_top_level_dirs_from_value)
+                .find_map(inventory_top_level_names_from_value)
         })
 }
 
@@ -1360,6 +1396,7 @@ pub(super) fn direct_current_workspace_top_level_dirs_overview_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    let semantic_kind = route.effective_output_contract_semantic_kind();
     let current_delivery = loop_state
         .delivery_messages
         .last()
@@ -1370,15 +1407,18 @@ pub(super) fn direct_current_workspace_top_level_dirs_overview_answer(
         || route.output_contract.delivery_required
         || matches!(
             route.output_contract.response_shape,
-            crate::OutputResponseShape::Free
-                | crate::OutputResponseShape::Scalar
+            crate::OutputResponseShape::Scalar
                 | crate::OutputResponseShape::FileToken
                 | crate::OutputResponseShape::OneSentence
         )
         || !matches!(
-            route.effective_output_contract_semantic_kind(),
+            semantic_kind,
             crate::OutputSemanticKind::None | crate::OutputSemanticKind::WorkspaceProjectSummary
         )
+        || (matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Free
+        ) && !matches!(semantic_kind, crate::OutputSemanticKind::None))
         || loop_state
             .executed_step_results
             .iter()
@@ -1389,12 +1429,8 @@ pub(super) fn direct_current_workspace_top_level_dirs_overview_answer(
     {
         return None;
     }
-    let dirs = observed_current_workspace_top_level_dirs(loop_state)?;
-    let answer = format!(
-        "workspace.top_level_dirs.count={}\nworkspace.top_level_dirs={}\nworkspace.overview.kind=repository_sections_by_purpose\nworkspace.overview.section_hints=docs,config,code,scripts,runtime_data,build_output",
-        dirs.len(),
-        dirs.join(",")
-    );
+    let inventory = observed_current_workspace_top_level_inventory(loop_state)?;
+    let answer = current_workspace_top_level_inventory_answer(&inventory);
     Some((
         answer,
         crate::task_journal::TaskJournalFinalizerSummary {
@@ -1410,6 +1446,40 @@ pub(super) fn direct_current_workspace_top_level_dirs_overview_answer(
             ..Default::default()
         },
     ))
+}
+
+fn current_workspace_top_level_inventory_answer(
+    inventory: &CurrentWorkspaceTopLevelInventory,
+) -> String {
+    let mut lines = Vec::new();
+    push_current_workspace_inventory_group("workspace.top_level.dirs", &inventory.dirs, &mut lines);
+    push_current_workspace_inventory_group(
+        "workspace.top_level.files",
+        &inventory.files,
+        &mut lines,
+    );
+    push_current_workspace_inventory_group(
+        "workspace.top_level.other",
+        &inventory.other,
+        &mut lines,
+    );
+    lines.push("workspace.overview.kind=repository_sections_by_purpose".to_string());
+    lines.push(
+        "workspace.overview.section_hints=docs,config,code,scripts,runtime_data,build_output"
+            .to_string(),
+    );
+    lines.join("\n")
+}
+
+fn push_current_workspace_inventory_group(label: &str, items: &[String], lines: &mut Vec<String>) {
+    if items.is_empty() {
+        return;
+    }
+    lines.push(format!("field_value.{label}.count={}", items.len()));
+    lines.push(format!("field_value.{label}={}", items.join(",")));
+    lines.push(format!("{label}.count={}", items.len()));
+    lines.push(format!("{label}:"));
+    lines.extend(items.iter().map(|item| format!("- {item}")));
 }
 
 pub(super) fn replace_delivery_with_deterministic_current_workspace_dirs_overview_answer(
