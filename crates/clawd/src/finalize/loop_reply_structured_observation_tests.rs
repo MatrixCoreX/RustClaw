@@ -1,4 +1,5 @@
 use super::*;
+use crate::finalize::loop_reply::deterministic_structured_container_summary_answer;
 
 #[test]
 fn scalar_path_only_matrix_answer_projects_ambiguous_find_name_candidates() {
@@ -169,6 +170,107 @@ fn direct_db_basic_observed_answer_counts_rows_for_scalar_count_contract() {
     .expect("scalar count fallback");
 
     assert_eq!(answer, "3");
+    assert_eq!(summary.format_ok, Some(true));
+}
+
+#[test]
+fn structured_container_summary_returns_machine_fields_for_empty_object() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_basic",
+        r#"{"action":"extract_field","exists":true,"field_path":"metadata","format":"json","path":"package.json","resolved_field_path":"metadata","value":{},"value_text":"{}","value_type":"object"}"#,
+    ));
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let answer = deterministic_structured_container_summary_answer(
+        &state,
+        "Summarize metadata.",
+        &loop_state,
+        Some(&ctx),
+    )
+    .expect("structured container answer");
+
+    assert!(answer.contains("message_key=clawd.msg.structured_container.observed"));
+    assert!(answer.contains("reason_code=structured_container_observed"));
+    assert!(answer.contains("field_path=metadata"));
+    assert!(answer.contains("container_kind=object"));
+    assert!(answer.contains("item_count=0"));
+    assert!(answer.contains("is_empty=true"));
+}
+
+#[test]
+fn structured_container_summary_returns_machine_fields_for_empty_array() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_basic",
+        r#"{"action":"extract_field","exists":true,"field_path":"scripts.test","format":"json","path":"package.json","resolved_field_path":"scripts.test","value":[],"value_text":"[]","value_type":"array"}"#,
+    ));
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let answer = deterministic_structured_container_summary_answer(
+        &state,
+        "Summarize scripts.test.",
+        &loop_state,
+        Some(&ctx),
+    )
+    .expect("structured container answer");
+
+    assert!(answer.contains("message_key=clawd.msg.structured_container.observed"));
+    assert!(answer.contains("reason_code=structured_container_observed"));
+    assert!(answer.contains("field_path=scripts.test"));
+    assert!(answer.contains("container_kind=array"));
+    assert!(answer.contains("item_count=0"));
+    assert!(answer.contains("is_empty=true"));
+}
+
+#[test]
+fn direct_db_basic_observed_answer_returns_machine_fields_for_empty_rows() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "db_basic",
+        r#"{"columns":["id","name"],"rows":[]}"#,
+    ));
+
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..crate::agent_engine::AgentRunContext::default()
+    };
+
+    let (answer, summary) =
+        direct_db_basic_observed_answer(&state, "List sqlite rows.", &loop_state, Some(&ctx))
+            .expect("empty db rows fallback");
+
+    assert!(answer.contains("message_key=clawd.msg.db.rows.observed"));
+    assert!(answer.contains("reason_code=db_rows_observed"));
+    assert!(answer.contains("row_count=0"));
+    assert!(answer.contains("column_count=2"));
+    assert!(answer.contains("column.1=id"));
+    assert!(answer.contains("column.2=name"));
     assert_eq!(summary.format_ok, Some(true));
 }
 

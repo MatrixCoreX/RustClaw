@@ -5,10 +5,7 @@ use tracing::info;
 use crate::agent_engine::{append_delivery_message, AgentRunContext, LoopState};
 use crate::{AppState, ClaimedTask};
 
-use super::{
-    direct_rustclaw_config_risk_answer, log_deterministic_delivery_record,
-    prefer_english_for_user_text,
-};
+use super::{direct_rustclaw_config_risk_answer, log_deterministic_delivery_record};
 
 pub(super) fn latest_successful_synthesis_output_matches(
     loop_state: &LoopState,
@@ -51,7 +48,7 @@ fn compact_json_item_label(key: Option<&str>, value: &serde_json::Value) -> Opti
 fn structured_container_summary_from_value(
     field_path: &str,
     value: &serde_json::Value,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     let field_path = field_path.trim();
     if field_path.is_empty() {
@@ -60,13 +57,6 @@ fn structured_container_summary_from_value(
     const MAX_PREVIEW_ITEMS: usize = 6;
     match value {
         serde_json::Value::Object(map) => {
-            if map.is_empty() {
-                return Some(if prefer_english {
-                    format!("`{field_path}` is an empty object.")
-                } else {
-                    format!("`{field_path}` 是一个空对象。")
-                });
-            }
             let mut entries = map
                 .iter()
                 .filter_map(|(key, value)| compact_json_item_label(Some(key), value))
@@ -75,78 +65,51 @@ fn structured_container_summary_from_value(
             if entries.is_empty() {
                 entries = map.keys().take(MAX_PREVIEW_ITEMS).cloned().collect();
             }
-            let suffix = if map.len() > entries.len() {
-                if prefer_english {
-                    ", ..."
-                } else {
-                    "，..."
-                }
-            } else {
-                ""
-            };
-            if prefer_english {
-                Some(format!(
-                    "`{field_path}` contains {} entries: {}{}.",
-                    map.len(),
-                    entries.join(", "),
-                    suffix
-                ))
-            } else {
-                Some(format!(
-                    "`{field_path}` 包含 {} 项：{}{}。",
-                    map.len(),
-                    entries.join("、"),
-                    suffix
-                ))
+            let mut lines = structured_container_machine_header(field_path, "object", map.len());
+            lines.push(format!("truncated={}", map.len() > entries.len()));
+            for (idx, entry) in entries.iter().enumerate() {
+                push_structured_machine_line(&mut lines, &format!("item.{}.label", idx + 1), entry);
             }
+            Some(lines.join("\n"))
         }
         serde_json::Value::Array(items) => {
-            if items.is_empty() {
-                return Some(if prefer_english {
-                    format!("`{field_path}` is an empty array.")
-                } else {
-                    format!("`{field_path}` 是一个空数组。")
-                });
-            }
             let entries = items
                 .iter()
                 .filter_map(|value| compact_json_item_label(None, value))
                 .take(MAX_PREVIEW_ITEMS)
                 .collect::<Vec<_>>();
-            let suffix = if items.len() > entries.len() {
-                if prefer_english {
-                    ", ..."
-                } else {
-                    "，..."
-                }
-            } else {
-                ""
-            };
-            if entries.is_empty() {
-                return Some(if prefer_english {
-                    format!("`{field_path}` contains {} items.", items.len())
-                } else {
-                    format!("`{field_path}` 包含 {} 项。", items.len())
-                });
+            let mut lines = structured_container_machine_header(field_path, "array", items.len());
+            lines.push(format!("truncated={}", items.len() > entries.len()));
+            for (idx, entry) in entries.iter().enumerate() {
+                push_structured_machine_line(&mut lines, &format!("item.{}.label", idx + 1), entry);
             }
-            if prefer_english {
-                Some(format!(
-                    "`{field_path}` contains {} items: {}{}.",
-                    items.len(),
-                    entries.join(", "),
-                    suffix
-                ))
-            } else {
-                Some(format!(
-                    "`{field_path}` 包含 {} 项：{}{}。",
-                    items.len(),
-                    entries.join("、"),
-                    suffix
-                ))
-            }
+            Some(lines.join("\n"))
         }
         _ => None,
     }
+}
+
+fn structured_container_machine_header(
+    field_path: &str,
+    container_kind: &str,
+    item_count: usize,
+) -> Vec<String> {
+    let mut lines = vec![
+        "message_key=clawd.msg.structured_container.observed".to_string(),
+        "reason_code=structured_container_observed".to_string(),
+    ];
+    push_structured_machine_line(&mut lines, "field_path", field_path);
+    lines.push(format!("container_kind={container_kind}"));
+    lines.push(format!("item_count={item_count}"));
+    lines.push(format!("is_empty={}", item_count == 0));
+    lines
+}
+
+fn push_structured_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
+    let value = crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),
+    );
+    lines.push(format!("{key}={value}"));
 }
 
 fn structured_container_from_extract_value(
@@ -203,7 +166,8 @@ pub(super) fn deterministic_structured_container_summary_answer(
     ) {
         return None;
     }
-    let prefer_english = prefer_english_for_user_text(state, user_text);
+    let _ = state;
+    let _ = user_text;
     loop_state
         .executed_step_results
         .iter()
@@ -213,7 +177,7 @@ pub(super) fn deterministic_structured_container_summary_answer(
         })
         .filter_map(|step| step.output.as_deref())
         .filter_map(|output| serde_json::from_str::<serde_json::Value>(output).ok())
-        .find_map(|value| structured_container_from_extract_value(&value, prefer_english))
+        .find_map(|value| structured_container_from_extract_value(&value, false))
 }
 
 pub(super) fn direct_db_basic_observed_answer(
@@ -232,7 +196,8 @@ pub(super) fn direct_db_basic_observed_answer(
     ) {
         return None;
     }
-    let prefer_english = prefer_english_for_user_text(state, user_text);
+    let _ = state;
+    let _ = user_text;
     let answer = loop_state
         .executed_step_results
         .iter()
@@ -252,11 +217,7 @@ pub(super) fn direct_db_basic_observed_answer(
         return None;
     }
     Some((
-        if prefer_english {
-            answer
-        } else {
-            answer.replace(", ", "，")
-        },
+        answer,
         crate::task_journal::TaskJournalFinalizerSummary {
             stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
             disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
@@ -315,7 +276,16 @@ fn db_basic_rows_answer_from_output_with_scalar_count(
         return Some(rows.len().to_string());
     }
     if rows.is_empty() {
-        return Some("No rows returned.".to_string());
+        let mut lines = vec![
+            "message_key=clawd.msg.db.rows.observed".to_string(),
+            "reason_code=db_rows_observed".to_string(),
+            "row_count=0".to_string(),
+            format!("column_count={}", columns.len()),
+        ];
+        for (idx, column) in columns.iter().enumerate() {
+            push_structured_machine_line(&mut lines, &format!("column.{}", idx + 1), column);
+        }
+        return Some(lines.join("\n"));
     }
     if rows.len() == 1 && columns.len() == 1 {
         return rows
