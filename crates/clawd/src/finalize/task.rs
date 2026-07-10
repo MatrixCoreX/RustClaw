@@ -18,6 +18,8 @@ mod task_payload_helpers;
 mod task_resume;
 #[path = "task_structured_evidence_table.rs"]
 mod task_structured_evidence_table;
+#[path = "task_terminal_clarify.rs"]
+mod task_terminal_clarify;
 #[path = "task_tree_summary_recovery.rs"]
 mod task_tree_summary_recovery;
 
@@ -1298,6 +1300,16 @@ pub(crate) async fn finalize_ask_result(
                 (answer_text, answer_messages)
             };
             journal.record_final_answer(&answer_text);
+            if task_terminal_clarify::preserve_terminal_clarify_from_journal(
+                &journal,
+                &mut answer_text,
+                &mut answer_messages,
+            ) {
+                failure_reply = false;
+                semantic_clarify = true;
+                journal.answer_verifier_summary = None;
+                journal.record_final_answer(&answer_text);
+            }
             if recover_raw_command_machine_field_final_answer(
                 route_result,
                 &mut journal,
