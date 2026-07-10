@@ -182,9 +182,9 @@ fn record_active_recipe_terminal_discussion_replan(
 }
 
 fn deterministic_observed_execution_status_answer(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
+    _state: &AppState,
+    _task: &ClaimedTask,
+    _user_text: &str,
     loop_state: &LoopState,
 ) -> Option<String> {
     let observed_steps = loop_state
@@ -204,13 +204,19 @@ fn deterministic_observed_execution_status_answer(
         return None;
     }
 
-    let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
-    let prefer_english = language_hint == "en";
-    let mut parts = Vec::new();
+    let mut steps = Vec::new();
+    let mut succeeded_count = 0usize;
+    let mut failed_count = 0usize;
     for (idx, step) in observed_steps.iter().enumerate() {
         let step_no = idx + 1;
         let skill = step.skill.trim();
+        let mut payload = serde_json::Map::new();
+        payload.insert("step_no".to_string(), json!(step_no));
+        payload.insert("step_id".to_string(), json!(step.step_id.trim()));
+        payload.insert("skill".to_string(), json!(skill));
         if step.is_ok() {
+            succeeded_count += 1;
+            payload.insert("status".to_string(), json!("ok"));
             let output = step
                 .output
                 .as_deref()
@@ -221,52 +227,65 @@ fn deterministic_observed_execution_status_answer(
                         &crate::visible_text::sanitize_user_visible_text(text).replace('\n', " "),
                     )
                 });
-            if prefer_english {
-                if let Some(output) = output {
-                    parts.push(format!("Step {step_no} `{skill}` succeeded: {output}."));
-                } else {
-                    parts.push(format!("Step {step_no} `{skill}` succeeded."));
-                }
-            } else {
-                if let Some(output) = output {
-                    parts.push(format!("第 {step_no} 步 `{skill}` 成功：{output}。"));
-                } else {
-                    parts.push(format!("第 {step_no} 步 `{skill}` 成功。"));
-                }
+            if let Some(output) = output {
+                payload.insert("output_excerpt".to_string(), json!(output));
             }
+            steps.push(Value::Object(payload));
             continue;
         }
-        let error = step
+        failed_count += 1;
+        payload.insert("status".to_string(), json!("error"));
+        match step
             .error
             .as_deref()
             .map(str::trim)
             .filter(|text| !text.is_empty())
-            .map(|text| {
-                if crate::skills::parse_structured_skill_error(text).is_some()
-                    || crate::skills::is_recoverable_skill_error(skill, text)
-                {
-                    crate::skills::normalize_skill_error_for_user(skill, text)
+        {
+            Some(error) => {
+                if let Some(structured) = crate::skills::parse_structured_skill_error(error) {
+                    payload.insert("error_kind".to_string(), json!(structured.error_kind));
+                    payload.insert("error_skill".to_string(), json!(structured.skill));
+                    payload.insert("error_platform".to_string(), json!(structured.platform));
+                    let error_excerpt = crate::truncate_for_agent_trace(
+                        &crate::visible_text::sanitize_user_visible_text(&structured.error_text)
+                            .replace('\n', " "),
+                    );
+                    payload.insert("error_excerpt".to_string(), json!(error_excerpt));
+                    if let Some(extra) = structured.extra {
+                        payload.insert("error_extra".to_string(), extra);
+                    }
                 } else {
-                    text.to_string()
+                    let error_excerpt = crate::truncate_for_agent_trace(
+                        &crate::visible_text::sanitize_user_visible_text(error).replace('\n', " "),
+                    );
+                    payload.insert("error_excerpt".to_string(), json!(error_excerpt));
                 }
-            })
-            .unwrap_or_else(|| {
-                serde_json::json!({
-                    "message_key": "clawd.msg.execution.step_error_missing",
-                    "reason_code": "execution_step_error_missing",
-                })
-                .to_string()
-            });
-        let error = crate::truncate_for_agent_trace(
-            &crate::visible_text::sanitize_user_visible_text(&error).replace('\n', " "),
-        );
-        if prefer_english {
-            parts.push(format!("Step {step_no} `{skill}` failed: {error}."));
-        } else {
-            parts.push(format!("第 {step_no} 步 `{skill}` 失败：{error}。"));
+            }
+            None => {
+                payload.insert(
+                    "message_key".to_string(),
+                    json!("clawd.msg.execution.step_error_missing"),
+                );
+                payload.insert(
+                    "reason_code".to_string(),
+                    json!("execution_step_error_missing"),
+                );
+            }
         }
+        steps.push(Value::Object(payload));
     }
-    Some(parts.join(" "))
+    Some(
+        json!({
+            "message_key": "clawd.msg.execution.step_status_summary",
+            "reason_code": "observed_execution_status",
+            "status": "error",
+            "succeeded_count": succeeded_count,
+            "failed_count": failed_count,
+            "steps": steps,
+            "text": Value::Null,
+        })
+        .to_string(),
+    )
 }
 
 fn rewrite_response_with_written_aliases(text: &str, loop_state: &LoopState) -> String {

@@ -952,9 +952,22 @@ fn deterministic_status_answer_uses_observed_step_status_before_llm() {
     )
     .expect("deterministic status answer");
 
-    assert!(answer.contains("list_dir"));
-    assert!(answer.contains("run_cmd"));
-    assert!(answer.contains("exit code 127"));
+    let payload = serde_json::from_str::<serde_json::Value>(&answer).expect("machine payload");
+    assert_eq!(
+        payload["message_key"],
+        "clawd.msg.execution.step_status_summary"
+    );
+    assert_eq!(payload["reason_code"], "observed_execution_status");
+    assert_eq!(payload["succeeded_count"], 1);
+    assert_eq!(payload["failed_count"], 1);
+    assert_eq!(payload["steps"][0]["skill"], "list_dir");
+    assert_eq!(payload["steps"][0]["status"], "ok");
+    assert_eq!(payload["steps"][1]["skill"], "run_cmd");
+    assert_eq!(payload["steps"][1]["status"], "error");
+    assert_eq!(
+        payload["steps"][1]["error_excerpt"],
+        "Command failed with exit code 127"
+    );
 }
 
 #[test]
@@ -1046,8 +1059,14 @@ fn deterministic_status_answer_uses_structured_run_cmd_stderr() {
     )
     .expect("deterministic status answer");
 
-    assert!(answer.contains("exit code 7"), "answer: {answer}");
-    assert!(answer.contains("stderr: problem"), "answer: {answer}");
+    let payload = serde_json::from_str::<serde_json::Value>(&answer).expect("machine payload");
+    assert_eq!(payload["steps"][1]["error_kind"], "nonzero_exit");
+    assert_eq!(
+        payload["steps"][1]["error_excerpt"],
+        "Command failed with exit code 7"
+    );
+    assert_eq!(payload["steps"][1]["error_extra"]["stderr"], "problem");
+    assert_eq!(payload["steps"][1]["error_extra"]["exit_code"], 7);
 }
 
 #[test]
