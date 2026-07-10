@@ -7,13 +7,13 @@ use super::{
     answer_is_direct_observation_passthrough, archive_list_raw_passthrough_replacement,
     archive_list_summary_from_body, compound_listing_content_delivery_guard_entry,
     cross_turn_observed_output_entries, dir_compare_direct_answer_candidate,
-    execution_failed_step_guard_entry, extract_direct_answer_from_generic_output,
-    extract_direct_answer_from_generic_output_i18n, extract_direct_scalar_from_generic_output,
-    extract_direct_scalar_from_generic_output_i18n,
+    execution_failed_step_guard_entry, extract_answer_from_finalizer_envelope_text,
+    extract_direct_answer_from_generic_output, extract_direct_answer_from_generic_output_i18n,
+    extract_direct_scalar_from_generic_output, extract_direct_scalar_from_generic_output_i18n,
     extract_direct_scalar_from_generic_output_with_locator_hint,
     extract_field_direct_answer_candidate, has_observed_answer_candidates,
     inventory_dir_direct_answer_candidate, multi_count_quantity_comparison_guard_entry,
-    normalize_system_basic_match_path, normalized_observed_listing,
+    non_code_markdown_text, normalize_system_basic_match_path, normalized_observed_listing,
     observed_answer_fallback_prompt_logical_path, observed_answer_language_compatible,
     observed_answer_language_compatible_for_route, observed_contract_json,
     observed_language_supports_bilingual_template, observed_output_entries,
@@ -26,9 +26,9 @@ use super::{
     route_quantity_comparison_requires_model_language_synthesis, route_requests_scalar_path_only,
     route_requires_synthesized_delivery, scalar_count_diagnostic_line_for_answer,
     scalar_count_diagnostic_machine_answer, scalar_route_prefers_structured_observed_answer,
-    structured_observed_body, tree_summary_direct_answer_candidate,
-    try_synthesize_answer_from_observed_output, AgentRunContext,
-    OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
+    strip_bare_json_language_prefix, structured_observed_body,
+    tree_summary_direct_answer_candidate, try_synthesize_answer_from_observed_output,
+    AgentRunContext, ObservedAnswerFallbackOut, OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
 };
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{
@@ -114,3 +114,4 @@ include!("observed_output_tests/system_archive_path_package.rs");
 include!("observed_output_tests/sqlite_archive_quantity_git.rs");
 include!("observed_output_tests/raw_health_service_http_log.rs");
 include!("observed_output_tests/raw_health_service_http_log_tail.rs");
+include!("observed_output_tests/text_parsing.rs");
