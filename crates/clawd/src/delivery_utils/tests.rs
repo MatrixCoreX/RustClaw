@@ -16,9 +16,11 @@ use super::file_delivery::{
     scan_filename_matches_with_limit,
 };
 use super::locator::{
-    directory_lookup_input_from_hint, extract_bare_filename_stem_candidates,
-    extract_directory_and_file_pair, extract_explicit_file_path_candidates,
+    directory_lookup_input_from_hint, extract_explicit_file_path_candidates,
     extract_filename_candidates,
+};
+use super::locator_test_support::{
+    extract_bare_filename_stem_candidates, extract_directory_and_file_pair,
 };
 use super::output_contract::{sync_output_payload, take_first_sentence};
 use super::{

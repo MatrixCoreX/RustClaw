@@ -8,6 +8,8 @@ use crate::{AppState, IntentOutputContract, OutputResponseShape, OutputSemanticK
 mod directory_lookup;
 mod file_delivery;
 mod locator;
+#[cfg(test)]
+mod locator_test_support;
 mod message_media;
 mod output_contract;
 mod path_helpers;
@@ -158,16 +160,16 @@ fn classify_directory_lookup_input(user_request: &str) -> Option<DirectoryLookup
     if text.is_empty() {
         return None;
     }
-    locator::parse_directory_lookup_input_for_tests(text)
+    locator_test_support::parse_directory_lookup_input_for_tests(text)
 }
 
 #[cfg(test)]
 fn classify_batch_directory_delivery_input(user_request: &str) -> Option<DirectoryLookupInput> {
     let text = user_request.trim();
-    if text.is_empty() || locator::extract_directory_and_file_pair(text).is_some() {
+    if text.is_empty() || locator_test_support::extract_directory_and_file_pair(text).is_some() {
         return None;
     }
-    locator::parse_directory_lookup_input_for_tests(text)
+    locator_test_support::parse_directory_lookup_input_for_tests(text)
 }
 #[cfg(test)]
 fn resolve_file_delivery_target(
