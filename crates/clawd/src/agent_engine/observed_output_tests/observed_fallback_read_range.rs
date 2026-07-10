@@ -560,7 +560,7 @@ fn direct_answer_passthroughs_contract_filename_read_range_excerpt_without_llm()
     };
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("# RustClaw\n（空行）\n<img src=\"./RustClaw.png\" width=\"420\" />\n（空行）")
+        Some("# RustClaw\n\n<img src=\"./RustClaw.png\" width=\"420\" />\n")
     );
 }
 
@@ -653,7 +653,7 @@ fn raw_command_output_read_range_direct_answer_preserves_visible_blank_line() {
 
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
-        Some("# RustClaw\n（空行）")
+        Some("# RustClaw\n")
     );
 }
 

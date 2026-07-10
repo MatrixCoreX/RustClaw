@@ -214,10 +214,10 @@ pub(crate) fn normalize_read_range_excerpt(excerpt: &str) -> Option<String> {
 }
 
 pub(super) fn normalize_read_range_excerpt_for_direct_answer(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     excerpt: &str,
-    prefer_english: bool,
-    preserve_blank_lines: bool,
+    _prefer_english: bool,
+    _preserve_blank_lines: bool,
 ) -> Option<String> {
     let lines = excerpt
         .lines()
@@ -235,22 +235,6 @@ pub(super) fn normalize_read_range_excerpt_for_direct_answer(
         .collect::<Vec<_>>();
     if lines.is_empty() || lines.iter().all(|line| line.is_empty()) {
         return None;
-    }
-    if !preserve_blank_lines && lines.iter().any(|line| line.is_empty()) {
-        let blank = observed_t(
-            state,
-            "clawd.msg.read_range_blank_line",
-            "（空行）",
-            "(blank line)",
-            prefer_english,
-        );
-        return Some(
-            lines
-                .into_iter()
-                .map(|line| if line.is_empty() { blank.clone() } else { line })
-                .collect::<Vec<_>>()
-                .join("\n"),
-        );
     }
     Some(lines.join("\n"))
 }
