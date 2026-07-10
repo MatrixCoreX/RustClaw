@@ -1025,6 +1025,9 @@ pub(super) fn should_force_actionable_plan_repair(
     if route_allows_existing_observed_context_terminal_respond(route_result, actions) {
         return false;
     }
+    if route_allows_active_bound_context_terminal_respond(route_result, loop_state, actions) {
+        return false;
+    }
     let requires_action_before_reply =
         !loop_state.has_tool_or_skill_output && route_result.is_execute_gate();
     route_result.output_contract.requires_content_evidence || requires_action_before_reply
@@ -1089,6 +1092,78 @@ fn route_allows_existing_observed_context_terminal_respond(
     is_plain_respond_only_plan(actions)
         .map(str::trim)
         .is_some_and(|content| !content.is_empty())
+}
+
+fn route_allows_active_bound_context_terminal_respond(
+    route_result: &RouteResult,
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> bool {
+    if route_result.needs_clarify
+        || route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || route_result.output_contract.delivery_intent != crate::OutputDeliveryIntent::None
+        || !matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Free
+                | crate::OutputResponseShape::OneSentence
+                | crate::OutputResponseShape::Strict
+        )
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        || !route_allows_model_language_terminal_respond(Some(route_result))
+    {
+        return false;
+    }
+    let locator_hint = route_result.output_contract.locator_hint.trim();
+    if locator_hint.is_empty()
+        || is_plain_respond_only_plan(actions)
+            .map(str::trim)
+            .is_none_or(str::is_empty)
+    {
+        return false;
+    }
+    active_context_targets_from_loop_state(loop_state)
+        .iter()
+        .any(|target| locator_surfaces_match(target, locator_hint))
+}
+
+fn active_context_targets_from_loop_state(loop_state: &LoopState) -> Vec<String> {
+    let Some(raw) = loop_state.output_vars.get("active_bound_targets") else {
+        return Vec::new();
+    };
+    let Ok(values) = serde_json::from_str::<Vec<String>>(raw) else {
+        return Vec::new();
+    };
+    values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn locator_surfaces_match(target: &str, locator_hint: &str) -> bool {
+    let target = target.trim();
+    let locator_hint = locator_hint.trim();
+    if target.is_empty() || locator_hint.is_empty() {
+        return false;
+    }
+    if target == locator_hint {
+        return true;
+    }
+    let target_file = Path::new(target).file_name().and_then(|name| name.to_str());
+    let hint_file = Path::new(locator_hint)
+        .file_name()
+        .and_then(|name| name.to_str());
+    match (target_file, hint_file) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
 }
 
 pub(super) fn required_session_alias_targets_from_loop_state(
