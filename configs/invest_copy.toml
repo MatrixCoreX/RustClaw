@@ -1,0 +1,21 @@
+[invest_copy]
+# Compliance-sensitive terms are policy metadata, not routing logic.
+# Runtime only reports a reason_code/term_index match; visible wording belongs to
+# the finalizer, i18n resources, or model-rendered copy.
+compliance_sensitive_terms = [
+  "保证收益",
+  "保本保收益",
+  "稳赚",
+  "稳赚不赔",
+  "一夜暴富",
+  "必买",
+  "闭眼买",
+  "满仓干",
+  "加杠杆满仓",
+  "坐庄",
+  "内幕消息",
+  "无风险高收益",
+  "guaranteed return",
+  "risk-free return",
+  "must buy ticker",
+]
