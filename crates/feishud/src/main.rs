@@ -645,11 +645,7 @@ async fn handle_incoming_feishu_media(state: AppState, ctx: FeishuMediaCtx) {
         return;
     }
 
-    let label = feishu_media_kind_label_zh(&ctx.message_type);
-    let hint = format!(
-        "用户发来{}，已保存为工作区相对路径：{}。请根据能力回复或调用工具处理。",
-        label, rel
-    );
+    let hint = feishu_media_agent_context(&ctx.message_type, &rel);
     handle_text_message_to_clawd(state, ctx.open_id, ctx.chat_id, hint, Some(ident.user_key));
 }
 
