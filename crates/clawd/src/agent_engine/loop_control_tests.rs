@@ -438,6 +438,54 @@ fn inconsistent_locator_clarify_without_route_boundary_replans_then_finishes_as_
 }
 
 #[test]
+fn deferred_agent_loop_locator_clarify_does_not_recover_into_plan_file_read() {
+    let plan = plan_result_with_raw_and_steps(
+        "{}",
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "Which file should I read?",
+                "terminal_intent": "clarify",
+                "clarify_reason_code": "missing_locator",
+                "missing_slot": "locator",
+                "locator_kind": "path"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
+    let mut route = route_result(OutputResponseShape::OneSentence);
+    route.risk_ceiling = RiskCeiling::Low;
+    route.needs_clarify = false;
+    route.wants_file_delivery = false;
+    route.route_reason = "standalone_freeform_clarify_loop_context".to_string();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.delivery_required = false;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    let mut loop_state = LoopState::new(2);
+
+    assert!(
+        try_recover_inconsistent_boundary_clarify(&mut loop_state, Some(&route), &intent).is_none()
+    );
+
+    let outcome = apply_structured_respond_clarify_to_loop_state(&mut loop_state, &intent);
+    assert_eq!(
+        outcome.stop_signal.as_deref(),
+        Some("structured_respond_clarify")
+    );
+    assert!(loop_state.pending_user_input_required);
+    assert_eq!(
+        loop_state.delivery_messages,
+        vec!["Which file should I read?"]
+    );
+    assert!(loop_state.attempt_ledger_entries.is_empty());
+}
+
+#[test]
 fn decision_envelope_output_vars_do_not_expose_initial_gate_ref_as_field() {
     let route = route_result(OutputResponseShape::OneSentence);
     let plan = plan_result_with_raw_and_steps(
