@@ -268,6 +268,36 @@ fn scalar_count_diagnostic_machine_answer(diagnostic: &str) -> String {
     .join("\n")
 }
 
+fn missing_extract_field_machine_answer(field_path: &str) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.extract_field_missing".to_string(),
+        "reason_code=extract_field_missing".to_string(),
+        "final_answer_shape=missing_structured_field".to_string(),
+        "exists=false".to_string(),
+    ];
+    push_observed_machine_line(&mut lines, "field_path", field_path);
+    lines.join("\n")
+}
+
+fn package_manager_detected_machine_answer(manager: &str) -> String {
+    let mut lines = vec![
+        "message_key=clawd.msg.package_manager_detected".to_string(),
+        "reason_code=package_manager_observed".to_string(),
+        "final_answer_shape=package_manager_summary".to_string(),
+    ];
+    push_observed_machine_line(&mut lines, "manager", manager);
+    push_observed_machine_line(&mut lines, "observed_field", "package_manager");
+    push_observed_machine_line(&mut lines, "observed_value", manager);
+    lines.join("\n")
+}
+
+fn push_observed_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
+    let value = crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(value).replace('\n', " "),
+    );
+    lines.push(format!("{key}={value}"));
+}
+
 fn direct_free_text_conflicts_with_request_language(
     candidate: &str,
     request_language_hint: &str,

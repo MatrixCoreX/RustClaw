@@ -1,22 +1,15 @@
 use super::*;
 
 pub(super) fn structured_field_display_line(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     field_path: &str,
     value: &serde_json::Value,
     value_text: Option<&str>,
     exists: bool,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> String {
     if !exists {
-        return observed_t_with_vars(
-            state,
-            "clawd.msg.structured_field_missing_display",
-            "{field_path}: 不存在",
-            "{field_path}: not found",
-            prefer_english,
-            &[("field_path", field_path)],
-        );
+        return missing_extract_field_machine_answer(field_path);
     }
     let rendered = value_text
         .map(str::trim)
@@ -168,14 +161,7 @@ pub(super) fn extract_field_direct_answer_candidate(
         if !allow_localized_template {
             return None;
         }
-        return Some(observed_t_with_vars(
-            state,
-            "clawd.msg.extract_field_missing",
-            "未找到 {field_path} 字段",
-            "field not found: {field_path}",
-            prefer_english,
-            &[("field_path", field_path)],
-        ));
+        return Some(missing_extract_field_machine_answer(field_path));
     }
     let field_value = value.get("value").unwrap_or(&serde_json::Value::Null);
     if matches!(

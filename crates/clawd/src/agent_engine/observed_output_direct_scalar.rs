@@ -334,14 +334,7 @@ pub(super) fn structured_scalar_candidate(
                 .map(str::trim)
                 .filter(|v| !v.is_empty())
                 .unwrap_or("requested field");
-            Some(observed_t_with_vars(
-                state,
-                "clawd.msg.extract_field_missing",
-                "未找到 {field_path} 字段",
-                "field not found: {field_path}",
-                prefer_english,
-                &[("field_path", field_path)],
-            ))
+            Some(missing_extract_field_machine_answer(field_path))
         }
         "extract_fields" | "read_fields" => {
             if route.is_some_and(|route| {
@@ -466,11 +459,11 @@ pub(super) fn format_market_price(price: f64) -> String {
 }
 
 pub(super) fn package_manager_summary_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     body: &str,
     response_shape: Option<crate::OutputResponseShape>,
     allow_localized_direct_template: bool,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     let manager = body
         .lines()
@@ -484,14 +477,7 @@ pub(super) fn package_manager_summary_candidate(
             | crate::OutputResponseShape::Free
             | crate::OutputResponseShape::Strict,
         ) if allow_localized_direct_template => {
-            Some(observed_t_with_vars(
-                state,
-                "clawd.msg.package_manager_detected",
-                "检测到的包管理器是 {manager}，依据是 package_manager 返回了 package_manager={manager}。",
-                "Detected package manager: {manager}. Basis: package_manager returned package_manager={manager}.",
-                prefer_english,
-                &[("manager", manager)],
-            ))
+            Some(package_manager_detected_machine_answer(manager))
         }
         _ => None,
     }

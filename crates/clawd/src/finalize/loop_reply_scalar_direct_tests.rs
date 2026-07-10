@@ -629,7 +629,10 @@ fn direct_scalar_finalize_uses_structured_extract_field_missing_message() {
     let (answer, summary) =
         direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
             .expect("scalar fallback should succeed");
-    assert_eq!(answer, "未找到 name 字段");
+    assert!(answer.contains("message_key=clawd.msg.extract_field_missing"));
+    assert!(answer.contains("reason_code=extract_field_missing"));
+    assert!(answer.contains("field_path=name"));
+    assert!(answer.contains("exists=false"));
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
@@ -658,7 +661,10 @@ fn direct_scalar_finalize_uses_structured_read_field_missing_message() {
     let (answer, summary) =
         direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
             .expect("scalar fallback should succeed");
-    assert_eq!(answer, "未找到 package.name 字段");
+    assert!(answer.contains("message_key=clawd.msg.extract_field_missing"));
+    assert!(answer.contains("reason_code=extract_field_missing"));
+    assert!(answer.contains("field_path=package.name"));
+    assert!(answer.contains("exists=false"));
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
