@@ -307,7 +307,7 @@ fn parse_structured_narrative_action_output_rejects_extra_fields() {
 }
 
 #[test]
-fn render_structured_narrative_action_output_uses_zh_labels() {
+fn render_structured_narrative_action_output_keeps_model_primary_text() {
     let output = StructuredNarrativeActionOutput::ScreenshotSummary(ImageScreenshotSummaryOut {
         purpose: "设置页面".to_string(),
         critical_text: vec!["隐私设置".to_string()],
@@ -316,7 +316,5 @@ fn render_structured_narrative_action_output_uses_zh_labels() {
         uncertainties: vec![],
     });
     let rendered = render_structured_narrative_action_output(&output, Some("zh-CN"));
-    assert!(rendered.contains("用途：设置页面"));
-    assert!(rendered.contains("关键信息：隐私设置"));
-    assert!(rendered.contains("警告：有未保存更改"));
+    assert_eq!(rendered, "设置页面");
 }
