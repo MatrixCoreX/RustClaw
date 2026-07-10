@@ -37,6 +37,9 @@ qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
 # - Qwen native (`qwen3-tts-instruct-flash`, `qwen3-tts-flash`): `Cherry` / `Serena` / `Ethan`
 # - Mimo native (`mimo-v2.5-tts`): `mimo_default` / `Mia` / `Chloe` / `冰糖`
 # - MiniMax native (`speech-2.8-*`, `speech-2.6-*`, `speech-02-*`): `male-qn-qingse`
+# Provider voice metadata
+mimo_voices = ["mimo_default", "冰糖", "茉莉", "苏打", "白桦", "Mia", "Chloe", "Milo", "Dean"]
+
 # Fault-tolerant fallback / vendor-default fallback
 # - request.voice > default_voice > vendor builtin default
 # - unsupported / mismatched voice names fall back to the selected vendor default

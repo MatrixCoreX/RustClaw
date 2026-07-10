@@ -36,6 +36,22 @@ fn normalize_and_ext() {
 }
 
 #[test]
+fn mimo_voice_metadata_comes_from_config() {
+    assert!(canonical_voice_name(MIMO_TTS_VOICES, "mimo_default").is_some());
+    assert!(canonical_voice_name(MIMO_TTS_VOICES, "冰糖").is_none());
+
+    let cfg = AudioSynthesizeConfig {
+        mimo_voices: Some(vec!["mimo_default".to_string(), "冰糖".to_string()]),
+        ..AudioSynthesizeConfig::default()
+    };
+
+    assert_eq!(
+        resolve_voice_for_vendor(VendorKind::Mimo, Some("冰糖"), None, &cfg),
+        "冰糖"
+    );
+}
+
+#[test]
 fn dry_run_returns_machine_payload_without_writing_file() {
     let root = unique_temp_root("audio-synthesize-dry-run");
     let (text, extra) = execute(

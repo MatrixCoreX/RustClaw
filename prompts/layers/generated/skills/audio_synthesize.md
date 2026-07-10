@@ -59,7 +59,7 @@
 
 Provider notes:
 - `minimax` is the current repo default for ordinary TTS requests; use the runtime default unless the user explicitly asks for another provider.
-- `mimo` uses `mimo-v2.5-tts` by default, with voices such as `mimo_default`, `Mia`, `Chloe`, `冰糖`, `茉莉`, `苏打`, and `白桦`.
+- `mimo` uses `mimo-v2.5-tts` by default; provider voice metadata is configured in `configs/audio.toml` under `audio_synthesize.mimo_voices`.
 - Mimo native TTS currently returns chat-completions audio data; use `mp3`, `wav`, or `pcm16` according to the requested file/container format.
 - Qwen native TTS remains supported, but external account billing errors should surface as provider failures rather than being hidden.
 
