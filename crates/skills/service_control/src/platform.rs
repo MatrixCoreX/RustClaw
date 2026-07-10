@@ -6,9 +6,7 @@ const DISCOVER_CANDIDATES_MAX: usize = 20;
 fn strip_service_suffix(s: &str) -> &str {
     let s = s.trim();
     let s_lower = s.to_lowercase();
-    if s.ends_with("\u{670D}\u{52A1}") {
-        s[..s.len().saturating_sub("\u{670D}\u{52A1}".len())].trim()
-    } else if s_lower.ends_with(" service") {
+    if s_lower.ends_with(" service") {
         s_lower
             .rfind(" service")
             .map(|i| s[..i].trim())

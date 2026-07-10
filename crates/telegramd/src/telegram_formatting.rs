@@ -642,10 +642,16 @@ pub(super) fn parse_structured_key_value(input: &str) -> Option<(&str, &str, &st
 }
 
 pub(super) fn looks_like_command_example_line(input: &str) -> bool {
-    input.starts_with('/')
-        || input.starts_with("示例：/")
-        || input.starts_with("example: /")
-        || input.starts_with("Example: /")
+    input.starts_with('/') || command_after_label_separator(input)
+}
+
+fn command_after_label_separator(input: &str) -> bool {
+    [":", "："].iter().any(|sep| {
+        input.split_once(sep).is_some_and(|(label, rest)| {
+            let label_len = label.trim().chars().count();
+            (1..=24).contains(&label_len) && rest.trim_start().starts_with('/')
+        })
+    })
 }
 
 pub(super) fn looks_like_section_header_line(input: &str) -> bool {

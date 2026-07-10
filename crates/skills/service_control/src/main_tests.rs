@@ -219,7 +219,17 @@ fn normalize_target_alias_maps_common_aliases() {
 
 #[test]
 fn normalize_target_alias_strips_service_suffix() {
-    assert_eq!(normalize_target_alias("nginx\u{670D}\u{52A1}"), "nginx");
-    assert_eq!(normalize_target_alias("mysql \u{670D}\u{52A1}"), "mysql");
     assert_eq!(normalize_target_alias("redis service"), "redis");
+}
+
+#[test]
+fn normalize_target_alias_does_not_parse_natural_language_suffixes() {
+    assert_eq!(
+        normalize_target_alias("nginx\u{670D}\u{52A1}"),
+        "nginx\u{670D}\u{52A1}"
+    );
+    assert_eq!(
+        normalize_target_alias("mysql \u{670D}\u{52A1}"),
+        "mysql \u{670D}\u{52A1}"
+    );
 }
