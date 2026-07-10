@@ -530,10 +530,10 @@ fn hidden_entries_answer_limit(route: &crate::RouteResult) -> usize {
 }
 
 pub(super) fn hidden_entries_direct_answer(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     route: &crate::RouteResult,
     loop_state: &LoopState,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if !route_requests_hidden_entries_check(route) {
         return None;
@@ -549,13 +549,16 @@ pub(super) fn hidden_entries_direct_answer(
         return Some(hidden_entries.len().to_string());
     }
     if hidden_entries.is_empty() {
-        return Some(observed_t(
-            state,
-            "clawd.msg.hidden_entries_none",
-            "未发现隐藏文件。",
-            "No hidden entries found.",
-            prefer_english,
-        ));
+        return Some(
+            [
+                "message_key=clawd.msg.hidden_entries.observed",
+                "reason_code=hidden_entries_observed",
+                "has_hidden=false",
+                "hidden_count=0",
+                "example_count=0",
+            ]
+            .join("\n"),
+        );
     }
     Some(
         hidden_entries

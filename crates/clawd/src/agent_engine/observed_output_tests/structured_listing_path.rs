@@ -871,8 +871,11 @@ fn direct_answer_formats_hidden_entries_check_empty_inventory_without_followup()
     let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
         .expect("hidden entries strict contract should answer from inventory");
 
-    assert!(answer.contains("未发现隐藏文件"));
-    assert!(!answer.contains("要继续"));
+    assert!(answer.contains("message_key=clawd.msg.hidden_entries.observed"));
+    assert!(answer.contains("reason_code=hidden_entries_observed"));
+    assert!(answer.contains("has_hidden=false"));
+    assert!(answer.contains("hidden_count=0"));
+    assert!(answer.contains("example_count=0"));
 }
 
 #[test]
