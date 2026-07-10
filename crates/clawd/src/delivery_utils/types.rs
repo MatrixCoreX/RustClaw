@@ -52,11 +52,13 @@ pub(super) fn localize_delivery_message_for_request(
     kind: DeliveryMessageKind,
     user_request: &str,
 ) -> String {
+    let default_text =
+        crate::i18n_t_with_default(state, kind.i18n_key(), &kind.machine_default_payload());
     crate::i18n_t_for_language_hint_with_default_vars(
         state,
         crate::language_policy::request_language_hint(user_request),
         kind.i18n_key(),
-        &kind.machine_default_payload(),
+        &default_text,
         &[],
     )
 }

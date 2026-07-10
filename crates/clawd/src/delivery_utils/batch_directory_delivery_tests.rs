@@ -88,7 +88,7 @@ fn batch_directory_delivery_only_sends_current_level_and_adds_child_dir_hint() {
 }
 
 #[test]
-fn batch_directory_delivery_messages_keep_token_only_lines_when_text_has_child_dir_hint() {
+fn batch_directory_delivery_messages_keep_file_tokens_with_child_dir_hint() {
     let mut state = test_state_with_i18n(&[(
         "clawd.msg.directory.child_dirs_hint",
         "This directory also contains subdirectories.",
@@ -121,10 +121,10 @@ fn batch_directory_delivery_messages_keep_token_only_lines_when_text_has_child_d
     );
 
     assert!(text.starts_with("FILE:"));
-    assert!(!text.contains("subdirectories"));
+    assert!(text.contains("subdirectories"));
     assert_eq!(messages.len(), 1);
     assert!(messages[0].starts_with("FILE:"));
-    assert!(!messages[0].contains("subdirectories"));
+    assert!(messages[0].contains("subdirectories"));
 }
 
 #[test]

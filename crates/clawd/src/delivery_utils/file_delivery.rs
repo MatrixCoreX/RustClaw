@@ -2,12 +2,12 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use super::directory_lookup::{resolve_directory_locator_input, resolve_directory_target};
-#[cfg(test)]
-use super::locator::classify_file_delivery_locator_input_for_tests;
 use super::locator::{
     classify_file_delivery_locator_from_hint, extract_explicit_file_path_candidates,
     normalize_locator_text,
 };
+#[cfg(test)]
+use super::locator_test_support::classify_file_delivery_locator_input_for_tests;
 use super::types::localize_delivery_message_for_request;
 use super::{
     resolve_existing_dir_under_root, resolve_existing_file_under_root,
