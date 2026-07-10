@@ -258,7 +258,14 @@ fn dir_compare_direct_answer_reports_no_differences() {
 
     let answer = dir_compare_direct_answer_candidate(None, &value, true).expect("answer");
 
-    assert_eq!(answer, "No differences found.");
+    assert!(answer.contains("message_key=clawd.msg.dir_compare.observed"));
+    assert!(answer.contains("reason_code=dir_compare_observed"));
+    assert!(answer.contains("has_differences=false"));
+    assert!(answer.contains("left_only_count=0"));
+    assert!(answer.contains("right_only_count=0"));
+    assert!(answer.contains("kind_mismatch_count=0"));
+    assert!(!answer.contains("No differences"), "answer: {answer}");
+    assert!(!answer.contains("未发现差异"), "answer: {answer}");
 }
 
 #[test]

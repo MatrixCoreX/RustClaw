@@ -452,9 +452,9 @@ fn tree_summary_row_machine_line(row: &serde_json::Value) -> Option<String> {
 }
 
 pub(super) fn dir_compare_direct_answer_candidate(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     value: &serde_json::Value,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if value.get("action").and_then(|v| v.as_str()) != Some("dir_compare") {
         return None;
@@ -472,22 +472,28 @@ pub(super) fn dir_compare_direct_answer_candidate(
         .get("kind_mismatches")
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
-    if left_only == 0 && right_only == 0 && kind_mismatches == 0 {
-        return Some(observed_t(
-            state,
-            "clawd.msg.dir_compare_no_diff",
-            "未发现差异。",
-            "No differences found.",
-            prefer_english,
-        ));
-    }
-    Some(if prefer_english {
+    let mut lines = vec![
+        "message_key=clawd.msg.dir_compare.observed".to_string(),
+        "reason_code=dir_compare_observed".to_string(),
         format!(
-            "Differences found: left-only {left_only}, right-only {right_only}, kind mismatches {kind_mismatches}."
-        )
-    } else {
-        format!("发现差异：左侧独有 {left_only} 项，右侧独有 {right_only} 项，类型不一致 {kind_mismatches} 项。")
-    })
+            "has_differences={}",
+            left_only > 0 || right_only > 0 || kind_mismatches > 0
+        ),
+        format!("left_only_count={left_only}"),
+        format!("right_only_count={right_only}"),
+        format!("kind_mismatch_count={kind_mismatches}"),
+    ];
+    for field in ["left_path", "right_path"] {
+        if let Some(path) = value
+            .get(field)
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        {
+            lines.push(format!("{field}={path}"));
+        }
+    }
+    Some(lines.join("\n"))
 }
 
 pub(super) fn inventory_dir_scalar_path_candidate(
