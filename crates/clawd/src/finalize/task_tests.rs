@@ -13,6 +13,7 @@ use super::{
     finalize_ask_checkpointed, journal_has_checkpointed_nonterminal_lifecycle,
     journal_has_missing_file_search_evidence, machine_payload_observed_facts,
     non_failure_final_status, normalize_existing_file_delivery_token_answer,
+    promote_verified_terminal_answer_after_verifier_pass,
     record_answer_verifier_required_evidence_rollout_attribution,
     recover_requested_machine_kv_summary_final_answer, resume_context_has_directory_lookup_failure,
     resume_context_path_batch_facts_are_missing_only,
@@ -30,12 +31,16 @@ mod checkpoint_finalization;
 mod config_guard_recovery;
 #[path = "task_tests/config_validation_delivery.rs"]
 mod config_validation_delivery;
+#[path = "task_tests/final_status.rs"]
+mod final_status;
 #[path = "task_tests/git_machine_kv_recovery.rs"]
 mod git_machine_kv_recovery;
 #[path = "task_tests/machine_kv_final_guard.rs"]
 mod machine_kv_final_guard;
 #[path = "task_tests/tree_summary_recovery.rs"]
 mod tree_summary_recovery;
+#[path = "task_tests/verified_terminal_promotion.rs"]
+mod verified_terminal_promotion;
 
 fn route_result(ask_mode: crate::AskMode) -> crate::RouteResult {
     crate::RouteResult {
@@ -58,18 +63,6 @@ fn route_result(ask_mode: crate::AskMode) -> crate::RouteResult {
 }
 
 // ensure_journal_task_metrics_* tests 已搬移到 finalize/journal.rs（Stage 3.1）。
-
-#[test]
-fn non_failure_final_status_preserves_clarify_semantics() {
-    assert_eq!(
-        non_failure_final_status(false),
-        crate::task_journal::TaskJournalFinalStatus::Success
-    );
-    assert_eq!(
-        non_failure_final_status(true),
-        crate::task_journal::TaskJournalFinalStatus::Clarify
-    );
-}
 
 #[test]
 fn answer_verifier_high_confidence_gap_forces_task_failure() {

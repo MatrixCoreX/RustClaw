@@ -1,0 +1,111 @@
+use super::*;
+
+fn verifier_pass_journal(task_id: &str, prompt: &str) -> crate::task_journal::TaskJournal {
+    let mut journal = crate::task_journal::TaskJournal::for_task(task_id, "ask", prompt);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: true,
+        missing_evidence_fields: Vec::new(),
+        answer_incomplete_reason: String::new(),
+        should_retry: false,
+        retry_instruction: String::new(),
+        confidence: 0.96,
+    });
+    journal
+}
+
+#[test]
+fn verifier_pass_promotes_latest_terminal_text_over_stale_machine_projection() {
+    let prompt = "Inspect archive and database fixtures, then return a table.";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+
+    let mut journal = verifier_pass_journal("task-verified-terminal-promotion", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "archive_basic",
+            r#"{"extra":{"field_value":{"members":["notes.txt","nested/config.ini"],"content_excerpt":"fixture archive notes","path":"/tmp/test_bundle.zip"}}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "db_basic",
+            r#"{"extra":{"field_value":{"tables":["orders","service_logs","users"],"schema_version":3}}}"#,
+        ));
+    let latest_answer = concat!(
+        "| check | value |\n",
+        "| --- | --- |\n",
+        "| zip member 1 | notes.txt |\n",
+        "| zip member 2 | nested/config.ini |\n",
+        "| notes.txt | fixture archive notes |\n",
+        "| tables | orders, service_logs, users |\n",
+        "| schema_version | 3 |"
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3",
+            "respond",
+            latest_answer,
+        ));
+
+    let mut answer_text = concat!(
+        "| field | value |\n",
+        "| --- | --- |\n",
+        "| archive.member | notes.txt |\n",
+        "| db.schema_version | 3 |"
+    )
+    .to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(promote_verified_terminal_answer_after_verifier_pass(
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+    assert_eq!(answer_text, latest_answer);
+    assert!(answer_text.contains("nested/config.ini"));
+    assert_eq!(answer_messages, vec![latest_answer.to_string()]);
+    assert_eq!(journal.final_answer.as_deref(), Some(latest_answer));
+}
+
+#[test]
+fn verifier_pass_does_not_promote_terminal_text_when_machine_summary_is_required() {
+    let prompt = "Return branch machine fields.";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    let mut journal = verifier_pass_journal("task-verified-terminal-machine-summary", prompt);
+    journal.record_turn_analysis(&crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        should_interrupt_active_run: false,
+        state_patch: Some(serde_json::json!({
+            "output_format": "machine_summary",
+            "required_machine_fields": ["branch"]
+        })),
+        attachment_processing_required: false,
+    });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "respond",
+            "branch is main",
+        ));
+    let mut answer_text = "branch=main".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!promote_verified_terminal_answer_after_verifier_pass(
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+    assert_eq!(answer_text, "branch=main");
+    assert_eq!(answer_messages, vec!["branch=main".to_string()]);
+}
