@@ -123,11 +123,15 @@ impl TaskJournalFinalizerStage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TaskJournalFinalizerFallback {}
+pub(crate) enum TaskJournalFinalizerFallback {
+    FreeformText,
+}
 
 impl TaskJournalFinalizerFallback {
     pub(crate) fn as_str(self) -> &'static str {
-        match self {}
+        match self {
+            Self::FreeformText => "freeform_text",
+        }
     }
 }
 

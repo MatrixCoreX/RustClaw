@@ -18,6 +18,19 @@ fn markdown_non_json_fallback_preserves_markdown_table_fence() {
 }
 
 #[test]
+fn freeform_observed_answer_fallback_is_not_schema_parsed() {
+    let parsed = freeform_observed_answer_fallback(
+        "`/tmp/example.md` starts with a grounded heading.\n\nparsed_json_fields=<not_json>",
+    )
+    .expect("freeform observed fallback");
+
+    assert!(parsed.qualified);
+    assert!(parsed.publishable);
+    assert_eq!(parsed._reason, "freeform_text_fallback");
+    assert!(freeform_observed_answer_fallback(r#"{"answer":"ok"}"#).is_none());
+}
+
+#[test]
 fn observed_answer_parser_strips_bare_json_language_prefix() {
     let raw = "json\n{\"answer\":\"ok\",\"qualified\":true}";
     assert_eq!(
