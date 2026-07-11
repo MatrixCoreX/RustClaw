@@ -149,6 +149,9 @@ fn classify_explicit_locator_candidate(candidate: &str) -> Option<ExtractedLocat
     if candidate_looks_like_dotted_version_number(candidate) {
         return None;
     }
+    if candidate_looks_like_protocol_field_path(candidate) {
+        return None;
+    }
     if !crate::worker::has_explicit_path_or_url_locator_hint(candidate) {
         return None;
     }
@@ -167,6 +170,54 @@ fn classify_explicit_locator_candidate(candidate: &str) -> Option<ExtractedLocat
             _ => "explicit_locator",
         },
     })
+}
+
+fn candidate_looks_like_protocol_field_path(candidate: &str) -> bool {
+    let trimmed = candidate.trim();
+    if !trimmed.contains(['/', '\\']) || trimmed.starts_with(['/', '\\']) {
+        return false;
+    }
+    let parts = trimmed
+        .split(['/', '\\'])
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    if parts.len() < 2 || parts.len() > 4 || parts.iter().any(|part| part.is_empty()) {
+        return false;
+    }
+    parts.iter().all(|part| {
+        part.chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+            && protocol_or_lifecycle_field_token(part)
+    })
+}
+
+fn protocol_or_lifecycle_field_token(token: &str) -> bool {
+    matches!(
+        token.to_ascii_lowercase().as_str(),
+        "accepted"
+            | "background"
+            | "cancel_ref"
+            | "cancelled"
+            | "canceled"
+            | "checkpoint_id"
+            | "error_text"
+            | "failed"
+            | "machine_reply"
+            | "needs_user"
+            | "next_check_after"
+            | "pending"
+            | "poll_ref"
+            | "queued"
+            | "repairenvelope"
+            | "resume_context"
+            | "running"
+            | "succeeded"
+            | "task_id"
+            | "task_lifecycle"
+            | "text"
+            | "timeout"
+            | "waiting"
+    )
 }
 
 pub(crate) fn candidate_looks_like_dotted_version_number(candidate: &str) -> bool {
