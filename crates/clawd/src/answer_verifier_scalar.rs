@@ -812,12 +812,52 @@ pub(super) fn normalize_markdown_heading_answer(answer: &str) -> Option<String> 
 
 pub(super) fn markdown_heading_from_read_observation(output: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
-    let object = value.as_object()?;
-    let action = object.get("action").and_then(|value| value.as_str())?;
-    if !matches!(action, "read_range" | "read_text_range") {
+    markdown_heading_from_read_observation_value(&value, 0)
+}
+
+fn markdown_heading_from_read_observation_value(
+    value: &serde_json::Value,
+    depth: usize,
+) -> Option<String> {
+    if depth > 3 {
         return None;
     }
-    let excerpt = object.get("excerpt").and_then(|value| value.as_str())?;
+    let object = value.as_object()?;
+    let action = object
+        .get("action")
+        .or_else(|| value.pointer("/extra/action"))
+        .and_then(|value| value.as_str());
+    if !matches!(action, Some("read_range" | "read_text_range")) {
+        if let Some(answer) = object
+            .get("extra")
+            .and_then(|extra| markdown_heading_from_read_observation_value(extra, depth + 1))
+        {
+            return Some(answer);
+        }
+        return object
+            .get("text")
+            .and_then(|text| text.as_str())
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text.trim()).ok())
+            .and_then(|text_value| {
+                markdown_heading_from_read_observation_value(&text_value, depth + 1)
+            });
+    }
+    [
+        object.get("excerpt").and_then(|value| value.as_str()),
+        object.get("content").and_then(|value| value.as_str()),
+        value
+            .pointer("/extra/excerpt")
+            .and_then(|value| value.as_str()),
+        value
+            .pointer("/extra/content")
+            .and_then(|value| value.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(markdown_heading_from_read_excerpt)
+}
+
+fn markdown_heading_from_read_excerpt(excerpt: &str) -> Option<String> {
     excerpt
         .lines()
         .map(strip_read_range_line_prefix)

@@ -1148,6 +1148,60 @@ fn markdown_heading_answer_grounded_in_read_range_skips_llm_verifier() {
 }
 
 #[test]
+fn markdown_heading_answer_grounded_in_wrapped_read_range_skips_llm_verifier() {
+    let mut route = route_with_mode(crate::AskMode::act_with_chat_finalizer());
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-wrapped-read-heading", "ask", "read it");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "excerpt": "1|# Service Notes\n2|\n3|fixture body",
+                    "path": "service_notes.md"
+                },
+                "text": "{\"action\":\"read_range\",\"excerpt\":\"1|# Service Notes\\n2|\\n3|fixture body\",\"path\":\"service_notes.md\"}"
+            })
+            .to_string(),
+        ));
+
+    assert!(structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        "Service Notes"
+    ));
+
+    let mut text_only_journal = crate::task_journal::TaskJournal::for_task(
+        "task-wrapped-read-heading-text-only",
+        "ask",
+        "read it",
+    );
+    text_only_journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            json!({
+                "text": "{\"action\":\"read_text_range\",\"excerpt\":\"1|# Release Checklist\\n2|\\n3|fixture body\",\"path\":\"release_checklist.md\"}"
+            })
+            .to_string(),
+        ));
+
+    assert!(structurally_satisfies_answer_contract(
+        &route,
+        &text_only_journal,
+        "Release Checklist"
+    ));
+}
+
+#[test]
 fn existence_with_path_answer_grounded_by_existing_path_fact_skips_llm_verifier() {
     let mut route = route_with_mode(crate::AskMode::act_plain());
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
