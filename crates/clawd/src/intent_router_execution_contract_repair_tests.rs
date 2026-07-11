@@ -234,7 +234,7 @@ fn explicit_command_execution_repair_preserves_command_summary_contract() {
         response_shape: OutputResponseShape::Free,
         requires_content_evidence: true,
         locator_kind: OutputLocatorKind::None,
-        semantic_kind: OutputSemanticKind::None,
+        semantic_kind: OutputSemanticKind::CommandOutputSummary,
         ..IntentOutputContract::default()
     };
 
@@ -264,11 +264,11 @@ fn explicit_command_execution_repair_preserves_command_summary_contract() {
 }
 
 #[test]
-fn explicit_command_execution_repair_upgrades_raw_one_sentence_to_command_summary_contract() {
+fn explicit_command_execution_repair_keeps_raw_one_sentence_without_synthesis_marker() {
     let runtime = crate::CommandIntentRuntime {
         all_result_suffixes: vec![],
         execute_prefixes: vec!["run ".to_string()],
-        standalone_commands: vec![],
+        standalone_commands: vec!["pwd".to_string()],
         default_locale: "en-US".to_string(),
         verify_enforce_enabled: true,
     };
@@ -287,7 +287,7 @@ fn explicit_command_execution_repair_upgrades_raw_one_sentence_to_command_summar
 
     let repair = super::apply_explicit_command_execution_contract_repair(
         &runtime,
-        "Run pwd first, then create one reply line from the observed result.",
+        "run pwd and return the observed stdout as one line.",
         "",
         &mut needs_clarify,
         &mut clarify_question,
@@ -295,24 +295,58 @@ fn explicit_command_execution_repair_upgrades_raw_one_sentence_to_command_summar
         &mut finalize_style,
     );
 
-    assert_eq!(
-        repair,
-        Some("explicit_command_requires_command_output_summary_execution")
-    );
+    assert_eq!(repair, Some("explicit_command_requires_fresh_execution"));
     assert_eq!(decision, FirstLayerDecision::PlannerExecute);
-    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     assert!(contract.requires_content_evidence);
-    assert_eq!(
-        contract.semantic_kind,
-        OutputSemanticKind::CommandOutputSummary
-    );
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
     assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     assert!(contract.locator_hint.is_empty());
 }
 
 #[test]
-fn explicit_command_summary_contract_ignores_legacy_decision_token() {
+fn explicit_command_execution_repair_defaults_unclassified_evidence_contract_to_raw_output() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["run ".to_string()],
+        standalone_commands: vec!["pwd".to_string()],
+        default_locale: "en-US".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::None,
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "run pwd",
+        "",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut finalize_style,
+    );
+
+    assert_eq!(repair, Some("explicit_command_requires_fresh_execution"));
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
+    assert_eq!(contract.response_shape, OutputResponseShape::Free);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn explicit_command_raw_contract_ignores_legacy_decision_token_without_synthesis_marker() {
     let runtime = crate::CommandIntentRuntime {
         all_result_suffixes: vec![],
         execute_prefixes: vec!["run ".to_string()],
@@ -343,17 +377,11 @@ fn explicit_command_summary_contract_ignores_legacy_decision_token() {
         &mut finalize_style,
     );
 
-    assert_eq!(
-        repair,
-        Some("explicit_command_requires_command_output_summary_execution")
-    );
+    assert_eq!(repair, Some("explicit_command_requires_fresh_execution"));
     assert_eq!(decision, FirstLayerDecision::DirectAnswer);
-    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     assert!(contract.requires_content_evidence);
-    assert_eq!(
-        contract.semantic_kind,
-        OutputSemanticKind::CommandOutputSummary
-    );
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
     assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     assert!(contract.locator_hint.is_empty());
@@ -760,7 +788,7 @@ fn command_payload_contract_repair_preserves_command_summary_contract() {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Free,
         requires_content_evidence: true,
-        semantic_kind: OutputSemanticKind::None,
+        semantic_kind: OutputSemanticKind::CommandOutputSummary,
         locator_kind: OutputLocatorKind::None,
         ..IntentOutputContract::default()
     };
