@@ -366,10 +366,21 @@ pub(crate) async fn execute_builtin_skill_with_task(
             Ok(String::from_utf8_lossy(clip).to_string())
         }
         "write_file" => {
-            ensure_only_keys(map, &["path", "content", "append"])?;
+            ensure_only_keys(
+                map,
+                &[
+                    "path",
+                    "content",
+                    "append",
+                    "mode",
+                    "create_parents",
+                    "parents",
+                ],
+            )?;
             let path = required_string(map, "path")?;
             let content = required_string(map, "content")?;
-            let append = optional_bool(map, "append").unwrap_or(false);
+            let append = write_file_append_flag(map)?;
+            let create_parents = write_file_create_parents_flag(map)?;
             if content.len() > crate::MAX_WRITE_FILE_BYTES {
                 return Err(builtin_error(
                     "write_file",
@@ -390,10 +401,12 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 &effective_path,
                 builtin_allows_path_outside_workspace(state, task),
             )?;
-            if let Some(parent) = real_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|err| {
-                    io_builtin_error("write_file", "mkdir", &err, Some(path), Some(parent))
-                })?;
+            if create_parents {
+                if let Some(parent) = real_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|err| {
+                        io_builtin_error("write_file", "mkdir", &err, Some(path), Some(parent))
+                    })?;
+                }
             }
             if append {
                 let prepend_line_separator = append_needs_line_separator(&real_path, content)
@@ -850,6 +863,72 @@ fn optional_bool(map: &serde_json::Map<String, Value>, key: &str) -> Option<bool
         },
         _ => None,
     }
+}
+
+fn write_file_append_flag(map: &serde_json::Map<String, Value>) -> Result<bool, String> {
+    let append = optional_bool(map, "append");
+    let Some(mode) = optional_string(map, "mode")
+        .map(str::trim)
+        .filter(|mode| !mode.is_empty())
+    else {
+        return Ok(append.unwrap_or(false));
+    };
+    let mode_append = match mode.to_ascii_lowercase().as_str() {
+        "overwrite" | "replace" | "write" => false,
+        "append" => true,
+        _ => {
+            return Err(builtin_error(
+                "write_file",
+                "invalid_args",
+                "unsupported_write_mode",
+                None,
+                None,
+                Some(serde_json::json!({
+                    "field": "mode",
+                    "value": mode,
+                    "supported_modes": ["overwrite", "replace", "write", "append"],
+                })),
+            ));
+        }
+    };
+    if let Some(append) = append {
+        if append != mode_append {
+            return Err(builtin_error(
+                "write_file",
+                "invalid_args",
+                "conflicting_write_mode",
+                None,
+                None,
+                Some(serde_json::json!({
+                    "field": "mode",
+                    "append": append,
+                    "mode": mode,
+                })),
+            ));
+        }
+    }
+    Ok(mode_append)
+}
+
+fn write_file_create_parents_flag(map: &serde_json::Map<String, Value>) -> Result<bool, String> {
+    let create_parents = optional_bool(map, "create_parents");
+    let parents = optional_bool(map, "parents");
+    if let (Some(create_parents), Some(parents)) = (create_parents, parents) {
+        if create_parents != parents {
+            return Err(builtin_error(
+                "write_file",
+                "invalid_args",
+                "conflicting_parent_create_flags",
+                None,
+                None,
+                Some(serde_json::json!({
+                    "create_parents": create_parents,
+                    "parents": parents,
+                })),
+            ));
+        }
+    }
+    Ok(create_parents.or(parents).unwrap_or(true))
 }
 
 fn append_needs_line_separator(path: &Path, content: &str) -> std::io::Result<bool> {

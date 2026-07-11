@@ -392,6 +392,7 @@ fn registry_resolves_legacy_machine_capability_aliases_without_static_fallback()
     let state = state_with_workspace_registry();
     let cases = [
         ("system.run_cmd", json!({"command": "pwd"}), "skill:run_cmd"),
+        ("run_cmd", json!({"command": "pwd"}), "skill:run_cmd"),
         (
             "filesystem.stat_path",
             json!({"path": "."}),
@@ -400,6 +401,11 @@ fn registry_resolves_legacy_machine_capability_aliases_without_static_fallback()
         ("filesystem.list_dir", json!({"path": "."}), "tool:fs_basic"),
         (
             "filesystem.read_file",
+            json!({"path": "README.md"}),
+            "tool:fs_basic",
+        ),
+        (
+            "fs_basic.read_text",
             json!({"path": "README.md"}),
             "tool:fs_basic",
         ),
