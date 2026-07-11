@@ -58,6 +58,50 @@ export interface TaskQueryResponse {
   lifecycle?: TaskLifecycleProjection | null;
 }
 
+export interface TaskLlmDebugUsage {
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens?: number | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  reasoning_tokens?: number | null;
+  cached_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+}
+
+export interface TaskLlmDebugCall {
+  call_index?: number | null;
+  ts?: number | null;
+  task_id?: string | null;
+  call_id?: string | null;
+  vendor?: string | null;
+  provider?: string | null;
+  provider_type?: string | null;
+  model?: string | null;
+  model_kind?: string | null;
+  status?: string | null;
+  mode?: string | null;
+  prompt_source?: string | null;
+  prompt_hash?: string | null;
+  prompt_file?: string | null;
+  prompt?: string | null;
+  request_payload?: unknown | null;
+  response?: string | null;
+  raw_response?: string | null;
+  clean_response?: string | null;
+  sanitized?: boolean | null;
+  error?: string | null;
+  usage?: TaskLlmDebugUsage | null;
+}
+
+export interface TaskLlmDebugResponse {
+  task_id: string;
+  call_count?: number | null;
+  calls?: TaskLlmDebugCall[] | null;
+  entries?: TaskLlmDebugCall[] | null;
+}
+
 export interface ActiveTaskItem {
   index: number;
   task_id: string;

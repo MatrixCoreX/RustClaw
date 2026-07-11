@@ -1074,6 +1074,13 @@ struct UsageHistoryChainEntry {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct TaskDebugCall {
+    call_index: usize,
+    #[serde(flatten)]
+    entry: TaskDebugEntry,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct UsageHistoryPage {
     page: usize,
     page_size: usize,
@@ -1169,12 +1176,16 @@ struct TaskDebugUsage {
 struct TaskDebugEntry {
     ts: Option<u64>,
     task_id: Option<String>,
+    call_id: Option<String>,
     vendor: Option<String>,
     provider: Option<String>,
     provider_type: Option<String>,
     model: Option<String>,
     model_kind: Option<String>,
     status: Option<String>,
+    mode: Option<String>,
+    prompt_source: Option<String>,
+    prompt_hash: Option<String>,
     prompt_file: Option<String>,
     prompt: Option<String>,
     request_payload: Option<Value>,

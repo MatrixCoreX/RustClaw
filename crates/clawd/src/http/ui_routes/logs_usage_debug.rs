@@ -286,12 +286,16 @@ fn summarize_usage_task(
     let latest = latest_entry.cloned().unwrap_or(TaskDebugEntry {
         ts: None,
         task_id: Some(task_id.clone()),
+        call_id: None,
         vendor: None,
         provider: None,
         provider_type: None,
         model: None,
         model_kind: None,
         status: None,
+        mode: None,
+        prompt_source: None,
+        prompt_hash: None,
         prompt_file: None,
         prompt: None,
         request_payload: None,
@@ -790,6 +794,18 @@ fn read_task_debug_entries(state: &AppState, task_id: &str) -> anyhow::Result<Ve
     Ok(entries)
 }
 
+fn numbered_task_debug_calls(entries: &[TaskDebugEntry]) -> Vec<TaskDebugCall> {
+    entries
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(index, entry)| TaskDebugCall {
+            call_index: index + 1,
+            entry,
+        })
+        .collect()
+}
+
 async fn task_debug_detail(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -844,7 +860,7 @@ async fn task_debug_detail(
     {
         return ui_auth_error("Task owner mismatch");
     }
-    let entries = match read_task_debug_entries(&state, normalized_task_id) {
+    let mut entries = match read_task_debug_entries(&state, normalized_task_id) {
         Ok(entries) => entries,
         Err(err) => {
             return (
@@ -857,12 +873,19 @@ async fn task_debug_detail(
             );
         }
     };
+    entries.sort_by(|a, b| {
+        (a.ts.unwrap_or(0), a.call_id.as_deref().unwrap_or_default())
+            .cmp(&(b.ts.unwrap_or(0), b.call_id.as_deref().unwrap_or_default()))
+    });
+    let calls = numbered_task_debug_calls(&entries);
     (
         StatusCode::OK,
         Json(ApiResponse {
             ok: true,
             data: Some(json!({
                 "task_id": normalized_task_id,
+                "call_count": calls.len(),
+                "calls": calls,
                 "entries": entries,
             })),
             error: None,
@@ -872,7 +895,8 @@ async fn task_debug_detail(
 
 #[cfg(test)]
 mod logs_usage_debug_tests {
-    use super::normalize_log_file_name;
+    use super::{normalize_log_file_name, numbered_task_debug_calls, TaskDebugEntry};
+    use serde_json::json;
 
     #[test]
     fn logs_latest_allows_device_side_and_server_nni_logs() {
@@ -880,6 +904,76 @@ mod logs_usage_debug_tests {
         assert_eq!(
             normalize_log_file_name(Some("nni-server.log")),
             "nni-server.log"
+        );
+    }
+
+    #[test]
+    fn numbered_task_debug_calls_preserve_llm_request_and_response_fields() {
+        let entries = vec![
+            TaskDebugEntry {
+                ts: Some(10),
+                task_id: Some("task-1".to_string()),
+                call_id: Some("task-1:normalizer".to_string()),
+                vendor: Some("minimax".to_string()),
+                provider: Some("vendor-minimax".to_string()),
+                provider_type: Some("openai_compat".to_string()),
+                model: Some("MiniMax-M3".to_string()),
+                model_kind: Some("compat".to_string()),
+                status: Some("ok".to_string()),
+                mode: Some("chat".to_string()),
+                prompt_source: Some("layered:normalizer".to_string()),
+                prompt_hash: Some("hash-1".to_string()),
+                prompt_file: None,
+                prompt: Some("prompt-body".to_string()),
+                request_payload: Some(json!({"messages":[{"role":"user","content":"hi"}]})),
+                response: Some("{\"action\":\"respond\"}".to_string()),
+                raw_response: Some("{\"choices\":[]}".to_string()),
+                clean_response: Some("{\"action\":\"respond\"}".to_string()),
+                sanitized: Some(false),
+                error: None,
+                usage: None,
+            },
+            TaskDebugEntry {
+                ts: Some(11),
+                task_id: Some("task-1".to_string()),
+                call_id: Some("task-1:planner".to_string()),
+                vendor: None,
+                provider: None,
+                provider_type: None,
+                model: None,
+                model_kind: None,
+                status: Some("ok".to_string()),
+                mode: None,
+                prompt_source: None,
+                prompt_hash: None,
+                prompt_file: None,
+                prompt: None,
+                request_payload: Some(json!({"messages":[{"role":"user","content":"plan"}]})),
+                response: None,
+                raw_response: Some("{\"id\":\"resp-2\"}".to_string()),
+                clean_response: None,
+                sanitized: None,
+                error: None,
+                usage: None,
+            },
+        ];
+
+        let calls = numbered_task_debug_calls(&entries);
+
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].call_index, 1);
+        assert_eq!(calls[1].call_index, 2);
+        assert_eq!(
+            calls[0].entry.call_id.as_deref(),
+            Some("task-1:normalizer")
+        );
+        assert_eq!(
+            calls[0].entry.request_payload.as_ref(),
+            entries[0].request_payload.as_ref()
+        );
+        assert_eq!(
+            calls[1].entry.raw_response.as_deref(),
+            Some("{\"id\":\"resp-2\"}")
         );
     }
 }
