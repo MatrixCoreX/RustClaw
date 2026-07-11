@@ -552,10 +552,13 @@ pub(super) fn contract_scoped_planner_skill_scope(
         .map(|action| action.skill)
         .filter(|skill| !skill.trim().is_empty())
         .collect::<BTreeSet<_>>();
-    if skills.is_empty() || skills.len() > 10 {
-        None
-    } else {
+    if !skills.is_empty() {
+        if skills.len() > 10 {
+            return None;
+        }
         Some(skills)
+    } else {
+        generic_local_content_contract_skill_scope(route)
     }
 }
 
@@ -563,11 +566,14 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
     route_result: Option<&RouteResult>,
 ) -> Option<BTreeSet<String>> {
     let route = route_result?;
-    if route.needs_clarify || route.output_contract_is_unclassified() {
+    if route.needs_clarify {
         return None;
     }
     if let Some(scope) = contract_scoped_planner_skill_scope(Some(route)) {
         return Some(scope);
+    }
+    if route.output_contract_is_unclassified() {
+        return None;
     }
     let skills = skills_from_action_refs_capped(
         crate::evidence_policy::capability_ref_action_refs_for_route(route, true),
@@ -578,6 +584,41 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
     } else {
         Some(skills)
     }
+}
+
+fn generic_local_content_contract_skill_scope(route: &RouteResult) -> Option<BTreeSet<String>> {
+    let contract = route.effective_output_contract();
+    if route.needs_clarify
+        || !contract.requires_content_evidence
+        || contract.delivery_required
+        || contract.delivery_intent != crate::OutputDeliveryIntent::None
+        || !matches!(
+            contract.semantic_kind,
+            crate::OutputSemanticKind::None
+                | crate::OutputSemanticKind::ContentExcerptSummary
+                | crate::OutputSemanticKind::ContentExcerptWithSummary
+        )
+        || !matches!(
+            contract.response_shape,
+            crate::OutputResponseShape::Free
+                | crate::OutputResponseShape::Strict
+                | crate::OutputResponseShape::OneSentence
+                | crate::OutputResponseShape::Scalar
+        )
+        || !matches!(
+            contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+    {
+        return None;
+    }
+    let skills = skills_from_action_refs_capped(
+        crate::contract_matrix::allowed_action_refs_for_output_contract(&contract),
+        8,
+    );
+    (!skills.is_empty()).then_some(skills)
 }
 
 #[cfg(test)]

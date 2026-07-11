@@ -296,6 +296,128 @@ fn alias_state_patch_ack_accepts_korean_object_map_value_field() {
 }
 
 #[test]
+fn alias_state_patch_ack_accepts_korean_add_or_update_schema() {
+    let state = repo_i18n_state();
+    let task = ask_task_with_payload_text(
+        "task-alias-ack-ko-add-or-update",
+        "정정합니다. \"자료A\"는 이제 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md 를 가리킵니다. 답장은 \"업데이트했습니다\"만 해 주세요.",
+    );
+    crate::conversation_state::replace_active_conversation_state_with_pointers(
+        &state,
+        &task,
+        None,
+        crate::conversation_state::ActiveSessionPointers {
+            active_followup_task_id: None,
+            active_clarify_task_id: None,
+            active_observed_facts_task_id: None,
+        },
+    );
+    let prior_turn = turn_analysis_with_alias(
+        "자료A",
+        "scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+    );
+    let prior_route = route_for_test();
+    let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "set alias");
+    crate::conversation_state::update_active_session_from_ask_outcome(
+        &state,
+        &task,
+        None,
+        "set alias",
+        &prior_route,
+        Some(&prior_turn),
+        "set alias",
+        "ack",
+        &[],
+        false,
+        &[],
+        &journal,
+        None,
+    );
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: None,
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: Some(json!({
+            "alias_bindings": {
+                "add_or_update": [{
+                    "alias": "자료A",
+                    "target": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+                    "scope": "session"
+                }],
+                "remove": []
+            },
+            "required_content_literals": ["업데이트했습니다"]
+        })),
+        attachment_processing_required: false,
+    };
+    let mut route = ack_route_for_test();
+
+    super::apply_alias_state_patch_ack_route(&mut route, Some(&turn_analysis), None);
+    let reply = super::alias_state_patch_ack_reply(
+        &state,
+        &task,
+        "Update session alias '자료A' to path 'scripts/nl_tests/fixtures/device_local/docs/release_checklist.md'.",
+        &route,
+        Some(&turn_analysis),
+        Some(&crate::intent_router::BoundaryEnvelope {
+            language_hint: Some("ko".to_string()),
+            ..Default::default()
+        }),
+    )
+    .expect("ack reply");
+
+    assert_eq!(route.ask_mode, crate::AskMode::state_patch_ack());
+    assert!(route.route_reason.contains("alias_state_patch_ack"));
+    assert!(!reply.is_llm_reply);
+    assert_eq!(reply.text, "업데이트했습니다");
+}
+
+#[test]
+fn alias_state_patch_ack_accepts_korean_locator_hint_schema() {
+    let state = repo_i18n_state();
+    let task = ask_task_with_payload_text(
+        "task-alias-ack-ko-locator-hint",
+        "이 대화에서는 참조 이름 \"자료A\"를 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 로 기억해 주세요. 답장은 \"기억했습니다\"만 해 주세요.",
+    );
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: None,
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: Some(json!({
+            "alias_bindings": [{
+                "alias": "자료A",
+                "locator_kind": "path",
+                "locator_hint": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+                "scope": "session"
+            }],
+            "required_machine_fields": [],
+            "required_content_literals": []
+        })),
+        attachment_processing_required: false,
+    };
+    let mut route = ack_route_for_test();
+
+    super::apply_alias_state_patch_ack_route(&mut route, Some(&turn_analysis), None);
+    let reply = super::alias_state_patch_ack_reply(
+        &state,
+        &task,
+        "Bind session alias '자료A'.",
+        &route,
+        Some(&turn_analysis),
+        Some(&crate::intent_router::BoundaryEnvelope {
+            language_hint: Some("ko".to_string()),
+            ..Default::default()
+        }),
+    )
+    .expect("ack reply");
+
+    assert_eq!(route.ask_mode, crate::AskMode::state_patch_ack());
+    assert!(route.route_reason.contains("alias_state_patch_ack"));
+    assert!(!reply.is_llm_reply);
+    assert_eq!(reply.text, "기억했습니다");
+}
+
+#[test]
 fn alias_state_patch_ack_reply_uses_current_request_locale_for_korean_update() {
     let state = repo_i18n_state();
     let task = ask_task_with_payload_text(

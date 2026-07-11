@@ -1175,5 +1175,8 @@ pub(crate) fn load_active_session_snapshot(
 }
 
 #[cfg(test)]
+#[path = "conversation_state_alias_state_patch_tests.rs"]
+mod alias_state_patch_tests;
+#[cfg(test)]
 #[path = "conversation_state_tests.rs"]
 mod tests;

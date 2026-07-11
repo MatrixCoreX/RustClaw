@@ -182,6 +182,7 @@ pub(super) fn normalize_intent_normalizer_top_level_for_schema(
     normalize_bool_field_with_default(obj, "should_interrupt_active_run", false);
     obj.entry("state_patch".to_string()).or_insert(Value::Null);
     normalize_state_patch_for_schema(obj);
+    promote_session_binding_alias_state_patch_fields(obj);
     promote_top_level_machine_state_patch_fields(obj);
     normalize_state_patch_for_schema(obj);
     obj.entry("attachment_processing_required".to_string())
@@ -606,6 +607,72 @@ fn promote_top_level_machine_state_patch_fields(obj: &mut serde_json::Map<String
             obj.insert("state_patch".to_string(), Value::Object(promoted));
         }
     }
+}
+
+fn promote_session_binding_alias_state_patch_fields(obj: &mut serde_json::Map<String, Value>) {
+    let Some(alias_binding) =
+        session_binding_alias_state_patch_value(obj.get("session_binding").or_else(|| {
+            obj.get("boundary_envelope")
+                .and_then(|value| value.get("session_binding"))
+        }))
+    else {
+        return;
+    };
+    match obj.get_mut("state_patch") {
+        Some(Value::Object(existing)) => {
+            existing
+                .entry("alias_bindings".to_string())
+                .or_insert(alias_binding);
+        }
+        _ => {
+            obj.insert(
+                "state_patch".to_string(),
+                serde_json::json!({ "alias_bindings": alias_binding }),
+            );
+        }
+    }
+}
+
+fn session_binding_alias_state_patch_value(value: Option<&Value>) -> Option<Value> {
+    let value = value?;
+    let obj = value.as_object()?;
+    if let Some(bindings) = obj
+        .get("alias_bindings")
+        .filter(|value| state_patch_value_is_meaningful(value))
+    {
+        return Some(bindings.clone());
+    }
+    let alias = obj
+        .get("alias")
+        .or_else(|| obj.get("alias_key"))
+        .or_else(|| obj.get("alias_name"))
+        .or_else(|| obj.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let target = obj
+        .get("target")
+        .or_else(|| obj.get("target_path"))
+        .or_else(|| obj.get("alias_target"))
+        .or_else(|| obj.get("alias_target_path"))
+        .or_else(|| obj.get("path"))
+        .or_else(|| obj.get("value"))
+        .or_else(|| obj.get("locator"))
+        .or_else(|| obj.get("locator_hint"))
+        .or_else(|| obj.get("locator_value"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    Some(serde_json::json!([{
+        "alias": alias,
+        "target": target,
+        "scope": obj
+            .get("scope")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("session"),
+    }]))
 }
 
 fn state_patch_value_is_meaningful(value: &Value) -> bool {

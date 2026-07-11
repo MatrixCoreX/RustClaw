@@ -160,6 +160,43 @@ pub(crate) fn session_alias_bindings_from_state_patch(
             }
             return out;
         }
+        if let Some(update_items) = alias_binding_update_items(alias_bindings) {
+            for item in update_items {
+                let Some(alias) = item
+                    .get("alias")
+                    .or_else(|| item.get("alias_key"))
+                    .or_else(|| item.get("surface"))
+                    .or_else(|| item.get("name"))
+                    .or_else(|| item.get("alias_name"))
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                let Some(target) =
+                    alias_binding_target_value(item).and_then(normalize_alias_target)
+                else {
+                    continue;
+                };
+                if out.iter().any(|existing: &SessionAliasBinding| {
+                    existing.alias.eq_ignore_ascii_case(alias)
+                }) {
+                    continue;
+                }
+                out.push(SessionAliasBinding {
+                    alias: alias.to_string(),
+                    target,
+                    updated_at_ts: now_ts,
+                });
+                if out.len() >= MAX_SESSION_ALIAS_BINDINGS {
+                    return out;
+                }
+            }
+            if !out.is_empty() {
+                return out;
+            }
+        }
         for (alias, value) in alias_bindings {
             let alias = alias.trim();
             if alias.is_empty() {
@@ -254,10 +291,26 @@ fn alias_bindings_metadata_is_ignorable(key: &str, value: &Value) -> bool {
         "forbidden_visible_literals"
         | "required_content_literals"
         | "required_visible_literals" => true,
+        "required_machine_fields" => required_machine_fields_are_alias_bindings_only(value),
         "primary_task_update" => {
             primary_task_update_value_is_inactive(value)
                 || primary_task_update_value_is_alias_binding_metadata(value)
                 || primary_task_update_value_is_alias_ack_projection(value)
+        }
+        _ => false,
+    }
+}
+
+fn required_machine_fields_are_alias_bindings_only(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text.trim() == "alias_bindings",
+        Value::Array(items) => {
+            !items.is_empty()
+                && items.iter().all(|item| {
+                    item.as_str()
+                        .map(str::trim)
+                        .is_some_and(|field| field == "alias_bindings")
+                })
         }
         _ => false,
     }
@@ -279,7 +332,7 @@ fn primary_task_update_value_is_alias_ack_projection(value: &Value) -> bool {
 fn primary_task_update_value_is_alias_binding_metadata(value: &Value) -> bool {
     let Some(action) = value
         .as_object()
-        .and_then(|map| map.get("action"))
+        .and_then(|map| map.get("action").or_else(|| map.get("kind")))
         .and_then(Value::as_str)
         .map(str::trim)
         .map(|action| action.to_ascii_lowercase())
@@ -326,6 +379,9 @@ fn alias_bindings_value_is_well_formed(value: &Value) -> bool {
         if alias_binding_record_map_present(bindings) {
             return alias_binding_record_from_map(bindings).is_some();
         }
+        if alias_binding_update_map_present(bindings) {
+            return alias_binding_update_map_is_well_formed(bindings);
+        }
         !bindings.is_empty()
             && bindings.iter().all(|(alias, target)| {
                 !alias.trim().is_empty()
@@ -341,6 +397,7 @@ fn alias_binding_target_value(item: &Value) -> Option<&str> {
         .or_else(|| item.get("path"))
         .or_else(|| item.get("value"))
         .or_else(|| item.get("locator"))
+        .or_else(|| item.get("locator_hint"))
         .or_else(|| item.get("locator_value"))
         .or_else(|| item.get("target_value"))
         .or_else(|| item.get("target_path"))
@@ -362,6 +419,9 @@ fn alias_binding_record_map_present(map: &serde_json::Map<String, Value>) -> boo
         || map.contains_key("target")
         || map.contains_key("alias_target")
         || map.contains_key("target_abs")
+        || map.contains_key("target_path")
+        || map.contains_key("alias_target_path")
+        || map.contains_key("locator_hint")
 }
 
 fn alias_binding_record_from_map(map: &serde_json::Map<String, Value>) -> Option<(String, String)> {
@@ -377,6 +437,57 @@ fn alias_binding_record_from_map(map: &serde_json::Map<String, Value>) -> Option
     let target =
         alias_binding_target_value(&Value::Object(map.clone())).and_then(normalize_alias_target)?;
     Some((alias.to_string(), target))
+}
+
+fn alias_binding_update_items<'a>(map: &'a serde_json::Map<String, Value>) -> Option<&'a [Value]> {
+    ["add_or_update", "upsert", "add", "update"]
+        .iter()
+        .find_map(|key| {
+            map.get(*key)
+                .and_then(Value::as_array)
+                .filter(|items| !items.is_empty())
+                .map(Vec::as_slice)
+        })
+}
+
+fn alias_binding_update_map_present(map: &serde_json::Map<String, Value>) -> bool {
+    alias_binding_update_items(map).is_some() || map.contains_key("remove")
+}
+
+fn alias_binding_update_map_is_well_formed(map: &serde_json::Map<String, Value>) -> bool {
+    let Some(update_items) = alias_binding_update_items(map) else {
+        return false;
+    };
+    let update_keys = ["add_or_update", "upsert", "add", "update"];
+    map.iter().all(|(key, value)| {
+        if update_keys.contains(&key.as_str()) {
+            return value.as_array().is_some_and(|items| {
+                !items.is_empty() && items.iter().all(alias_binding_update_item_is_well_formed)
+            });
+        }
+        if key == "remove" {
+            return !json_value_is_meaningful(value);
+        }
+        false
+    }) && update_items
+        .iter()
+        .all(alias_binding_update_item_is_well_formed)
+}
+
+fn alias_binding_update_item_is_well_formed(item: &Value) -> bool {
+    let alias = item
+        .get("alias")
+        .or_else(|| item.get("alias_key"))
+        .or_else(|| item.get("surface"))
+        .or_else(|| item.get("name"))
+        .or_else(|| item.get("alias_name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|alias| !alias.is_empty());
+    let target = alias_binding_target_value(item)
+        .map(str::trim)
+        .filter(|target| !target.is_empty());
+    alias.is_some() && target.is_some()
 }
 
 fn json_value_is_meaningful(value: &Value) -> bool {
@@ -442,6 +553,7 @@ fn compatibility_alias_target(value: &Value) -> Option<&str> {
                 .or_else(|| obj.get("path"))
                 .or_else(|| obj.get("value"))
                 .or_else(|| obj.get("locator"))
+                .or_else(|| obj.get("locator_hint"))
                 .or_else(|| obj.get("locator_value"))
                 .or_else(|| obj.get("target_value"))
                 .or_else(|| obj.get("target_path"))

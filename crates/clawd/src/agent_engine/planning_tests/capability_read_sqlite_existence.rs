@@ -488,6 +488,30 @@ fn contract_scoped_planner_skill_scope_leaves_unclassified_routes_open() {
 }
 
 #[test]
+fn generic_local_content_contract_scopes_planner_skills_from_allowed_actions() {
+    let mut route = base_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/docs/service_notes.md".to_string();
+
+    let scope = contract_scoped_planner_skill_scope(Some(&route)).expect("generic local scope");
+
+    assert!(scope.contains("fs_basic"));
+    assert!(scope.contains("doc_parse"));
+    assert!(!scope.contains("x"));
+    assert!(!scope.contains("image_generate"));
+    assert!(scope.len() <= 8);
+
+    let lightweight_scope = contract_scoped_lightweight_planner_skill_scope(Some(&route))
+        .expect("lightweight generic local scope");
+    assert_eq!(scope, lightweight_scope);
+}
+
+#[test]
 fn sqlite_table_listing_route_rewrites_text_read_plan_to_db_basic_list_tables() {
     let mut route = base_route_result();
     route.output_contract.response_shape = OutputResponseShape::Strict;
