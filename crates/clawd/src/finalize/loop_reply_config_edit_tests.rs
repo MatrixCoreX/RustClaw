@@ -130,6 +130,78 @@ fn direct_config_edit_observed_answer_summarizes_guard_config() {
 }
 
 #[test]
+fn direct_config_edit_plan_answer_includes_following_guard_observation() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_edit",
+        r#"{"action":"plan_config_change","path":"configs/config.toml","field_path":"llm.selected_vendor","new_value":"minimax","would_change":true}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "config_basic",
+        r#"{"action":"guard_config","path":"configs/config.toml","risk_count":1,"risks":["tools.allow_sudo=true"]}"#,
+    ));
+
+    let (answer, summary) = direct_config_edit_observed_answer(
+        &state,
+        "preview config change and guard it",
+        &loop_state,
+    )
+    .expect("config_edit plan and guard answer");
+
+    let payload: serde_json::Value = serde_json::from_str(&answer).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.config_edit.planned")
+    );
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("config_edit_planned")
+    );
+    assert_eq!(
+        payload
+            .pointer("/field_path")
+            .and_then(serde_json::Value::as_str),
+        Some("llm.selected_vendor")
+    );
+    assert_eq!(
+        payload
+            .pointer("/value")
+            .and_then(serde_json::Value::as_str),
+        Some("minimax")
+    );
+    assert_eq!(
+        payload
+            .pointer("/risk_count")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        payload
+            .pointer("/risks/0")
+            .and_then(serde_json::Value::as_str),
+        Some("tools.allow_sudo=true")
+    );
+    assert_eq!(
+        payload
+            .pointer("/candidates/0")
+            .and_then(serde_json::Value::as_str),
+        Some("tools.allow_sudo=true")
+    );
+    assert_eq!(
+        summary.disposition,
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
 fn direct_config_edit_observed_answer_projects_agent_hook_policy_surface() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(1);
