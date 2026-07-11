@@ -45,6 +45,28 @@ pub(super) fn extract_answer_from_finalizer_envelope_text(raw: &str) -> Option<S
     .filter(|answer| !answer.is_empty())
 }
 
+pub(super) fn freeform_observed_answer_fallback(raw: &str) -> Option<ObservedAnswerFallbackOut> {
+    let trimmed_owned;
+    let trimmed = if let Some(non_code_text) = non_code_markdown_text(raw) {
+        trimmed_owned = non_code_text;
+        trimmed_owned.trim()
+    } else {
+        raw.trim().trim_matches('`').trim()
+    };
+    if trimmed.is_empty() || trimmed.starts_with('{') || trimmed.starts_with('[') {
+        return None;
+    }
+    Some(ObservedAnswerFallbackOut {
+        answer: trimmed.to_string(),
+        qualified: true,
+        needs_clarify: false,
+        is_meta_instruction: false,
+        publishable: true,
+        confidence: 0.7,
+        _reason: String::from("freeform_text_fallback"),
+    })
+}
+
 pub(super) fn non_code_markdown_text(raw: &str) -> Option<String> {
     let mut in_fence = false;
     let mut fence_lang = String::new();

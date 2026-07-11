@@ -5,8 +5,10 @@ use crate::{llm_gateway, AppState, ClaimedTask};
 
 #[path = "observed_output_text.rs"]
 mod output_text;
+#[cfg(test)]
+use output_text::non_code_markdown_text;
 use output_text::{
-    extract_answer_from_finalizer_envelope_text, non_code_markdown_text,
+    extract_answer_from_finalizer_envelope_text, freeform_observed_answer_fallback,
     strip_bare_json_language_prefix, ObservedAnswerFallbackOut,
 };
 #[path = "observed_output_transform.rs"]
@@ -1440,7 +1442,9 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
             .await
             .map_err(|err| format!("observed answer fallback LLM failed: {err}"))?;
     let llm_out_for_parse = strip_bare_json_language_prefix(&llm_out);
-    let parsed = match crate::prompt_utils::validate_against_schema::<ObservedAnswerFallbackOut>(
+    let (parsed, parsed_from_schema) = match crate::prompt_utils::validate_against_schema::<
+        ObservedAnswerFallbackOut,
+    >(
         llm_out_for_parse,
         crate::prompt_utils::PromptSchemaId::FinalizerOut,
     ) {
@@ -1452,7 +1456,7 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
                     validated.schema_normalized
                 );
             }
-            Some(validated.value)
+            (Some(validated.value), true)
         }
         Err(err) => {
             tracing::info!(
@@ -1460,41 +1464,9 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
                 task.task_id,
                 err
             );
-            None
+            (freeform_observed_answer_fallback(llm_out_for_parse), false)
         }
-    }
-    .or_else(|| {
-            // F14: some providers occasionally violate the "Output JSON only" contract,
-            // 直接吐 markdown 文本（常见表现：被多步 read 喂饱后给一段中文综述但没包成
-            // JSON envelope）。原先 ObservedAnswerFallbackOut 解析失败 → 整个 fallback
-            // 返回 None → finalize 落到 clarify_question_fallback，把已经合成好的真实
-            // 答案丢掉，变成"假需要确认"。这里把 trim 后的整段文本视作 answer 兜底，
-            // 同时 publishable=true、qualified=true、confidence=0.7（足以越过下游
-            // OBSERVED_SELF_CLASSIFY_CONF_THRESHOLD=0.55，并保留下游 semantic_judge 的
-            // meta-instruction 检查仍能拦截 "我会去检查/please confirm" 之类伪答案）。
-            let trimmed_owned;
-            let trimmed = if let Some(non_code_text) = non_code_markdown_text(llm_out_for_parse) {
-                trimmed_owned = non_code_text;
-                trimmed_owned.trim()
-            } else {
-                llm_out_for_parse.trim().trim_matches('`').trim()
-            };
-            if trimmed.is_empty() {
-                return None;
-            }
-            if trimmed.starts_with('{') || trimmed.starts_with('[') {
-                return None;
-            }
-        Some(ObservedAnswerFallbackOut {
-            answer: trimmed.to_string(),
-            qualified: true,
-            needs_clarify: false,
-            is_meta_instruction: false,
-            publishable: true,
-            confidence: 0.7,
-            _reason: String::from("non_json_text_fallback"),
-        })
-    });
+    };
     let Some(parsed) = parsed else {
         return Ok(None);
     };
@@ -1610,7 +1582,9 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
             } else {
                 crate::finalize::FinalizerDisposition::AllowFallback
             }),
-            parsed: true,
+            fallback: (!parsed_from_schema)
+                .then_some(crate::task_journal::TaskJournalFinalizerFallback::FreeformText),
+            parsed: parsed_from_schema,
             contract_ok: qualified,
             completion_ok: Some(qualified),
             grounded_ok: Some(qualified),
