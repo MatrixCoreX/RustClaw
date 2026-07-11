@@ -572,6 +572,9 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
     if let Some(scope) = contract_scoped_planner_skill_scope(Some(route)) {
         return Some(scope);
     }
+    if let Some(scope) = bounded_local_machine_boundary_skill_scope(route) {
+        return Some(scope);
+    }
     if route.output_contract_is_unclassified() {
         return None;
     }
@@ -584,6 +587,26 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
     } else {
         Some(skills)
     }
+}
+
+fn bounded_local_machine_boundary_skill_scope(route: &RouteResult) -> Option<BTreeSet<String>> {
+    if route.needs_clarify
+        || route.output_contract.delivery_required
+        || route.wants_file_delivery
+        || !matches!(route.schedule_kind, crate::ScheduleKind::None)
+    {
+        return None;
+    }
+    if route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+        || route.has_route_reason_machine_marker("explicit_command_requires_fresh_execution")
+        || route.has_route_reason_machine_marker("command_payload_requires_raw_output_execution")
+    {
+        return Some(BTreeSet::from(["run_cmd".to_string()]));
+    }
+    if route.has_route_reason_machine_marker("auto_locator_suppressed_multiple_explicit_paths") {
+        return Some(BTreeSet::from(["fs_basic".to_string()]));
+    }
+    None
 }
 
 fn generic_local_content_contract_skill_scope(route: &RouteResult) -> Option<BTreeSet<String>> {
