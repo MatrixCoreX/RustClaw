@@ -506,3 +506,104 @@ fn normalizer_schema_promotes_legacy_top_level_language_hint_into_boundary_envel
     )
     .expect("schema validation");
 }
+
+#[test]
+fn normalizer_schema_promotes_session_binding_alias_pair_into_state_patch() {
+    let raw = r#"{
+          "schema_version":1,
+          "raw_chars":101,
+          "language_hint":"ko",
+          "schedule_intent":{"kind":"none"},
+          "attachment_refs":[],
+          "explicit_locators":["scripts/nl_tests/fixtures/device_local/docs/service_notes.md"],
+          "session_binding":{
+            "alias_name":"자료A",
+            "alias_target":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+            "scope":"session"
+          },
+          "needs_clarify":false,
+          "resolved_user_intent":"Bind temporary alias to a path.",
+          "output_contract":{
+            "response_shape":"strict",
+            "exact_sentence_count":1,
+            "requires_content_evidence":false,
+            "delivery_required":false,
+            "locator_kind":"none",
+            "delivery_intent":"none",
+            "contract_marker":"none"
+          }
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(
+        raw,
+        "이 대화에서는 참조 이름 \"자료A\"를 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 로 기억해 주세요. 답장은 \"기억했습니다\"만 해 주세요.",
+    );
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/state_patch/alias_bindings/0/alias")
+            .and_then(|value| value.as_str()),
+        Some("자료A")
+    );
+    assert_eq!(
+        value
+            .pointer("/state_patch/alias_bindings/0/target")
+            .and_then(|value| value.as_str()),
+        Some("scripts/nl_tests/fixtures/device_local/docs/service_notes.md")
+    );
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
+}
+
+#[test]
+fn normalizer_schema_promotes_session_binding_locator_hint_into_state_patch() {
+    let raw = r#"{
+          "schema_version":1,
+          "raw_chars":101,
+          "language_hint":"ko",
+          "schedule_intent":{"kind":"none"},
+          "attachment_refs":[],
+          "session_binding":{
+            "alias":"자료A",
+            "locator_kind":"path",
+            "locator_hint":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+            "scope":"session"
+          },
+          "needs_clarify":false,
+          "resolved_user_intent":"Bind temporary alias to a path.",
+          "output_contract":{
+            "response_shape":"strict",
+            "requires_content_evidence":false,
+            "delivery_required":false,
+            "locator_kind":"none",
+            "delivery_intent":"none",
+            "contract_marker":"none"
+          }
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(
+        raw,
+        "이 대화에서는 참조 이름 \"자료A\"를 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 로 기억해 주세요.",
+    );
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/state_patch/alias_bindings/0/alias")
+            .and_then(|value| value.as_str()),
+        Some("자료A")
+    );
+    assert_eq!(
+        value
+            .pointer("/state_patch/alias_bindings/0/target")
+            .and_then(|value| value.as_str()),
+        Some("scripts/nl_tests/fixtures/device_local/docs/service_notes.md")
+    );
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
+}

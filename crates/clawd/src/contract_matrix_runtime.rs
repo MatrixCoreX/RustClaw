@@ -582,8 +582,7 @@ pub(crate) fn capability_ref_action_refs_for_route(
     route_capability_ref_action_refs(route, preferred_only)
 }
 
-#[cfg(test)]
-fn allowed_action_refs_for_output_contract(
+pub(crate) fn allowed_action_refs_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Vec<ActionRef> {
     bundled_contract_matrix()
