@@ -814,6 +814,27 @@ fn preserved_visible_ask_result_for_terminal_projection(
     if task_kind != "ask" || db_status != "succeeded" || !result_has_visible_reply(result_json) {
         return None;
     }
+    if result_json
+        .pointer("/task_lifecycle/state")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|state| matches!(state, "waiting" | "background"))
+    {
+        return None;
+    }
+    let is_agent_loop_async_poll_checkpoint = result_json
+        .pointer("/task_lifecycle/checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|checkpoint_id| checkpoint_id.starts_with("agent-loop:"))
+        && result_json
+            .pointer("/task_checkpoint/resume_entrypoint")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            == Some("poll_async_job");
+    if is_agent_loop_async_poll_checkpoint {
+        return None;
+    }
     result_json.as_object().map(|_| result_json.clone())
 }
 

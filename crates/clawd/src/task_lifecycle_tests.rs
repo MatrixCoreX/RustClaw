@@ -361,8 +361,14 @@ fn checkpoint_resume_directive_is_closed_machine_instruction() {
             }),
             100,
         ),
-        CheckpointResumeDirective::NotReady {
-            status_code: "async_job_expired",
+        CheckpointResumeDirective::PollAsyncJob {
+            checkpoint_id: "ckpt-job-policy-expired".to_string(),
+            job_id: "job-policy-expired".to_string(),
+            adapter_kind: "http_job_poll".to_string(),
+            poll_after_seconds: 5,
+            expires_at: 100,
+            cancel_ref: "cancel:job-policy-expired".to_string(),
+            message_key: "tool.msg.job.running".to_string(),
         }
     );
     assert_eq!(
@@ -459,11 +465,43 @@ fn checkpoint_resume_directive_is_closed_machine_instruction() {
             status_code: "missing_pending_async_job",
         }
     );
+    for status in ["accepted", "running", "expired"] {
+        assert_eq!(
+            checkpoint_resume_directive(
+                &json!({
+                    "task_lifecycle": {
+                        "state": "background",
+                        "next_check_after": 90,
+                        "checkpoint_id": format!("ckpt-job-{status}")
+                    },
+                    "task_checkpoint": checkpoint_value_with_entrypoint(
+                        &format!("ckpt-job-{status}"),
+                        "poll_async_job",
+                        Some(json!({
+                            "job_id": format!("job-{status}"),
+                            "status": status,
+                            "poll_after_seconds": 5,
+                            "expires_at": 100,
+                            "cancel_ref": format!("cancel:job-{status}"),
+                            "message_key": "tool.msg.job.running"
+                        }))
+                    )
+                }),
+                100,
+            ),
+            CheckpointResumeDirective::PollAsyncJob {
+                checkpoint_id: format!("ckpt-job-{status}"),
+                job_id: format!("job-{status}"),
+                adapter_kind: "unspecified_poll".to_string(),
+                poll_after_seconds: 5,
+                expires_at: 100,
+                cancel_ref: format!("cancel:job-{status}"),
+                message_key: "tool.msg.job.running".to_string(),
+            }
+        );
+    }
     for (status, expires_at, expected_status_code) in [
-        ("accepted", 100, "async_job_expired"),
-        ("running", 100, "async_job_expired"),
         ("failed", 200, "async_job_failed"),
-        ("expired", 200, "async_job_expired"),
         ("succeeded", 200, "async_job_observation_required"),
     ] {
         assert_eq!(

@@ -83,6 +83,19 @@ fn runtime_async_job_start_state_patch_survives_schema_and_becomes_plan_hint() {
         hint.async_adapter_kind.as_deref(),
         Some("local_process_poll")
     );
+
+    let sequence_hint = parse_runtime_async_job_start_plan_hint(Some(&serde_json::json!({
+        "runtime_async_job_start": {
+            "command_sequence": "sleep 15 && echo RUSTCLAW_LONG_BACKGROUND_FIXED",
+            "delivery_mode": "background",
+            "async_adapter_kind": "local_process_poll"
+        }
+    })))
+    .expect("runtime async job command_sequence should become plan hint");
+    assert_eq!(
+        sequence_hint.command.as_deref(),
+        Some("sleep 15 && echo RUSTCLAW_LONG_BACKGROUND_FIXED")
+    );
 }
 
 #[test]

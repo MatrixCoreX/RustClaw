@@ -1827,7 +1827,7 @@ fn terminal_async_poll_projection_preserves_visible_ask_reply() {
 }
 
 #[test]
-fn terminal_agent_loop_async_poll_projection_adds_machine_visible_ask_reply() {
+fn terminal_agent_loop_async_poll_projection_replaces_waiting_visible_ask_reply() {
     let state = state_with_tasks_table();
     let now = 9_700;
     let checkpoint_id =
@@ -1853,6 +1853,9 @@ fn terminal_agent_loop_async_poll_projection_adds_machine_visible_ask_reply() {
         "remaining_seconds": 600,
         "expired": false
     });
+    seed["task_checkpoint"]["resume_entrypoint"] = json!("poll_async_job");
+    seed["text"] = json!("checkpoint accepted but not terminal");
+    seed["messages"] = json!(["checkpoint accepted but not terminal"]);
     insert_task(&state, "ask-machine-terminal", "running", Some(&seed), now);
 
     claim_recorded_paused_checkpoint_resume_dispatch_result_internal(
@@ -1905,6 +1908,7 @@ fn terminal_agent_loop_async_poll_projection_adds_machine_visible_ask_reply() {
     assert_eq!(status, "succeeded");
     assert_eq!(error_text, None);
     let reply = result["messages"][0].as_str().expect("machine reply");
+    assert_ne!(reply, "checkpoint accepted but not terminal");
     assert!(reply.contains("checkpoint_id"));
     assert!(reply.contains("poll_ref"));
     assert!(reply.contains("next_check_after"));

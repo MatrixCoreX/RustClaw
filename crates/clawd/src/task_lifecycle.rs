@@ -598,20 +598,16 @@ fn non_empty_string_at(value: &Value, path: &[&str]) -> bool {
 
 fn pending_async_job_resume_blocker(
     job: &AsyncJobRef,
-    effective_expires_at: i64,
-    now_ts: i64,
+    _effective_expires_at: i64,
+    _now_ts: i64,
 ) -> Option<&'static str> {
     if !job.missing_required_fields().is_empty() {
         return Some("invalid_pending_async_job");
     }
     match job.status {
-        AsyncJobStatus::Accepted | AsyncJobStatus::Running if effective_expires_at <= now_ts => {
-            Some("async_job_expired")
-        }
-        AsyncJobStatus::Accepted | AsyncJobStatus::Running => None,
+        AsyncJobStatus::Accepted | AsyncJobStatus::Running | AsyncJobStatus::Expired => None,
         AsyncJobStatus::Succeeded => Some("async_job_observation_required"),
         AsyncJobStatus::Failed => Some("async_job_failed"),
-        AsyncJobStatus::Expired => Some("async_job_expired"),
     }
 }
 

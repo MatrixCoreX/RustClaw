@@ -73,11 +73,13 @@ fn ignores_protocol_field_selector_paths_as_locators() {
     assert!(
         extract_explicit_locator_for_fallback("RepairEnvelope/issue_codes checkpoint_id").is_none()
     );
-    assert!(
-        !structured_locator_tokens("text/error_text RepairEnvelope/issue_codes")
-            .iter()
-            .any(|token| token.kind == StructuredLocatorTokenKind::Path)
-    );
+    assert!(extract_explicit_locator_for_fallback("waiting/background").is_none());
+    assert!(extract_explicit_locator_for_fallback("poll_ref/checkpoint_id").is_none());
+    assert!(!structured_locator_tokens(
+        "text/error_text RepairEnvelope/issue_codes waiting/background poll_ref/checkpoint_id"
+    )
+    .iter()
+    .any(|token| token.kind == StructuredLocatorTokenKind::Path));
 }
 
 #[test]

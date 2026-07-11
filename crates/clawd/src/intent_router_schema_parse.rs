@@ -129,7 +129,7 @@ pub(super) fn parse_runtime_async_job_start_plan_hint(
             .filter(|value| !value.is_empty())
             .map(str::to_string)
     };
-    let command = field_text(&["command", "cmd", "shell_command"])?;
+    let command = field_text(&["command", "cmd", "shell_command", "command_sequence"])?;
     let kind = field_text(&["kind"]).unwrap_or_else(|| "runtime_async_job_start".to_string());
     let execution_mode = field_text(&["execution_mode", "mode"]);
     let async_adapter_kind = field_text(&["async_adapter_kind", "adapter_kind"]);
