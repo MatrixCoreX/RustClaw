@@ -1602,6 +1602,27 @@ fn state_patch_accepts_alias_bindings_array_target_value_field() {
 }
 
 #[test]
+fn state_patch_accepts_alias_bindings_array_target_path_field() {
+    let patch = json!({
+        "alias_bindings": [{
+            "alias": "자료A",
+            "target_path": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+            "scope": "session"
+        }],
+        "required_content_literals": ["기억했습니다"]
+    });
+
+    assert!(super::state_patch_is_alias_bindings_only(&patch));
+    let bindings = super::session_alias_bindings_from_state_patch(Some(&patch));
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].alias, "자료A");
+    assert_eq!(
+        bindings[0].target,
+        "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+    );
+}
+
+#[test]
 fn state_patch_accepts_alias_bindings_array_locator_field() {
     let patch = json!({
         "alias_bindings": [{

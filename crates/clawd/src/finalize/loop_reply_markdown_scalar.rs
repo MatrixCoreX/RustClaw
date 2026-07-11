@@ -35,7 +35,14 @@ pub(super) fn deterministic_scalar_markdown_heading_answer_from_loop(
         .filter(|step| step.is_ok())
         .filter_map(|step| step.output.as_deref())
         .find(|output| output.contains("\"read_range\"") || output.contains("\"read_text_range\""))
-        .and_then(markdown_heading_from_read_output)
+        .and_then(|output| {
+            if route_requests_title_scalar_selector(route) {
+                first_markdown_heading_from_read_output(output)
+                    .or_else(|| markdown_heading_from_read_output(output))
+            } else {
+                markdown_heading_from_read_output(output)
+            }
+        })
 }
 
 pub(super) fn route_allows_observed_markdown_heading_scalar_delivery(
@@ -126,12 +133,94 @@ pub(super) fn observed_markdown_heading_scalar_answer_for_delivery(
         }
         return None;
     }
+    if route_requests_title_scalar_selector(route) {
+        if let (Some(delivery_heading), Some(observed_heading)) = (
+            markdown_heading_from_line(trimmed_delivery),
+            first_markdown_heading_from_read_output(observed_output),
+        ) {
+            if delivery_heading.trim() == observed_heading.trim() {
+                return Some(observed_heading);
+            }
+        }
+    }
+    if route_allows_observed_markdown_heading_body_reduction(route)
+        && markdown_heading_from_line(trimmed_delivery).is_none()
+    {
+        if let Some(observed_heading) = first_markdown_heading_from_read_output(observed_output) {
+            if delivery_is_bounded_wrapper_around_observed_heading(
+                trimmed_delivery,
+                &observed_heading,
+            ) {
+                return Some(observed_heading);
+            }
+        }
+    }
     let observed_heading = markdown_heading_from_read_output(observed_output)?;
     if trimmed_delivery == observed_heading.trim() {
         return Some(observed_heading);
     }
     let delivery_heading = markdown_heading_from_line(trimmed_delivery)?;
     (delivery_heading.trim() == observed_heading.trim()).then_some(observed_heading)
+}
+
+fn route_requests_title_scalar_selector(route: &crate::RouteResult) -> bool {
+    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+        && route
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .as_deref()
+            .is_some_and(|selector| selector == "title")
+}
+
+fn delivery_is_bounded_wrapper_around_observed_heading(delivery: &str, heading: &str) -> bool {
+    let delivery = delivery.trim();
+    let heading = heading.trim();
+    if delivery.is_empty()
+        || heading.is_empty()
+        || delivery == heading
+        || delivery.contains('\n')
+        || !delivery.contains(heading)
+    {
+        return false;
+    }
+    let Some(offset) = delivery.find(heading) else {
+        return false;
+    };
+    let prefix = delivery[..offset].trim();
+    let suffix = delivery[offset + heading.len()..].trim();
+    let wrapper_chars = delivery
+        .chars()
+        .count()
+        .saturating_sub(heading.chars().count());
+    if wrapper_chars > 24 {
+        return false;
+    }
+    // Avoid reducing ordinary summaries that begin with the document heading and then add content.
+    !prefix.is_empty() || suffix.chars().all(is_heading_wrapper_punctuation)
+}
+
+fn is_heading_wrapper_punctuation(ch: char) -> bool {
+    ch.is_whitespace()
+        || matches!(
+            ch,
+            '"' | '\''
+                | '`'
+                | '.'
+                | ','
+                | ':'
+                | ';'
+                | '!'
+                | '?'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+        )
 }
 
 pub(super) fn replace_delivery_with_observed_markdown_heading_scalar(

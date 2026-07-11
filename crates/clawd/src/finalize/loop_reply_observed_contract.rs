@@ -31,6 +31,26 @@ pub(super) fn direct_scalar_observed_answer(
     {
         return Some((answer, summary));
     }
+    if route_requests_title_scalar_selector(route) {
+        if let Some(answer) =
+            deterministic_scalar_markdown_heading_answer_from_loop(loop_state, agent_run_context)
+        {
+            return Some((
+                answer,
+                crate::task_journal::TaskJournalFinalizerSummary {
+                    stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                    disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                    contract_ok: true,
+                    completion_ok: Some(true),
+                    grounded_ok: Some(true),
+                    format_ok: Some(true),
+                    needs_clarify: Some(false),
+                    used_evidence_ids_count: 1,
+                    ..Default::default()
+                },
+            ));
+        }
+    }
     if let Some((answer, summary)) =
         latest_terminal_scalar_respond_answer_from_loop_contract(route, loop_state)
     {
@@ -144,6 +164,16 @@ pub(super) fn direct_scalar_observed_answer(
             ..Default::default()
         },
     ))
+}
+
+fn route_requests_title_scalar_selector(route: &crate::RouteResult) -> bool {
+    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+        && route
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .as_deref()
+            .is_some_and(|selector| selector == "title")
 }
 
 fn scalar_projection_should_defer_to_publishable_evidence_summary(
