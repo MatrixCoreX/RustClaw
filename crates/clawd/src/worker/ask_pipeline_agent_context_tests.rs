@@ -353,6 +353,57 @@ fn boundary_observation_redacts_non_boundary_clarify_workspace_child_path() {
     assert!(block.contains("\"resolved_workspace_child_redacted\":true"));
     assert!(!block.contains(&readme.display().to_string()));
     assert!(block.contains("post_route_non_boundary_clarify_deferred_to_agent_loop"));
+    assert!(block.contains("\"missing_referent\""));
+    assert!(block.contains("\"reason_code\":\"unbound_deictic_reference\""));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn boundary_observation_hides_active_plan_files_for_unbound_referent() {
+    let root = temp_workspace_root("unbound_referent_plan_files");
+    let plan_dir = root.join("plan");
+    std::fs::create_dir_all(&plan_dir).expect("plan dir");
+    let active_plan = plan_dir.join("active.md");
+    std::fs::write(&active_plan, "# Active Plan\n").expect("active plan");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+    state.skill_rt.default_locator_search_dir = root.clone();
+    let mut route = base_route();
+    route.route_reason = "standalone_freeform_clarify_loop_context".to_string();
+    let post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: None,
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: false,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::with_owner(
+            "agent_loop_boundary_defer",
+            "post_route_non_boundary_clarify_deferred_to_agent_loop",
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
+        ),
+    };
+
+    let block = agent_loop_boundary_observations_block(
+        &state,
+        &post_route,
+        &crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        },
+        None,
+        "summarize it",
+        "summarize it",
+        &[],
+    )
+    .expect("observation block");
+
+    assert!(block.contains("\"missing_referent\""));
+    assert!(block.contains("\"active_plan_files\":[]"));
+    assert!(!block.contains(&active_plan.display().to_string()));
     let _ = std::fs::remove_dir_all(root);
 }
 

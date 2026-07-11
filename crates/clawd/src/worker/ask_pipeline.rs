@@ -409,10 +409,15 @@ fn agent_loop_boundary_observations_block(
     let route_reason_codes = boundary_observation_route_reason_codes(route);
     let session_alias_bindings = session_alias_binding_observations(session_snapshot);
     let active_bound_targets = active_bound_target_observations(session_snapshot);
+    let missing_referent = missing_referent_observation(route, &active_bound_targets);
     let file_delivery_target_candidates =
         file_delivery_target_candidate_observations(route, session_snapshot);
     let current_workspace_scope = current_workspace_scope_observation(state, route);
-    let active_plan_files = active_plan_file_observations(state);
+    let active_plan_files = if missing_referent.is_some() {
+        Vec::new()
+    } else {
+        active_plan_file_observations(state)
+    };
     let default_main_config_contract =
         default_main_config_contract_observation(state, prompt, route);
     let current_request_locator = if default_main_config_contract.is_some() {
@@ -447,6 +452,7 @@ fn agent_loop_boundary_observations_block(
         && route_reason_codes.is_empty()
         && session_alias_bindings.is_empty()
         && active_bound_targets.is_empty()
+        && missing_referent.is_none()
         && file_delivery_target_candidates.is_empty()
         && current_workspace_scope.is_none()
         && active_plan_files.is_empty()
@@ -480,6 +486,7 @@ fn agent_loop_boundary_observations_block(
         },
         "session_alias_bindings": session_alias_bindings,
         "active_bound_targets": active_bound_targets,
+        "missing_referent": missing_referent,
         "file_delivery_target_candidates": file_delivery_target_candidates,
         "current_workspace_scope": current_workspace_scope,
         "active_plan_files": active_plan_files,
@@ -495,6 +502,23 @@ fn agent_loop_boundary_observations_block(
     Some(format!(
         "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{encoded}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS"
     ))
+}
+
+fn missing_referent_observation(
+    route: &crate::RouteResult,
+    active_bound_targets: &[serde_json::Value],
+) -> Option<serde_json::Value> {
+    if !route.has_route_reason_machine_marker("standalone_freeform_clarify_loop_context")
+        || !active_bound_targets.is_empty()
+    {
+        return None;
+    }
+    Some(serde_json::json!({
+        "owner_layer": "agent_loop_boundary",
+        "reason_code": "unbound_deictic_reference",
+        "status_code": "missing_referent",
+        "missing_slot": "referent",
+    }))
 }
 
 fn runtime_session_state_observation(
