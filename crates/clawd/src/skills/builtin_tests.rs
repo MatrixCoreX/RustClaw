@@ -163,6 +163,130 @@ async fn write_file_append_line_separates_existing_non_newline_tail() {
 }
 
 #[tokio::test]
+async fn write_file_accepts_overwrite_mode_token() {
+    let root = TempDirGuard::new("write_file_overwrite_mode");
+    let path = root.path.join("notes/memo.txt");
+    fs::create_dir_all(path.parent().expect("parent")).expect("create notes");
+    fs::write(&path, "old content").expect("write initial file");
+
+    let state = test_state(root.path.clone());
+    let output = execute_builtin_skill(
+        &state,
+        "write_file",
+        &json!({
+            "path": "notes/memo.txt",
+            "content": "new content\n",
+            "mode": "overwrite"
+        }),
+    )
+    .await
+    .expect("overwrite mode should succeed");
+
+    assert!(output.starts_with("written "));
+    assert_eq!(
+        fs::read_to_string(path).expect("read file"),
+        "new content\n"
+    );
+}
+
+#[tokio::test]
+async fn write_file_accepts_append_mode_token() {
+    let root = TempDirGuard::new("write_file_append_mode");
+    let path = root.path.join("notes/memo.txt");
+    fs::create_dir_all(path.parent().expect("parent")).expect("create notes");
+    fs::write(&path, "alpha\n").expect("write initial file");
+
+    let state = test_state(root.path.clone());
+    let output = execute_builtin_skill(
+        &state,
+        "write_file",
+        &json!({
+            "path": "notes/memo.txt",
+            "content": "beta\n",
+            "mode": "append"
+        }),
+    )
+    .await
+    .expect("append mode should succeed");
+
+    assert!(output.starts_with("appended "));
+    assert_eq!(
+        fs::read_to_string(path).expect("read file"),
+        "alpha\nbeta\n"
+    );
+}
+
+#[tokio::test]
+async fn write_file_rejects_conflicting_append_and_mode_tokens() {
+    let root = TempDirGuard::new("write_file_conflicting_mode");
+    let state = test_state(root.path.clone());
+
+    let err = execute_builtin_skill(
+        &state,
+        "write_file",
+        &json!({
+            "path": "notes/memo.txt",
+            "content": "beta\n",
+            "append": true,
+            "mode": "overwrite"
+        }),
+    )
+    .await
+    .expect_err("conflicting write mode should fail");
+
+    let structured =
+        crate::skills::parse_structured_skill_error(&err).expect("structured write_file error");
+    assert_eq!(structured.skill, "write_file");
+    assert_eq!(structured.error_kind, "invalid_args");
+}
+
+#[tokio::test]
+async fn write_file_accepts_create_parents_token() {
+    let root = TempDirGuard::new("write_file_create_parents");
+    let path = root.path.join("notes/deep/memo.txt");
+    let state = test_state(root.path.clone());
+
+    let output = execute_builtin_skill(
+        &state,
+        "write_file",
+        &json!({
+            "path": "notes/deep/memo.txt",
+            "content": "created\n",
+            "create_parents": true
+        }),
+    )
+    .await
+    .expect("create_parents write should succeed");
+
+    assert!(output.starts_with("written "));
+    assert_eq!(fs::read_to_string(path).expect("read file"), "created\n");
+}
+
+#[tokio::test]
+async fn write_file_respects_create_parents_false_token() {
+    let root = TempDirGuard::new("write_file_without_create_parents");
+    let state = test_state(root.path.clone());
+
+    let err = execute_builtin_skill(
+        &state,
+        "write_file",
+        &json!({
+            "path": "notes/deep/memo.txt",
+            "content": "created\n",
+            "create_parents": false
+        }),
+    )
+    .await
+    .expect_err("missing parent without create_parents should fail");
+
+    let structured =
+        crate::skills::parse_structured_skill_error(&err).expect("structured write_file error");
+    assert_eq!(structured.skill, "write_file");
+    assert_eq!(structured.error_kind, "not_found");
+    assert!(!root.path.join("notes").exists());
+}
+
+#[tokio::test]
 async fn list_dir_missing_locator_is_error_not_success_observation() {
     let root = TempDirGuard::new("list_dir_missing_locator");
     let state = test_state(root.path.clone());
