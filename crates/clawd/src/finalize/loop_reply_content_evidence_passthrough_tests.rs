@@ -75,6 +75,48 @@ fn content_evidence_one_sentence_terminal_answer_is_kept_without_semantic_kind()
 }
 
 #[test]
+fn content_evidence_scalar_heading_terminal_answer_is_kept_before_meta_classifier() {
+    let answer = "Service Notes";
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.last_user_visible_respond = Some(answer.to_string());
+    loop_state.delivery_messages.push(answer.to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|fixture body","path":"service_notes.md"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|# Service Notes\\n2|\\n3|fixture body\",\"path\":\"service_notes.md\"}"}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", answer));
+    let mut route = free_route_result();
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "service_notes.md".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        should_drop_passthrough_delivery_for_content_evidence(
+            &loop_state,
+            true,
+            Some(&agent_run_context),
+            answer,
+        ),
+        Some(false)
+    );
+    assert!(content_evidence_terminal_respond_is_contractual_answer(
+        &loop_state,
+        Some(&agent_run_context),
+        answer,
+    ));
+}
+
+#[test]
 fn content_evidence_contractual_terminal_answer_requires_observation() {
     let answer = "配置加载检查应先做。";
     let mut loop_state = crate::agent_engine::LoopState::new(2);

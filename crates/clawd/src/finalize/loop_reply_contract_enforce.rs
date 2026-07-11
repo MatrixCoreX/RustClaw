@@ -562,12 +562,14 @@ pub(super) fn content_evidence_terminal_respond_is_contractual_answer(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    if !route.output_contract.requires_content_evidence {
+    let contract = route.effective_output_contract();
+    if !contract.requires_content_evidence {
         return false;
     }
     if !matches!(
-        route.output_contract.response_shape,
+        contract.response_shape,
         crate::OutputResponseShape::Free
+            | crate::OutputResponseShape::Scalar
             | crate::OutputResponseShape::OneSentence
             | crate::OutputResponseShape::Strict
     ) {
@@ -579,13 +581,20 @@ pub(super) fn content_evidence_terminal_respond_is_contractual_answer(
     ) {
         return strict_raw_command_output_exact_observation_answer(route, loop_state, respond);
     }
+    if direct_scalar_observed_answer(None, loop_state, agent_run_context)
+        .is_some_and(|(answer, _)| answer.trim() == respond.trim())
+    {
+        return true;
+    }
     let has_answer_semantic = !matches!(
         route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::None
     );
     let has_constrained_answer_shape = matches!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Strict
+        contract.response_shape,
+        crate::OutputResponseShape::Scalar
+            | crate::OutputResponseShape::OneSentence
+            | crate::OutputResponseShape::Strict
     );
     if !has_answer_semantic && !has_constrained_answer_shape {
         return false;
