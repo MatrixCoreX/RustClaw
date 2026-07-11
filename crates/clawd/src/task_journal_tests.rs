@@ -97,6 +97,7 @@ fn summary_json_includes_finalizer_and_task_metrics() {
     });
     journal.record_delivery_consistent(true);
     journal.record_llm_calls_per_task(3);
+    journal.record_llm_elapsed_ms_per_task(42);
     let mut by_prompt = std::collections::HashMap::new();
     by_prompt.insert(
         "normalizer".to_string(),
@@ -214,6 +215,41 @@ fn summary_json_includes_finalizer_and_task_metrics() {
             .and_then(Value::as_u64),
         Some(157_037)
     );
+    assert_eq!(
+        summary
+            .get("cost_budget")
+            .and_then(|v| v.get("policy_kind"))
+            .and_then(Value::as_str),
+        Some("loop_telemetry_rollout_gate")
+    );
+    assert_eq!(
+        summary
+            .get("cost_budget")
+            .and_then(|v| v.get("semantic_authority"))
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        summary
+            .get("cost_budget")
+            .and_then(|v| v.pointer("/observed/provider_retries"))
+            .and_then(Value::as_u64),
+        Some(2)
+    );
+    assert_eq!(
+        summary
+            .get("cost_budget")
+            .and_then(|v| v.pointer("/observed/prompt_truncations"))
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert!(summary
+        .get("cost_budget")
+        .and_then(|v| v.get("signals"))
+        .and_then(Value::as_array)
+        .is_some_and(|signals| signals
+            .iter()
+            .any(|signal| signal.as_str() == Some("prompt_truncation_observed"))));
     assert_eq!(
         summary
             .get("route_result")
