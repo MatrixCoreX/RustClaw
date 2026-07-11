@@ -1194,6 +1194,98 @@ fn task_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
     })
 }
 
+fn cost_budget_json(journal: &TaskJournal) -> Value {
+    const SIMPLE_BOUNDED_LLM_CALL_LIMIT: u64 = 8;
+    const SIMPLE_BOUNDED_ELAPSED_MS_LIMIT: u64 = 180_000;
+    let by_prompt = journal.task_metrics.by_prompt.as_ref();
+    let prompt_truncation_count = by_prompt
+        .map(|map| {
+            map.values()
+                .map(|bucket| bucket.prompt_truncation_count)
+                .sum::<u64>()
+        })
+        .unwrap_or(0);
+    let provider_retry_count = by_prompt
+        .map(|map| {
+            map.values()
+                .map(|bucket| bucket.provider_retry_count)
+                .sum::<u64>()
+        })
+        .unwrap_or(0);
+    let provider_attempt_count = by_prompt
+        .map(|map| {
+            map.values()
+                .map(|bucket| bucket.provider_attempt_count)
+                .sum::<u64>()
+        })
+        .unwrap_or(0);
+    let verifier_attempt_count = by_prompt
+        .and_then(|map| map.get("verifier").map(|bucket| bucket.count))
+        .unwrap_or(0);
+    let repair_attempt_count = by_prompt
+        .map(|map| {
+            map.iter()
+                .filter(|(label, _)| label.split('_').any(|part| part == "repair"))
+                .map(|(_, bucket)| bucket.count)
+                .sum::<u64>()
+        })
+        .unwrap_or(0);
+    let tool_calls = journal
+        .step_results
+        .iter()
+        .filter(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+        })
+        .count();
+    let llm_calls = journal.task_metrics.llm_calls_per_task.unwrap_or(0);
+    let llm_elapsed_ms = journal.task_metrics.llm_elapsed_ms_per_task.unwrap_or(0);
+    let mut signals = Vec::new();
+    if llm_calls > SIMPLE_BOUNDED_LLM_CALL_LIMIT {
+        signals.push("llm_call_threshold_exceeded");
+    }
+    if llm_elapsed_ms > SIMPLE_BOUNDED_ELAPSED_MS_LIMIT {
+        signals.push("elapsed_threshold_exceeded");
+    }
+    if prompt_truncation_count > 0 {
+        signals.push("prompt_truncation_observed");
+    }
+    if provider_retry_count > 0 {
+        signals.push("provider_retry_observed");
+    }
+    if verifier_attempt_count > 1 {
+        signals.push("verifier_retry_observed");
+    }
+    json!({
+        "schema_version": 1,
+        "owner_layer": "agent_loop",
+        "policy_kind": "loop_telemetry_rollout_gate",
+        "semantic_authority": false,
+        "enforcement": "observe",
+        "long_tail_escape": "checkpoint_background_resume",
+        "thresholds": {
+            "simple_bounded_llm_calls": SIMPLE_BOUNDED_LLM_CALL_LIMIT,
+            "simple_bounded_elapsed_ms": SIMPLE_BOUNDED_ELAPSED_MS_LIMIT,
+            "prompt_truncation_count": 0,
+        },
+        "observed": {
+            "llm_calls": llm_calls,
+            "tool_calls": tool_calls,
+            "rounds": journal.rounds.len(),
+            "steps": journal.step_results.len(),
+            "llm_elapsed_ms": llm_elapsed_ms,
+            "verifier_attempts": verifier_attempt_count,
+            "repair_attempts": repair_attempt_count,
+            "provider_attempts": provider_attempt_count,
+            "provider_retries": provider_retry_count,
+            "prompt_truncations": prompt_truncation_count,
+        },
+        "signals": signals,
+    })
+}
+
 fn validation_result_json(journal: &TaskJournal) -> Value {
     let signals = journal
         .step_results
@@ -1680,6 +1772,7 @@ impl TaskJournal {
             "task_checkpoint": self.task_checkpoint.clone(),
             "task_outcome": task_outcome_summary_json(self),
             "task_metrics": task_metrics_json(&self.task_metrics),
+            "cost_budget": cost_budget_json(self),
             "validation_result": validation_result_json(self),
             "final_answer": self.final_answer.as_deref().map(crate::truncate_for_log),
         })
@@ -1780,6 +1873,7 @@ impl TaskJournal {
             "task_lifecycle": self.task_lifecycle.clone(),
             "task_checkpoint": self.task_checkpoint.clone(),
             "task_metrics": task_metrics_json(&self.task_metrics),
+            "cost_budget": cost_budget_json(self),
             "validation_result": validation_result_json(self),
             "ask_state_transitions": self.transitions.iter().map(ask_transition_json).collect::<Vec<_>>(),
         })
