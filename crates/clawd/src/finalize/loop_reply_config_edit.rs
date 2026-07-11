@@ -226,6 +226,21 @@ fn direct_config_edit_plan_answer(
     if let Some(value) = value {
         payload["value"] = serde_json::json!(value);
     }
+    if let Some(guard) = outputs.iter().rev().find(|item| {
+        item.index > planned.index
+            && config_edit_output_action(&item.value) == Some("guard_config")
+            && config_edit_path_label(&item.value) == path
+    }) {
+        let risk_count = guard
+            .value
+            .get("risk_count")
+            .and_then(|value| value.as_u64())
+            .unwrap_or_else(|| config_edit_risk_labels(&guard.value).len() as u64);
+        payload["risk_count"] = serde_json::json!(risk_count);
+        payload["count"] = serde_json::json!(risk_count);
+        payload["risks"] = serde_json::json!(config_edit_risk_labels(&guard.value));
+        payload["candidates"] = serde_json::json!(config_edit_candidate_labels(&guard.value));
+    }
     Some(payload.to_string())
 }
 
