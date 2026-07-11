@@ -235,23 +235,17 @@ fn command_output_summary_contract_from_structured_fields(
     needs_clarify: bool,
     command_result_synthesis_marker: bool,
 ) -> bool {
-    let raw_command_output_with_summary_signal = matches!(
+    let command_output_summary_signal = matches!(
         output_contract.semantic_kind,
-        OutputSemanticKind::RawCommandOutput
-    ) && (matches!(
-        output_contract.response_shape,
-        OutputResponseShape::OneSentence
-    ) || command_result_synthesis_marker);
+        OutputSemanticKind::CommandOutputSummary
+    ) || command_result_synthesis_marker;
     !needs_clarify
         && output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
         && output_contract.locator_hint.trim().is_empty()
-        && (matches!(
-            output_contract.semantic_kind,
-            OutputSemanticKind::None | OutputSemanticKind::CommandOutputSummary
-        ) || raw_command_output_with_summary_signal)
+        && command_output_summary_signal
         && matches!(
             output_contract.response_shape,
             OutputResponseShape::Free
