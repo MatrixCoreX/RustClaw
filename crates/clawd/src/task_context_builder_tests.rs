@@ -1108,6 +1108,7 @@ fn light_execution_budget_detects_scalar_path_only_pwd_route() {
 fn light_execution_budget_detects_bounded_observation_summaries() {
     for semantic_kind in [
         crate::OutputSemanticKind::CommandOutputSummary,
+        crate::OutputSemanticKind::RawCommandOutput,
         crate::OutputSemanticKind::ServiceStatus,
     ] {
         let mut route = base_route_result();
@@ -1124,6 +1125,38 @@ fn light_execution_budget_detects_bounded_observation_summaries() {
             "{semantic_kind:?} should use light execution budget"
         );
     }
+}
+
+#[test]
+fn light_execution_budget_detects_bounded_multi_locator_local_boundary() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.route_reason = "current_workspace_generic_contract_deferred_to_agent_loop; auto_locator_suppressed_multiple_explicit_paths".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+
+    assert!(uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
+}
+
+#[test]
+fn light_execution_budget_detects_freeform_bounded_multi_locator_local_boundary() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.route_reason = "current_workspace_generic_contract_deferred_to_agent_loop; auto_locator_suppressed_multiple_explicit_paths".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+
+    assert!(uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
 }
 
 #[test]

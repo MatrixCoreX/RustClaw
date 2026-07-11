@@ -558,10 +558,42 @@ fn route_uses_bounded_observation_summary_light_budget(route_result: &RouteResul
     }
     route_result.output_contract_marker_is_any(&[
         crate::OutputSemanticKind::CommandOutputSummary,
+        crate::OutputSemanticKind::RawCommandOutput,
         crate::OutputSemanticKind::ServiceStatus,
     ]) || route_has_capability_ref_machine_token(route_result)
 }
 
+fn route_uses_bounded_local_machine_boundary_light_budget(route_result: &RouteResult) -> bool {
+    if route_result.risk_ceiling != crate::RiskCeiling::Low
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || !matches!(route_result.schedule_kind, crate::ScheduleKind::None)
+        || !(route_result.ask_mode.is_plain_act() || route_result.ask_mode.finalize_chat_wrapped())
+    {
+        return false;
+    }
+    if route_has_output_contract_marker(route_result, "workspace_project_summary")
+        || route_result
+            .output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary)
+    {
+        return false;
+    }
+    let bounded_response = matches!(
+        route_result.output_contract.response_shape,
+        crate::OutputResponseShape::Free
+            | crate::OutputResponseShape::Scalar
+            | crate::OutputResponseShape::OneSentence
+            | crate::OutputResponseShape::Strict
+    );
+    let bounded_locator = matches!(
+        route_result.output_contract.locator_kind,
+        crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
+    );
+    bounded_response
+        && bounded_locator
+        && route_result
+            .has_route_reason_machine_marker("auto_locator_suppressed_multiple_explicit_paths")
+}
 fn route_has_capability_ref_machine_token(route_result: &RouteResult) -> bool {
     [&route_result.route_reason, &route_result.resolved_intent]
         .iter()
@@ -602,6 +634,9 @@ pub(crate) fn uses_light_execution_context_budget(
         return true;
     }
     if route_uses_bounded_observation_summary_light_budget(route_result) {
+        return true;
+    }
+    if route_uses_bounded_local_machine_boundary_light_budget(route_result) {
         return true;
     }
     if !route_result.ask_mode.is_plain_act() {
