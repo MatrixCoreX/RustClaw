@@ -7,6 +7,7 @@ import type {
   ChannelName,
   ConsolePage,
   SubmitTaskResponse,
+  TaskLlmDebugResponse,
   TaskQueryResponse,
 } from "../types/api";
 
@@ -47,6 +48,9 @@ export function useTaskRuntime({
   const [taskLoading, setTaskLoading] = useState(false);
   const [taskResult, setTaskResult] = useState<TaskQueryResponse | null>(null);
   const [taskError, setTaskError] = useState<string | null>(null);
+  const [taskLlmDebug, setTaskLlmDebug] = useState<TaskLlmDebugResponse | null>(null);
+  const [taskLlmDebugLoading, setTaskLlmDebugLoading] = useState(false);
+  const [taskLlmDebugError, setTaskLlmDebugError] = useState<string | null>(null);
   const [trackingTaskId, setTrackingTaskId] = useState<string | null>(null);
   const [activeTasks, setActiveTasks] = useState<ActiveTaskItem[]>([]);
   const [activeTasksLoading, setActiveTasksLoading] = useState(false);
@@ -81,6 +85,16 @@ export function useTaskRuntime({
     const body = (await res.json()) as ApiResponse<TaskQueryResponse>;
     if (!res.ok || !body.ok || !body.data) {
       throw new Error(body.error || `task query failed (${res.status})`);
+    }
+    return body.data;
+  };
+
+  const fetchTaskLlmDebugById = async (id: string): Promise<TaskLlmDebugResponse> => {
+    const normalizedId = encodeURIComponent(id.trim());
+    const res = await apiFetch(`/v1/debug/tasks/${normalizedId}`);
+    const body = (await res.json()) as ApiResponse<TaskLlmDebugResponse>;
+    if (!res.ok || !body.ok || !body.data) {
+      throw new Error(body.error || `task llm debug query failed (${res.status})`);
     }
     return body.data;
   };
@@ -131,6 +145,8 @@ export function useTaskRuntime({
       setTaskLoading(true);
       setTaskError(null);
       setTaskResult(null);
+      setTaskLlmDebug(null);
+      setTaskLlmDebugError(null);
     }
     try {
       const result = await fetchTaskById(id);
@@ -155,11 +171,32 @@ export function useTaskRuntime({
     setTaskLoading(false);
   };
 
+  const queryTaskLlmDebug = async (id?: string) => {
+    const targetTaskId = (id ?? taskId).trim();
+    if (!targetTaskId) return null;
+    setTaskLlmDebugLoading(true);
+    setTaskLlmDebugError(null);
+    try {
+      const result = await fetchTaskLlmDebugById(targetTaskId);
+      setTaskLlmDebug(result);
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setTaskLlmDebugError(message);
+      setTaskLlmDebug(null);
+      return null;
+    } finally {
+      setTaskLlmDebugLoading(false);
+    }
+  };
+
   const markTaskSubmitted = (submittedTaskId: string) => {
     setTaskId(submittedTaskId);
     setTrackingTaskId(submittedTaskId);
     setTaskResult(null);
     setTaskError(null);
+    setTaskLlmDebug(null);
+    setTaskLlmDebugError(null);
   };
 
   const recordTaskResult = (submittedTaskId: string, finalResult: TaskQueryResponse) => {
@@ -378,6 +415,8 @@ export function useTaskRuntime({
 
   const viewTask = async (taskIdToView: string) => {
     setTaskId(taskIdToView);
+    setTaskLlmDebug(null);
+    setTaskLlmDebugError(null);
     return queryTaskById(taskIdToView);
   };
 
@@ -413,6 +452,9 @@ export function useTaskRuntime({
     taskLoading,
     taskResult,
     taskError,
+    taskLlmDebug,
+    taskLlmDebugLoading,
+    taskLlmDebugError,
     trackingTaskId,
     activeTasks,
     activeTasksLoading,
@@ -450,9 +492,11 @@ export function useTaskRuntime({
     interactionError,
     interactionSubmittedTaskId,
     fetchTaskById,
+    fetchTaskLlmDebugById,
     fetchActiveTasks,
     queryTaskById,
     queryTask,
+    queryTaskLlmDebug,
     viewTask,
     setResumeDraftValue,
     submitResumeForTask,

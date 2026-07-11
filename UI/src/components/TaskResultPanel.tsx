@@ -11,7 +11,8 @@ import {
   type TaskOutcomeView,
   type TaskPermissionView,
 } from "../lib/task-result";
-import type { TaskQueryResponse } from "../types/api";
+import type { TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
+import { TaskLlmTracePanel } from "./TaskLlmTracePanel";
 
 type Translate = (zh: string, en: string) => string;
 type TranslateSlash = (text: string) => string;
@@ -25,10 +26,14 @@ export interface TaskResultPanelProps {
   taskLoading: boolean;
   taskError: string | null;
   taskResult: TaskQueryResponse | null;
+  taskLlmDebug: TaskLlmDebugResponse | null;
+  taskLlmDebugLoading: boolean;
+  taskLlmDebugError: string | null;
   resumeDrafts: Record<string, string>;
   resumeSubmittingTaskId: string | null;
   onTaskIdChange: (value: string) => void;
   onQueryTask: () => unknown | Promise<unknown>;
+  onQueryTaskLlmDebug: (taskId?: string) => unknown | Promise<unknown>;
   onResumeDraftChange: (taskId: string, value: string) => void;
   onSubmitResume: (taskId: string) => unknown | Promise<unknown>;
 }
@@ -48,10 +53,14 @@ export function TaskResultPanel({
   taskLoading,
   taskError,
   taskResult,
+  taskLlmDebug,
+  taskLlmDebugLoading,
+  taskLlmDebugError,
   resumeDrafts,
   resumeSubmittingTaskId,
   onTaskIdChange,
   onQueryTask,
+  onQueryTaskLlmDebug,
   onResumeDraftChange,
   onSubmitResume,
 }: TaskResultPanelProps) {
@@ -296,6 +305,15 @@ export function TaskResultPanel({
               </div>
             </details>
           ) : null}
+          <TaskLlmTracePanel
+            t={t}
+            tSlash={tSlash}
+            taskResult={taskResult}
+            taskLlmDebug={taskLlmDebug}
+            taskLlmDebugLoading={taskLlmDebugLoading}
+            taskLlmDebugError={taskLlmDebugError}
+            onQueryTaskLlmDebug={onQueryTaskLlmDebug}
+          />
           <details className="mt-4 rounded-lg border border-white/10 bg-[#12151f] p-3">
             <summary className="cursor-pointer text-xs font-medium text-white/65">
               {tSlash("技术详情 JSON / Technical JSON")}

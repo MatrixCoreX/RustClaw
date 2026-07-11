@@ -505,6 +505,9 @@ export default function App() {
     taskLoading,
     taskResult,
     taskError,
+    taskLlmDebug,
+    taskLlmDebugLoading,
+    taskLlmDebugError,
     trackingTaskId,
     activeTasks,
     activeTasksLoading,
@@ -544,6 +547,7 @@ export default function App() {
     fetchTaskById,
     fetchActiveTasks,
     queryTask,
+    queryTaskLlmDebug,
     viewTask,
     setResumeDraftValue,
     submitResumeForTask,
@@ -1679,8 +1683,12 @@ export default function App() {
               taskLoading={taskLoading}
               taskError={taskError}
               taskResult={taskResult}
+              taskLlmDebug={taskLlmDebug}
+              taskLlmDebugLoading={taskLlmDebugLoading}
+              taskLlmDebugError={taskLlmDebugError}
               onTaskIdChange={setTaskId}
               onQueryTask={queryTask}
+              onQueryTaskLlmDebug={queryTaskLlmDebug}
             />
           ) : null}
     </ConsoleLayout>
