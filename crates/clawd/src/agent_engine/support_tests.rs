@@ -884,6 +884,46 @@ fn seed_loop_state_treats_missing_referent_as_boundary_clarify() {
 }
 
 #[test]
+fn seed_loop_state_ignores_missing_referent_when_auto_locator_boundary_ready() {
+    let observation = serde_json::json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "needs_clarify": false,
+        "post_route_boundary_record": {
+            "outcome": "boundary_ready",
+            "reason_code": "post_route_auto_locator_satisfied_path_scoped_content"
+        },
+        "auto_locator": {
+            "resolved_direct": true,
+            "path": "/workspace/rustclaw.service",
+            "fuzzy_candidates": []
+        },
+        "missing_referent": {
+            "owner_layer": "agent_loop_boundary",
+            "reason_code": "unbound_deictic_reference",
+            "status_code": "missing_referent",
+            "missing_slot": "referent"
+        }
+    });
+    let block = format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS",
+        serde_json::to_string(&observation).expect("observation json")
+    );
+    let ctx = AgentRunContext {
+        user_request: Some(format!("check file\n{block}")),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(4);
+
+    seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
+
+    assert!(!loop_state.boundary_observation_needs_clarify);
+    assert!(!loop_state
+        .output_vars
+        .contains_key("agent_loop.boundary_observation_needs_clarify"));
+}
+
+#[test]
 fn guard_policy_defaults_to_agent_loop_authority_when_config_missing() {
     let root = temp_support_workspace("rollout-defaults");
     let mut state = crate::AppState::test_default_with_fixture_provider();

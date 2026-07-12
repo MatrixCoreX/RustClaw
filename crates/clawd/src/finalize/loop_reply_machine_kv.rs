@@ -3,6 +3,9 @@ use serde_json::Value;
 use crate::agent_engine::{append_delivery_message, AgentRunContext, LoopState};
 use crate::ClaimedTask;
 
+#[path = "loop_reply_machine_kv/path_fact_delivery.rs"]
+mod path_fact_delivery;
+
 use super::{
     final_answer_text_from_delivery, log_deterministic_delivery_record,
     raw_command_machine_field_delivery_satisfies_request,
@@ -172,6 +175,47 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         if answer_is_service_status_selector {
             return false;
         }
+    }
+    if let Some(restored) =
+        path_fact_delivery::latest_path_batch_fact_delivery_for_requested_summary(
+            loop_state,
+            agent_run_context,
+            &answer,
+        )
+    {
+        if restored.trim() == current.trim() {
+            loop_state.last_user_visible_respond = Some(current);
+            return false;
+        }
+        delivery_messages.clear();
+        delivery_messages.push(restored.clone());
+        loop_state.delivery_messages.clear();
+        append_delivery_message(
+            &task.task_id,
+            &mut loop_state.delivery_messages,
+            restored.clone(),
+        );
+        loop_state.last_user_visible_respond = Some(restored);
+        *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: loop_state.executed_step_results.len(),
+            ..Default::default()
+        });
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "requested_machine_kv_summary_path_fact_delivery",
+            "restored",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return true;
     }
     if marker_only_requested_summary(&answer)
         && !strict_machine_field_contract_requested(agent_run_context)
