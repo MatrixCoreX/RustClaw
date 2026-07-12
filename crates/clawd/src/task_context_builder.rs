@@ -674,7 +674,7 @@ fn machine_context_has_capability_ref_token(machine_context: &str) -> bool {
 
 pub(crate) fn uses_light_execution_context_budget(
     route_result: &RouteResult,
-    _resolved_prompt: &str,
+    resolved_prompt: &str,
 ) -> bool {
     if uses_local_workspace_execution_context_budget(route_result) {
         return true;
@@ -682,11 +682,14 @@ pub(crate) fn uses_light_execution_context_budget(
     if route_needs_recent_execution_history(route_result) {
         return false;
     }
+    let intent_surface =
+        crate::intent::surface_signals::analyze_prompt_surface(route_result.resolved_intent.trim());
+    if route_uses_explicit_locator_surface_light_budget(route_result, resolved_prompt) {
+        return true;
+    }
     if route_uses_structured_clarify_boundary_light_budget(route_result) {
         return true;
     }
-    let intent = route_result.resolved_intent.trim();
-    let intent_surface = crate::intent::surface_signals::analyze_prompt_surface(intent);
     if route_uses_structured_chat_wrapped_light_budget(route_result, &intent_surface) {
         return true;
     }
@@ -707,6 +710,27 @@ pub(crate) fn uses_light_execution_context_budget(
         || route_has_output_contract_marker(route_result, "existence_with_path")
         || route_uses_structured_listing(route_result)
         || route_uses_structured_content_read(route_result, &intent_surface)
+}
+
+fn route_uses_explicit_locator_surface_light_budget(
+    route_result: &RouteResult,
+    resolved_prompt: &str,
+) -> bool {
+    if route_result.needs_clarify
+        || route_result.wants_file_delivery
+        || route_result.output_contract.delivery_required
+        || route_result.output_contract.delivery_intent != crate::OutputDeliveryIntent::None
+        || route_result.schedule_kind != crate::ScheduleKind::None
+        || route_result.should_refresh_long_term_memory
+        || matches!(route_result.risk_ceiling, crate::RiskCeiling::High)
+        || !(route_result.ask_mode.is_plain_act() || route_result.ask_mode.finalize_chat_wrapped())
+        || !route_result
+            .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+    {
+        return false;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(resolved_prompt);
+    surface.has_explicit_path_or_url() || surface.has_concrete_locator_hint()
 }
 
 pub(crate) fn uses_local_workspace_execution_context_budget(route_result: &RouteResult) -> bool {
