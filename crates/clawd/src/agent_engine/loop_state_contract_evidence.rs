@@ -104,7 +104,41 @@ fn boundary_observation_has_blocking_missing_referent(value: &Value) -> bool {
     {
         return false;
     }
+    if value
+        .get("current_request_locator")
+        .and_then(Value::as_object)
+        .is_some_and(current_request_locator_has_concrete_surface)
+    {
+        return false;
+    }
     true
+}
+
+fn current_request_locator_has_concrete_surface(locator: &serde_json::Map<String, Value>) -> bool {
+    locator
+        .get("has_concrete_surface")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || locator
+            .get("explicit_locator_hints")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.get("hint")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .is_some_and(|hint| !hint.is_empty())
+                })
+            })
+        || locator
+            .get("resolved_workspace_child")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|path| !path.is_empty())
+        || locator
+            .get("resolved_workspace_path_pair")
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty())
 }
 
 fn active_plan_file_targets_from_boundary_observation_blocks(summary: &str) -> Vec<String> {

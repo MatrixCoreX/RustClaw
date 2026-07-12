@@ -639,6 +639,49 @@ fn seed_loop_state_extracts_current_request_locator_boundary_observation() {
 }
 
 #[test]
+fn seed_loop_state_ignores_missing_referent_when_current_request_locator_is_concrete() {
+    let observation = serde_json::json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "needs_clarify": false,
+        "current_request_locator": {
+            "source": "current_request",
+            "has_concrete_surface": true,
+            "explicit_locator_hints": [
+                {"kind": "filename", "hint": "README.md"}
+            ],
+            "resolved_workspace_root": "/tmp/rustclaw"
+        },
+        "missing_referent": {
+            "owner_layer": "agent_loop_boundary",
+            "reason_code": "unbound_deictic_reference",
+            "status_code": "missing_referent",
+            "missing_slot": "referent"
+        }
+    });
+    let block = format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS",
+        serde_json::to_string(&observation).expect("observation json")
+    );
+    let ctx = AgentRunContext {
+        user_request: Some(format!("read README.md\n{block}")),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(4);
+
+    seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
+
+    assert!(!loop_state.boundary_observation_needs_clarify);
+    assert!(!loop_state
+        .output_vars
+        .contains_key("agent_loop.boundary_observation_needs_clarify"));
+    assert!(loop_state
+        .output_vars
+        .get("current_request_locator_evidence")
+        .is_some_and(|evidence| evidence.contains("README.md")));
+}
+
+#[test]
 fn seed_loop_state_extracts_active_plan_file_targets_boundary_observation() {
     let observation = serde_json::json!({
         "kind": "agent_loop_boundary_observations",
