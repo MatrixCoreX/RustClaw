@@ -202,6 +202,66 @@ fn direct_config_edit_plan_answer_includes_following_guard_observation() {
 }
 
 #[test]
+fn direct_config_edit_observed_answer_combines_read_field_and_guard_config() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_basic",
+        r#"{"extra":{"action":"extract_field","exists":true,"field_path":"llm.selected_vendor","format":"toml","path":"/home/guagua/rustclaw/configs/config.toml","resolved_field_path":"llm.selected_vendor","resolved_path":"/home/guagua/rustclaw/configs/config.toml","value":"minimax","value_text":"minimax","value_type":"string"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "config_basic",
+        r#"{"extra":{"action":"guard_config","candidates":["tools.allow_sudo=true"],"count":1,"format":"toml","path":"/home/guagua/rustclaw/configs/config.toml","resolved_path":"/home/guagua/rustclaw/configs/config.toml","risk_count":1,"risks":["tools.allow_sudo=true"],"valid":false}}"#,
+    ));
+
+    let (answer, summary) = direct_config_edit_observed_answer(
+        &state,
+        "只预览改配置，不写入；读取 llm.selected_vendor 当前值并检查风险。",
+        &loop_state,
+    )
+    .expect("config preview read+guard answer");
+
+    let payload: serde_json::Value = serde_json::from_str(&answer).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.config_edit.preview_read_guard")
+    );
+    assert_eq!(
+        payload
+            .pointer("/field_path")
+            .and_then(serde_json::Value::as_str),
+        Some("llm.selected_vendor")
+    );
+    assert_eq!(
+        payload
+            .pointer("/current_value")
+            .and_then(serde_json::Value::as_str),
+        Some("minimax")
+    );
+    assert_eq!(
+        payload
+            .pointer("/would_write")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        payload
+            .pointer("/risk_count")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        summary.disposition,
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
 fn direct_config_edit_observed_answer_projects_agent_hook_policy_surface() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(1);
