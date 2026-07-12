@@ -183,6 +183,7 @@ pub(super) fn normalize_intent_normalizer_top_level_for_schema(
     obj.entry("state_patch".to_string()).or_insert(Value::Null);
     normalize_state_patch_for_schema(obj);
     promote_top_level_machine_state_patch_fields(obj);
+    promote_active_task_reference_replacement_pair(obj);
     normalize_state_patch_for_schema(obj);
     obj.entry("attachment_processing_required".to_string())
         .or_insert(Value::Bool(false));
@@ -619,6 +620,56 @@ fn promote_top_level_machine_state_patch_fields(obj: &mut serde_json::Map<String
         }
         _ => {
             obj.insert("state_patch".to_string(), Value::Object(promoted));
+        }
+    }
+}
+
+fn promote_active_task_reference_replacement_pair(obj: &mut serde_json::Map<String, Value>) {
+    let Some(pair) = active_task_reference_replacement_pair(obj.get("active_task_reference"))
+    else {
+        return;
+    };
+    let state_patch = obj
+        .entry("state_patch".to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if !state_patch.is_object() {
+        *state_patch = Value::Object(serde_json::Map::new());
+    }
+    let map = state_patch.as_object_mut().expect("state_patch object");
+    append_state_patch_replacement_pair(map, pair);
+}
+
+fn active_task_reference_replacement_pair(value: Option<&Value>) -> Option<Value> {
+    let map = value?.as_object()?;
+    let from = first_machine_scalar_text(map, &["from", "old", "source"])?;
+    let to = first_machine_scalar_text(map, &["to", "new", "target", "value"])?;
+    (from != to).then(|| serde_json::json!({ "from": from, "to": to }))
+}
+
+fn first_machine_scalar_text(
+    map: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Option<String> {
+    keys.iter()
+        .find_map(|key| map.get(*key).and_then(scalar_json_value_text))
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+}
+
+fn append_state_patch_replacement_pair(map: &mut serde_json::Map<String, Value>, pair: Value) {
+    match map.get_mut("replacement_pairs") {
+        Some(Value::Array(items)) => {
+            if !items.iter().any(|item| item == &pair) {
+                items.push(pair);
+            }
+        }
+        Some(existing) if existing == &pair => {}
+        Some(existing) => {
+            let previous = existing.clone();
+            *existing = Value::Array(vec![previous, pair]);
+        }
+        None => {
+            map.insert("replacement_pairs".to_string(), Value::Array(vec![pair]));
         }
     }
 }
