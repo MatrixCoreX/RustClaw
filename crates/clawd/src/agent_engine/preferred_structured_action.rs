@@ -335,6 +335,14 @@ pub(super) fn readonly_count_candidate_for_rejected_run_cmd(
                 obj.insert("files_only".to_string(), Value::Bool(false));
             }
         }
+        if let Some(extension) = count.extension {
+            obj.insert("ext_filter".to_string(), Value::String(extension));
+            obj.insert("kind_filter".to_string(), Value::String("file".to_string()));
+            obj.insert("count_files".to_string(), Value::Bool(true));
+            obj.insert("count_dirs".to_string(), Value::Bool(false));
+            obj.insert("files_only".to_string(), Value::Bool(true));
+            obj.insert("dirs_only".to_string(), Value::Bool(false));
+        }
     }
     Some(AgentAction::CallTool {
         tool: "fs_basic".to_string(),

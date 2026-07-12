@@ -767,6 +767,7 @@ pub(super) struct ReadonlyFindCountCommand {
     pub(super) root: String,
     pub(super) kind: ScalarCountInventoryKind,
     pub(super) recursive: bool,
+    pub(super) extension: Option<String>,
 }
 
 pub(super) fn filesystem_find_route_prefers_structured_tool(
@@ -785,11 +786,7 @@ pub(super) fn filesystem_find_route_prefers_structured_tool(
 
 pub(super) fn simple_shell_extension_pattern(pattern: &str) -> Option<String> {
     let pattern = pattern.trim();
-    let candidate = pattern
-        .strip_prefix("*.")
-        .or_else(|| pattern.strip_prefix('.'))
-        .unwrap_or(pattern)
-        .trim();
+    let candidate = pattern.strip_prefix("*.")?.trim();
     if candidate.is_empty()
         || candidate.contains('/')
         || candidate
@@ -924,6 +921,7 @@ pub(super) fn readonly_find_count_from_shell_command(
     }
     let mut kind = ScalarCountInventoryKind::Any;
     let mut recursive = true;
+    let mut extension = None;
     while index < find_words.len() {
         let word = find_words[index].as_str();
         match word {
@@ -945,7 +943,8 @@ pub(super) fn readonly_find_count_from_shell_command(
                 index += 2;
             }
             "-name" | "-iname" => {
-                find_words.get(index + 1)?;
+                let pattern = find_words.get(index + 1)?;
+                extension = Some(simple_shell_extension_pattern(pattern)?);
                 index += 2;
             }
             "-print" => {
@@ -954,10 +953,14 @@ pub(super) fn readonly_find_count_from_shell_command(
             _ => return None,
         }
     }
+    if extension.is_some() && !matches!(kind, ScalarCountInventoryKind::Files) {
+        return None;
+    }
     Some(ReadonlyFindCountCommand {
         root,
         kind,
         recursive,
+        extension,
     })
 }
 
@@ -995,6 +998,14 @@ fn fs_basic_count_entries_action_from_readonly_find_count(
                 obj.insert("dirs_only".to_string(), Value::Bool(true));
                 obj.insert("files_only".to_string(), Value::Bool(false));
             }
+        }
+        if let Some(extension) = count.extension {
+            obj.insert("ext_filter".to_string(), Value::String(extension));
+            obj.insert("kind_filter".to_string(), Value::String("file".to_string()));
+            obj.insert("count_files".to_string(), Value::Bool(true));
+            obj.insert("count_dirs".to_string(), Value::Bool(false));
+            obj.insert("files_only".to_string(), Value::Bool(true));
+            obj.insert("dirs_only".to_string(), Value::Bool(false));
         }
     }
     AgentAction::CallTool {

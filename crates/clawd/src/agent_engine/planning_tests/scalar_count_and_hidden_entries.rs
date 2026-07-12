@@ -469,6 +469,107 @@ fn contract_rejected_find_wc_count_run_cmd_rewrites_to_count_entries() {
 }
 
 #[test]
+fn find_wc_count_run_cmd_rewrite_preserves_extension_filter() {
+    let root = TempDirGuard::new("scalar_count_find_wc_ext_rewrite");
+    fs::create_dir_all(root.path.join("child")).expect("create child dir");
+    fs::write(root.path.join("a.md"), "a").expect("write md");
+    fs::write(root.path.join("b.txt"), "b").expect("write txt");
+    fs::write(root.path.join("child/c.MD"), "c").expect("write nested md");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = root_path.clone();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.route_reason =
+        "scalar_locator_requires_evidence; executable_contract_preserved_for_agent_loop"
+            .to_string();
+    let actions = vec![AgentAction::CallTool {
+        tool: "run_cmd".to_string(),
+        args: json!({
+            "command": format!("find {} -type f -iname \"*.MD\" | wc -l", root_path),
+            "cwd": "/home/guagua/rustclaw",
+        }),
+    }];
+
+    let normalized = normalize_planned_actions_with_original_and_context(
+        &test_state(),
+        Some(&route),
+        &LoopState::new(1),
+        "count target files with the requested extension",
+        None,
+        None,
+        Some(root_path.as_str()),
+        actions,
+    );
+
+    let args = normalized
+        .iter()
+        .find_map(|action| {
+            planned_call(action).and_then(|(tool, args)| {
+                (tool == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("count_entries"))
+                .then_some(args)
+            })
+        })
+        .expect("expected structured count_entries action");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(root_path.as_str())
+    );
+    assert_eq!(
+        args.get("kind_filter").and_then(Value::as_str),
+        Some("file")
+    );
+    assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(false));
+    assert_eq!(args.get("recursive").and_then(Value::as_bool), Some(true));
+    assert_eq!(args.get("ext_filter").and_then(Value::as_str), Some("md"));
+}
+
+#[test]
+fn find_wc_count_run_cmd_rewrite_keeps_non_extension_name_filter_literal() {
+    let root = TempDirGuard::new("scalar_count_find_wc_literal_name");
+    fs::write(root.path.join("README"), "a").expect("write readme");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = root_path.clone();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.route_reason =
+        "scalar_locator_requires_evidence; executable_contract_preserved_for_agent_loop"
+            .to_string();
+    let actions = vec![AgentAction::CallTool {
+        tool: "run_cmd".to_string(),
+        args: json!({
+            "command": format!("find {} -type f -name README | wc -l", root_path),
+            "cwd": "/home/guagua/rustclaw",
+        }),
+    }];
+
+    let normalized = normalize_planned_actions_with_original_and_context(
+        &test_state(),
+        Some(&route),
+        &LoopState::new(1),
+        "count target files with the requested name filter",
+        None,
+        None,
+        Some(root_path.as_str()),
+        actions,
+    );
+
+    assert!(
+        normalized.iter().any(
+            |action| matches!(action, AgentAction::CallTool { tool, .. } if tool == "run_cmd")
+        ),
+        "non-extension name filters should stay on the literal command path: {normalized:?}"
+    );
+}
+
+#[test]
 fn scalar_count_listing_plan_preserves_files_kind_for_count_inventory() {
     let root = TempDirGuard::new("scalar_count_files_only_locator_dir");
     fs::write(root.path.join("a.txt"), "a").expect("write a");
