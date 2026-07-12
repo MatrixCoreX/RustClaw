@@ -116,3 +116,54 @@ fn terminal_last_output_placeholder_respond_publishes_structured_output() {
         Some(content)
     );
 }
+
+#[test]
+fn terminal_last_output_placeholder_respond_publishes_empty_string_scalar() {
+    let state = test_state_with_registry();
+    let task = crate::ClaimedTask {
+        task_id: "task-terminal-last-output-placeholder-empty-string".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: String::new(),
+    };
+    let policy = load_agent_loop_guard_policy(&state);
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 1;
+    loop_state.has_tool_or_skill_output = true;
+    let content = "\"\"";
+    loop_state.last_output = Some(content.to_string());
+    loop_state
+        .output_vars
+        .insert("last_output".to_string(), content.to_string());
+    let actions = vec![AgentAction::Respond {
+        content: "{{last_output}}".to_string(),
+    }];
+
+    let outcome = super::super::handle_respond_action(
+        &state,
+        &task,
+        &actions,
+        &mut loop_state,
+        &policy,
+        0,
+        1,
+        1,
+        "respond:terminal_last_output",
+        "{{last_output}}",
+        None,
+    );
+
+    assert!(outcome.should_stop);
+    assert_eq!(outcome.stop_signal.as_deref(), Some("respond"));
+    assert!(outcome.ended_with_user_visible_output);
+    assert_eq!(loop_state.delivery_messages, vec![content.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(content)
+    );
+}

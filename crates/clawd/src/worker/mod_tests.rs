@@ -524,11 +524,11 @@ async fn runtime_recovery_skips_current_worker_expired_lease() {
         .expect("runtime recovery tick");
 
     let db = state.core.db.get().expect("get db");
-    let current_status: String = db
+    let (current_status, current_lease_expires_at): (String, i64) = db
         .query_row(
-            "SELECT status FROM tasks WHERE task_id = 'runtime-current-worker-expired'",
+            "SELECT status, lease_expires_at FROM tasks WHERE task_id = 'runtime-current-worker-expired'",
             [],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .expect("query current worker task");
     let (old_status, old_error, old_result): (String, Option<String>, Option<String>) = db
@@ -540,6 +540,10 @@ async fn runtime_recovery_skips_current_worker_expired_lease() {
         .expect("query old worker task");
 
     assert_eq!(current_status, "running");
+    assert!(
+        current_lease_expires_at > crate::now_ts_u64() as i64,
+        "current worker active task lease should be refreshed instead of merely skipped"
+    );
     assert_eq!(old_status, "timeout");
     assert_eq!(old_error.as_deref(), Some("worker_lease_expired"));
     let old_result: serde_json::Value =

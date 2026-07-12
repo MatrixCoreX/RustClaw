@@ -31,6 +31,8 @@ mod filesystem_mutation_lifecycle;
 mod machine_envelope;
 #[path = "dispatch_support_tests/read_range_synthesis_fallback.rs"]
 mod read_range_synthesis_fallback;
+#[path = "dispatch_support_tests/scalar_config_fallback.rs"]
+mod scalar_config_fallback;
 #[path = "dispatch_support_tests/status_answer.rs"]
 mod status_answer;
 #[path = "dispatch_support_tests/synthesize_failure_replan.rs"]

@@ -88,7 +88,7 @@ pub(crate) fn claim_next_task(state: &AppState) -> anyhow::Result<Option<Claimed
 
     let now_text = now_ts();
     let claimed_at = now_ts_u64() as i64;
-    let lease_expires_at = task_worker_lease_expires_at(state, claimed_at);
+    let lease_expires_at = worker_task_lease_expires_at(state, claimed_at);
     let changed = db.execute(
         "UPDATE tasks
          SET status = 'running',
@@ -188,18 +188,18 @@ pub(crate) fn touch_running_task(state: &AppState, task_id: &str) -> anyhow::Res
             task_id,
             heartbeat_at.to_string(),
             state.worker.worker_id,
-            task_worker_lease_expires_at(state, heartbeat_at)
+            worker_task_lease_expires_at(state, heartbeat_at)
         ],
     )?;
     Ok(changed > 0)
 }
 
-fn task_worker_lease_expires_at(state: &AppState, now_ts: i64) -> i64 {
+pub(crate) fn worker_task_lease_expires_at(state: &AppState, now_ts: i64) -> i64 {
     let lease_seconds = state
         .worker
         .worker_task_heartbeat_seconds
         .saturating_mul(4)
-        .max(60);
+        .max(300);
     now_ts.saturating_add(lease_seconds as i64)
 }
 

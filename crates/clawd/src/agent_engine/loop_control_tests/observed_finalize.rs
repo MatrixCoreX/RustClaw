@@ -47,6 +47,66 @@ fn observed_config_basic_scalar_output_can_stop_loop_without_second_round() {
 }
 
 #[test]
+fn observed_wrapped_empty_config_basic_scalar_output_can_stop_loop_without_second_round() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "config_basic",
+        r#"{"extra":{"action":"extract_field","exists":true,"field_path":"workspace.package.repository","value_text":"","value":"","value_type":"string"},"text":"{\"action\":\"extract_field\",\"exists\":true,\"field_path\":\"workspace.package.repository\",\"value_text\":\"\",\"value\":\"\",\"value_type\":\"string\"}"}"#,
+    ));
+    let actions = vec![AgentAction::CallTool {
+        tool: "config_basic".to_string(),
+        args: json!({"action":"read_field","path":"Cargo.toml","field_path":"workspace.package.repository"}),
+    }];
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result(OutputResponseShape::Scalar)),
+        ..Default::default()
+    };
+    assert_eq!(
+        crate::agent_engine::observed_output::extract_direct_scalar_from_generic_output(
+            &loop_state,
+            Some(&agent_run_context),
+        )
+        .as_deref(),
+        Some("\"\"")
+    );
+    assert_eq!(
+        crate::agent_engine::observed_output::extract_direct_scalar_from_generic_output_i18n(
+            &loop_state,
+            &crate::AppState::test_default_with_fixture_provider(),
+            Some(&agent_run_context),
+        )
+        .as_deref(),
+        Some("\"\"")
+    );
+    assert!(should_stop_for_observed_finalize(
+        Some(&agent_run_context),
+        &loop_state,
+        &actions,
+    ));
+
+    let mut path_route = route_result(OutputResponseShape::Scalar);
+    path_route.output_contract.requires_content_evidence = true;
+    path_route.output_contract.delivery_required = false;
+    path_route.output_contract.locator_kind = OutputLocatorKind::Path;
+    path_route.output_contract.locator_hint = "Cargo.toml".to_string();
+    let path_agent_run_context = AgentRunContext {
+        route_result: Some(path_route),
+        ..Default::default()
+    };
+    assert_eq!(
+        crate::agent_engine::observed_output::extract_direct_scalar_from_generic_output_i18n(
+            &loop_state,
+            &crate::AppState::test_default_with_fixture_provider(),
+            Some(&path_agent_run_context),
+        )
+        .as_deref(),
+        Some("\"\"")
+    );
+}
+
+#[test]
 fn service_control_status_protocol_output_can_stop_strict_loop_without_synthesis_round() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;

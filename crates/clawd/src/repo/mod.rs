@@ -58,6 +58,6 @@ pub(crate) use tasks::{
     record_paused_checkpoint_resume_executor_state_internal,
     record_paused_checkpoint_resume_work_item_internal, touch_running_task, update_task_failure,
     update_task_failure_with_result, update_task_progress_result, update_task_success,
-    update_task_timeout, ClaimedPausedCheckpointResumeExecutor, DuePausedCheckpointTask,
-    TaskViewerAccessError,
+    update_task_timeout, worker_task_lease_expires_at, ClaimedPausedCheckpointResumeExecutor,
+    DuePausedCheckpointTask, TaskViewerAccessError,
 };
