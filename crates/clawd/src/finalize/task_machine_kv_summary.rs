@@ -203,6 +203,31 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         journal.record_final_answer(answer_text.as_str());
         return false;
     };
+    if let Some(patched) =
+        patch_current_answer_with_requested_machine_summary(answer_text, answer_messages, &summary)
+    {
+        if patched.trim() == answer_text.trim() {
+            journal.record_final_answer(answer_text.as_str());
+            return false;
+        }
+        answer_messages.clear();
+        answer_messages.push(patched.clone());
+        *answer_text = patched;
+        journal.record_final_answer(answer_text.as_str());
+        journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: journal.step_results.len(),
+            ..Default::default()
+        });
+        return true;
+    }
     if answer_text.trim() == summary {
         journal.record_final_answer(answer_text.as_str());
         return false;
@@ -281,6 +306,61 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         ..Default::default()
     });
     true
+}
+
+fn patch_current_answer_with_requested_machine_summary(
+    answer_text: &str,
+    answer_messages: &[String],
+    requested_summary: &str,
+) -> Option<String> {
+    std::iter::once(answer_text)
+        .chain(answer_messages.iter().map(String::as_str))
+        .find_map(|candidate| {
+            patch_json_object_with_requested_machine_summary(candidate, requested_summary)
+        })
+}
+
+fn patch_json_object_with_requested_machine_summary(
+    candidate: &str,
+    requested_summary: &str,
+) -> Option<String> {
+    let pairs = requested_machine_summary_pairs(requested_summary);
+    if pairs.is_empty() {
+        return None;
+    }
+    let mut value = serde_json::from_str::<serde_json::Value>(candidate.trim()).ok()?;
+    let serde_json::Value::Object(object) = &mut value else {
+        return None;
+    };
+    if object.is_empty() {
+        return None;
+    }
+    let mut changed = false;
+    for (key, value_text) in pairs {
+        if object.get(&key).is_some_and(json_value_has_payload) {
+            continue;
+        }
+        object.insert(key, machine_summary_value_to_json(&value_text));
+        changed = true;
+    }
+    changed
+        .then(|| serde_json::to_string(&value).ok())
+        .flatten()
+}
+
+fn requested_machine_summary_pairs(requested_summary: &str) -> Vec<(String, String)> {
+    machine_kv_units(requested_summary)
+        .into_iter()
+        .filter_map(|unit| {
+            let (key, value) = unit.split_once('=')?;
+            Some((key.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+fn machine_summary_value_to_json(value: &str) -> serde_json::Value {
+    serde_json::from_str::<serde_json::Value>(value)
+        .unwrap_or_else(|_| serde_json::Value::String(value.to_string()))
 }
 
 fn final_answer_preserves_terminal_scalar_contract(
