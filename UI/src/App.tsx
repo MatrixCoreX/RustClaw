@@ -572,12 +572,18 @@ export default function App() {
     chatInput,
     chatAttachments,
     chatAgentMode,
+    chatTeachingMode,
+    chatTeachingTaskResult,
+    chatTeachingLlmDebug,
+    chatTeachingLlmDebugLoading,
+    chatTeachingLlmDebugError,
     chatSending,
     chatRecording,
     chatVoiceRecordingSupported,
     chatError,
     chatAttachmentInputRef,
     setChatAgentMode,
+    setChatTeachingMode,
     clearChatMessages,
     setChatInput,
     handleChatInputKeyDown,
@@ -586,6 +592,7 @@ export default function App() {
     startChatVoiceRecording,
     stopChatVoiceRecording,
     sendChatMessage,
+    queryChatTeachingLlmDebug,
   } = useChatRuntime({
     apiFetch,
     t,
@@ -1324,10 +1331,16 @@ export default function App() {
           {currentPage === "chat" ? (
             <ChatPage
               t={t}
+              tSlash={tSlash}
               chatMessages={chatMessages}
               chatInput={chatInput}
               chatAttachments={chatAttachments}
               chatAgentMode={chatAgentMode}
+              chatTeachingMode={chatTeachingMode}
+              chatTeachingTaskResult={chatTeachingTaskResult}
+              chatTeachingLlmDebug={chatTeachingLlmDebug}
+              chatTeachingLlmDebugLoading={chatTeachingLlmDebugLoading}
+              chatTeachingLlmDebugError={chatTeachingLlmDebugError}
               chatSending={chatSending}
               chatRecording={chatRecording}
               chatVoiceRecordingSupported={chatVoiceRecordingSupported}
@@ -1335,6 +1348,7 @@ export default function App() {
               chatAttachmentInputRef={chatAttachmentInputRef}
               toLocalTime={toLocalTime}
               onChatAgentModeChange={setChatAgentMode}
+              onChatTeachingModeChange={setChatTeachingMode}
               onClearMessages={clearChatMessages}
               onChatInputChange={setChatInput}
               onChatInputKeyDown={handleChatInputKeyDown}
@@ -1343,6 +1357,7 @@ export default function App() {
               onStartVoiceRecording={startChatVoiceRecording}
               onStopVoiceRecording={stopChatVoiceRecording}
               onSendMessage={sendChatMessage}
+              onQueryChatTeachingLlmDebug={queryChatTeachingLlmDebug}
             />
           ) : null}
 

@@ -16,6 +16,7 @@ import type {
   ChannelName,
   ChatMessage,
   SubmitTaskResponse,
+  TaskLlmDebugResponse,
   TaskQueryResponse,
 } from "../types/api";
 
@@ -65,6 +66,11 @@ export function useChatRuntime({
   const [chatInput, setChatInput] = useState("");
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [chatAgentMode, setChatAgentMode] = useState(true);
+  const [chatTeachingMode, setChatTeachingMode] = useState(false);
+  const [chatTeachingTaskResult, setChatTeachingTaskResult] = useState<TaskQueryResponse | null>(null);
+  const [chatTeachingLlmDebug, setChatTeachingLlmDebug] = useState<TaskLlmDebugResponse | null>(null);
+  const [chatTeachingLlmDebugLoading, setChatTeachingLlmDebugLoading] = useState(false);
+  const [chatTeachingLlmDebugError, setChatTeachingLlmDebugError] = useState<string | null>(null);
   const [chatSending, setChatSending] = useState(false);
   const [chatRecording, setChatRecording] = useState(false);
   const [chatVoiceRecordingSupported] = useState(canUseDirectVoiceRecording);
@@ -76,6 +82,7 @@ export function useChatRuntime({
   const chatAttachmentsValueRef = useRef<ChatAttachment[]>([]);
   const chatSendingValueRef = useRef(false);
   const chatRecordingValueRef = useRef(false);
+  const chatTeachingModeValueRef = useRef(false);
   const voiceSendOnStopRef = useRef(false);
   const voiceStopRequestedRef = useRef(false);
 
@@ -83,6 +90,7 @@ export function useChatRuntime({
   chatAttachmentsValueRef.current = chatAttachments;
   chatSendingValueRef.current = chatSending;
   chatRecordingValueRef.current = chatRecording;
+  chatTeachingModeValueRef.current = chatTeachingMode;
 
   const clearChatMessages = () => {
     setChatMessages([
@@ -93,6 +101,38 @@ export function useChatRuntime({
         ts: Date.now(),
       },
     ]);
+    setChatTeachingTaskResult(null);
+    setChatTeachingLlmDebug(null);
+    setChatTeachingLlmDebugError(null);
+  };
+
+  const fetchChatTeachingLlmDebugById = async (id: string): Promise<TaskLlmDebugResponse> => {
+    const normalizedId = encodeURIComponent(id.trim());
+    const res = await apiFetch(`/v1/debug/tasks/${normalizedId}`);
+    const body = (await res.json()) as ApiResponse<TaskLlmDebugResponse>;
+    if (!res.ok || !body.ok || !body.data) {
+      throw new Error(body.error || `chat teaching trace query failed (${res.status})`);
+    }
+    return body.data;
+  };
+
+  const queryChatTeachingLlmDebug = async (taskId?: string) => {
+    const targetTaskId = (taskId ?? chatTeachingTaskResult?.task_id ?? "").trim();
+    if (!targetTaskId) return null;
+    setChatTeachingLlmDebugLoading(true);
+    setChatTeachingLlmDebugError(null);
+    try {
+      const result = await fetchChatTeachingLlmDebugById(targetTaskId);
+      setChatTeachingLlmDebug(result);
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setChatTeachingLlmDebugError(message);
+      setChatTeachingLlmDebug(null);
+      return null;
+    } finally {
+      setChatTeachingLlmDebugLoading(false);
+    }
   };
 
   const handleChatAttachmentSelection = async (fileList: FileList | null) => {
@@ -352,6 +392,16 @@ export function useChatRuntime({
 
       const submittedTaskId = submitData.data.task_id;
       onTaskSubmitted(submittedTaskId);
+      if (chatTeachingModeValueRef.current) {
+        setChatTeachingTaskResult({
+          task_id: submittedTaskId,
+          status: "running",
+          result_json: null,
+          error_text: null,
+        });
+        setChatTeachingLlmDebug(null);
+        setChatTeachingLlmDebugError(null);
+      }
 
       let finalResult: TaskQueryResponse | null = null;
       for (let i = 0; i < 90; i += 1) {
@@ -366,6 +416,10 @@ export function useChatRuntime({
         throw new Error(t("轮询超时：任务仍在运行，请稍后在任务查询区查看。", "Polling timed out: the task is still running. Check it later in the task query area."));
       }
       onTaskResult(submittedTaskId, finalResult);
+      if (chatTeachingModeValueRef.current) {
+        setChatTeachingTaskResult(finalResult);
+        void queryChatTeachingLlmDebug(submittedTaskId);
+      }
 
       const assistantMsg: ChatMessage = {
         id: `a-${Date.now()}`,
@@ -410,12 +464,18 @@ export function useChatRuntime({
     chatInput,
     chatAttachments,
     chatAgentMode,
+    chatTeachingMode,
+    chatTeachingTaskResult,
+    chatTeachingLlmDebug,
+    chatTeachingLlmDebugLoading,
+    chatTeachingLlmDebugError,
     chatSending,
     chatRecording,
     chatVoiceRecordingSupported,
     chatError,
     chatAttachmentInputRef,
     setChatAgentMode,
+    setChatTeachingMode,
     clearChatMessages,
     setChatInput,
     handleChatInputKeyDown,
@@ -424,6 +484,7 @@ export function useChatRuntime({
     startChatVoiceRecording,
     stopChatVoiceRecording,
     sendChatMessage,
+    queryChatTeachingLlmDebug,
   };
 }
 
