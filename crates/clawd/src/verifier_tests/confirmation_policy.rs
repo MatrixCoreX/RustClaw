@@ -154,6 +154,200 @@ fn readonly_cli_help_run_cmd_action_is_low_risk_without_confirmation() {
 }
 
 #[test]
+fn workspace_validation_run_cmd_is_low_risk_without_confirmation() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+            request_text: Some("validate generated code"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({
+                    "command": "python3 test_calc_core.py",
+                    "cwd": "run/nl_eval_tmp/codex_cli_continuous_20260711_new",
+                    "timeout_seconds": 30
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation);
+    assert!(result.issues.iter().all(|issue| {
+        !matches!(
+            issue.kind,
+            VerifyIssueKind::ConfirmationRequired | VerifyIssueKind::RiskBudgetExceeded
+        )
+    }));
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/risk_level")
+            .and_then(serde_json::Value::as_str),
+        Some("low")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
+    );
+}
+
+#[test]
+fn workspace_inline_python_probe_run_cmd_is_low_risk_without_confirmation() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+            request_text: Some("validate generated code"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({
+                    "command": "python3 - <<'PY'\nfrom calc_core import safe_div\nprint(safe_div(1, 0))\nPY",
+                    "cwd": "run/nl_eval_tmp/codex_cli_continuous_20260711_new",
+                    "timeout_seconds": 30
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation);
+    assert!(result.issues.iter().all(|issue| {
+        !matches!(
+            issue.kind,
+            VerifyIssueKind::ConfirmationRequired | VerifyIssueKind::RiskBudgetExceeded
+        )
+    }));
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/risk_level")
+            .and_then(serde_json::Value::as_str),
+        Some("low")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
+    );
+}
+
+#[test]
+fn workspace_inline_python_probe_with_arrow_output_is_low_risk_without_confirmation() {
+    let state = test_state();
+    let task = test_task();
+    let project_dir = state
+        .skill_rt
+        .workspace_root
+        .join("run/nl_eval_tmp/codex_cli_continuous_20260711_new");
+    let command = format!(
+        "cd {} && python3 - <<'PY'\nfrom calc_core import safe_div\nresult = safe_div(1, 0)\nprint(\"safe_div(1,0) =>\", result)\nassert result == {{\"ok\": False, \"error_code\": \"division_by_zero\"}}, result\nPY\necho \"EXIT=$?\"",
+        project_dir.display()
+    );
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+            request_text: Some("validate generated code"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({
+                    "command": command,
+                    "cwd": "run/nl_eval_tmp/codex_cli_continuous_20260711_new",
+                    "timeout_seconds": 30
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation);
+    assert!(result.issues.iter().all(|issue| {
+        !matches!(
+            issue.kind,
+            VerifyIssueKind::ConfirmationRequired | VerifyIssueKind::RiskBudgetExceeded
+        )
+    }));
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/risk_level")
+            .and_then(serde_json::Value::as_str),
+        Some("low")
+    );
+}
+
+#[test]
+fn external_workspace_validation_run_cmd_keeps_confirmation_boundary() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+            request_text: Some("validate external code"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({
+                    "command": "python3 test_calc_core.py",
+                    "cwd": "/var/tmp/external_project",
+                    "timeout_seconds": 30
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved, "external validation should stay bounded");
+    assert!(result.issues.iter().any(|issue| {
+        matches!(
+            issue.kind,
+            VerifyIssueKind::ConfirmationRequired | VerifyIssueKind::RiskBudgetExceeded
+        )
+    }));
+}
+
+#[test]
 fn high_risk_external_generation_requires_confirmation_without_dry_run() {
     let state = test_state();
     let task = test_task();

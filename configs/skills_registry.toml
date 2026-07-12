@@ -26,6 +26,7 @@ planner_capabilities = [
   { name = "system.inspect_cli_help", action = "inspect_cli_help", effect = "observe", required = ["command"], optional = ["cwd", "timeout_seconds", "idle_timeout_seconds", "max_output_bytes"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "read_only", network_access = false, filesystem_write = false, external_publish = false, credential_access = false },
   { name = "system.run_command", effect = "external", required = ["command"], optional = ["cwd", "timeout_seconds", "idle_timeout_seconds", "max_output_bytes", "async_start", "poll_after_seconds", "expires_in_seconds"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true },
   { name = "system.run_cmd", effect = "external", required = ["command"], optional = ["cwd", "timeout_seconds", "idle_timeout_seconds", "max_output_bytes", "async_start", "poll_after_seconds", "expires_in_seconds"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true },
+  { name = "system.shell_run", effect = "external", required = ["command"], optional = ["cwd", "timeout_seconds", "idle_timeout_seconds", "max_output_bytes", "async_start", "poll_after_seconds", "expires_in_seconds"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true },
   { name = "run_cmd", effect = "external", required = ["command"], optional = ["cwd", "timeout_seconds", "idle_timeout_seconds", "max_output_bytes", "async_start", "poll_after_seconds", "expires_in_seconds"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "async_preferred", async_adapter_kind = "local_process_poll", isolation_profile = "local_current_workspace", network_access = true, filesystem_write = true, external_publish = true, credential_access = true },
 ]
 input_schema = { type = "object", required = ["command"], properties = { action = { type = "string" }, command = { type = "string" }, cwd = { type = "string" }, timeout_seconds = { type = "integer" }, idle_timeout_seconds = { type = "integer" }, max_output_bytes = { type = "integer" }, async_start = { type = "boolean" }, poll_after_seconds = { type = "integer" }, expires_in_seconds = { type = "integer" } } }
@@ -201,12 +202,13 @@ planner_capabilities = [
   { name = "filesystem.grep_text", action = "grep_text", effect = "observe", required = ["query"], optional = ["root", "max_results"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "filesystem.search_text", action = "grep_text", effect = "observe", required = ["query"], optional = ["root", "max_results"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "filesystem.compare_paths", action = "compare_paths", effect = "observe", required = ["left_path|paths", "right_path|paths"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
-  { name = "filesystem.write_file", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
-  { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
-  { name = "filesystem.append_text", action = "append_text", effect = "mutate", required = ["path", "content"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
-  { name = "filesystem.append_file", action = "append_text", effect = "mutate", required = ["path", "content"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
-  { name = "filesystem.make_dir", action = "make_dir", effect = "mutate", required = ["path"], optional = ["parents", "recursive"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
-  { name = "filesystem.create_dir", action = "make_dir", effect = "mutate", required = ["path"], optional = ["parents", "recursive"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
+  { name = "filesystem.write_file", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
+  { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short", isolation_profile = "local_current_workspace", network_access = false, filesystem_write = true, external_publish = false, credential_access = false },
+  { name = "filesystem.append_text", action = "append_text", effect = "mutate", required = ["path", "content"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "filesystem.append_file", action = "append_text", effect = "mutate", required = ["path", "content"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "filesystem.make_dir", action = "make_dir", effect = "mutate", required = ["path"], optional = ["parents", "recursive"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "filesystem.make_directory", action = "make_dir", effect = "mutate", required = ["path"], optional = ["parents", "recursive"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short" },
+  { name = "filesystem.create_dir", action = "make_dir", effect = "mutate", required = ["path"], optional = ["parents", "recursive"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "args", execution_mode = "sync_short" },
   { name = "filesystem.remove_path", action = "remove_path", effect = "mutate", required = ["path"], optional = ["target_kind", "recursive"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
   { name = "filesystem.delete_path", action = "remove_path", effect = "mutate", required = ["path"], optional = ["target_kind", "recursive"], risk_level = "high", preferred = true, once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
 ]
@@ -548,13 +550,13 @@ planner_kind = "tool"
 group = "system"
 aliases = ["database", "sqlite_tool"]
 description = "Run read-only SQLite queries and confirmed SQLite mutations through structured database actions."
-semantic_tags = ["sqlite_query", "sqlite_table_listing", "sqlite_table_names_only", "sqlite_database_kind_judgment", "sqlite_schema_version"]
+semantic_tags = ["sqlite_query", "sqlite_table_listing", "sqlite_table_names_only", "sqlite_database_kind_judgment", "sqlite_schema_version", "sqlite_user_version"]
 risk_level = "high"
 auto_invocable = false
 requires_confirmation = true
 side_effect = true
 preferred_over_run_cmd = true
-validation_actions = ["sqlite_query", "schema_version", "list_tables"]
+validation_actions = ["sqlite_query", "schema_version", "user_version", "list_tables"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/db_basic.md"
 output_kind = "text"
@@ -564,6 +566,7 @@ confirmation_exempt_when = [
   { action = "sqlite_query" },
   { action = "list_tables" },
   { action = "schema_version" },
+  { action = "user_version" },
 ]
 planner_capabilities = [
   { name = "database.query", action = "sqlite_query", effect = "observe", required = ["sql"], optional = ["db_path", "path", "limit"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short" },
@@ -580,6 +583,9 @@ planner_capabilities = [
   { name = "database.schema_version", action = "schema_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "schema_version" },
   { name = "db.schema_version", action = "schema_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "schema_version" },
   { name = "sqlite.schema_version", action = "schema_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "schema_version" },
+  { name = "database.user_version", action = "user_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", preferred = true, idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "user_version" },
+  { name = "db.user_version", action = "user_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "user_version" },
+  { name = "sqlite.user_version", action = "user_version", effect = "observe", optional = ["db_path", "path"], risk_level = "low", idempotent = true, dedup_scope = "args", execution_mode = "sync_short", final_answer_shape = "user_version" },
   { name = "database.execute", action = "sqlite_execute", effect = "mutate", required = ["sql", "confirm"], optional = ["db_path", "path"], risk_level = "high", once_per_task = true, idempotent = false, dedup_scope = "action", execution_mode = "sync_short" },
 ]
 input_schema = { type = "object", properties = { action = { type = "string" }, db_path = { type = "string" }, path = { type = "string" }, query = { type = "string" }, table = { type = "string" }, limit = { type = "integer" } } }

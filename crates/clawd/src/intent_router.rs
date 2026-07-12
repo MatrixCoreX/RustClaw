@@ -176,6 +176,7 @@ mod state_patch_fields;
 use state_patch_fields::{
     append_state_patch_slice_tokens_to_resolved_intent,
     append_state_patch_structured_field_selector_to_resolved_intent,
+    apply_state_patch_required_machine_fields_contract,
     apply_state_patch_structured_field_selector, normalize_structured_field_selector,
     schema_key_is_structured_scalar_field_selector, state_patch_targets_task_lifecycle_fields,
 };
@@ -433,6 +434,11 @@ fn append_route_reason(reason: &mut String, addition: &str) {
 #[path = "intent_router_normalizer_run.rs"]
 mod normalizer_run;
 pub(crate) use normalizer_run::run_intent_normalizer;
+#[cfg(test)]
+pub(crate) use normalizer_run::{
+    execution_recipe_target_locator_contract_yields_to_agent_loop,
+    inline_structured_payload_repair_yields_to_execution_context,
+};
 
 #[cfg(test)]
 #[path = "intent_router_test_support.rs"]
@@ -473,6 +479,10 @@ mod current_turn_structural_repair_tests;
 #[cfg(test)]
 #[path = "intent_router_normalizer_schema_guard_tests.rs"]
 mod normalizer_schema_guard_tests;
+
+#[cfg(test)]
+#[path = "intent_router_normalizer_schema_machine_field_tests.rs"]
+mod normalizer_schema_machine_field_tests;
 
 #[cfg(test)]
 #[path = "intent_router_normalizer_turn_policy_tests.rs"]

@@ -1,6 +1,7 @@
 use super::{
     action_counts_as_tool_call, action_effect_is_repeatable_for_active_recipe,
     capture_round_progress_snapshot, check_repeat_action_guard, finalize_execute_round_outcome,
+    terminal_synthesis_can_skip_remaining_actions,
 };
 use crate::agent_engine::action_fingerprint_for_policy;
 use crate::agent_engine::support::{
@@ -78,6 +79,18 @@ planner_capabilities = [
 "#
 }
 
+fn filesystem_write_registry_fixture() -> &'static str {
+    r#"
+[[skills]]
+name = "fs_basic"
+enabled = true
+kind = "runner"
+planner_capabilities = [
+  { name = "filesystem.write_text", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high", once_per_task = true, dedup_scope = "args", idempotent = false },
+]
+"#
+}
+
 #[test]
 fn observed_output_alone_does_not_mark_plan_exhausted_user_visible() {
     let loop_state = super::LoopState::new(2);
@@ -121,6 +134,79 @@ fn max_tool_call_budget_counts_only_external_calls() {
     assert!(!action_counts_as_tool_call(&crate::AgentAction::Respond {
         content: "done".to_string()
     }));
+}
+
+#[test]
+fn terminal_synthesis_skips_only_placeholder_delivery_suffix() {
+    let mut loop_state = super::LoopState::new(2);
+    loop_state.last_publishable_synthesis_output = Some(r#"{"test_status":"OK"}"#.to_string());
+    let action = crate::AgentAction::SynthesizeAnswer {
+        evidence_refs: vec!["s4".to_string()],
+    };
+
+    assert!(terminal_synthesis_can_skip_remaining_actions(
+        &action,
+        &[
+            crate::AgentAction::Think {
+                content: "trace".to_string(),
+            },
+            crate::AgentAction::Respond {
+                content: "{{ last_output }}".to_string(),
+            },
+        ],
+        &loop_state,
+    ));
+}
+
+#[test]
+fn terminal_synthesis_skips_non_json_delivery_suffix_for_strict_json_contract() {
+    let mut loop_state = super::LoopState::new(2);
+    loop_state.last_publishable_synthesis_output = Some(r#"{"test_status":"OK"}"#.to_string());
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        ..Default::default()
+    });
+    let action = crate::AgentAction::SynthesizeAnswer {
+        evidence_refs: vec!["s4".to_string()],
+    };
+
+    assert!(terminal_synthesis_can_skip_remaining_actions(
+        &action,
+        &[
+            crate::AgentAction::Respond {
+                content: "{{ last_output }}".to_string(),
+            },
+            crate::AgentAction::Respond {
+                content: "FILE:/workspace/test_calc_core.py".to_string(),
+            },
+        ],
+        &loop_state,
+    ));
+}
+
+#[test]
+fn terminal_synthesis_does_not_skip_concrete_or_executable_suffix() {
+    let mut loop_state = super::LoopState::new(2);
+    loop_state.last_publishable_synthesis_output = Some(r#"{"test_status":"OK"}"#.to_string());
+    let action = crate::AgentAction::SynthesizeAnswer {
+        evidence_refs: vec!["s4".to_string()],
+    };
+
+    assert!(!terminal_synthesis_can_skip_remaining_actions(
+        &action,
+        &[crate::AgentAction::Respond {
+            content: r#"{"test_status":"OK"}"#.to_string(),
+        }],
+        &loop_state,
+    ));
+    assert!(!terminal_synthesis_can_skip_remaining_actions(
+        &action,
+        &[crate::AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({"action":"read_range"}),
+        }],
+        &loop_state,
+    ));
 }
 
 #[test]
@@ -354,4 +440,53 @@ fn registry_idempotency_guard_records_repeat_block_attribution() {
             .and_then(serde_json::Value::as_str),
         Some("safety_policy")
     );
+}
+
+#[test]
+fn registry_args_dedup_allows_multiple_distinct_filesystem_writes() {
+    let state = state_with_registry(filesystem_write_registry_fixture(), &["fs_basic"]);
+    let task = task_fixture("task-registry-write-multiple-files");
+    let mut loop_state = super::LoopState::new(2);
+    let first = crate::AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "write_text",
+            "path": "run/nl_eval_tmp/a.py",
+            "content": "A"
+        }),
+    };
+    let second = crate::AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "write_text",
+            "path": "run/nl_eval_tmp/b.py",
+            "content": "B"
+        }),
+    };
+    let policy = test_policy(true);
+    let first_fingerprint = action_fingerprint_for_policy(&state, &policy, &first, None);
+    let second_fingerprint = action_fingerprint_for_policy(&state, &policy, &second, None);
+
+    assert_ne!(first_fingerprint, second_fingerprint);
+    assert!(first_fingerprint.contains("run/nl_eval_tmp/a.py"));
+    assert!(second_fingerprint.contains("run/nl_eval_tmp/b.py"));
+
+    loop_state
+        .successful_action_fingerprints
+        .insert(first_fingerprint, 1);
+
+    assert_eq!(
+        check_repeat_action_guard(
+            &state,
+            &task,
+            &mut loop_state,
+            &policy,
+            &second,
+            None,
+            &second_fingerprint,
+            2,
+        ),
+        None
+    );
+    assert!(loop_state.rollout_attribution.is_empty());
 }

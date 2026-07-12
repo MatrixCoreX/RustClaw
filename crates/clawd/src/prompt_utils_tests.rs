@@ -1271,6 +1271,30 @@ fn normalize_agent_action_shape_preserves_call_tool_fs_basic_write_text() {
 }
 
 #[test]
+fn normalize_agent_action_shape_rewrites_dotted_fs_basic_tool_action() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let normalized = super::parse_agent_action_json_with_repair(
+        r#"{"type":"call_tool","tool":"fs_basic.read_text_range","args":{"path":"/tmp/calc_core.py","mode":"range","start_line":0,"end_line":200}}"#,
+        &state,
+    )
+    .expect("dotted fs_basic tool action should normalize");
+    assert_eq!(
+        normalized,
+        json!({
+            "type": "call_tool",
+            "tool": "fs_basic",
+            "args": {
+                "action": "read_text_range",
+                "path": "/tmp/calc_core.py",
+                "mode": "range",
+                "start_line": 0,
+                "end_line": 200
+            }
+        })
+    );
+}
+
+#[test]
 fn normalize_agent_action_shape_rewrites_system_basic_list_dir_to_base_skill() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let normalized = super::parse_agent_action_json_with_repair(

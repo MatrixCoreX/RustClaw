@@ -672,18 +672,47 @@ fn machine_field_placeholder_delivery_for_scalar_contract(
     delivery: &str,
     route: Option<&crate::RouteResult>,
 ) -> bool {
-    route.is_some_and(route_allows_direct_scalar_observed_answer)
-        && matches!(
-            delivery.trim(),
-            "field_value"
-                | "value"
-                | "value_text"
-                | "path"
-                | "resolved_path"
-                | "command_output"
-                | "count"
-                | "total"
-        )
+    if !route.is_some_and(route_allows_direct_scalar_observed_answer) {
+        return false;
+    }
+    let delivery = delivery.trim();
+    matches!(
+        delivery,
+        "field_value"
+            | "value"
+            | "value_text"
+            | "path"
+            | "resolved_path"
+            | "command_output"
+            | "count"
+            | "total"
+    ) || scalar_machine_assignment_projection(delivery)
+}
+
+fn scalar_machine_assignment_projection(delivery: &str) -> bool {
+    let mut lines = delivery
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let Some(line) = lines.next() else {
+        return false;
+    };
+    if lines.next().is_some() {
+        return false;
+    }
+    let Some((key, value)) = line.split_once('=') else {
+        return false;
+    };
+    let key = key.trim();
+    let value = value.trim();
+    !key.is_empty()
+        && !value.is_empty()
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '[' | ']'))
+        && value
+            .chars()
+            .all(|ch| !ch.is_control() && !matches!(ch, '{' | '}' | '[' | ']'))
 }
 
 pub(super) fn replace_delivery_with_direct_structured_observed_answer(

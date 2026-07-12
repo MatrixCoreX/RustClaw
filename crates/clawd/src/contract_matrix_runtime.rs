@@ -110,6 +110,11 @@ pub(crate) fn compact_prompt_line_for_route(route: &RouteResult) -> Option<Strin
     if let Some(line) = compact_prompt_line_for_route_capability_ref(route) {
         return Some(line);
     }
+    if route_uses_agent_loop_execution_boundary(route) {
+        return Some(
+            "- agent_loop_execution_policy source=route_marker match=agent_loop_execution evidence_profile=agent_loop required_evidence=none final_answer_shape=none available_action_refs=fs_basic.read_text_range,fs_basic.write_text,fs_basic.append_text,fs_basic.list_dir,run_cmd preferred_action_refs=fs_basic.read_text_range,fs_basic.write_text,fs_basic.append_text,run_cmd".to_string(),
+        );
+    }
     let output_contract = route.effective_output_contract();
     compact_prompt_line_for_output_contract(&output_contract)
 }
@@ -250,6 +255,9 @@ pub(crate) fn final_answer_shape_for_route(route: &RouteResult) -> Option<FinalA
     if let Some(shape) = final_answer_shape_for_route_capability_ref(route) {
         return Some(shape);
     }
+    if route_uses_agent_loop_execution_boundary(route) {
+        return None;
+    }
     let output_contract = route.effective_output_contract();
     final_answer_shape_for_output_contract(&output_contract)
 }
@@ -257,6 +265,66 @@ pub(crate) fn final_answer_shape_for_route(route: &RouteResult) -> Option<FinalA
 fn final_answer_shape_for_route_capability_ref(route: &RouteResult) -> Option<FinalAnswerShape> {
     registry_final_answer_shape_for_route_capability_ref(route, true)
         .or_else(|| registry_final_answer_shape_for_route_capability_ref(route, false))
+}
+
+fn route_uses_agent_loop_execution_boundary(route: &RouteResult) -> bool {
+    !route.needs_clarify
+        && !route.output_contract.delivery_required
+        && !route.wants_file_delivery
+        && matches!(route.schedule_kind, crate::ScheduleKind::None)
+        && route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+}
+
+fn agent_loop_execution_trace_snapshot(matrix: &ContractMatrix, route: &RouteResult) -> Value {
+    let preferred_actions = vec![
+        "fs_basic.read_text_range",
+        "fs_basic.write_text",
+        "fs_basic.append_text",
+        "run_cmd",
+    ];
+    let allowed_actions = vec![
+        "fs_basic.read_text_range",
+        "fs_basic.write_text",
+        "fs_basic.append_text",
+        "fs_basic.list_dir",
+        "run_cmd",
+        "system_basic.tree_summary",
+    ];
+    json!({
+        "evidence_policy_version": matrix.matrix_version,
+        "evidence_policy_hash": matrix.matrix_version_hash(),
+        "schema_version": matrix.schema_version,
+        "trace_policy": matrix.trace_policy.to_trace_json(),
+        "contract_marker": route.effective_output_contract_semantic_kind().as_str(),
+        "response_shape": route.output_contract.response_shape.as_str(),
+        "locator_kind": route.output_contract.locator_kind.as_str(),
+        "delivery_intent": route.output_contract.delivery_intent.as_str(),
+        "requires_content_evidence": false,
+        "delivery_required": false,
+        "structured_field_selector": route
+            .output_contract
+            .self_extension
+            .structured_field_selector
+            .as_deref(),
+        "contract_match": "agent_loop_execution",
+        "policy_mode": "observe",
+        "evidence_scope": "agent_loop",
+        "freshness": "current_task",
+        "artifact_kind": "text",
+        "channel_visibility": "user_visible",
+        "evidence_profile": "agent_loop_execution",
+        "required_evidence": Vec::<String>::new(),
+        "evidence_expression": EvidenceExpression::default().to_trace_json(&[]),
+        "observation_sources": allowed_actions.clone(),
+        "observation_extractors": [],
+        "final_answer_shape": "none",
+        "final_answer_shape_class": null,
+        "coarse_response_shape": null,
+        "allows_model_language": false,
+        "preferred_actions": preferred_actions,
+        "allowed_actions": allowed_actions,
+        "forbidden_actions": Vec::<String>::new(),
+    })
 }
 
 fn registry_final_answer_shape_for_route_capability_ref(
@@ -303,6 +371,10 @@ fn final_answer_shape_override_for_output_contract(
 }
 
 pub(crate) fn trace_snapshot_for_route(route: &RouteResult) -> Option<Value> {
+    if route_uses_agent_loop_execution_boundary(route) {
+        return bundled_contract_matrix()
+            .map(|matrix| agent_loop_execution_trace_snapshot(matrix, route));
+    }
     let output_contract = route.effective_output_contract();
     trace_snapshot_for_output_contract_with_route_reason(
         &output_contract,
@@ -440,6 +512,9 @@ pub(crate) fn action_trace_for_route(route: &RouteResult, action_ref: &str) -> O
     if route_capability_ref_allows_action_ref(route, &action) {
         return Some(capability_ref_action_trace(route, &action));
     }
+    if route_uses_agent_loop_execution_boundary(route) {
+        return Some(agent_loop_execution_action_trace(&action));
+    }
     let output_contract = route.effective_output_contract();
     action_trace_for_output_contract_with_route_reason(
         &output_contract,
@@ -516,10 +591,36 @@ fn capability_ref_action_trace(route: &RouteResult, action: &ActionRef) -> Value
     })
 }
 
+fn agent_loop_execution_action_trace(action: &ActionRef) -> Value {
+    let action_key = action.as_key();
+    let observation_extractor = ObservationExtractor::from_source(&action_key);
+    json!({
+        "schema_version": 1,
+        "action_ref": action_key,
+        "contract_match": "agent_loop_execution",
+        "decision": ActionPolicyDecision::Allowed.as_str(),
+        "policy_mode": "observe",
+        "evidence_profile": "agent_loop_execution",
+        "observation_extractor": observation_extractor.as_ref().map(ObservationExtractor::to_trace_json),
+        "required_evidence": Vec::<String>::new(),
+        "evidence_expression": EvidenceExpression::default().to_trace_json(&[]),
+        "final_answer_shape": "none",
+        "final_answer_shape_class": null,
+        "coarse_response_shape": null,
+        "allows_model_language": false,
+        "preferred_actions": [action_key.clone()],
+        "allowed_actions": [action_key],
+        "forbidden_actions": Vec::<String>::new(),
+    })
+}
+
 pub(crate) fn contract_trace_action_key_for_route(
     route: &RouteResult,
     action_ref: &str,
 ) -> Option<String> {
+    if route_uses_agent_loop_execution_boundary(route) {
+        return ActionRef::parse(action_ref).map(|action| action.as_key());
+    }
     let output_contract = route.effective_output_contract();
     contract_trace_action_key_for_contract(&output_contract, action_ref)
 }

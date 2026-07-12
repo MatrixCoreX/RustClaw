@@ -137,6 +137,7 @@ pub(super) async fn run_intent_normalizer_model_step(
                 req,
                 &prompt_source,
                 &contract_repair_report,
+                &llm_out_for_parse,
             )
             .await
             {

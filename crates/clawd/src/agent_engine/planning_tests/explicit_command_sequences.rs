@@ -504,6 +504,50 @@ fn embedded_standalone_command_sequence_uses_configured_command_tokens() {
 }
 
 #[test]
+fn executionless_route_preserves_planner_selected_literal_command_sequence() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
+    let mut route = route_result(
+        crate::AskMode::act_plain(),
+        false,
+        OutputResponseShape::Free,
+    );
+    route.route_reason = "boundary_only; executionless_finalize_trace_plain".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let loop_state = LoopState::new(1);
+    let request = "pwd whoami hostname 三个结果每个一行 不要总结";
+
+    assert_eq!(
+        super::super::explicit_command_segment(&state.policy.command_intent, request).as_deref(),
+        Some("pwd; whoami; hostname")
+    );
+    let normalized = normalize_explicit_planner_actions(
+        &state,
+        &route,
+        &loop_state,
+        "run local command sequence and return raw lines",
+        request,
+        vec![planner_run_cmd_action(
+            &state,
+            request,
+            "pwd; whoami; hostname",
+            false,
+        )],
+    );
+
+    assert_eq!(normalized.len(), 5);
+    let args = assert_run_cmd_action(&normalized[0], "pwd");
+    assert_eq!(args.get(CLAWD_CONTINUE_ON_ERROR_ARG), Some(&json!(true)));
+    let args = assert_run_cmd_action(&normalized[1], "whoami");
+    assert_eq!(args.get(CLAWD_CONTINUE_ON_ERROR_ARG), Some(&json!(true)));
+    let args = assert_run_cmd_action(&normalized[2], "hostname");
+    assert_eq!(args.get(CLAWD_CONTINUE_ON_ERROR_ARG), Some(&json!(true)));
+    assert_synthesize_action(&normalized[3], &["step_1", "step_2", "step_3"]);
+    assert_last_output_respond(&normalized[4]);
+}
+
+#[test]
 fn prefixed_single_command_with_format_tail_is_single_step_safe() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
     state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];

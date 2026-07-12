@@ -1,0 +1,16 @@
+# Codex CLI style continuous development NL cases.
+# Created: 2026-07-11
+#
+# Purpose:
+# - Exercise user-style consecutive development instructions in one client-like conversation.
+# - Cover create -> extend -> repair verification -> inspect current state.
+# - Validate that the agent can keep project context and avoid accepting a passing command
+#   when the changed behavior was not actually exercised.
+#
+# Format:
+#   suite|name|tags|prompt|expect=<substring>
+
+codex_cli_continuous_dev|create_calc_project_zh|covers:continuous_dev,coding,create_files,run_tests,json_output,client_like;requires_tool_call=true;local_side_effect|在 run/nl_eval_tmp/codex_cli_continuous_20260711_new 创建一个小型 Python 项目：新建 calc_core.py，实现 add(a,b) 和 sub(a,b)；新建 test_calc_core.py，覆盖这两个函数；运行 python3 test_calc_core.py。最后只输出 JSON，包含 created_files、test_command、test_status。|expect=contains:calc_core.py;contains:test_calc_core.py;contains:test_status
+codex_cli_continuous_dev|extend_mul_zh|covers:continuous_dev,coding,modify_files,run_tests,json_output,client_like;requires_tool_call=true;local_side_effect|继续刚才这个项目：给 calc_core.py 增加 mul(a,b)，把 test_calc_core.py 更新到真实测试 add、sub、mul；运行 python3 test_calc_core.py。最后只输出 JSON，包含 changed_files、test_command、test_status、functions。|expect=contains:mul;contains:test_status
+codex_cli_continuous_dev|extend_safe_div_and_verify_zh|covers:continuous_dev,coding,modify_files,verification_repair,run_tests,direct_probe,json_output,client_like;requires_tool_call=true;local_side_effect|继续刚才这个项目：增加 safe_div(a,b)。b 为 0 时返回 {"ok": false, "error_code": "division_by_zero"}，正常时返回 {"ok": true, "value": 商}。更新 test_calc_core.py，必须保证 safe_div 正常除法和 division_by_zero 两个断言在测试入口中真实执行；运行 python3 test_calc_core.py，并额外执行一次 python3 - <<'PY' 直接调用 safe_div(1,0) 验证 error_code。最后只输出 JSON，包含 changed_files、test_command、test_status、functions、error_codes。|expect=contains:safe_div;contains:division_by_zero;contains:error_codes
+codex_cli_continuous_dev|inspect_project_state_zh|covers:continuous_dev,coding,state_inspection,read_files,run_tests,json_output,client_like;requires_tool_call=true;local_side_effect|读取刚才项目的 calc_core.py 和 test_calc_core.py，确认当前有哪些函数、safe_div 的除零错误码是什么，并重新运行 python3 test_calc_core.py。最后只输出 JSON，包含 project_dir、functions、error_codes、test_status、evidence_files。|expect=contains:safe_div;contains:division_by_zero;contains:test_status

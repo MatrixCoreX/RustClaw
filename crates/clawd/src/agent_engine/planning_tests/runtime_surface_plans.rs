@@ -123,12 +123,90 @@ fn open_planning_tool_spec_includes_runtime_protocols() {
 }
 
 #[test]
+fn open_planning_with_contract_scope_uses_compact_tool_library() {
+    let mut state = test_state_with_enabled_skills(&["db_basic", "fs_basic"]);
+    state.skill_rt.workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let task = test_task();
+    let mut route = base_route_result();
+    route.resolved_intent = "capability_ref=database.list_tables".to_string();
+    route.route_reason = "capability_ref=database.list_tables".to_string();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
+    let library = PlannerToolLibrary::new(
+        &state,
+        &task,
+        PlanningPromptClass::OpenPlanning,
+        Some(&route),
+        None,
+    );
+
+    let spec = library.tool_spec().expect("scoped open planning tool spec");
+    let playbooks = library.skill_playbooks();
+    let quick_index = library.skill_quick_index();
+
+    assert!(library
+        .skill_scope
+        .as_ref()
+        .is_some_and(|scope| { scope.len() == 1 && scope.contains("db_basic") }));
+    assert!(spec.contains("### LIGHT_EXECUTION_RULES"));
+    assert!(!spec.starts_with("runtime_capability_map_v1"));
+    assert!(!spec.contains("### Agent runtime protocols"));
+    assert!(playbooks.contains("db_basic"));
+    assert!(!playbooks.contains("fs_basic"));
+    assert!(quick_index.contains("db_basic"));
+    assert!(!quick_index.contains("fs_basic"));
+}
+
+#[test]
 fn lightweight_tool_spec_includes_runtime_protocols() {
     let spec = build_lightweight_tool_spec(None, None);
 
     assert!(spec.contains("agent_runtime_protocols=subagent_roles:"));
     assert!(spec.contains("subagent_write_enabled:false"));
     assert!(spec.contains("async_job_protocol="));
+}
+
+#[test]
+fn sqlite_user_version_run_cmd_rewrites_to_db_basic_user_version() {
+    let mut route = base_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "run_cmd".to_string(),
+            args: json!({
+                "command": "sqlite3 /tmp/app.sqlite \"PRAGMA user_version;\""
+            }),
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let rewritten =
+        rewrite_sqlite_user_version_plan_to_db_basic(Some(&route), None, false, actions);
+
+    match &rewritten[0] {
+        AgentAction::CallSkill { skill, args } => {
+            assert_eq!(skill, "db_basic");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("user_version")
+            );
+            assert_eq!(
+                args.get("db_path").and_then(Value::as_str),
+                Some("/tmp/app.sqlite")
+            );
+        }
+        other => panic!("expected db_basic user_version rewrite, got {other:?}"),
+    }
+    assert!(matches!(rewritten[1], AgentAction::Respond { .. }));
 }
 
 #[test]

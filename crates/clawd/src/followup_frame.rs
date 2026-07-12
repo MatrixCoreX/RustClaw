@@ -16,6 +16,7 @@ pub(crate) enum FollowupOpKind {
     Generic,
     Read,
     List,
+    CodeWorkspace,
     Delivery,
     ClarifyPending,
 }
@@ -531,6 +532,9 @@ fn op_kind_from_route(
     if unresolved_locator {
         return FollowupOpKind::ClarifyPending;
     }
+    if derive_code_workspace_bound_target_from_route_and_journal(route_result, journal).is_some() {
+        return FollowupOpKind::CodeWorkspace;
+    }
     if route_result.wants_file_delivery || route_result.output_contract.delivery_required {
         return FollowupOpKind::Delivery;
     }
@@ -705,6 +709,217 @@ fn bound_target_from_journal_output_value(value: &Value) -> Option<String> {
     None
 }
 
+fn action_and_path_from_journal_output_value(value: &Value) -> Option<(String, String)> {
+    for source in [Some(value), value.get("extra")].into_iter().flatten() {
+        let Some(action) = nonempty_string_field(source, "action") else {
+            continue;
+        };
+        let Some(path) = nonempty_string_field(source, "resolved_path")
+            .or_else(|| nonempty_string_field(source, "effective_path"))
+            .or_else(|| nonempty_string_field(source, "path"))
+        else {
+            continue;
+        };
+        return Some((action, path));
+    }
+    None
+}
+
+fn cwd_from_journal_output_value(value: &Value) -> Option<String> {
+    for source in [Some(value), value.get("extra")].into_iter().flatten() {
+        if let Some(cwd) = nonempty_string_field(source, "cwd")
+            .or_else(|| nonempty_string_field(source, "working_dir"))
+        {
+            return Some(cwd);
+        }
+    }
+    None
+}
+
+fn path_parent_string(path: &str) -> Option<String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let path = Path::new(path);
+    let parent = if path.extension().is_some() {
+        path.parent()?
+    } else {
+        path
+    };
+    let rendered = parent.to_string_lossy().trim().to_string();
+    (!rendered.is_empty()).then_some(rendered)
+}
+
+fn code_workspace_write_action(action: &str) -> bool {
+    matches!(action, "write_text" | "append_text" | "shell_write")
+}
+
+fn code_workspace_validation_action(action: &str) -> bool {
+    matches!(
+        action,
+        "run_cmd" | "process_basic" | "read_range" | "read_text_range" | "grep_text"
+    )
+}
+
+fn path_looks_like_code_or_test_artifact(path: &str) -> bool {
+    let lower = path.trim().to_ascii_lowercase();
+    const CODE_EXTENSIONS: &[&str] = &[
+        ".py", ".rs", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".kt", ".c", ".cc", ".cpp",
+        ".h", ".hpp", ".cs", ".php", ".rb", ".swift", ".scala", ".sh", ".bash", ".zsh", ".fish",
+        ".ps1", ".sql",
+    ];
+    CODE_EXTENSIONS
+        .iter()
+        .any(|extension| lower.ends_with(extension))
+}
+
+fn path_looks_like_test_artifact(path: &str) -> bool {
+    let path = path.trim().replace('\\', "/");
+    let basename = Path::new(&path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path.as_str())
+        .to_ascii_lowercase();
+    basename.starts_with("test_")
+        || basename.ends_with("_test.py")
+        || basename.ends_with(".test.js")
+        || basename.ends_with(".spec.js")
+        || basename.ends_with(".test.ts")
+        || basename.ends_with(".spec.ts")
+        || basename.ends_with("_test.rs")
+}
+
+fn push_unique_path(paths: &mut Vec<String>, path: String) {
+    if path.trim().is_empty() || paths.iter().any(|existing| existing == &path) {
+        return;
+    }
+    paths.push(path);
+}
+
+pub(crate) fn derive_code_workspace_bound_target_from_journal(
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<String> {
+    let mut write_dirs = Vec::new();
+    let mut validation_dirs = Vec::new();
+    let mut saw_validation = false;
+
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            continue;
+        }
+        if matches!(step.skill.as_str(), "run_cmd" | "process_basic") {
+            saw_validation = true;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        let Some(value) = parse_journal_step_output(output.trim()) else {
+            continue;
+        };
+        if let Some((action, path)) = action_and_path_from_journal_output_value(&value) {
+            if code_workspace_write_action(&action) && path_looks_like_code_or_test_artifact(&path)
+            {
+                if let Some(parent) = path_parent_string(&path) {
+                    push_unique_path(&mut write_dirs, parent);
+                }
+            }
+            if code_workspace_validation_action(&action)
+                && path_looks_like_code_or_test_artifact(&path)
+            {
+                saw_validation = true;
+                if let Some(parent) = path_parent_string(&path) {
+                    push_unique_path(&mut validation_dirs, parent);
+                }
+            }
+        }
+        if matches!(step.skill.as_str(), "run_cmd" | "process_basic") {
+            if let Some(cwd) = cwd_from_journal_output_value(&value)
+                .or_else(|| nonempty_string_field(&value, "cwd"))
+            {
+                push_unique_path(&mut validation_dirs, cwd);
+            }
+        }
+    }
+
+    if write_dirs.is_empty() || !saw_validation {
+        return None;
+    }
+    write_dirs
+        .iter()
+        .find(|dir| validation_dirs.iter().any(|candidate| candidate == *dir))
+        .cloned()
+        .or_else(|| {
+            (write_dirs.len() == 1)
+                .then(|| write_dirs.first().cloned())
+                .flatten()
+        })
+}
+
+pub(crate) fn derive_code_workspace_bound_target_from_route_and_journal(
+    route_result: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<String> {
+    derive_code_workspace_bound_target_from_journal(journal).or_else(|| {
+        route_result
+            .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+            .then(|| derive_read_validated_code_workspace_bound_target_from_journal(journal))
+            .flatten()
+    })
+}
+
+fn derive_read_validated_code_workspace_bound_target_from_journal(
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<String> {
+    let mut source_dirs = Vec::new();
+    let mut test_dirs = Vec::new();
+    let mut saw_validation_command = false;
+
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            continue;
+        }
+        if matches!(step.skill.as_str(), "run_cmd" | "process_basic") {
+            saw_validation_command = true;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        let Some(value) = parse_journal_step_output(output.trim()) else {
+            continue;
+        };
+        let Some((action, path)) = action_and_path_from_journal_output_value(&value) else {
+            continue;
+        };
+        if !matches!(action.as_str(), "read_range" | "read_text_range")
+            || !path_looks_like_code_or_test_artifact(&path)
+        {
+            continue;
+        }
+        let Some(parent) = path_parent_string(&path) else {
+            continue;
+        };
+        if path_looks_like_test_artifact(&path) {
+            push_unique_path(&mut test_dirs, parent);
+        } else {
+            push_unique_path(&mut source_dirs, parent);
+        }
+    }
+
+    if !saw_validation_command || source_dirs.is_empty() || test_dirs.is_empty() {
+        return None;
+    }
+    source_dirs
+        .iter()
+        .find(|dir| test_dirs.iter().any(|candidate| candidate == *dir))
+        .cloned()
+        .or_else(|| {
+            (source_dirs.len() == 1 && test_dirs.len() == 1)
+                .then(|| source_dirs.first().cloned())
+                .flatten()
+        })
+}
+
 fn is_listing_json(value: &Value) -> bool {
     value
         .get("action")
@@ -858,6 +1073,9 @@ fn listing_json_has_entries(value: &Value) -> bool {
 pub(crate) fn derive_bound_target_from_journal(
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<String> {
+    if let Some(code_workspace) = derive_code_workspace_bound_target_from_journal(journal) {
+        return Some(code_workspace);
+    }
     for step in journal.step_results.iter().rev() {
         if step.status != crate::executor::StepExecutionStatus::Ok {
             continue;
@@ -1107,6 +1325,9 @@ fn derive_frame_for_ask_outcome(
         && (route_result.needs_clarify
             || route_result.output_contract.locator_hint.trim().is_empty());
     let op_kind = op_kind_from_route(route_result, unresolved_locator, journal);
+    let code_workspace_bound_target = matches!(op_kind, FollowupOpKind::CodeWorkspace)
+        .then(|| derive_code_workspace_bound_target_from_route_and_journal(route_result, journal))
+        .flatten();
     let should_extract_answer_entries = matches!(op_kind, FollowupOpKind::List)
         || (matches!(op_kind, FollowupOpKind::Delivery)
             && answer_contains_multiple_delivery_targets(answer_text, answer_messages))
@@ -1125,9 +1346,11 @@ fn derive_frame_for_ask_outcome(
         op_kind,
         bound_target: (!unresolved_locator)
             .then(|| {
-                observed_facts.bound_target.clone().or_else(|| {
-                    let hint = route_result.output_contract.locator_hint.trim();
-                    (!hint.is_empty()).then(|| hint.to_string())
+                code_workspace_bound_target.clone().or_else(|| {
+                    observed_facts.bound_target.clone().or_else(|| {
+                        let hint = route_result.output_contract.locator_hint.trim();
+                        (!hint.is_empty()).then(|| hint.to_string())
+                    })
                 })
             })
             .flatten(),

@@ -55,6 +55,7 @@ use super::{
     rewrite_sqlite_count_query_to_requested_schema_column,
     rewrite_sqlite_schema_version_plan_to_db_basic, rewrite_sqlite_table_listing_plan_to_db_basic,
     rewrite_sqlite_table_probe_to_requested_schema_value,
+    rewrite_sqlite_user_version_plan_to_db_basic,
     rewrite_terminal_placeholder_respond_to_synthesize_answer,
     rewrite_terminal_synthesis_placeholder_respond,
     rewrite_unresolved_template_arg_multi_file_read_plan, round1_prompt_spec_for_class,

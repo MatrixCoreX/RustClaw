@@ -451,12 +451,54 @@ async fn builtin_write_file_outcome_exposes_structured_extra() {
             .and_then(|value| value.as_u64()),
         Some(6)
     );
+    assert_eq!(
+        write_extra
+            .get("preexisting")
+            .and_then(|value| value.as_bool()),
+        Some(false)
+    );
+    assert_eq!(
+        write_extra.get("changed").and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        write_extra.get("noop").and_then(|value| value.as_bool()),
+        Some(false)
+    );
     assert!(
         write_extra
             .get("resolved_path")
             .and_then(|value| value.as_str())
             .is_some_and(|path| path.ends_with("tmp/out.txt")),
         "extra: {write_extra}"
+    );
+
+    let rewrite_same = super::run_skill_with_runner_outcome(
+        &state,
+        &task,
+        "write_file",
+        json!({"path": "tmp/out.txt", "content": "alpha\n"}),
+    )
+    .await
+    .expect("same-content write outcome");
+    let rewrite_same_extra = rewrite_same.extra.expect("same-content write extra");
+    assert_eq!(
+        rewrite_same_extra
+            .get("preexisting")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        rewrite_same_extra
+            .get("changed")
+            .and_then(|value| value.as_bool()),
+        Some(false)
+    );
+    assert_eq!(
+        rewrite_same_extra
+            .get("noop")
+            .and_then(|value| value.as_bool()),
+        Some(true)
     );
 
     let append = super::run_skill_with_runner_outcome(

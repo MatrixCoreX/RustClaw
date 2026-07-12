@@ -818,6 +818,72 @@ fn seed_loop_state_extracts_pre_loop_clarify_candidates() {
 }
 
 #[test]
+fn seed_loop_state_extracts_boundary_observation_needs_clarify() {
+    let observation = serde_json::json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "needs_clarify": true,
+        "post_route_boundary_record": {
+            "outcome": "boundary_clarify",
+            "reason_code": "post_route_boundary_clarify_required"
+        }
+    });
+    let block = format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS",
+        serde_json::to_string(&observation).expect("observation json")
+    );
+    let ctx = AgentRunContext {
+        user_request: Some(format!("ambiguous delivery\n{block}")),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(4);
+
+    seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
+
+    assert!(loop_state.boundary_observation_needs_clarify);
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.boundary_observation_needs_clarify"),
+        Some(&"true".to_string())
+    );
+}
+
+#[test]
+fn seed_loop_state_treats_missing_referent_as_boundary_clarify() {
+    let observation = serde_json::json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "needs_clarify": false,
+        "missing_referent": {
+            "owner_layer": "agent_loop_boundary",
+            "reason_code": "unbound_deictic_reference",
+            "status_code": "missing_referent",
+            "missing_slot": "referent"
+        }
+    });
+    let block = format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS",
+        serde_json::to_string(&observation).expect("observation json")
+    );
+    let ctx = AgentRunContext {
+        user_request: Some(format!("continue previous project\n{block}")),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(4);
+
+    seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
+
+    assert!(loop_state.boundary_observation_needs_clarify);
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.boundary_observation_needs_clarify"),
+        Some(&"true".to_string())
+    );
+}
+
+#[test]
 fn guard_policy_defaults_to_agent_loop_authority_when_config_missing() {
     let root = temp_support_workspace("rollout-defaults");
     let mut state = crate::AppState::test_default_with_fixture_provider();

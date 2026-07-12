@@ -174,6 +174,13 @@ pub(crate) fn push_unique_machine_kv_surface(surfaces: &mut Vec<String>, value: 
     }
 }
 
+pub(crate) fn requested_machine_markers_for_projection(input: &str) -> Vec<String> {
+    requested_machine_markers(input)
+        .into_iter()
+        .filter(|marker| !machine_request_option_key(marker))
+        .collect()
+}
+
 fn requested_machine_kv_pairs(input: &str) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     let tokens = input.split_whitespace().collect::<Vec<_>>();
@@ -405,6 +412,13 @@ fn valid_single_machine_marker(value: &str) -> bool {
             | "names"
             | "paths"
             | "changed_files"
+            | "created_files"
+            | "test_command"
+            | "test_status"
+            | "functions"
+            | "error_codes"
+            | "evidence_files"
+            | "project_dir"
             | "manager"
             | "available"
             | "valid"

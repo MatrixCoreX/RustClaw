@@ -10,10 +10,11 @@ use super::{
     observed_scalar_values_from_evidence_map, observed_scalar_values_from_evidence_map_for_route,
     observed_single_path_values_from_evidence_map, observed_strict_list_items_from_evidence_map,
     observed_strict_list_items_from_evidence_map_for_route, observed_table_cells_from_evidence_map,
-    output_contract_prompt_block, recent_structured_scalar_values_from_journal,
-    route_contract_marker_is_scalar_path_only, should_verify_answer,
-    strict_list_route_allows_observed_subset, structural_satisfaction_can_skip_verifier,
-    structurally_satisfies_answer_contract, AnswerVerifierOut,
+    output_contract_prompt_block, post_write_content_evidence_missing_before_verifier,
+    recent_structured_scalar_values_from_journal, route_contract_marker_is_scalar_path_only,
+    should_verify_answer, strict_list_route_allows_observed_subset,
+    structural_satisfaction_can_skip_verifier, structurally_satisfies_answer_contract,
+    AnswerVerifierOut,
 };
 use super::{health_check_value_from_output, observed_find_ext_results};
 
@@ -1218,6 +1219,11 @@ fn should_verify_answer_skips_grounded_structured_machine_projection() {
             "planned_outputs=[{\"path\":\"/home/guagua/rustclaw/document/media_dry_run/audio_check.mp3\",\"type\":\"audio_file\"}]",
         )
     ));
+    assert!(!should_verify_answer(
+        &route,
+        &journal,
+        r#"{"functions":["add","sub","mul","safe_div"],"error_codes":["division_by_zero"],"test_status":"passed","evidence_files":["calc_core.py","test_calc_core.py"]}"#
+    ));
 }
 
 #[test]
@@ -1955,3 +1961,6 @@ mod text_protocol_boundary;
 
 #[path = "answer_verifier_tests/local_status_evidence.rs"]
 mod local_status_evidence;
+
+#[path = "answer_verifier_tests/strict_json_projection_skip.rs"]
+mod strict_json_projection_skip;

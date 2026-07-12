@@ -54,8 +54,32 @@ pub(super) fn coerce_output_contract_value_for_schema(value: &mut Value) {
                 Value::String(response_shape.to_string()),
             );
         }
+        if let Some(semantic_kind) = command_output_semantic_kind_from_string_contract(raw) {
+            contract.insert(
+                "contract_marker".to_string(),
+                Value::String(semantic_kind.as_str().to_string()),
+            );
+        }
     }
     *value = Value::Object(contract);
+}
+
+fn command_output_semantic_kind_from_string_contract(raw: &str) -> Option<OutputSemanticKind> {
+    match normalize_schema_token(raw).as_str() {
+        "raw"
+        | "raw_output"
+        | "command_output"
+        | "command_result"
+        | "combined_command_output"
+        | "command_execution_result"
+        | "shell_output"
+        | "terminal_output" => Some(OutputSemanticKind::RawCommandOutput),
+        "command_output_summary"
+        | "command_result_summary"
+        | "command_output_synthesis"
+        | "command_result_synthesis" => Some(OutputSemanticKind::CommandOutputSummary),
+        _ => None,
+    }
 }
 
 fn normalize_output_contract_aliases(contract: &mut serde_json::Map<String, Value>) {

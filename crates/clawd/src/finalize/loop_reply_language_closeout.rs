@@ -488,7 +488,7 @@ pub(super) fn route_prefers_language_rendered_execution_failed_step(
         })
 }
 
-pub(super) fn planned_delivery_is_publishable_model_language_answer(delivery: &str) -> bool {
+pub(crate) fn planned_delivery_is_publishable_model_language_answer(delivery: &str) -> bool {
     let delivery = delivery.trim();
     !delivery.is_empty()
         && crate::finalize::parse_delivery_token(delivery).is_none()

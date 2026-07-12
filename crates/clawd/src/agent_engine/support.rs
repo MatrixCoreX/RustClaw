@@ -1295,9 +1295,8 @@ pub(super) fn action_fingerprint_for_policy(
     let Some(registry) = state.get_skills_registry() else {
         return action_fingerprint(state, action);
     };
-    let once_per_task = registry.resolved_once_per_task(&normalized_skill, action_token.as_deref());
     let dedup_scope = registry.resolved_dedup_scope(&normalized_skill, action_token.as_deref());
-    if once_per_task || dedup_scope == claw_core::skill_registry::RegistryDedupScope::Action {
+    if dedup_scope == claw_core::skill_registry::RegistryDedupScope::Action {
         if literal_execution_failed_step_run_cmd_uses_args_fingerprint(
             &normalized_skill,
             action_token.as_deref(),

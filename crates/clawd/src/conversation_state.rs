@@ -915,10 +915,11 @@ pub(crate) fn update_active_session_from_ask_outcome(
             return;
         }
     };
-    let clear_active_session_pointers_for_alias_update =
-        turn_analysis_has_alias_only_state_patch(turn_analysis);
     let current_outcome_refreshes_session_pointers =
-        current_outcome_has_ordered_entries(journal, semantic_clarify);
+        current_outcome_has_session_anchor(route_result, journal, semantic_clarify);
+    let clear_active_session_pointers_for_alias_update =
+        turn_analysis_has_alias_only_state_patch(turn_analysis)
+            && !current_outcome_refreshes_session_pointers;
     let preserve_active_session_pointers = !clear_active_session_pointers_for_alias_update
         && !current_outcome_refreshes_session_pointers
         && (should_preserve_active_session_pointers(turn_analysis)
@@ -1093,6 +1094,20 @@ fn current_outcome_has_ordered_entries(
 ) -> bool {
     !semantic_clarify
         && !crate::followup_frame::derive_ordered_entries_from_journal(journal).is_empty()
+}
+
+fn current_outcome_has_session_anchor(
+    route_result: &crate::RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    semantic_clarify: bool,
+) -> bool {
+    current_outcome_has_ordered_entries(journal, semantic_clarify)
+        || (!semantic_clarify
+            && crate::followup_frame::derive_code_workspace_bound_target_from_route_and_journal(
+                route_result,
+                journal,
+            )
+            .is_some())
 }
 
 fn load_authoritative_followup_frame(

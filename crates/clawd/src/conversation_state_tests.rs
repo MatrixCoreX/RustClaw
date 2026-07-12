@@ -1189,6 +1189,117 @@ fn alias_only_state_patch_clears_stale_active_pointers() {
 }
 
 #[test]
+fn alias_only_state_patch_does_not_clear_current_code_workspace_anchor() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = ClaimedTask {
+        task_id: "task-alias-with-code-workspace".to_string(),
+        user_id: 11,
+        chat_id: 12,
+        user_key: Some("user-key".to_string()),
+        channel: "telegram".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    super::replace_active_conversation_state_with_pointers(
+        &state,
+        &task,
+        None,
+        ActiveSessionPointers {
+            active_followup_task_id: Some("old-followup".to_string()),
+            active_clarify_task_id: Some("old-clarify".to_string()),
+            active_observed_facts_task_id: Some("old-observed".to_string()),
+        },
+    );
+    let project_dir = "/home/guagua/rustclaw/run/nl_eval_tmp/code_workspace_alias_patch";
+    let calc_path = format!("{project_dir}/calc_core.py");
+    let test_path = format!("{project_dir}/test_calc_core.py");
+    let mut route = route_result_for_test(crate::AskMode::act_plain(), false);
+    route.route_reason =
+        "executable_contract_preserved_for_agent_loop; alias_state_patch_ack".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: None,
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: Some(json!({
+            "alias_bindings": [{
+                "alias": "WORKSPACE",
+                "target": project_dir
+            }]
+        })),
+        attachment_processing_required: false,
+    };
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "create code workspace");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            serde_json::json!({
+                "extra": {
+                    "action": "write_text",
+                    "resolved_path": calc_path,
+                }
+            })
+            .to_string(),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "fs_basic",
+            serde_json::json!({
+                "extra": {
+                    "action": "write_text",
+                    "resolved_path": test_path,
+                }
+            })
+            .to_string(),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3", "run_cmd", "OK",
+        ));
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+
+    super::update_active_session_from_ask_outcome(
+        &state,
+        &task,
+        None,
+        "create code workspace",
+        &route,
+        Some(&turn_analysis),
+        "create code workspace",
+        r#"{"created_files":["calc_core.py","test_calc_core.py"],"test_status":"passed"}"#,
+        &[],
+        false,
+        &[],
+        &journal,
+        None,
+    );
+
+    let loaded = super::load_active_conversation_state(&state, &task).expect("state");
+    assert_eq!(
+        loaded.active_followup_task_id.as_deref(),
+        Some(task.task_id.as_str())
+    );
+    assert!(loaded.active_clarify_task_id.is_none());
+    let snapshot = load_active_session_snapshot(&state, &task);
+    let frame = snapshot
+        .active_followup_frame
+        .expect("code workspace frame");
+    assert_eq!(
+        frame.op_kind,
+        crate::followup_frame::FollowupOpKind::CodeWorkspace
+    );
+    assert_eq!(frame.bound_target.as_deref(), Some(project_dir));
+}
+
+#[test]
 fn merge_alias_bindings_prefers_structured_state_patch() {
     let prior = ConversationState {
         alias_bindings: vec![SessionAliasBinding {

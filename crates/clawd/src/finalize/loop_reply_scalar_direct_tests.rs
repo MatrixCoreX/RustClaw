@@ -79,6 +79,54 @@ fn schema_version_capability_shape_uses_observed_scalar_without_semantic_kind() 
 }
 
 #[tokio::test]
+async fn finalize_loop_reply_replaces_scalar_machine_assignment_with_observed_value() {
+    let state = test_state();
+    let task = claimed_task("task-schema-version-scalar-machine-assignment");
+    let mut route = free_route_result();
+    route.route_reason =
+        "scalar_locator_requires_evidence; executable_contract_preserved_for_agent_loop"
+            .to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "db_basic",
+        r#"{"extra":{"action":"schema_version","field_value":{"schema_version":3},"schema_version":3},"text":"{\"columns\":[\"schema_version\"],\"rows\":[{\"schema_version\":3}]}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        "schema_version=3",
+    ));
+    loop_state
+        .delivery_messages
+        .push("schema_version=3".to_string());
+    loop_state.last_user_visible_respond = Some("schema_version=3".to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "read sqlite schema_version and output only the number",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should project bare scalar");
+
+    assert_eq!(reply.text, "3");
+    assert_eq!(reply.messages, vec!["3".to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_preserves_publishable_evidence_summary_over_scalar_projection() {
     let state = test_state();
     let task = claimed_task("task-generic-evidence-summary-over-scalar");

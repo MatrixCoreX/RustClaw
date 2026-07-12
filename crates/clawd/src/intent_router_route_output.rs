@@ -1,9 +1,11 @@
 use serde_json::json;
 
 use super::{
+    apply_state_patch_required_machine_fields_contract,
     apply_state_patch_structured_field_selector, execution_finalize_style_for_contract,
     route_has_structured_execution_signal, route_trace_record,
-    state_patch_targets_task_lifecycle_fields, IntentNormalizerOutput, RouteDecision, TurnAnalysis,
+    state_patch_targets_task_lifecycle_fields, ExecutionRecipePlanHint, IntentNormalizerOutput,
+    RouteDecision, TurnAnalysis,
 };
 use crate::pipeline_types::OutputContractRef;
 use crate::{
@@ -78,9 +80,43 @@ pub(crate) fn route_result_from_normalizer(
             .as_ref()
             .and_then(|analysis| analysis.state_patch.as_ref()),
     );
+    let required_machine_fields_contract_repair =
+        apply_state_patch_required_machine_fields_contract(
+            &mut output_contract,
+            normalizer_out
+                .turn_analysis
+                .as_ref()
+                .and_then(|analysis| analysis.state_patch.as_ref()),
+        );
     let mut needs_clarify = normalizer_out.needs_clarify;
     let mut clarify_question = normalizer_out.clarify_question.clone();
+    let mut wants_file_delivery = normalizer_out.wants_file_delivery;
+    if required_machine_fields_contract_repair.is_some() {
+        wants_file_delivery = false;
+        super::append_route_reason(
+            &mut route_reason,
+            "required_machine_fields_clear_delivery_contract",
+        );
+    }
     let execution_finalize_style = normalizer_out.execution_finalize_style;
+    if normalizer_out
+        .turn_analysis
+        .as_ref()
+        .and_then(|analysis| analysis.state_patch.as_ref())
+        .is_some_and(crate::conversation_state::state_patch_is_alias_bindings_only)
+    {
+        output_contract = crate::IntentOutputContract::default();
+        needs_clarify = false;
+        clarify_question.clear();
+        wants_file_delivery = false;
+        super::append_route_reason(&mut route_reason, "alias_state_patch_ack");
+    }
+    if normalizer_declares_agent_loop_execution_boundary(normalizer_out) && !needs_clarify {
+        super::append_route_reason(
+            &mut route_reason,
+            "executable_contract_preserved_for_agent_loop",
+        );
+    }
     if route_targets_task_lifecycle_query(normalizer_out, &route_reason) {
         output_contract.response_shape = crate::OutputResponseShape::Free;
         output_contract.requires_content_evidence = true;
@@ -110,7 +146,7 @@ pub(crate) fn route_result_from_normalizer(
     let ask_mode = ask_mode_from_machine_route_state(
         needs_clarify,
         &output_contract,
-        normalizer_out.wants_file_delivery,
+        wants_file_delivery,
         normalizer_out.schedule_kind,
         normalizer_out.execution_recipe_hint,
         execution_finalize_style,
@@ -129,11 +165,41 @@ pub(crate) fn route_result_from_normalizer(
         resume_behavior: normalizer_out.resume_behavior,
         schedule_kind: normalizer_out.schedule_kind,
         schedule_intent: normalizer_out.schedule_intent.clone(),
-        wants_file_delivery: normalizer_out.wants_file_delivery,
+        wants_file_delivery,
         should_refresh_long_term_memory: normalizer_out.should_refresh_long_term_memory,
         agent_display_name_hint,
         output_contract,
     }
+}
+
+fn normalizer_declares_agent_loop_execution_boundary(out: &IntentNormalizerOutput) -> bool {
+    out.execution_recipe_hint.as_ref().is_some_and(|spec| {
+        !matches!(
+            spec.kind,
+            crate::execution_recipe::ExecutionRecipeKind::None
+        )
+    }) || execution_recipe_plan_hint_declares_execution(out.execution_recipe_plan_hint.as_ref())
+}
+
+fn execution_recipe_plan_hint_declares_execution(
+    execution_recipe_plan_hint: Option<&ExecutionRecipePlanHint>,
+) -> bool {
+    execution_recipe_plan_hint.is_some_and(|hint| {
+        let kind = hint.kind.trim();
+        !kind.is_empty() && kind != "none"
+            || hint
+                .command
+                .as_deref()
+                .is_some_and(|command| !command.trim().is_empty())
+            || hint
+                .execution_mode
+                .as_deref()
+                .is_some_and(|mode| !mode.trim().is_empty())
+            || hint
+                .async_adapter_kind
+                .as_deref()
+                .is_some_and(|adapter| !adapter.trim().is_empty())
+    })
 }
 
 fn route_targets_task_lifecycle_query(

@@ -96,6 +96,14 @@ fn observed_answer_language_compatibility_rejects_clear_request_language_mismatc
 }
 
 #[test]
+fn observed_answer_language_compatibility_accepts_structured_json_machine_output() {
+    let answer = r#"{"changed_files":["calc_core.py","test_calc_core.py"],"test_command":"python -m unittest test_calc_core.py","test_status":"OK","functions":["add","sub","mul"]}"#;
+
+    assert!(observed_answer_language_compatible(answer, "zh-CN"));
+    assert!(observed_answer_language_compatible(answer, "en"));
+}
+
+#[test]
 fn observed_answer_language_compatibility_accepts_grounded_strict_path_list_machine_output() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(

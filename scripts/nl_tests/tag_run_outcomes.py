@@ -56,9 +56,9 @@ def find_plan_steps(trace: dict) -> list[dict]:
     return steps
 
 
-def latest_ok_synthesis_output(steps: list[dict]) -> str:
+def latest_ok_terminal_output(steps: list[dict]) -> str:
     for step in reversed(steps):
-        if str(step.get("skill") or "") != "synthesize_answer":
+        if str(step.get("skill") or "") not in {"synthesize_answer", "respond"}:
             continue
         if str(step.get("status") or "").lower() != "ok":
             continue
@@ -66,6 +66,10 @@ def latest_ok_synthesis_output(steps: list[dict]) -> str:
         if output:
             return output
     return ""
+
+
+def trace_output_is_truncated(output: str) -> bool:
+    return "...(truncated)" in output
 
 
 def final_answer_text(result: dict, summary: dict) -> str:
@@ -112,18 +116,19 @@ def classify(obj: dict) -> tuple[str, str]:
     steps = find_step_results(trace)
     plan_steps = find_plan_steps(trace)
     finalizer_summary = summary.get("finalizer_summary") or {}
-    latest_synthesis = latest_ok_synthesis_output(steps)
+    latest_terminal_output = latest_ok_terminal_output(steps)
     final_answer = final_answer_text(result, summary)
 
     if (
         status == "succeeded"
-        and latest_synthesis
+        and latest_terminal_output
         and final_answer
-        and latest_synthesis.strip() != final_answer.strip()
+        and not trace_output_is_truncated(latest_terminal_output)
+        and latest_terminal_output.strip() != final_answer.strip()
         and isinstance(finalizer_summary, dict)
         and str(finalizer_summary.get("stage") or "").lower() == "observed_generic"
     ):
-        return "finalizer_overwrite", "latest synthesized answer was replaced by observed-generic finalizer output"
+        return "finalizer_overwrite", "latest terminal answer was replaced by observed-generic finalizer output"
 
     if isinstance(verifier, dict) and verifier.get("pass") is False:
         reason = str(verifier.get("answer_incomplete_reason") or "answer verifier rejected final answer")

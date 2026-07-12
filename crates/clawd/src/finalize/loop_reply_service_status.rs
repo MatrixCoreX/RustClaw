@@ -1,6 +1,6 @@
 use crate::agent_engine::LoopState;
 
-pub(super) fn service_status_system_basic_info_answer(
+pub(crate) fn service_status_system_basic_info_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<String> {

@@ -19,6 +19,9 @@ use crate::task_journal::{
     delivery_payload_consistent, TaskJournal, TaskJournalFinalStatus, TaskJournalFinalizerSummary,
 };
 use crate::ClaimedTask;
+use std::borrow::Cow;
+
+const FINALIZER_RECOVERED_TERMINAL_STOP_SIGNAL: &str = "finalizer_recovered_terminal_answer";
 
 /// TASK 层入口前调用：保证 v1 task_metrics 中的两个核心字段非空。
 ///
@@ -56,6 +59,72 @@ fn rollout_switches_from_loop_state(loop_state: &LoopState) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn finalizer_summary_recovered_success(summary: Option<&TaskJournalFinalizerSummary>) -> bool {
+    summary.is_some_and(|summary| {
+        summary.disposition == Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+            && summary.contract_ok
+    })
+}
+
+fn effective_final_stop_signal<'a>(
+    loop_stop_signal: Option<&'a str>,
+    final_status: TaskJournalFinalStatus,
+    finalizer_summary: Option<&TaskJournalFinalizerSummary>,
+) -> Option<Cow<'a, str>> {
+    let signal = loop_stop_signal?;
+    if final_status == TaskJournalFinalStatus::Success
+        && signal == "synthesize_answer_failed"
+        && finalizer_summary_recovered_success(finalizer_summary)
+    {
+        return Some(Cow::Borrowed(FINALIZER_RECOVERED_TERMINAL_STOP_SIGNAL));
+    }
+    Some(Cow::Borrowed(signal))
+}
+
+fn record_stop_signal_observation_fields(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    loop_stop_signal: Option<&str>,
+    final_stop_signal: Option<&str>,
+) {
+    if let Some(signal) = loop_stop_signal {
+        obj.insert("loop_stop_signal".to_string(), serde_json::json!(signal));
+    }
+    if let Some(signal) = final_stop_signal {
+        obj.insert("final_stop_signal".to_string(), serde_json::json!(signal));
+    }
+}
+
+fn strict_json_projection_observation(loop_state: &LoopState) -> Option<serde_json::Value> {
+    if loop_state
+        .output_vars
+        .get("agent_loop.strict_json_projection_publishable")
+        .map(String::as_str)
+        != Some("true")
+    {
+        return None;
+    }
+    let output = loop_state
+        .output_vars
+        .get("agent_loop.strict_json_projection_output")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())?;
+    let serde_json::Value::Object(object) =
+        serde_json::from_str::<serde_json::Value>(output).ok()?
+    else {
+        return None;
+    };
+    if object.is_empty() || object.len() > 16 || output.len() > 8192 {
+        return None;
+    }
+    Some(serde_json::json!({
+        "kind": "agent_loop_strict_json_projection",
+        "owner_layer": "agent_loop",
+        "schema_version": 1,
+        "publishable": true,
+        "output": output,
+    }))
+}
+
 /// LOOP 层一次性构建 journal（替代原 `loop_reply::build_loop_journal`）。
 ///
 /// 字段写入顺序与值保持原实现一致：
@@ -77,6 +146,11 @@ pub(crate) fn build_from_loop_state(
     final_status: TaskJournalFinalStatus,
 ) -> TaskJournal {
     let mut journal = TaskJournal::for_task(&task.task_id, "ask", user_text);
+    let effective_stop_signal = effective_final_stop_signal(
+        loop_state.last_stop_signal.as_deref(),
+        final_status,
+        finalizer_summary.as_ref(),
+    );
     if let Some(ctx) = agent_run_context {
         if let Some(route_result) = ctx.route_result.as_ref() {
             journal.record_route_result(route_result);
@@ -96,6 +170,9 @@ pub(crate) fn build_from_loop_state(
     for observation in &loop_state.task_observations {
         journal.push_task_observation(observation.clone());
     }
+    if let Some(observation) = strict_json_projection_observation(loop_state) {
+        journal.push_task_observation(observation);
+    }
     let mut stop_observation =
         crate::agent_hooks::stop_outcome(final_status.as_str()).to_machine_json("agent_loop");
     if let Some(obj) = stop_observation.as_object_mut() {
@@ -103,12 +180,11 @@ pub(crate) fn build_from_loop_state(
             "final_status".to_string(),
             serde_json::json!(final_status.as_str()),
         );
-        if let Some(stop_signal) = loop_state.last_stop_signal.as_deref() {
-            obj.insert(
-                "final_stop_signal".to_string(),
-                serde_json::json!(stop_signal),
-            );
-        }
+        record_stop_signal_observation_fields(
+            obj,
+            loop_state.last_stop_signal.as_deref(),
+            effective_stop_signal.as_deref(),
+        );
     }
     journal.push_task_observation(stop_observation);
     let mut session_end = crate::agent_hooks::session_end_outcome(final_status.as_str())
@@ -125,7 +201,7 @@ pub(crate) fn build_from_loop_state(
     } else {
         journal.record_used_evidence_ids_count(0);
     }
-    if let Some(stop_signal) = loop_state.last_stop_signal.as_deref() {
+    if let Some(stop_signal) = effective_stop_signal.as_deref() {
         journal.record_final_stop_signal(stop_signal.to_string());
     }
     if let Some(lifecycle) = loop_state.task_lifecycle.clone() {

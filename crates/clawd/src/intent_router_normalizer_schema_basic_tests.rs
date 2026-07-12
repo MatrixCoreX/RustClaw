@@ -510,7 +510,7 @@ fn normalizer_schema_normalization_maps_process_status_alias_to_service_status()
 }
 
 #[test]
-fn contract_repair_report_marks_command_payload_as_raw_output() {
+fn contract_repair_report_marks_command_payload_without_forcing_raw_output() {
     let raw = r#"{
           "resolved_user_intent":"列出 logs 目录下前 10 个文件名，不读取内容",
           "needs_clarify":false,
@@ -531,7 +531,7 @@ fn contract_repair_report_marks_command_payload_as_raw_output() {
         value
             .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
-        Some("raw_command_output")
+        Some("none")
     );
     assert!(report.source_csv().contains("command_payload"));
     assert!(report

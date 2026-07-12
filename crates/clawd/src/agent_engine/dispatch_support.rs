@@ -13,20 +13,62 @@ use super::{
 };
 use crate::{AgentAction, OutputResponseShape};
 
+#[path = "dispatch_local_code_projection_gate.rs"]
+mod dispatch_local_code_projection_gate;
 #[path = "dispatch_synthesis.rs"]
 mod dispatch_synthesis;
 
+use dispatch_local_code_projection_gate::{
+    local_code_strict_json_projection_should_defer_observed_synthesis as gate_defer_observed_synthesis,
+    local_code_strict_json_projection_should_defer_until_validation as gate_defer_until_validation,
+    LOCAL_CODE_PROJECTION_PENDING_READBACK, LOCAL_CODE_PROJECTION_PENDING_VALIDATION,
+};
 use dispatch_synthesis::{
     archive_database_aggregate_structured_answer, deterministic_scalar_markdown_heading_answer,
     filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
-    package_docker_probe_structured_answer, route_resolved_intent,
-    step_has_observable_synthesis_fact, synthesize_answer_allows_direct_fallback,
+    local_code_task_strict_json_projection, package_docker_probe_structured_answer,
+    route_resolved_intent, step_has_observable_synthesis_fact,
+    strict_json_projection_answer_satisfies_request, synthesize_answer_allows_direct_fallback,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer,
     synthesize_evidence_policy_direct_observed_fallback_answer, synthesize_failure_observed_facts,
     synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
     synthesize_route_prefers_model_language_observed_status, synthesize_user_language_source,
 };
+
+pub(super) fn local_code_strict_json_projection_should_defer_observed_synthesis(
+    user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    gate_defer_observed_synthesis(user_text, loop_state, agent_run_context)
+}
+
+pub(super) fn local_code_strict_json_projection_should_defer_until_validation(
+    user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    gate_defer_until_validation(user_text, loop_state, agent_run_context)
+}
+
+pub(super) fn local_code_strict_json_projection_from_machine_evidence(
+    user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    let answer = local_code_task_strict_json_projection(user_text, loop_state, agent_run_context)?;
+    strict_json_projection_answer_satisfies_request(user_text, &answer, agent_run_context)
+        .then_some(answer)
+}
+
+pub(super) fn local_code_strict_json_answer_satisfies_request(
+    user_text: &str,
+    answer: &str,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    strict_json_projection_answer_satisfies_request(user_text, answer, agent_run_context)
+}
 
 pub(super) fn apply_skill_action_outcome(
     loop_state: &mut LoopState,
@@ -695,6 +737,7 @@ async fn synthesize_failure_user_message(
 #[cfg(test)]
 #[path = "dispatch_support_tests.rs"]
 mod tests;
+
 fn is_read_only_skill_invocation(state: &AppState, normalized_skill: &str, args: &Value) -> bool {
     if state.skill_is_read_only(normalized_skill) {
         return true;
@@ -746,6 +789,16 @@ fn should_publish_respond_message(loop_state: &LoopState, text: &str) -> bool {
         return false;
     }
     true
+}
+
+fn bare_last_output_placeholder(content: &str) -> bool {
+    let trimmed = content.trim();
+    if !trimmed.starts_with("{{") || !trimmed.ends_with("}}") {
+        return false;
+    }
+    let inner = trimmed[2..trimmed.len().saturating_sub(2)].trim();
+    let lower = inner.to_ascii_lowercase();
+    lower == "last_output" || lower.starts_with("last_output.") || lower.starts_with("last_output[")
 }
 
 fn respond_machine_envelope_payload(text: &str) -> bool {
@@ -922,8 +975,10 @@ pub(super) fn handle_respond_action(
         .delivery_messages
         .last()
         .is_some_and(|last| last.trim() == text.trim());
+    let terminal_last_output_passthrough =
+        !has_remaining_actions && !text.is_empty() && bare_last_output_placeholder(content);
     let publish_respond = should_publish_respond_message(loop_state, &text)
-        || (terminal_direct_answer && !duplicate_delivery);
+        || ((terminal_direct_answer || terminal_last_output_passthrough) && !duplicate_delivery);
     if !text.is_empty() && (publish_respond || !has_remaining_actions) {
         loop_state.last_user_visible_respond = Some(text.clone());
     }
@@ -1072,6 +1127,56 @@ fn apply_recipe_run_cmd_overrides(
     );
 }
 
+fn record_latest_run_cmd_command_output_vars(
+    loop_state: &mut LoopState,
+    normalized_skill: &str,
+    args: &Value,
+) {
+    if normalized_skill != "run_cmd" {
+        return;
+    }
+    let Some(command) = args
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+    else {
+        return;
+    };
+    loop_state.output_vars.insert(
+        "agent_loop.latest_run_cmd_command".to_string(),
+        command.to_string(),
+    );
+    record_run_cmd_command_list_output_var(loop_state, command);
+    if let Some(cwd) = args
+        .get("cwd")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|cwd| !cwd.is_empty())
+    {
+        loop_state
+            .output_vars
+            .insert("agent_loop.latest_run_cmd_cwd".to_string(), cwd.to_string());
+    }
+}
+
+fn record_run_cmd_command_list_output_var(loop_state: &mut LoopState, command: &str) {
+    let mut commands = loop_state
+        .output_vars
+        .get("agent_loop.run_cmd_commands")
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+        .unwrap_or_default();
+    if commands.iter().any(|existing| existing == command) {
+        return;
+    }
+    commands.push(command.to_string());
+    if let Ok(serialized) = serde_json::to_string(&commands) {
+        loop_state
+            .output_vars
+            .insert("agent_loop.run_cmd_commands".to_string(), serialized);
+    }
+}
+
 pub(super) async fn handle_call_tool_action(
     state: &AppState,
     task: &ClaimedTask,
@@ -1193,6 +1298,7 @@ pub(super) async fn handle_call_tool_action(
             crate::truncate_for_log(&resolved_args.to_string())
         );
     }
+    record_latest_run_cmd_command_output_vars(loop_state, &normalized_skill, &resolved_args);
     loop_state.tool_calls_total += 1;
     let args_summary = build_safe_skill_args_summary(&resolved_args, PROGRESS_ARGS_SUMMARY_MAX_LEN);
     let skill_outcome = execute_prepared_skill_action(
@@ -1334,6 +1440,7 @@ pub(super) async fn handle_call_skill_action(
             crate::truncate_for_log(&resolved_args.to_string())
         );
     }
+    record_latest_run_cmd_command_output_vars(loop_state, &normalized_skill, &resolved_args);
     let read_file_requested_path = read_file_requested_path(&normalized_skill, &resolved_args);
     let write_file_effective_path =
         write_file_effective_path(state, &normalized_skill, &resolved_args);
@@ -1496,6 +1603,29 @@ pub(super) async fn handle_synthesize_answer_action(
             let allow_direct_fallback = synthesize_answer_allows_direct_fallback(evidence_refs)
                 && synthesize_route_allows_direct_fallback(agent_run_context)
                 && !direct_fallback_blocked;
+            if let Some(answer) =
+                local_code_strict_json_projection_from_machine_evidence(
+                    user_text,
+                    loop_state,
+                    agent_run_context,
+                )
+            {
+                return Ok(answer);
+            }
+            if local_code_strict_json_projection_should_defer_observed_synthesis(
+                user_text,
+                loop_state,
+                agent_run_context,
+            ) {
+                return Err(LOCAL_CODE_PROJECTION_PENDING_READBACK.to_string());
+            }
+            if local_code_strict_json_projection_should_defer_until_validation(
+                user_text,
+                loop_state,
+                agent_run_context,
+            ) {
+                return Err(LOCAL_CODE_PROJECTION_PENDING_VALIDATION.to_string());
+            }
             if allow_direct_fallback {
                 if let Some(answer) =
                     synthesize_direct_observed_fallback_answer(state, loop_state, agent_run_context)
@@ -1530,6 +1660,9 @@ pub(super) async fn handle_synthesize_answer_action(
                     return Ok(answer);
                 }
             }
+            if synthesize_failure_should_replan(loop_state) {
+                return Err("synthesize_answer_no_publishable_answer".to_string());
+            }
             Err(synthesize_failure_user_message(
                 state,
                 task,
@@ -1549,6 +1682,27 @@ pub(super) async fn handle_synthesize_answer_action(
     {
         Some(answer) => {
             let answer = answer.to_string();
+            if strict_json_projection_answer_satisfies_request(
+                user_text,
+                &answer,
+                agent_run_context,
+            ) {
+                loop_state.output_vars.insert(
+                    "agent_loop.strict_json_projection_publishable".to_string(),
+                    "true".to_string(),
+                );
+                loop_state.output_vars.insert(
+                    "agent_loop.strict_json_projection_output".to_string(),
+                    answer.clone(),
+                );
+            } else {
+                loop_state
+                    .output_vars
+                    .remove("agent_loop.strict_json_projection_publishable");
+                loop_state
+                    .output_vars
+                    .remove("agent_loop.strict_json_projection_output");
+            }
             crate::append_subtask_result(
                 &mut loop_state.subtask_results,
                 global_step,
@@ -1595,7 +1749,13 @@ pub(super) async fn handle_synthesize_answer_action(
                 .error
                 .clone()
                 .unwrap_or_else(|| "synthesize_answer failed".to_string());
-            let should_replan = synthesize_failure_should_replan(loop_state);
+            let local_code_projection_pending_readback =
+                err == LOCAL_CODE_PROJECTION_PENDING_READBACK;
+            let local_code_projection_pending_validation =
+                err == LOCAL_CODE_PROJECTION_PENDING_VALIDATION;
+            let should_replan = !local_code_projection_pending_readback
+                && !local_code_projection_pending_validation
+                && synthesize_failure_should_replan(loop_state);
             if should_replan {
                 let compact_err = err
                     .replace('\n', " ")
@@ -1648,6 +1808,10 @@ pub(super) async fn handle_synthesize_answer_action(
             );
             Ok(ActionLoopDecision::StopRound(if should_replan {
                 "recoverable_failure_continue_round".to_string()
+            } else if local_code_projection_pending_validation {
+                "recoverable_failure_continue_round".to_string()
+            } else if local_code_projection_pending_readback {
+                LOCAL_CODE_PROJECTION_PENDING_READBACK.to_string()
             } else {
                 "synthesize_answer_failed".to_string()
             }))
@@ -1673,6 +1837,15 @@ pub(super) async fn dispatch_round_action(
     ended_with_user_visible_output: &mut bool,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<ActionLoopDecision, String> {
+    let resolved_capability_action;
+    let action = if matches!(action, AgentAction::CallCapability { .. }) {
+        resolved_capability_action = Some(
+            crate::capability_resolver::resolve_agent_action_for_state(state, action.clone()),
+        );
+        resolved_capability_action.as_ref().unwrap()
+    } else {
+        action
+    };
     match action {
         AgentAction::CallTool { tool, args } => {
             handle_call_tool_action(
@@ -1719,7 +1892,7 @@ pub(super) async fn dispatch_round_action(
             .await
         }
         AgentAction::CallCapability { capability, args } => {
-            Err(unresolved_capability_error(state, &capability, &args))
+            Err(unresolved_capability_error(state, capability, args))
         }
         AgentAction::SynthesizeAnswer { evidence_refs } => {
             if active_recipe_terminal_discussion_should_replan(actions, loop_state, policy, idx) {

@@ -408,6 +408,144 @@ fn boundary_observation_hides_active_plan_files_for_unbound_referent() {
 }
 
 #[test]
+fn boundary_observation_marks_deictic_filename_followup_without_active_target() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut route = base_route();
+    route.route_reason = "execution_recipe_target_locator_preserved_for_agent_loop; executable_contract_preserved_for_agent_loop; current_turn_locator_overrides_contextual_path"
+        .to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: None,
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: false,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::new(
+            "post_route_no_change",
+            crate::post_route_policy::PostRoutePolicyOutcome::NoChange,
+        ),
+    };
+
+    let block = agent_loop_boundary_observations_block(
+        &state,
+        &post_route,
+        &crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        },
+        None,
+        "continue that project and update test_calc_core.py",
+        "continue that project and update test_calc_core.py",
+        &[],
+    )
+    .expect("deictic filename followup without target should export boundary state");
+
+    assert!(block.contains("\"missing_referent\""));
+    assert!(block.contains("\"reason_code\":\"unbound_deictic_reference\""));
+    assert!(block.contains("\"source\":\"unbound_contextual_locator\""));
+    assert!(block.contains("\"active_bound_targets\":[]"));
+}
+
+#[test]
+fn boundary_observation_does_not_export_active_plan_files_for_plain_answer_boundary() {
+    let root = temp_workspace_root("plain_answer_hides_plan_files");
+    let plan_dir = root.join("plan");
+    std::fs::create_dir_all(&plan_dir).expect("plan dir");
+    let active_plan = plan_dir.join("active.md");
+    std::fs::write(&active_plan, "# Active Plan\n").expect("active plan");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+    state.skill_rt.default_locator_search_dir = root.clone();
+    let mut route = base_route();
+    route.route_reason.clear();
+    let post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: None,
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: false,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::new(
+            "post_route_no_change",
+            crate::post_route_policy::PostRoutePolicyOutcome::NoChange,
+        ),
+    };
+
+    let block = agent_loop_boundary_observations_block(
+        &state,
+        &post_route,
+        &crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        },
+        None,
+        "draft from current conversation",
+        "draft from current conversation",
+        &[],
+    );
+
+    assert!(block.is_none());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn boundary_observation_exports_active_plan_files_for_workspace_summary_contract() {
+    let root = temp_workspace_root("workspace_summary_plan_files");
+    let plan_dir = root.join("plan");
+    std::fs::create_dir_all(&plan_dir).expect("plan dir");
+    let active_plan = plan_dir.join("active.md");
+    std::fs::write(&active_plan, "# Active Plan\n").expect("active plan");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+    state.skill_rt.default_locator_search_dir = root.clone();
+    let mut route = base_route();
+    route.route_reason = "workspace_project_summary".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+    let post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: None,
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: false,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::new(
+            "post_route_no_change",
+            crate::post_route_policy::PostRoutePolicyOutcome::NoChange,
+        ),
+    };
+
+    let block = agent_loop_boundary_observations_block(
+        &state,
+        &post_route,
+        &crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        },
+        None,
+        "summarize workspace",
+        "summarize workspace",
+        &[],
+    )
+    .expect("workspace summary should export boundary observation");
+
+    assert!(block.contains("\"active_plan_files\""));
+    assert!(block.contains(&active_plan.display().to_string()));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn post_route_missing_locator_boundary_defers_to_agent_loop_candidate() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = claimed_task("missing-locator-boundary-defer");
@@ -708,4 +846,51 @@ fn boundary_observation_block_exports_runtime_session_state_for_status_query() {
     assert!(block.contains("\"runtime_session_state\""));
     assert!(block.contains("\"active_task_present\":false"));
     assert!(block.contains("\"pending_user_boundary_present\":false"));
+}
+
+#[test]
+fn boundary_observation_exports_code_workspace_followup_anchor() {
+    let route = base_route();
+    let post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: None,
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: false,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::new(
+            "post_route_no_change",
+            crate::post_route_policy::PostRoutePolicyOutcome::NoChange,
+        ),
+    };
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let project_dir = "/home/guagua/rustclaw/run/nl_eval_tmp/code_workspace_anchor";
+    let frame = crate::followup_frame::FollowupFrame {
+        source_request: "code workspace update".to_string(),
+        op_kind: crate::followup_frame::FollowupOpKind::CodeWorkspace,
+        bound_target: Some(project_dir.to_string()),
+        source_task_id: "task-code-workspace".to_string(),
+        ..crate::followup_frame::FollowupFrame::default()
+    };
+
+    let block = agent_loop_boundary_observations_block(
+        &state,
+        &post_route,
+        &crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: Some(frame),
+            active_clarify_state: None,
+            active_observed_facts: None,
+        },
+        None,
+        "code workspace followup",
+        "code workspace followup",
+        &[],
+    )
+    .expect("code workspace anchor should export boundary state");
+
+    assert!(block.contains("\"active_bound_targets\""));
+    assert!(block.contains("\"op_kind\":\"code_workspace\""));
+    assert!(block.contains(project_dir));
 }

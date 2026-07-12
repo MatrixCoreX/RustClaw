@@ -90,28 +90,37 @@ impl<'a> PlannerToolLibrary<'a> {
         matches!(self.planning_class, PlanningPromptClass::OpenPlanning)
     }
 
+    fn uses_compact_tool_library(&self) -> bool {
+        !self.is_open_planning() || self.skill_scope.is_some()
+    }
+
     fn skill_playbooks(&self) -> String {
-        if self.is_open_planning() {
-            build_skill_playbooks_text_scoped(self.state, self.task, self.skill_scope.as_ref())
-        } else {
+        if self.uses_compact_tool_library() {
             build_lightweight_skill_playbooks_text(self.state, self.task, self.skill_scope.as_ref())
+        } else {
+            build_skill_playbooks_text_scoped(self.state, self.task, self.skill_scope.as_ref())
         }
     }
 
     fn skill_quick_index(&self) -> String {
-        if self.is_open_planning() {
-            build_skill_quick_index_text_scoped(self.state, self.task, self.skill_scope.as_ref())
-        } else {
+        if self.uses_compact_tool_library() {
             build_lightweight_skill_quick_index_text(
                 self.state,
                 self.task,
                 self.skill_scope.as_ref(),
             )
+        } else {
+            build_skill_quick_index_text_scoped(self.state, self.task, self.skill_scope.as_ref())
         }
     }
 
     fn tool_spec(&self) -> Result<String, String> {
-        if self.is_open_planning() {
+        if self.uses_compact_tool_library() {
+            Ok(build_lightweight_tool_spec(
+                self.route_result,
+                self.auto_locator_path,
+            ))
+        } else {
             crate::bootstrap::load_required_prompt_template_for_state(
                 self.state,
                 AGENT_TOOL_SPEC_PATH,
@@ -129,11 +138,6 @@ impl<'a> PlannerToolLibrary<'a> {
                 spec
             })
             .map_err(|err| err.to_string())
-        } else {
-            Ok(build_lightweight_tool_spec(
-                self.route_result,
-                self.auto_locator_path,
-            ))
         }
     }
 }
@@ -166,6 +170,8 @@ mod inline_transform_contract;
 mod legacy_file_config_capabilities;
 #[path = "media_artifact_plan.rs"]
 mod media_artifact_plan;
+#[path = "planner_abort_recovery.rs"]
+mod planner_abort_recovery;
 #[path = "preferred_structured_action.rs"]
 mod preferred_structured_action;
 #[path = "read_range_action.rs"]
@@ -208,6 +214,7 @@ use explicit_observed_paths::*;
 use inline_transform_contract::*;
 use legacy_file_config_capabilities::*;
 use media_artifact_plan::*;
+use planner_abort_recovery::*;
 use preferred_structured_action::*;
 use read_range_action::*;
 use runtime_status_scalar_plan::*;
@@ -590,10 +597,39 @@ pub(super) async fn plan_round_actions(
                                         ),
                                     )
                                 } else {
-                                    return Err(
-                                        "second repair plan parser failed: no executable steps"
-                                            .to_string(),
-                                    );
+                                    if let Some((actions, raw)) = try_compact_abort_recovery_plan(
+                                        state,
+                                        task,
+                                        goal,
+                                        &turn_analysis,
+                                        user_text,
+                                        route_result,
+                                        loop_state,
+                                        auto_locator_path,
+                                        Some(&original_user_text_for_policy),
+                                        &tool_spec_template,
+                                        &skill_playbooks,
+                                        &attempt_ledger,
+                                        &plan_raw,
+                                        Some(&second_repaired),
+                                    )
+                                    .await?
+                                    {
+                                        (
+                                            actions,
+                                            PlanKind::Repair,
+                                            raw,
+                                            planner_notes_for_repair_success(
+                                                repair_reason,
+                                                Some("planner_abort_compact_retry"),
+                                            ),
+                                        )
+                                    } else {
+                                        return Err(
+                                            "plan_second_repair_parse_failed_no_executable_steps"
+                                                .to_string(),
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -625,9 +661,36 @@ pub(super) async fn plan_round_actions(
                                 ),
                             )
                         } else {
-                            return Err(
-                                "single plan parser failed: no executable steps".to_string()
-                            );
+                            if let Some((actions, raw)) = try_compact_abort_recovery_plan(
+                                state,
+                                task,
+                                goal,
+                                &turn_analysis,
+                                user_text,
+                                route_result,
+                                loop_state,
+                                auto_locator_path,
+                                Some(&original_user_text_for_policy),
+                                &tool_spec_template,
+                                &skill_playbooks,
+                                &attempt_ledger,
+                                &plan_raw,
+                                Some(&repaired),
+                            )
+                            .await?
+                            {
+                                (
+                                    actions,
+                                    PlanKind::Repair,
+                                    raw,
+                                    planner_notes_for_repair_success(
+                                        repair_reason,
+                                        Some("planner_abort_compact_retry"),
+                                    ),
+                                )
+                            } else {
+                                return Err("plan_parse_failed_no_executable_steps".to_string());
+                            }
                         }
                     }
                 }
@@ -692,6 +755,64 @@ pub(super) async fn plan_round_actions(
         serde_json::to_string(&labels).unwrap_or_else(|_| "[]".to_string())
     );
     Ok(plan_result)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn try_compact_abort_recovery_plan(
+    state: &AppState,
+    task: &ClaimedTask,
+    goal: &str,
+    turn_analysis: &str,
+    user_text: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+    original_user_text_for_policy: Option<&str>,
+    tool_spec_template: &str,
+    skill_playbooks: &str,
+    attempt_ledger: &str,
+    first_raw_plan: &str,
+    latest_raw_plan: Option<&str>,
+) -> Result<Option<(Vec<AgentAction>, String)>, String> {
+    let Some((actions, raw)) = compact_retry_plan_actions(
+        state,
+        task,
+        PlannerAbortRecoveryInput {
+            goal,
+            turn_analysis,
+            user_text,
+            tool_spec: tool_spec_template,
+            skill_playbooks,
+            attempt_ledger,
+            first_raw_plan,
+            latest_raw_plan,
+            round_no: loop_state.round_no,
+            route_result,
+            loop_state,
+        },
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    let actions = normalize_planned_actions_with_original_and_context(
+        state,
+        route_result,
+        loop_state,
+        user_text,
+        original_user_text_for_policy,
+        Some(goal),
+        auto_locator_path,
+        actions,
+    );
+    if should_force_actionable_plan_repair(state, route_result, loop_state, &actions) {
+        warn!(
+            "planner_abort_compact_retry_non_actionable task_id={} round={}",
+            task.task_id, loop_state.round_no
+        );
+        return Ok(None);
+    }
+    Ok(Some((actions, raw)))
 }
 
 #[cfg(test)]

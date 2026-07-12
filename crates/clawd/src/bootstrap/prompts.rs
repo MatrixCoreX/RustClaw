@@ -82,6 +82,10 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "plan_repair (agent_engine.planning)",
     ),
     (
+        "prompts/planner_abort_compact_retry_prompt.md",
+        "planner_abort_compact_retry_agent_engine_planning",
+    ),
+    (
         "prompts/observed_answer_fallback_prompt.md",
         "observed_answer_fallback (finalize.observed)",
     ),

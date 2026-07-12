@@ -123,6 +123,8 @@ fn route_allows_alias_state_patch_ack(
     route_result.schedule_kind == crate::ScheduleKind::None
         && !route_result.needs_clarify
         && !route_result.wants_file_delivery
+        && !route_result
+            .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && route_result.output_contract.delivery_intent == crate::OutputDeliveryIntent::None

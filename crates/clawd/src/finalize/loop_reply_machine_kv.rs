@@ -74,6 +74,51 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
     observed_texts.sort();
     observed_texts.dedup();
     let request_surfaces = requested_machine_kv_request_surfaces(user_text, agent_run_context);
+    if current_json_delivery_satisfies_required_machine_fields(agent_run_context, &current)
+        || current_json_delivery_satisfies_requested_machine_tokens(&current, &request_surfaces)
+    {
+        loop_state.last_user_visible_respond = Some(current);
+        return false;
+    }
+    if let Some(restored) = latest_json_delivery_satisfying_requested_machine_tokens(
+        loop_state,
+        delivery_messages,
+        &request_surfaces,
+    ) {
+        if restored.trim() == current.trim() {
+            loop_state.last_user_visible_respond = Some(current);
+            return false;
+        }
+        delivery_messages.clear();
+        delivery_messages.push(restored.clone());
+        loop_state.delivery_messages.clear();
+        append_delivery_message(
+            &task.task_id,
+            &mut loop_state.delivery_messages,
+            restored.clone(),
+        );
+        loop_state.last_user_visible_respond = Some(restored);
+        *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: loop_state.executed_step_results.len(),
+            ..Default::default()
+        });
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "requested_machine_kv_summary_latest_requested_json",
+            "restored",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return true;
+    }
     let Some(answer) =
         crate::machine_kv_projection::requested_machine_kv_summary_from_observation_inputs(
             request_surfaces.iter().map(String::as_str),
@@ -499,6 +544,183 @@ fn current_delivery_is_structured_json_answer(current: &str) -> bool {
     }
 }
 
+fn current_json_delivery_satisfies_required_machine_fields(
+    agent_run_context: Option<&AgentRunContext>,
+    current: &str,
+) -> bool {
+    let required = required_machine_field_keys_from_state_patch(agent_run_context);
+    if required.is_empty() {
+        return false;
+    }
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(current.trim()) else {
+        return false;
+    };
+    object.len() == required.len()
+        && required
+            .iter()
+            .all(|key| object.get(key).is_some_and(json_value_has_payload))
+}
+
+fn current_json_delivery_satisfies_requested_machine_tokens(
+    current: &str,
+    request_surfaces: &[String],
+) -> bool {
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(current.trim()) else {
+        return false;
+    };
+    !object.is_empty()
+        && object.len() <= 16
+        && object.iter().all(|(key, value)| {
+            valid_machine_unit_key(key)
+                && json_value_has_payload(value)
+                && request_surfaces
+                    .iter()
+                    .any(|surface| surface_contains_machine_token(surface, key))
+        })
+}
+
+fn latest_json_delivery_satisfying_requested_machine_tokens(
+    loop_state: &LoopState,
+    delivery_messages: &[String],
+    request_surfaces: &[String],
+) -> Option<String> {
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok() || !matches!(step.skill.as_str(), "respond" | "synthesize_answer") {
+            continue;
+        }
+        if let Some(candidate) = step.output.as_deref().and_then(|candidate| {
+            json_delivery_satisfying_requested_machine_tokens(candidate, request_surfaces)
+        }) {
+            return Some(candidate);
+        }
+    }
+    for candidate in [
+        loop_state.last_user_visible_respond.as_deref(),
+        loop_state.last_publishable_synthesis_output.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(candidate) =
+            json_delivery_satisfying_requested_machine_tokens(candidate, request_surfaces)
+        {
+            return Some(candidate);
+        }
+    }
+    for candidate in loop_state
+        .delivery_messages
+        .iter()
+        .rev()
+        .chain(delivery_messages.iter().rev())
+    {
+        if let Some(candidate) =
+            json_delivery_satisfying_requested_machine_tokens(candidate, request_surfaces)
+        {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn json_delivery_satisfying_requested_machine_tokens(
+    candidate: &str,
+    request_surfaces: &[String],
+) -> Option<String> {
+    let candidate = candidate.trim();
+    if current_json_delivery_satisfies_requested_machine_tokens(candidate, request_surfaces) {
+        return Some(candidate.to_string());
+    }
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(candidate) else {
+        return None;
+    };
+    let answer = object.get("answer").and_then(Value::as_str)?.trim();
+    current_json_delivery_satisfies_requested_machine_tokens(answer, request_surfaces)
+        .then(|| answer.to_string())
+}
+
+fn surface_contains_machine_token(surface: &str, token: &str) -> bool {
+    !token.is_empty()
+        && surface
+            .split(|ch| !machine_token_char(ch))
+            .any(|segment| segment == token)
+}
+
+fn machine_token_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')
+}
+
+fn required_machine_field_keys_from_state_patch(
+    agent_run_context: Option<&AgentRunContext>,
+) -> Vec<String> {
+    let Some(state_patch) = agent_run_context
+        .and_then(|ctx| ctx.turn_analysis.as_ref())
+        .and_then(|analysis| analysis.state_patch.as_ref())
+    else {
+        return Vec::new();
+    };
+    let mut keys = Vec::new();
+    collect_required_machine_field_keys(state_patch, &mut keys);
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+fn collect_required_machine_field_keys(value: &Value, keys: &mut Vec<String>) {
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object {
+                let key = normalized_state_patch_key(key);
+                if matches!(
+                    key.as_str(),
+                    "required_field" | "required_machine_field" | "required_machine_fields"
+                ) {
+                    collect_machine_field_key_values(child, keys);
+                } else {
+                    collect_required_machine_field_keys(child, keys);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_required_machine_field_keys(item, keys);
+            }
+        }
+        Value::String(_) | Value::Number(_) | Value::Bool(_) | Value::Null => {}
+    }
+}
+
+fn collect_machine_field_key_values(value: &Value, keys: &mut Vec<String>) {
+    match value {
+        Value::String(text) => {
+            let key = text.trim();
+            if valid_machine_unit_key(key) {
+                keys.push(key.to_string());
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_machine_field_key_values(item, keys);
+            }
+        }
+        Value::Object(object) => {
+            for child in object.values() {
+                collect_machine_field_key_values(child, keys);
+            }
+        }
+        Value::Number(_) | Value::Bool(_) | Value::Null => {}
+    }
+}
+
+fn json_value_has_payload(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::String(text) => !text.trim().is_empty(),
+        Value::Array(items) => !items.is_empty(),
+        Value::Object(object) => !object.is_empty(),
+        Value::Bool(_) | Value::Number(_) => true,
+    }
+}
+
 fn current_delivery_is_generated_file_report_machine_projection(current: &str) -> bool {
     let current = current.trim();
     if current.is_empty() {
@@ -641,8 +863,30 @@ fn requested_machine_summary_should_override_scalar(
     current: &str,
     requested_summary: &str,
 ) -> bool {
+    let current = current.trim();
     let requested = requested_summary.trim();
-    !requested.is_empty() && requested.contains('=') && !current.contains(requested)
+    if requested.is_empty() || !requested.contains('=') || current.contains(requested) {
+        return false;
+    }
+    !requested_machine_summary_value_matches_scalar(current, requested)
+}
+
+fn requested_machine_summary_value_matches_scalar(current: &str, requested_summary: &str) -> bool {
+    let mut lines = requested_summary
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let Some(line) = lines.next() else {
+        return false;
+    };
+    if lines.next().is_some() {
+        return false;
+    }
+    let Some((_key, value)) = line.split_once('=') else {
+        return false;
+    };
+    let value = value.trim();
+    !current.is_empty() && value == current
 }
 
 fn current_delivery_preserves_web_search_listing(

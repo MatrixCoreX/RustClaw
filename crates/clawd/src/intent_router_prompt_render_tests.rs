@@ -5,6 +5,90 @@ fn normalizer_compact_prompt_is_default_for_agent_loop_convergence() {
     assert!(super::prompt_render::intent_normalizer_compact_prompt_default_enabled());
 }
 
+fn empty_normalizer_out_for_retry_test() -> super::IntentNormalizerOut {
+    super::IntentNormalizerOut {
+        boundary_envelope: None,
+        resolved_user_intent: String::new(),
+        resume_behavior: String::new(),
+        schedule_kind: String::new(),
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "boundary_only".to_string(),
+        confidence: 0.9,
+        schedule_intent: None,
+        output_contract: None,
+        execution_recipe: None,
+        turn_type: String::new(),
+        target_task_policy: String::new(),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    }
+}
+
+#[test]
+fn normalizer_retry_preserves_base_execution_recipe_machine_field() {
+    let mut retry_out = empty_normalizer_out_for_retry_test();
+    let mut report = super::ContractRepairReport::default();
+    let base = r#"{
+        "resolved_user_intent": "create files and run validation",
+        "execution_recipe": {"kind": "ops_closed_loop"},
+        "output_contract": {"response_shape": "file_token", "delivery_required": true}
+    }"#;
+
+    super::prompt_render::preserve_base_execution_recipe_for_retry(
+        &mut retry_out,
+        base,
+        &mut report,
+    );
+
+    assert_eq!(
+        retry_out
+            .execution_recipe
+            .as_ref()
+            .map(|recipe| recipe.kind.as_str()),
+        Some("ops_closed_loop")
+    );
+    assert!(report
+        .detail_csv()
+        .contains("preserved_base_execution_recipe"));
+    assert!(
+        retry_out.output_contract.is_none(),
+        "retry recovery should not preserve noisy delivery/output-contract shape"
+    );
+}
+
+#[test]
+fn normalizer_retry_keeps_retry_execution_recipe_when_present() {
+    let mut retry_out = empty_normalizer_out_for_retry_test();
+    retry_out.execution_recipe = Some(super::IntentExecutionRecipeOut {
+        kind: "runtime_async_job".to_string(),
+        ..Default::default()
+    });
+    let mut report = super::ContractRepairReport::default();
+    let base = r#"{"execution_recipe":{"kind":"ops_closed_loop"}}"#;
+
+    super::prompt_render::preserve_base_execution_recipe_for_retry(
+        &mut retry_out,
+        base,
+        &mut report,
+    );
+
+    assert_eq!(
+        retry_out
+            .execution_recipe
+            .as_ref()
+            .map(|recipe| recipe.kind.as_str()),
+        Some("runtime_async_job")
+    );
+    assert!(!report
+        .detail_csv()
+        .contains("preserved_base_execution_recipe"));
+}
+
 #[test]
 fn compact_normalizer_prompt_pins_boundary_schema() {
     let route_view = crate::task_context_builder::RouteContextView {

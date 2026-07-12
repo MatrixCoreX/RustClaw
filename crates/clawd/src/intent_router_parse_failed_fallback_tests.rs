@@ -408,6 +408,49 @@ fn parse_failed_fallback_no_longer_builds_git_semantic_contract() {
 }
 
 #[test]
+fn parse_failed_fallback_preserves_raw_execution_contract_marker() {
+    let req =
+        "继续当前代码项目，输出 JSON 字段 changed_files、test_command、test_status、functions。";
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = test_task("parse-failed-raw-executable-contract", req);
+    let raw = r#"{
+        "execution_recipe": {"kind": "ops_closed_loop"},
+        "state_patch": {
+            "required_machine_fields": [
+                "changed_files",
+                "test_command",
+                "test_status",
+                "functions"
+            ]
+        },
+        "output_contract": {"response_shape": "strict"},
+        "needs_clarify": false
+    }"#;
+    let fallback = super::normalizer_parse_failed_fallback_output(
+        &state,
+        &task,
+        req,
+        req,
+        &crate::intent::surface_signals::analyze_prompt_surface(req),
+        raw,
+    );
+
+    assert_eq!(
+        fallback.route_trace_record.route_trace_decision,
+        RouteTraceDecision::Act
+    );
+    assert!(!fallback.needs_clarify);
+    assert_eq!(
+        fallback.output_contract.response_shape,
+        OutputResponseShape::Strict
+    );
+    assert!(fallback.output_contract.requires_content_evidence);
+    assert!(fallback
+        .reason
+        .contains("executable_contract_preserved_for_agent_loop"));
+}
+
+#[test]
 fn parse_failed_existing_directory_path_fallback_builds_observation_contract() {
     let root = make_temp_workspace_with_child("parse_failed_existing_dir", "docs");
     std::fs::write(

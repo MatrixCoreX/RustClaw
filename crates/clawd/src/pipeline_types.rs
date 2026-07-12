@@ -801,14 +801,21 @@ impl PlanStep {
 
     pub(crate) fn to_agent_action(&self) -> Option<AgentAction> {
         match self.action_type.as_str() {
-            "call_skill" => Some(AgentAction::CallSkill {
-                skill: self.skill.clone(),
-                args: self.args.clone(),
-            }),
-            "call_tool" => Some(AgentAction::CallTool {
-                tool: self.skill.clone(),
-                args: self.args.clone(),
-            }),
+            "call_skill" => terminal_agent_action_from_wrapped_ref(&self.skill, &self.args)
+                .or_else(|| {
+                    Some(AgentAction::CallSkill {
+                        skill: self.skill.clone(),
+                        args: self.args.clone(),
+                    })
+                }),
+            "call_tool" => {
+                terminal_agent_action_from_wrapped_ref(&self.skill, &self.args).or_else(|| {
+                    Some(AgentAction::CallTool {
+                        tool: self.skill.clone(),
+                        args: self.args.clone(),
+                    })
+                })
+            }
             "call_capability" => Some(AgentAction::CallCapability {
                 capability: self.skill.clone(),
                 args: self.args.clone(),
@@ -845,6 +852,49 @@ impl PlanStep {
             _ => None,
         }
     }
+}
+
+fn terminal_agent_action_from_wrapped_ref(raw_ref: &str, args: &Value) -> Option<AgentAction> {
+    match raw_ref.trim().to_ascii_lowercase().as_str() {
+        "synthesize_answer" => Some(AgentAction::SynthesizeAnswer {
+            evidence_refs: evidence_refs_from_value(args),
+        }),
+        "respond" => Some(AgentAction::Respond {
+            content: terminal_content_from_value(args).unwrap_or_default(),
+        }),
+        _ => None,
+    }
+}
+
+fn evidence_refs_from_value(value: &Value) -> Vec<String> {
+    let value = value.get("evidence_refs").unwrap_or(value);
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(str::to_string)
+            .collect(),
+        Value::String(item) => {
+            let item = item.trim();
+            if item.is_empty() {
+                Vec::new()
+            } else {
+                vec![item.to_string()]
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn terminal_content_from_value(value: &Value) -> Option<String> {
+    ["content", "text", "message", "body"]
+        .into_iter()
+        .find_map(|key| value.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|content| !content.is_empty())
+        .map(str::to_string)
 }
 
 impl PlanResult {

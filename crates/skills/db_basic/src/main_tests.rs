@@ -109,6 +109,42 @@ fn schema_version_action_runs_pragma_without_sql_arg() {
 }
 
 #[test]
+fn user_version_action_runs_pragma_without_sql_arg() {
+    let db_path = temp_db_path("user-version");
+    let conn = Connection::open(&db_path).expect("create sqlite fixture");
+    conn.execute_batch("PRAGMA user_version = 7;")
+        .expect("set user_version");
+    drop(conn);
+
+    let (text, extra) = execute(json!({
+        "action": "user_version",
+        "db_path": db_path,
+    }))
+    .expect("user_version should run PRAGMA user_version without a sql arg");
+
+    let value: Value = serde_json::from_str(&text).expect("text should be result json");
+    assert_eq!(
+        extra.get("action").and_then(Value::as_str),
+        Some("user_version")
+    );
+    assert_eq!(
+        value
+            .get("columns")
+            .and_then(Value::as_array)
+            .and_then(|columns| columns.first())
+            .and_then(Value::as_str),
+        Some("user_version")
+    );
+    assert_eq!(extra.get("user_version").and_then(Value::as_i64), Some(7));
+    assert_eq!(
+        extra
+            .pointer("/field_value/user_version")
+            .and_then(Value::as_i64),
+        Some(7)
+    );
+}
+
+#[test]
 fn list_tables_action_runs_internal_catalog_query_without_sql_arg() {
     let db_path = temp_db_path("list-tables");
     execute(json!({

@@ -59,13 +59,16 @@ pub(super) fn attach_route_clarify_machine_envelope(
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    let Some(route) = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .filter(|route| route.needs_clarify)
-        .filter(|route| route_allows_terminal_clarify_envelope(route, loop_state))
-    else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
+    let agent_loop_terminal_clarify = loop_state_agent_loop_terminal_clarify(loop_state);
+    if !route.needs_clarify && !agent_loop_terminal_clarify {
+        return false;
+    }
+    if !route_allows_terminal_clarify_envelope(route, loop_state) {
+        return false;
+    }
     if completed_act_delivery_should_own_terminal_state(loop_state, delivery_messages) {
         return false;
     }
@@ -171,6 +174,10 @@ fn route_allows_terminal_clarify_envelope(
     loop_state: &LoopState,
 ) -> bool {
     loop_state.pending_user_input_required
+}
+
+fn loop_state_agent_loop_terminal_clarify(loop_state: &LoopState) -> bool {
+    output_var(loop_state, "agent_loop.terminal_intent").as_deref() == Some("clarify")
 }
 
 fn agent_loop_nonblocking_clarify_answer(loop_state: &LoopState) -> bool {

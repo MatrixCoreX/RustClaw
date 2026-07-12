@@ -708,7 +708,7 @@ fn builtin_success_extra(workspace_root: &Path, skill_name: &str, args: &Value) 
             let resolved_path = workspace_resolved_path(workspace_root, &effective_path);
             let append = obj.get("append").and_then(Value::as_bool).unwrap_or(false);
             let content_bytes = obj.get("content").and_then(Value::as_str).map(str::len);
-            Some(json!({
+            let mut extra = json!({
                 "schema_version": 1,
                 "source": "builtin_success_extra",
                 "action": if append { "append_text" } else { "write_text" },
@@ -717,7 +717,11 @@ fn builtin_success_extra(workspace_root: &Path, skill_name: &str, args: &Value) 
                 "resolved_path": resolved_path,
                 "append": append,
                 "content_bytes": content_bytes,
-            }))
+            });
+            if let Some(change) = write_file_change_metadata(&resolved_path, append, obj) {
+                merge_object_fields(&mut extra, change);
+            }
+            Some(extra)
         }
         "make_dir" => {
             let path = obj.get("path").and_then(Value::as_str)?.trim();
@@ -815,6 +819,45 @@ fn workspace_resolved_path(workspace_root: &Path, path: &str) -> String {
         path.display().to_string()
     } else {
         workspace_root.join(path).display().to_string()
+    }
+}
+
+fn write_file_change_metadata(
+    resolved_path: &str,
+    append: bool,
+    obj: &Map<String, Value>,
+) -> Option<Value> {
+    let content = obj.get("content").and_then(Value::as_str)?;
+    let path = Path::new(resolved_path);
+    let existing = match std::fs::read_to_string(path) {
+        Ok(existing) => Some(existing),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => return None,
+    };
+    if append {
+        let changed = !content.is_empty();
+        return Some(json!({
+            "preexisting": existing.is_some(),
+            "noop": !changed,
+            "changed": changed,
+        }));
+    }
+    let noop = existing
+        .as_deref()
+        .is_some_and(|current| current == content);
+    Some(json!({
+        "preexisting": existing.is_some(),
+        "noop": noop,
+        "changed": !noop,
+    }))
+}
+
+fn merge_object_fields(target: &mut Value, source: Value) {
+    let (Some(target), Some(source)) = (target.as_object_mut(), source.as_object()) else {
+        return;
+    };
+    for (key, value) in source {
+        target.insert(key.clone(), value.clone());
     }
 }
 

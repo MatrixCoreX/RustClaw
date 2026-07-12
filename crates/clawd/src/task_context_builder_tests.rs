@@ -1,11 +1,12 @@
 use super::{
     active_task_context_only_memory_context, apply_execution_context_to_prompts,
-    build_active_task_context, build_request_surface_hints, build_session_alias_context,
-    chat_memory_context_hint, classify_route_context_budget, current_request_only_memory_context,
-    needs_text_anchor_probe_for_route, observed_facts_provide_immediate_anchor,
-    planner_memory_context_hint, request_can_fill_active_clarify_target,
-    request_qualifies_for_anchor_only_route_context, route_needs_recent_execution_history,
-    session_snapshot_has_primary_task_context, session_snapshot_provides_execution_state_anchor,
+    build_active_execution_anchor_context, build_active_task_context, build_request_surface_hints,
+    build_session_alias_context, chat_memory_context_hint, classify_route_context_budget,
+    current_request_only_memory_context, needs_text_anchor_probe_for_route,
+    observed_facts_provide_immediate_anchor, planner_memory_context_hint,
+    request_can_fill_active_clarify_target, request_qualifies_for_anchor_only_route_context,
+    route_needs_recent_execution_history, session_snapshot_has_primary_task_context,
+    session_snapshot_provides_execution_state_anchor,
     should_prefer_light_execution_memory_from_session, should_suppress_execution_anchor_context,
     uses_light_execution_context_budget, ExecutionContextView, PlannerContextView,
     RouteContextBudgetTier, TaskContextBundle, TaskContextRawSources,
@@ -100,6 +101,53 @@ fn session_alias_context_exports_temporary_bindings() {
     assert!(context.contains("那个日志"));
     assert!(context.contains("/tmp/app.log"));
     assert!(context.contains("not execution evidence"));
+}
+
+#[test]
+fn generic_followup_anchor_does_not_export_bound_target_as_execution_evidence() {
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            source_request: "draft continuation".to_string(),
+            op_kind: crate::followup_frame::FollowupOpKind::Generic,
+            bound_target: Some("/workspace/plan/current.md".to_string()),
+            ordered_entries: vec!["current.md".to_string()],
+            ..crate::followup_frame::FollowupFrame::default()
+        }),
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    let context = build_active_execution_anchor_context(&snapshot);
+
+    assert!(context.contains("### ACTIVE_EXECUTION_ANCHOR"));
+    assert!(context.contains("followup_source_request: draft continuation"));
+    assert!(context.contains("followup_op_kind: Generic"));
+    assert!(!context.contains("followup_bound_target"));
+    assert!(!context.contains("followup_ordered_entries"));
+    assert!(!session_snapshot_provides_execution_state_anchor(&snapshot));
+}
+
+#[test]
+fn read_followup_anchor_exports_bound_target_as_execution_evidence() {
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            source_request: "read file".to_string(),
+            op_kind: crate::followup_frame::FollowupOpKind::Read,
+            bound_target: Some("/workspace/README.md".to_string()),
+            ordered_entries: vec!["README.md".to_string()],
+            ..crate::followup_frame::FollowupFrame::default()
+        }),
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    let context = build_active_execution_anchor_context(&snapshot);
+
+    assert!(context.contains("followup_bound_target: /workspace/README.md"));
+    assert!(context.contains("followup_ordered_entries: 1:README.md"));
+    assert!(session_snapshot_provides_execution_state_anchor(&snapshot));
 }
 
 #[test]
@@ -343,6 +391,7 @@ fn observed_facts_anchor_is_preserved_without_local_followup_word_budgeting() {
 #[test]
 fn followup_frame_anchor_is_preserved_without_local_followup_word_budgeting() {
     let frame = crate::followup_frame::FollowupFrame {
+        op_kind: crate::followup_frame::FollowupOpKind::Read,
         bound_target: Some("/tmp/device_local/logs/model_io.log".to_string()),
         ..crate::followup_frame::FollowupFrame::default()
     };
@@ -365,6 +414,7 @@ fn text_anchor_probe_is_skipped_when_session_already_has_locator_anchor() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            op_kind: crate::followup_frame::FollowupOpKind::Read,
             bound_target: Some("/tmp/device_local/logs/model_io.log".to_string()),
             ..crate::followup_frame::FollowupFrame::default()
         }),
@@ -444,6 +494,7 @@ fn execution_text_context_is_suppressed_when_session_has_followup_or_observed_an
     let followup_snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            op_kind: crate::followup_frame::FollowupOpKind::Read,
             bound_target: Some("/tmp/device_local/logs/model_io.log".to_string()),
             ..crate::followup_frame::FollowupFrame::default()
         }),
@@ -487,6 +538,7 @@ fn session_anchored_chat_wrapped_content_reads_prefer_light_memory_budget() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            op_kind: crate::followup_frame::FollowupOpKind::Read,
             bound_target: Some("/tmp/device_local/README.md".to_string()),
             ..crate::followup_frame::FollowupFrame::default()
         }),
@@ -519,6 +571,7 @@ fn open_or_unanchored_routes_do_not_force_light_memory_budget() {
     let anchored_snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            op_kind: crate::followup_frame::FollowupOpKind::Read,
             bound_target: Some("/tmp/device_local/README.md".to_string()),
             ..crate::followup_frame::FollowupFrame::default()
         }),
@@ -612,6 +665,7 @@ fn stateful_light_routes_suppress_execution_anchor_context() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            op_kind: crate::followup_frame::FollowupOpKind::Read,
             bound_target: Some("/tmp/device_local/README.md".to_string()),
             ..crate::followup_frame::FollowupFrame::default()
         }),
@@ -639,6 +693,7 @@ fn quantity_comparison_keeps_recent_execution_history() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,
         active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            op_kind: crate::followup_frame::FollowupOpKind::Read,
             bound_target: Some("document".to_string()),
             ..crate::followup_frame::FollowupFrame::default()
         }),
@@ -1144,6 +1199,83 @@ fn light_execution_budget_detects_bounded_multi_locator_local_boundary() {
 }
 
 #[test]
+fn light_execution_budget_detects_medium_risk_bounded_local_data_boundary() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.risk_ceiling = crate::RiskCeiling::Medium;
+    route.route_reason =
+        "executionless_finalize_trace_plain; auto_locator_suppressed_multiple_explicit_paths"
+            .to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+
+    assert!(uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
+}
+
+#[test]
+fn light_execution_budget_detects_inline_structured_payload_boundary() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.risk_ceiling = crate::RiskCeiling::Low;
+    route.route_reason =
+        "inline_structured_payload_context_execute; executable_contract_preserved_for_agent_loop"
+            .to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+
+    assert!(uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
+}
+
+#[test]
+fn light_execution_budget_detects_executionless_state_patch_boundary() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.risk_ceiling = crate::RiskCeiling::Medium;
+    route.route_reason = "executionless_finalize_trace_plain".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+
+    assert!(uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
+}
+
+#[test]
+fn light_execution_budget_detects_agent_loop_deferred_clarify_marker() {
+    for marker in [
+        "standalone_freeform_clarify_loop_context",
+        "alias_state_patch_ack",
+    ] {
+        let mut route = base_route_result();
+        route.needs_clarify = false;
+        route.ask_mode = crate::AskMode::act_plain();
+        route.route_reason = format!("{marker}; agent_loop_default_entry");
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        route.output_contract.requires_content_evidence = false;
+        route.output_contract.delivery_required = false;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+
+        assert!(
+            uses_light_execution_context_budget(&route, &route.resolved_intent),
+            "{marker} should use light budget"
+        );
+    }
+}
+
+#[test]
 fn light_execution_budget_detects_freeform_bounded_multi_locator_local_boundary() {
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::act_with_chat_finalizer();
@@ -1154,6 +1286,50 @@ fn light_execution_budget_detects_freeform_bounded_multi_locator_local_boundary(
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
 
     assert!(uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
+}
+
+#[test]
+fn light_execution_budget_keeps_workspace_executable_contract_light_despite_delivery_noise() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.risk_ceiling = crate::RiskCeiling::High;
+    route.route_reason = "file_token_delivery_contract_repair; executable_contract_preserved_for_agent_loop; contract:generated_file_delivery; normalizer_semantic_contract_demoted_to_route_marker; generated_file_delivery_allows_runtime_target".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "run/nl_eval_tmp/codex_cli_continuous_20260711_new".to_string();
+    route.wants_file_delivery = true;
+
+    assert!(!route_needs_recent_execution_history(&route));
+    assert!(uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
+}
+
+#[test]
+fn light_execution_budget_rejects_high_risk_external_path_executable_contract() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.risk_ceiling = crate::RiskCeiling::High;
+    route.route_reason =
+        "executable_contract_preserved_for_agent_loop; generated_file_delivery_allows_runtime_target"
+            .to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/etc/rustclaw-outside-workspace".to_string();
+    route.wants_file_delivery = true;
+
+    assert!(!uses_light_execution_context_budget(
         &route,
         &route.resolved_intent
     ));
@@ -1296,7 +1472,7 @@ fn light_execution_budget_detects_clarify_rewrite_bound_reads() {
 }
 
 #[test]
-fn light_execution_budget_skips_non_structured_chat_wrapped_or_clarify_routes() {
+fn light_execution_budget_skips_non_structured_chat_wrapped_but_keeps_clarify_light() {
     let mut chat_wrapped_execution = base_route_result();
     chat_wrapped_execution.ask_mode = crate::AskMode::act_with_chat_finalizer();
     chat_wrapped_execution.resolved_intent = "比较这两个文件大小，然后一句话总结".to_string();
@@ -1318,7 +1494,7 @@ fn light_execution_budget_skips_non_structured_chat_wrapped_or_clarify_routes() 
     let mut clarify = base_route_result();
     clarify.needs_clarify = true;
     clarify.resolved_intent = "看一下那个日志".to_string();
-    assert!(!uses_light_execution_context_budget(
+    assert!(uses_light_execution_context_budget(
         &clarify,
         &clarify.resolved_intent
     ));

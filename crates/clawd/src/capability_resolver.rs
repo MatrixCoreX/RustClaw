@@ -113,7 +113,7 @@ pub(crate) fn resolve_capability_action_with_record_for_state(
     capability: &str,
     args: Value,
 ) -> (Option<AgentAction>, CapabilityResolutionRecord) {
-    let normalized = normalize_capability_name(capability);
+    let (normalized, args) = normalize_capability_invocation(capability, args);
     match resolve_registry_capability_action(state, &normalized, args.clone()) {
         RegistryCapabilityResolution::Resolved(resolved) => {
             return (Some(resolved.action), resolved.record);
@@ -368,12 +368,49 @@ fn normalize_capability_name(capability: &str) -> String {
         .replace("::", ".")
 }
 
+fn normalize_capability_invocation(capability: &str, args: Value) -> (String, Value) {
+    let normalized = normalize_capability_name(capability);
+    if normalized == "system.runtime_status" && args_has_command_field(&args) {
+        return (
+            "system.run_command".to_string(),
+            normalize_run_command_args(args),
+        );
+    }
+    if matches!(
+        normalized.as_str(),
+        "system.run_command" | "system.run_cmd" | "system.shell_run" | "run_cmd"
+    ) {
+        return (normalized, normalize_run_command_args(args));
+    }
+    (normalized, args)
+}
+
+fn args_has_command_field(args: &Value) -> bool {
+    args.as_object().is_some_and(|obj| {
+        obj.get("command")
+            .or_else(|| obj.get("cmd"))
+            .or_else(|| obj.get("shell_command"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+    })
+}
+
 fn normalize_run_command_args(args: Value) -> Value {
     let mut obj = args.as_object().cloned().unwrap_or_default();
     if !obj.contains_key("command") {
-        if let Some(cmd) = obj.remove("cmd") {
+        if let Some(cmd) = obj.remove("cmd").or_else(|| obj.remove("shell_command")) {
             obj.insert("command".to_string(), cmd);
         }
+    }
+    if obj
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(normalize_capability_name)
+        .is_some_and(|kind| matches!(kind.as_str(), "run_cmd" | "run_command" | "shell_run"))
+    {
+        obj.remove("kind");
     }
     Value::Object(obj)
 }

@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::memory;
 use crate::memory::service::PromptMemoryContext;
@@ -247,19 +247,21 @@ fn build_active_execution_anchor_context(
             ));
         }
         lines.push(format!("followup_op_kind: {:?}", frame.op_kind));
-        if let Some(target) = frame
-            .bound_target
-            .as_deref()
-            .map(str::trim)
-            .filter(|target| !target.is_empty())
-        {
-            lines.push(format!(
-                "followup_bound_target: {}",
-                truncate_context_snippet(target, 220)
-            ));
-        }
-        if let Some(entries) = ordered_entries_context_line(&frame.ordered_entries) {
-            lines.push(format!("followup_ordered_entries: {entries}"));
+        if followup_frame_allows_execution_anchor_target(frame) {
+            if let Some(target) = frame
+                .bound_target
+                .as_deref()
+                .map(str::trim)
+                .filter(|target| !target.is_empty())
+            {
+                lines.push(format!(
+                    "followup_bound_target: {}",
+                    truncate_context_snippet(target, 220)
+                ));
+            }
+            if let Some(entries) = ordered_entries_context_line(&frame.ordered_entries) {
+                lines.push(["followup_ordered_entries:", entries.as_str()].join(" "));
+            }
         }
     }
     if let Some(facts) = session_snapshot.active_observed_facts.as_ref() {
@@ -275,7 +277,7 @@ fn build_active_execution_anchor_context(
             ));
         }
         if let Some(entries) = ordered_entries_context_line(&facts.ordered_entries) {
-            lines.push(format!("observed_ordered_entries: {entries}"));
+            lines.push(["observed_ordered_entries:", entries.as_str()].join(" "));
         }
     }
     if lines.len() <= 2 {
@@ -353,13 +355,24 @@ fn observed_facts_provide_immediate_anchor(
 fn followup_frame_provides_immediate_anchor(
     active_followup_frame: Option<&crate::followup_frame::FollowupFrame>,
 ) -> bool {
-    active_followup_frame.is_some_and(|frame| {
-        frame
-            .bound_target
-            .as_deref()
-            .is_some_and(|target| !target.trim().is_empty())
-            || !frame.ordered_entries.is_empty()
-    })
+    active_followup_frame.is_some_and(followup_frame_allows_execution_anchor_target)
+}
+
+fn followup_frame_allows_execution_anchor_target(
+    frame: &crate::followup_frame::FollowupFrame,
+) -> bool {
+    matches!(
+        frame.op_kind,
+        crate::followup_frame::FollowupOpKind::Read
+            | crate::followup_frame::FollowupOpKind::List
+            | crate::followup_frame::FollowupOpKind::CodeWorkspace
+            | crate::followup_frame::FollowupOpKind::Delivery
+            | crate::followup_frame::FollowupOpKind::ClarifyPending
+    ) && (frame
+        .bound_target
+        .as_deref()
+        .is_some_and(|target| !target.trim().is_empty())
+        || !frame.ordered_entries.is_empty())
 }
 
 fn needs_text_anchor_probe_for_route(
@@ -564,8 +577,7 @@ fn route_uses_bounded_observation_summary_light_budget(route_result: &RouteResul
 }
 
 fn route_uses_bounded_local_machine_boundary_light_budget(route_result: &RouteResult) -> bool {
-    if route_result.risk_ceiling != crate::RiskCeiling::Low
-        || route_result.output_contract.delivery_required
+    if route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
         || !matches!(route_result.schedule_kind, crate::ScheduleKind::None)
         || !(route_result.ask_mode.is_plain_act() || route_result.ask_mode.finalize_chat_wrapped())
@@ -589,11 +601,38 @@ fn route_uses_bounded_local_machine_boundary_light_budget(route_result: &RouteRe
         route_result.output_contract.locator_kind,
         crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
     );
-    bounded_response
-        && bounded_locator
-        && route_result
-            .has_route_reason_machine_marker("auto_locator_suppressed_multiple_explicit_paths")
+    if !bounded_response || !bounded_locator {
+        return false;
+    }
+    if route_result.has_route_reason_machine_marker("inline_structured_payload_context_execute") {
+        return route_result.risk_ceiling == crate::RiskCeiling::Low
+            && route_result.output_contract.requires_content_evidence;
+    }
+    if route_result.has_route_reason_machine_marker("executionless_finalize_trace_plain")
+        && route_result.risk_ceiling != crate::RiskCeiling::High
+        && !route_result.output_contract.requires_content_evidence
+        && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
+    {
+        return true;
+    }
+    if route_result
+        .has_route_reason_machine_marker("auto_locator_suppressed_multiple_explicit_paths")
+        && matches!(
+            route_result.risk_ceiling,
+            crate::RiskCeiling::Low | crate::RiskCeiling::Medium
+        )
+    {
+        return true;
+    }
+    false
 }
+
+fn route_uses_structured_clarify_boundary_light_budget(route_result: &RouteResult) -> bool {
+    route_result.needs_clarify
+        || route_result.has_route_reason_machine_marker("standalone_freeform_clarify_loop_context")
+        || route_result.has_route_reason_machine_marker("alias_state_patch_ack")
+}
+
 fn route_has_capability_ref_machine_token(route_result: &RouteResult) -> bool {
     [&route_result.route_reason, &route_result.resolved_intent]
         .iter()
@@ -622,11 +661,14 @@ pub(crate) fn uses_light_execution_context_budget(
     route_result: &RouteResult,
     _resolved_prompt: &str,
 ) -> bool {
-    if route_result.needs_clarify {
-        return false;
+    if uses_local_workspace_execution_context_budget(route_result) {
+        return true;
     }
     if route_needs_recent_execution_history(route_result) {
         return false;
+    }
+    if route_uses_structured_clarify_boundary_light_budget(route_result) {
+        return true;
     }
     let intent = route_result.resolved_intent.trim();
     let intent_surface = crate::intent::surface_signals::analyze_prompt_surface(intent);
@@ -647,6 +689,76 @@ pub(crate) fn uses_light_execution_context_budget(
         || route_has_output_contract_marker(route_result, "existence_with_path")
         || route_uses_structured_listing(route_result)
         || route_uses_structured_content_read(route_result, &intent_surface)
+}
+
+pub(crate) fn uses_local_workspace_execution_context_budget(route_result: &RouteResult) -> bool {
+    if route_result.needs_clarify
+        || !(route_result.ask_mode.is_plain_act() || route_result.ask_mode.finalize_chat_wrapped())
+        || !matches!(route_result.schedule_kind, crate::ScheduleKind::None)
+        || !route_result
+            .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+    {
+        return false;
+    }
+    let contract = route_result.effective_output_contract();
+    let shape_allowed = matches!(
+        contract.locator_kind,
+        crate::OutputLocatorKind::Path
+            | crate::OutputLocatorKind::Filename
+            | crate::OutputLocatorKind::CurrentWorkspace
+            | crate::OutputLocatorKind::None
+    ) && matches!(
+        contract.response_shape,
+        crate::OutputResponseShape::Free
+            | crate::OutputResponseShape::Strict
+            | crate::OutputResponseShape::OneSentence
+            | crate::OutputResponseShape::FileToken
+    );
+    if !shape_allowed {
+        return false;
+    }
+
+    workspace_scoped_execution_locator_allowed(
+        contract.locator_kind,
+        &contract.locator_hint,
+        route_result.risk_ceiling,
+    )
+}
+
+fn workspace_scoped_execution_locator_allowed(
+    locator_kind: crate::OutputLocatorKind,
+    locator_hint: &str,
+    risk_ceiling: crate::RiskCeiling,
+) -> bool {
+    match locator_kind {
+        crate::OutputLocatorKind::Filename => {
+            locator_hint_is_relative_workspace_child(locator_hint)
+        }
+        crate::OutputLocatorKind::Path => locator_hint_is_relative_workspace_child(locator_hint),
+        crate::OutputLocatorKind::CurrentWorkspace => true,
+        crate::OutputLocatorKind::None => !matches!(risk_ceiling, crate::RiskCeiling::High),
+        _ => false,
+    }
+}
+
+fn locator_hint_is_relative_workspace_child(locator_hint: &str) -> bool {
+    let trimmed = locator_hint.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return false;
+    }
+    let mut has_normal = false;
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => has_normal = true,
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return false,
+        }
+    }
+    has_normal
 }
 
 const ROUTE_OUTPUT_CONTRACT_MARKERS: &[&str] = &[

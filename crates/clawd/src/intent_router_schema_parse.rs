@@ -278,6 +278,7 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         | "raw_output"
         | "command_output"
         | "command_result"
+        | "combined_command_output"
         | "command_execution_result" => OutputSemanticKind::RawCommandOutput,
         "command_output_summary"
         | "command_result_summary"

@@ -117,6 +117,7 @@ pub(super) fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static s
         | "raw_output"
         | "command_output"
         | "command_result"
+        | "combined_command_output"
         | "command_execution_result"
         | "shell_output"
         | "terminal_output" => OutputSemanticKind::RawCommandOutput.as_str(),

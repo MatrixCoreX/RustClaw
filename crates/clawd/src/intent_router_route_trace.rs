@@ -127,7 +127,10 @@ fn route_trace_repair_code_class(code: &str) -> &'static str {
         | "raw_output_explicit_locator_contract_repaired"
         | "target_task_policy_enum_normalized"
         | "turn_type_enum_normalized" => "schema_normalization",
-        "executable_contract_preserved_for_agent_loop" => "contract_execution_signal",
+        "command_payload_preserved_for_agent_loop"
+        | "executable_contract_preserved_for_agent_loop"
+        | "execution_recipe_target_locator_preserved_for_agent_loop"
+        | "inline_structured_payload_preserved_as_execution_spec" => "contract_execution_signal",
         "archive_unpack_missing_archive_locator_requires_clarify"
         | "current_turn_anchor_overrides_contextual_target"
         | "current_turn_locator_overrides_contextual_path"

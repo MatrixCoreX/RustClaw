@@ -246,6 +246,33 @@ fn canonicalize_plan_action_step_value(value: Value) -> (Value, bool) {
     else {
         return (Value::Object(map), false);
     };
+    let mut normalized = false;
+    if kind == "synthesize_answer" && !map.contains_key("evidence_refs") {
+        if let Some(evidence_refs) = map
+            .get("args")
+            .and_then(Value::as_object)
+            .and_then(|args| args.get("evidence_refs"))
+            .cloned()
+        {
+            map.insert("evidence_refs".to_string(), evidence_refs);
+            normalized = true;
+        }
+    }
+    if kind == "respond" && !map.contains_key("content") {
+        if let Some(content) = map
+            .get("args")
+            .and_then(Value::as_object)
+            .and_then(|args| {
+                ["content", "text", "message", "body"]
+                    .into_iter()
+                    .find_map(|key| args.get(key))
+            })
+            .cloned()
+        {
+            map.insert("content".to_string(), content);
+            normalized = true;
+        }
+    }
     let allowed_keys: &[&str] = match kind.as_str() {
         "think" => &["type", "content"],
         "call_skill" => &["type", "skill", "args"],
@@ -266,7 +293,7 @@ fn canonicalize_plan_action_step_value(value: Value) -> (Value, bool) {
     };
     let original_len = map.len();
     map.retain(|key, _| allowed_keys.contains(&key.as_str()));
-    let mut normalized = map.len() != original_len;
+    normalized |= map.len() != original_len;
     if map.get("type").and_then(|value| value.as_str()) != Some(kind.as_str()) {
         map.insert("type".to_string(), Value::String(kind));
         normalized = true;
@@ -1318,6 +1345,9 @@ fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
             });
         }
         if let Some(skill) = obj.get("skill").and_then(|v| v.as_str()) {
+            if let Some(normalized) = normalize_terminal_action_alias(obj, skill.trim()) {
+                return normalized;
+            }
             let normalized_skill = state.resolve_canonical_skill_name(skill.trim());
             if state.is_builtin_skill(&normalized_skill) {
                 let args = obj.get("args").cloned().unwrap_or_else(|| json!({}));
@@ -1329,8 +1359,15 @@ fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
             }
         }
         if let Some(tool) = obj.get("tool").and_then(|v| v.as_str()) {
+            if let Some(normalized) = normalize_terminal_action_alias(obj, tool.trim()) {
+                return normalized;
+            }
             let normalized_tool = state.resolve_canonical_skill_name(tool.trim());
             let args = obj.get("args").cloned().unwrap_or_else(|| json!({}));
+            if let Some(normalized) = normalize_dotted_tool_action(state, tool.trim(), args.clone())
+            {
+                return normalized;
+            }
             if normalized_tool == "run_cmd" {
                 return normalize_run_cmd_call(obj, args.as_object());
             }
@@ -1377,6 +1414,15 @@ fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
         return value;
     };
     let step_type = raw_type.trim().to_ascii_lowercase();
+    if step_type == "synthesize_answer" {
+        return normalize_synthesize_answer_action(obj);
+    }
+    if step_type == "respond"
+        && obj.get("content").and_then(Value::as_str).is_none()
+        && terminal_content_from_action_fields(obj).is_some()
+    {
+        return normalize_respond_action(obj);
+    }
     if matches!(
         step_type.as_str(),
         "think" | "call_tool" | "call_skill" | "call_capability" | "respond"
@@ -1393,14 +1439,22 @@ fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
         }
         if step_type == "call_tool" {
             if let Some(tool) = obj.get("tool").and_then(|v| v.as_str()) {
+                if let Some(normalized) = normalize_terminal_action_alias(obj, tool.trim()) {
+                    return normalized;
+                }
                 let normalized_tool = state.resolve_canonical_skill_name(tool.trim());
+                let args = obj.get("args").cloned().unwrap_or_else(|| json!({}));
+                if let Some(normalized) =
+                    normalize_dotted_tool_action(state, tool.trim(), args.clone())
+                {
+                    return normalized;
+                }
                 if normalized_tool == "run_cmd" {
                     return normalize_run_cmd_call(
                         obj,
                         obj.get("args").and_then(|v| v.as_object()),
                     );
                 }
-                let args = obj.get("args").cloned().unwrap_or_else(|| json!({}));
                 return json!({
                     "type": "call_tool",
                     "tool": normalized_tool,
@@ -1415,26 +1469,12 @@ fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
         // 取 args.content / args.text / content / text 中第一个有值的字符串。
         if step_type == "call_skill" {
             if let Some(skill) = obj.get("skill").and_then(|v| v.as_str()) {
+                if let Some(normalized) = normalize_terminal_action_alias(obj, skill.trim()) {
+                    return normalized;
+                }
                 let canon = skill.trim().to_ascii_lowercase();
                 if matches!(canon.as_str(), "respond" | "reply" | "answer" | "final") {
-                    let args = obj.get("args").and_then(|v| v.as_object());
-                    let pick = |k: &str| -> Option<String> {
-                        let from_args = args
-                            .and_then(|m| m.get(k))
-                            .and_then(|v| v.as_str())
-                            .map(str::to_string);
-                        let from_top = obj.get(k).and_then(|v| v.as_str()).map(str::to_string);
-                        from_args.or(from_top)
-                    };
-                    let content = pick("content")
-                        .or_else(|| pick("text"))
-                        .or_else(|| pick("message"))
-                        .or_else(|| pick("body"))
-                        .unwrap_or_default();
-                    return json!({
-                        "type": "respond",
-                        "content": content,
-                    });
+                    return normalize_respond_action(obj);
                 }
                 let normalized_skill = state.resolve_canonical_skill_name(skill.trim());
                 if normalized_skill == "run_cmd" {
@@ -1481,6 +1521,107 @@ fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
     }
 
     value
+}
+
+fn normalize_terminal_action_alias(
+    obj: &serde_json::Map<String, Value>,
+    raw_name: &str,
+) -> Option<Value> {
+    match raw_name.trim().to_ascii_lowercase().as_str() {
+        "synthesize_answer" => Some(normalize_synthesize_answer_action(obj)),
+        "respond" => Some(normalize_respond_action(obj)),
+        _ => None,
+    }
+}
+
+fn normalize_synthesize_answer_action(obj: &serde_json::Map<String, Value>) -> Value {
+    json!({
+        "type": "synthesize_answer",
+        "evidence_refs": terminal_evidence_refs_from_action_fields(obj),
+    })
+}
+
+fn normalize_respond_action(obj: &serde_json::Map<String, Value>) -> Value {
+    json!({
+        "type": "respond",
+        "content": terminal_content_from_action_fields(obj).unwrap_or_default(),
+    })
+}
+
+fn terminal_content_from_action_fields(obj: &serde_json::Map<String, Value>) -> Option<String> {
+    ["content", "text", "message", "body"]
+        .into_iter()
+        .find_map(|key| terminal_string_field_from_obj_or_args(obj, key).map(str::to_string))
+}
+
+fn terminal_string_field_from_obj_or_args<'a>(
+    obj: &'a serde_json::Map<String, Value>,
+    key: &str,
+) -> Option<&'a str> {
+    obj.get("args")
+        .and_then(Value::as_object)
+        .and_then(|args| args.get(key))
+        .and_then(Value::as_str)
+        .or_else(|| obj.get(key).and_then(Value::as_str))
+        .map(str::trim)
+}
+
+fn terminal_evidence_refs_from_action_fields(obj: &serde_json::Map<String, Value>) -> Vec<String> {
+    obj.get("args")
+        .and_then(Value::as_object)
+        .and_then(|args| args.get("evidence_refs"))
+        .or_else(|| obj.get("evidence_refs"))
+        .map(terminal_evidence_refs_from_value)
+        .unwrap_or_default()
+}
+
+fn terminal_evidence_refs_from_value(value: &Value) -> Vec<String> {
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(str::to_string)
+            .collect(),
+        Value::String(item) => {
+            let item = item.trim();
+            if item.is_empty() {
+                Vec::new()
+            } else {
+                vec![item.to_string()]
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn normalize_dotted_tool_action(state: &AppState, tool: &str, args: Value) -> Option<Value> {
+    let (base, action) = tool.split_once('.')?;
+    let base = base.trim();
+    let action = action.trim();
+    if base.is_empty()
+        || action.is_empty()
+        || !action
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+    {
+        return None;
+    }
+    let normalized_tool = state.resolve_canonical_skill_name(base);
+    if !state.is_builtin_skill(&normalized_tool) && state.skill_manifest(&normalized_tool).is_none()
+    {
+        return None;
+    }
+    let mut args_obj = args.as_object().cloned().unwrap_or_default();
+    args_obj
+        .entry("action".to_string())
+        .or_insert_with(|| json!(action));
+    Some(json!({
+        "type": "call_tool",
+        "tool": normalized_tool,
+        "args": Value::Object(args_obj),
+    }))
 }
 
 fn normalize_run_cmd_call(

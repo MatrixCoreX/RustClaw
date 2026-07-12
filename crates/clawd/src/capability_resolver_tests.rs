@@ -297,6 +297,11 @@ fn registry_resolves_terminal_layer_representative_capabilities() {
             json!({"command": "pwd"}),
             "skill:run_cmd",
         ),
+        (
+            "system.shell_run",
+            json!({"shell_command": "pwd"}),
+            "skill:run_cmd",
+        ),
         ("git.status", json!({}), "tool:git_basic"),
         (
             "web.search_results",
@@ -388,10 +393,46 @@ fn registry_resolution_preserves_media_poll_action_arg() {
 }
 
 #[test]
+fn command_like_runtime_status_rewrites_to_run_cmd_capability() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "system.runtime_status",
+        json!({
+            "kind": "run_cmd",
+            "shell_command": "python3 test_calc_core.py",
+            "cwd": "/tmp/project"
+        }),
+    );
+
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    assert_eq!(record.capability_ref, "system.run_command");
+    assert_eq!(record.resolved_ref.as_deref(), Some("skill:run_cmd"));
+    let Some(AgentAction::CallSkill { skill, args }) = action else {
+        panic!("expected run_cmd skill action, got {action:?}");
+    };
+    assert_eq!(skill, "run_cmd");
+    assert_eq!(
+        args.get("command").and_then(Value::as_str),
+        Some("python3 test_calc_core.py")
+    );
+    assert!(args.get("kind").is_none());
+    assert!(args.get("shell_command").is_none());
+}
+
+#[test]
 fn registry_resolves_legacy_machine_capability_aliases_without_static_fallback() {
     let state = state_with_workspace_registry();
     let cases = [
         ("system.run_cmd", json!({"command": "pwd"}), "skill:run_cmd"),
+        (
+            "system.shell_run",
+            json!({"shell_command": "pwd"}),
+            "skill:run_cmd",
+        ),
         ("run_cmd", json!({"command": "pwd"}), "skill:run_cmd"),
         (
             "filesystem.stat_path",

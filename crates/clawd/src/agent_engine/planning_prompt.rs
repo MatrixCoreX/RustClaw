@@ -566,8 +566,14 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
     route_result: Option<&RouteResult>,
 ) -> Option<BTreeSet<String>> {
     let route = route_result?;
-    if route.needs_clarify {
-        return None;
+    if route.needs_clarify
+        || route.has_route_reason_machine_marker("standalone_freeform_clarify_loop_context")
+        || route.has_route_reason_machine_marker("alias_state_patch_ack")
+    {
+        return Some(BTreeSet::new());
+    }
+    if let Some(scope) = local_workspace_execution_skill_scope(route) {
+        return Some(scope);
     }
     if let Some(scope) = contract_scoped_planner_skill_scope(Some(route)) {
         return Some(scope);
@@ -589,6 +595,17 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
     }
 }
 
+fn local_workspace_execution_skill_scope(route: &RouteResult) -> Option<BTreeSet<String>> {
+    if !crate::task_context_builder::uses_local_workspace_execution_context_budget(route) {
+        return None;
+    }
+    Some(BTreeSet::from([
+        "fs_basic".to_string(),
+        "run_cmd".to_string(),
+        "system_basic".to_string(),
+    ]))
+}
+
 fn bounded_local_machine_boundary_skill_scope(route: &RouteResult) -> Option<BTreeSet<String>> {
     if route.needs_clarify
         || route.output_contract.delivery_required
@@ -603,8 +620,18 @@ fn bounded_local_machine_boundary_skill_scope(route: &RouteResult) -> Option<BTr
     {
         return Some(BTreeSet::from(["run_cmd".to_string()]));
     }
+    if route.has_route_reason_machine_marker("inline_structured_payload_context_execute")
+        || route.has_route_reason_machine_marker("executionless_finalize_trace_plain")
+    {
+        return Some(BTreeSet::new());
+    }
     if route.has_route_reason_machine_marker("auto_locator_suppressed_multiple_explicit_paths") {
-        return Some(BTreeSet::from(["fs_basic".to_string()]));
+        return Some(BTreeSet::from([
+            "archive_basic".to_string(),
+            "config_basic".to_string(),
+            "db_basic".to_string(),
+            "fs_basic".to_string(),
+        ]));
     }
     None
 }
@@ -637,11 +664,19 @@ fn generic_local_content_contract_skill_scope(route: &RouteResult) -> Option<BTr
     {
         return None;
     }
+    if locator_hint_targets_sqlite_database(&contract.locator_hint) {
+        return Some(BTreeSet::from(["db_basic".to_string()]));
+    }
     let skills = skills_from_action_refs_capped(
         crate::contract_matrix::allowed_action_refs_for_output_contract(&contract),
         8,
     );
     (!skills.is_empty()).then_some(skills)
+}
+
+fn locator_hint_targets_sqlite_database(locator_hint: &str) -> bool {
+    let trimmed = locator_hint.trim().to_ascii_lowercase();
+    trimmed.ends_with(".sqlite") || trimmed.ends_with(".db")
 }
 
 #[cfg(test)]

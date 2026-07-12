@@ -78,6 +78,9 @@ use crate::{
 use claw_core::config::{AgentConfig, ToolsConfig};
 use claw_core::skill_registry::SkillsRegistry;
 
+#[path = "loop_reply_tests/machine_kv_json_guard.rs"]
+mod machine_kv_json_guard;
+
 #[test]
 fn visible_answer_machine_payload_detection_is_structural() {
     assert!(visible_answer_is_machine_payload(

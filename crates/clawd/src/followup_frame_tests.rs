@@ -1,8 +1,9 @@
 use super::{
-    derive_bound_target_from_journal, extract_ordered_entries_from_text,
-    load_active_followup_frame, ordered_entries_from_listing_json, persist_frame,
-    replace_active_frame_from_ask_outcome, synthesize_locator_reply_resolved_intent, FollowupFrame,
-    FollowupOpKind, FollowupSliceKind, FollowupSliceSpec, FollowupUnresolvedSlot,
+    derive_bound_target_from_journal, derive_code_workspace_bound_target_from_journal,
+    extract_ordered_entries_from_text, load_active_followup_frame,
+    ordered_entries_from_listing_json, persist_frame, replace_active_frame_from_ask_outcome,
+    synthesize_locator_reply_resolved_intent, FollowupFrame, FollowupOpKind, FollowupSliceKind,
+    FollowupSliceSpec, FollowupUnresolvedSlot,
 };
 use crate::{runtime::AppState, IntentOutputContract, OutputLocatorKind, RouteResult};
 
@@ -293,6 +294,294 @@ fn bound_target_accepts_extra_machine_payload() {
         derive_bound_target_from_journal(&journal).as_deref(),
         Some("/tmp/visible-machine.log")
     );
+}
+
+#[test]
+fn code_workspace_journal_persists_project_dir_for_followup() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        task_id: "task-followup-code-workspace".to_string(),
+        user_id: 31,
+        chat_id: 32,
+        user_key: Some("test-user".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let project_dir = "/home/guagua/rustclaw/run/nl_eval_tmp/code_workspace_anchor";
+    let calc_path = format!("{project_dir}/calc_core.py");
+    let test_path = format!("{project_dir}/test_calc_core.py");
+    let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            serde_json::json!({
+                "action": "write_text",
+                "path": calc_path,
+            })
+            .to_string(),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "fs_basic",
+            serde_json::json!({
+                "action": "write_text",
+                "path": test_path,
+            })
+            .to_string(),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3",
+            "run_cmd",
+            serde_json::json!({
+                "action": "run_cmd",
+                "cwd": project_dir,
+                "command": "python3 test_calc_core.py",
+                "exit_code": 0,
+            })
+            .to_string(),
+        ));
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: "code workspace update".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "executable_contract_preserved_for_agent_loop".to_string(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: crate::OutputResponseShape::Strict,
+            ..IntentOutputContract::default()
+        },
+    };
+
+    assert_eq!(
+        derive_code_workspace_bound_target_from_journal(&journal).as_deref(),
+        Some(project_dir)
+    );
+    assert_eq!(
+        derive_bound_target_from_journal(&journal).as_deref(),
+        Some(project_dir)
+    );
+
+    replace_active_frame_from_ask_outcome(
+        &state,
+        &task,
+        "code workspace update",
+        &route_result,
+        r#"{"changed_files":["calc_core.py","test_calc_core.py"],"test_status":"passed"}"#,
+        &[],
+        false,
+        &journal,
+    );
+    let frame = load_active_followup_frame(&state, &task).expect("frame should load");
+    assert_eq!(frame.op_kind, FollowupOpKind::CodeWorkspace);
+    assert_eq!(frame.bound_target.as_deref(), Some(project_dir));
+}
+
+#[test]
+fn readback_validated_code_workspace_persists_project_dir_for_followup() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        task_id: "task-followup-code-workspace-readback-only".to_string(),
+        user_id: 231,
+        chat_id: 232,
+        user_key: Some("test-user-readback-only".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let project_dir = "/home/guagua/rustclaw/run/nl_eval_tmp/code_workspace_readback_only";
+    let calc_path = format!("{project_dir}/calc_core.py");
+    let test_path = format!("{project_dir}/test_calc_core.py");
+    let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            serde_json::json!({
+                "extra": {
+                    "action": "read_text_range",
+                    "path": calc_path,
+                    "resolved_path": calc_path,
+                    "excerpt": "1|def add(a, b): return a + b\n2|def safe_div(a, b): return {\"ok\": True, \"value\": a / b}",
+                }
+            })
+            .to_string(),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "fs_basic",
+            serde_json::json!({
+                "extra": {
+                    "action": "read_text_range",
+                    "path": test_path,
+                    "resolved_path": test_path,
+                    "excerpt": "1|from calc_core import add, safe_div\n2|def test_safe_div_zero(): pass",
+                }
+            })
+            .to_string(),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3",
+            "run_cmd",
+            "ALL_TESTS_PASSED",
+        ));
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: "code workspace readback validation".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "executable_contract_preserved_for_agent_loop".to_string(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: crate::OutputResponseShape::Strict,
+            ..IntentOutputContract::default()
+        },
+    };
+
+    replace_active_frame_from_ask_outcome(
+        &state,
+        &task,
+        "code workspace readback validation",
+        &route_result,
+        r#"{"changed_files":["calc_core.py","test_calc_core.py"],"test_status":"passed"}"#,
+        &[],
+        false,
+        &journal,
+    );
+    let frame = load_active_followup_frame(&state, &task).expect("frame should load");
+    assert_eq!(frame.op_kind, FollowupOpKind::CodeWorkspace);
+    assert_eq!(frame.bound_target.as_deref(), Some(project_dir));
+}
+
+#[test]
+fn code_workspace_followup_wins_over_delivery_route_noise() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        task_id: "task-followup-code-workspace-delivery-noise".to_string(),
+        user_id: 131,
+        chat_id: 132,
+        user_key: Some("test-user-delivery-noise".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let project_dir = "/home/guagua/rustclaw/run/nl_eval_tmp/code_workspace_delivery_noise";
+    let calc_path = format!("{project_dir}/calc_core.py");
+    let test_path = format!("{project_dir}/test_calc_core.py");
+    let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            serde_json::json!({
+                "extra": {
+                    "action": "write_text",
+                    "path": calc_path,
+                    "resolved_path": calc_path,
+                }
+            })
+            .to_string(),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "fs_basic",
+            serde_json::json!({
+                "extra": {
+                    "action": "write_text",
+                    "path": test_path,
+                    "resolved_path": test_path,
+                }
+            })
+            .to_string(),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3",
+            "run_cmd",
+            serde_json::json!({
+                "extra": {
+                    "action": "run_cmd",
+                    "cwd": project_dir,
+                    "exit_code": 0,
+                }
+            })
+            .to_string(),
+        ));
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: "code workspace update with delivery noise".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason:
+            "file_token_delivery_contract_repair; executable_contract_preserved_for_agent_loop"
+                .to_string(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: true,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: crate::OutputResponseShape::Strict,
+            delivery_required: true,
+            ..IntentOutputContract::default()
+        },
+    };
+
+    replace_active_frame_from_ask_outcome(
+        &state,
+        &task,
+        "code workspace update with delivery noise",
+        &route_result,
+        r#"{"created_files":["calc_core.py","test_calc_core.py"],"test_status":"passed"}"#,
+        &[],
+        false,
+        &journal,
+    );
+    let frame = load_active_followup_frame(&state, &task).expect("frame should load");
+    assert_eq!(frame.op_kind, FollowupOpKind::CodeWorkspace);
+    assert_eq!(frame.bound_target.as_deref(), Some(project_dir));
 }
 
 #[test]
