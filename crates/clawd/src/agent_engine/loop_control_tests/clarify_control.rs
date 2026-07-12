@@ -142,6 +142,27 @@ fn boundary_observation_tool_action_forces_machine_clarify_without_delivery() {
 }
 
 #[test]
+fn boundary_observation_with_concrete_tool_target_defers_to_agent_loop() {
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "read_text_range",
+            "path": "README.md",
+            "mode": "head",
+            "n": 20
+        }),
+    }];
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 1;
+    loop_state.boundary_observation_needs_clarify = true;
+
+    assert!(
+        forced_boundary_observation_clarify_intent(&loop_state, &actions).is_none(),
+        "a verifier-approved action with a concrete machine target must execute in the agent loop"
+    );
+}
+
+#[test]
 fn low_risk_freeform_topic_clarify_replans_without_publishing_question() {
     let plan = plan_result_with_raw_and_steps(
         "{}",

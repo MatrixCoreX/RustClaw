@@ -482,6 +482,7 @@ fn forced_boundary_observation_clarify_intent(
 ) -> Option<StructuredRespondTerminalIntent> {
     if !loop_state.boundary_observation_needs_clarify
         || actions_allow_structured_respond_terminal_intent(actions)
+        || actions_have_concrete_target_binding(actions)
     {
         return None;
     }
@@ -494,6 +495,56 @@ fn forced_boundary_observation_clarify_intent(
         field_path: Some("agent_loop.boundary_observations.missing_referent".to_string()),
         locator_kind: Some("none".to_string()),
     })
+}
+
+fn actions_have_concrete_target_binding(actions: &[AgentAction]) -> bool {
+    actions.iter().any(action_has_concrete_target_binding)
+}
+
+fn action_has_concrete_target_binding(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallTool { args, .. }
+        | AgentAction::CallSkill { args, .. }
+        | AgentAction::CallCapability { args, .. } => args_have_concrete_target_binding(args),
+        AgentAction::Respond { .. }
+        | AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Think { .. } => false,
+    }
+}
+
+fn args_have_concrete_target_binding(args: &Value) -> bool {
+    let Some(object) = args.as_object() else {
+        return false;
+    };
+    [
+        "path",
+        "paths",
+        "root",
+        "target",
+        "target_path",
+        "source_path",
+        "left_path",
+        "right_path",
+        "db_path",
+        "url",
+        "task_id",
+        "job_id",
+    ]
+    .iter()
+    .any(|key| json_value_has_concrete_target(object.get(*key)))
+}
+
+fn json_value_has_concrete_target(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::String(text)) => !text.trim().is_empty(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|item| json_value_has_concrete_target(Some(item))),
+        Some(Value::Object(object)) => object
+            .values()
+            .any(|item| json_value_has_concrete_target(Some(item))),
+        _ => false,
+    }
 }
 
 fn actions_allow_structured_respond_terminal_intent(actions: &[AgentAction]) -> bool {
