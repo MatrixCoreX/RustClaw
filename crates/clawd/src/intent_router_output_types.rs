@@ -112,8 +112,7 @@ impl BoundaryEnvelope {
             );
         }
         if self.session_binding.is_none() {
-            self.session_binding =
-                boundary_string_field(model.get("session_binding"), BoundaryStringKind::Reference);
+            self.session_binding = session_binding_string_field(model.get("session_binding"));
         }
         if self.safety_budget_hint.is_none() {
             self.safety_budget_hint = boundary_string_field(
@@ -213,6 +212,26 @@ fn boundary_string_field(
         return None;
     }
     Some(text.to_string())
+}
+
+fn session_binding_string_field(value: Option<&serde_json::Value>) -> Option<String> {
+    let value = value?;
+    if let Some(text) = value
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        return session_binding_plain_token_is_supported(text).then(|| text.to_string());
+    }
+    let text = boundary_object_reference_field(value, BoundaryStringKind::Reference)?.trim();
+    if text.is_empty() || text.chars().count() > 128 || text.chars().any(|ch| ch.is_control()) {
+        return None;
+    }
+    Some(text.to_string())
+}
+
+fn session_binding_plain_token_is_supported(text: &str) -> bool {
+    matches!(text.trim(), "resume_execute" | "resume_discuss")
 }
 
 fn boundary_object_reference_field(

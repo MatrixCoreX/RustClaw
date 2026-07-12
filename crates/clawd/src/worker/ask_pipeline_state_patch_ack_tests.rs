@@ -679,3 +679,14 @@ fn session_binding_value_reply_ignores_resume_control_tokens() {
 
     assert!(super::session_binding_value_reply(&route, Some(&boundary)).is_none());
 }
+
+#[test]
+fn session_binding_value_reply_ignores_session_status_tokens() {
+    let route = ack_route_for_test();
+    let boundary = crate::intent_router::BoundaryEnvelope {
+        session_binding: Some("continuing".to_string()),
+        ..Default::default()
+    };
+
+    assert!(super::session_binding_value_reply(&route, Some(&boundary)).is_none());
+}

@@ -92,10 +92,28 @@ pub(super) fn session_binding_value_reply(
     let value = boundary_envelope
         .and_then(|envelope| envelope.session_binding.as_deref())
         .map(str::trim)
-        .filter(|value| {
-            !value.is_empty() && !matches!(*value, "resume_execute" | "resume_discuss")
-        })?;
+        .filter(|value| session_binding_direct_value_is_displayable(value))?;
     Some(crate::AskReply::non_llm(value.to_string()))
+}
+
+fn session_binding_direct_value_is_displayable(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase().replace([' ', '-'], "_");
+    !normalized.is_empty()
+        && !matches!(
+            normalized.as_str(),
+            "resume"
+                | "resume_execute"
+                | "resume_discuss"
+                | "defer"
+                | "reuse_active"
+                | "replace_active"
+                | "pause_and_queue"
+                | "standalone"
+                | "continuing"
+                | "continue"
+                | "carryover"
+                | "carryover_unresolved_target"
+        )
 }
 
 fn alias_state_patch_ack_language_hint(

@@ -288,6 +288,43 @@ fn post_route_redacts_untrusted_workspace_child(
         )
 }
 
+fn deferred_clarify_observation(
+    post_route: &crate::post_route_policy::PostRoutePolicyResult,
+    route: &crate::RouteResult,
+) -> Option<Value> {
+    if post_route.gate_record.reason_code
+        != "post_route_non_boundary_clarify_deferred_to_agent_loop"
+    {
+        return None;
+    }
+    let question = route.clarify_question.trim();
+    if question.is_empty() {
+        return None;
+    }
+    Some(serde_json::json!({
+        "required": true,
+        "allow_tool_calls_before_clarify": false,
+        "owner_layer": post_route.gate_record.owner_layer,
+        "reason_code": post_route.gate_record.reason_code,
+        "outcome": post_route.gate_record.outcome.as_str(),
+        "clarify_reason_kind": clarify_reason_kind_token(post_route.clarify_reason_kind),
+        "missing_slot": "target",
+        "question": question,
+    }))
+}
+
+fn clarify_reason_kind_token(kind: crate::post_route_policy::ClarifyReasonKind) -> &'static str {
+    match kind {
+        crate::post_route_policy::ClarifyReasonKind::RouteReasonText => "route_reason_text",
+        crate::post_route_policy::ClarifyReasonKind::MissingPathScopedLocator => {
+            "missing_path_scoped_locator"
+        }
+        crate::post_route_policy::ClarifyReasonKind::FuzzyLocatorCandidates => {
+            "fuzzy_locator_candidates"
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum WorkerLoopBoundaryDeferral {
     BareTopicContextExpansion,
@@ -463,9 +500,11 @@ fn agent_loop_boundary_observations_block(
     let contract_repair_candidates =
         contract_repair_candidate_observations(state, prompt, resolved_prompt, route);
     let runtime_session_state = runtime_session_state_observation(session_snapshot, turn_analysis);
+    let deferred_clarify = deferred_clarify_observation(post_route, route);
+    let effective_needs_clarify = route.needs_clarify || deferred_clarify.is_some();
     let has_boundary_gate = post_route.gate_record.outcome
         != crate::post_route_policy::PostRoutePolicyOutcome::NoChange
-        || route.needs_clarify
+        || effective_needs_clarify
         || post_route.missing_locator_for_path_scoped_content;
 
     if !has_boundary_gate
@@ -491,7 +530,8 @@ fn agent_loop_boundary_observations_block(
     let observation = serde_json::json!({
         "kind": "agent_loop_boundary_observations",
         "schema_version": 1,
-        "needs_clarify": route.needs_clarify,
+        "needs_clarify": effective_needs_clarify,
+        "deferred_clarify": deferred_clarify,
         "locator_kind": route.output_contract.locator_kind.as_str(),
         "delivery_required": route.output_contract.delivery_required,
         "content_evidence_required": route.output_contract.requires_content_evidence,
