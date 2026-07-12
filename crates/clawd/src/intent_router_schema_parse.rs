@@ -86,6 +86,10 @@ pub(super) struct IntentExecutionRecipeOut {
     pub(super) execution_mode: String,
     #[serde(default)]
     pub(super) async_adapter_kind: String,
+    #[serde(default)]
+    pub(super) requires_content_evidence: bool,
+    #[serde(default)]
+    pub(super) attachment_processing_required: bool,
 }
 
 pub(super) fn parse_execution_recipe_plan_hint(
@@ -106,6 +110,8 @@ pub(super) fn parse_execution_recipe_plan_hint(
         && command.is_none()
         && execution_mode.is_none()
         && async_adapter_kind.is_none()
+        && !raw.requires_content_evidence
+        && !raw.attachment_processing_required
     {
         return None;
     }
@@ -114,6 +120,8 @@ pub(super) fn parse_execution_recipe_plan_hint(
         command,
         execution_mode,
         async_adapter_kind,
+        requires_content_evidence: raw.requires_content_evidence,
+        attachment_processing_required: raw.attachment_processing_required,
     })
 }
 
@@ -139,6 +147,8 @@ pub(super) fn parse_runtime_async_job_start_plan_hint(
         command: Some(command),
         execution_mode,
         async_adapter_kind,
+        requires_content_evidence: false,
+        attachment_processing_required: false,
     })
 }
 

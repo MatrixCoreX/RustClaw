@@ -104,6 +104,20 @@ fn lightweight_scope_uses_local_data_skills_for_bounded_multi_locator_boundary()
 }
 
 #[test]
+fn executable_agent_loop_boundary_keeps_lightweight_skill_scope_open() {
+    let mut route = base_route_result();
+    route.route_reason = "executionless_finalize_trace_plain; executable_contract_preserved_for_agent_loop; auto_locator_suppressed_multiple_explicit_paths".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+
+    assert_eq!(
+        contract_scoped_lightweight_planner_skill_scope(Some(&route)),
+        None,
+        "executable agent-loop boundaries should expose the full quick index instead of pre-filtering to a local filesystem slice"
+    );
+}
+
+#[test]
 fn sqlite_locator_generic_scalar_scope_prefers_db_basic_only() {
     let mut route = base_route_result();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -179,7 +193,7 @@ fn lightweight_scope_uses_run_cmd_for_raw_command_boundary() {
 }
 
 #[test]
-fn local_workspace_execution_uses_lightweight_prompt_and_local_skill_scope() {
+fn local_workspace_execution_uses_lightweight_prompt_without_semantic_skill_scope() {
     let mut route = base_route_result();
     route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -197,16 +211,13 @@ fn local_workspace_execution_uses_lightweight_prompt_and_local_skill_scope() {
     );
     assert_eq!(
         contract_scoped_lightweight_planner_skill_scope(Some(&route)),
-        Some(BTreeSet::from([
-            "fs_basic".to_string(),
-            "run_cmd".to_string(),
-            "system_basic".to_string(),
-        ]))
+        None,
+        "local execution stays lightweight but the planner owns capability choice from the full compact quick index"
     );
 }
 
 #[test]
-fn local_workspace_execution_with_delivery_noise_uses_lightweight_prompt_and_scope() {
+fn local_workspace_execution_with_delivery_noise_uses_lightweight_prompt_without_skill_scope() {
     let mut route = base_route_result();
     route.risk_ceiling = crate::RiskCeiling::High;
     route.route_reason = "file_token_delivery_contract_repair; executable_contract_preserved_for_agent_loop; contract:generated_file_delivery; normalizer_semantic_contract_demoted_to_route_marker; generated_file_delivery_allows_runtime_target".to_string();
@@ -226,10 +237,7 @@ fn local_workspace_execution_with_delivery_noise_uses_lightweight_prompt_and_sco
     );
     assert_eq!(
         contract_scoped_lightweight_planner_skill_scope(Some(&route)),
-        Some(BTreeSet::from([
-            "fs_basic".to_string(),
-            "run_cmd".to_string(),
-            "system_basic".to_string(),
-        ]))
+        None,
+        "delivery repair noise should not narrow ordinary capability choice before the loop planner"
     );
 }

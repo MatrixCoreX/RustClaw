@@ -167,22 +167,19 @@ fn insert_boundary_envelope_for_schema(obj: &mut serde_json::Map<String, Value>,
         .cloned()
         .or_else(|| model_boundary.get("schedule_intent").cloned())
         .unwrap_or(Value::Null);
-    let language_hint = {
-        let hint = crate::language_policy::request_language_hint(req);
-        if hint == "config_default" {
-            Value::Null
-        } else {
-            Value::String(hint.to_string())
-        }
-    };
-    let language_hint = boundary_string_for_schema(
+    let request_language_hint = crate::language_policy::request_language_hint(req);
+    let model_language_hint = boundary_string_for_schema(
         model_boundary
             .get("language_hint")
             .or_else(|| obj.get("language_hint")),
         BoundaryStringKind::Reference,
     )
-    .map(Value::String)
-    .unwrap_or(language_hint);
+    .map(Value::String);
+    let language_hint = if matches!(request_language_hint, "config_default" | "mixed") {
+        model_language_hint.unwrap_or(Value::Null)
+    } else {
+        Value::String(request_language_hint.to_string())
+    };
     let active_task_reference = obj
         .get("target_task_policy")
         .and_then(Value::as_str)

@@ -199,6 +199,7 @@ fn execution_recipe_plan_hint_declares_execution(
                 .async_adapter_kind
                 .as_deref()
                 .is_some_and(|adapter| !adapter.trim().is_empty())
+            || hint.attachment_processing_required
     })
 }
 

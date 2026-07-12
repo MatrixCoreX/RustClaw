@@ -449,6 +449,7 @@ fn execution_recipe_declares_agent_loop_execution(
         ]
         .iter()
         .any(|value| !value.trim().is_empty())
+        || recipe.attachment_processing_required
 }
 
 pub(super) fn cap_intent_normalizer_prompt_for_llm_budget(
