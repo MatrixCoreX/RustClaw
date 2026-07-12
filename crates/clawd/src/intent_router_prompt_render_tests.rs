@@ -152,6 +152,71 @@ fn normalizer_retry_does_not_preserve_shape_only_delivery_noise() {
 }
 
 #[test]
+fn normalizer_retry_preserves_base_alias_state_patch_when_retry_drops_it() {
+    let mut retry_out = empty_normalizer_out_for_retry_test();
+    let mut report = super::ContractRepairReport::default();
+    let base = r#"{
+        "resolved_user_intent": "bind a session alias",
+        "state_patch": {
+            "alias_bindings": [{
+                "alias": "note_file",
+                "target": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+            }]
+        }
+    }"#;
+
+    super::prompt_render::preserve_base_alias_state_patch_for_retry(
+        &mut retry_out,
+        base,
+        &mut report,
+    );
+
+    assert_eq!(
+        retry_out
+            .state_patch
+            .as_ref()
+            .and_then(|patch| patch.pointer("/alias_bindings/0/alias"))
+            .and_then(|value| value.as_str()),
+        Some("note_file")
+    );
+    assert!(report
+        .detail_csv()
+        .contains("preserved_base_alias_state_patch"));
+}
+
+#[test]
+fn normalizer_retry_keeps_retry_state_patch_when_present() {
+    let mut retry_out = empty_normalizer_out_for_retry_test();
+    retry_out.state_patch = Some(serde_json::json!({
+        "primary_task_update": {"action": "none"}
+    }));
+    let mut report = super::ContractRepairReport::default();
+    let base = r#"{
+        "state_patch": {
+            "alias_bindings": [{
+                "alias": "note_file",
+                "target": "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+            }]
+        }
+    }"#;
+
+    super::prompt_render::preserve_base_alias_state_patch_for_retry(
+        &mut retry_out,
+        base,
+        &mut report,
+    );
+
+    assert!(retry_out
+        .state_patch
+        .as_ref()
+        .and_then(|patch| patch.get("alias_bindings"))
+        .is_none());
+    assert!(!report
+        .detail_csv()
+        .contains("preserved_base_alias_state_patch"));
+}
+
+#[test]
 fn compact_normalizer_prompt_pins_boundary_schema() {
     let route_view = crate::task_context_builder::RouteContextView {
         request_surface_hints: "locator_target_pair: Cargo.toml | Cargo.lock".to_string(),

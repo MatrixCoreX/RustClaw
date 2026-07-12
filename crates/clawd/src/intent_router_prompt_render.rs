@@ -401,6 +401,11 @@ pub(super) async fn retry_intent_normalizer_json_parse(
                 base_llm_out_for_parse,
                 &mut report,
             );
+            preserve_base_alias_state_patch_for_retry(
+                &mut value,
+                base_llm_out_for_parse,
+                &mut report,
+            );
             Some((value, report))
         }
         Err(err) => {
@@ -457,6 +462,36 @@ pub(super) fn preserve_base_output_contract_for_retry(
     }
     retry_out.output_contract = Some(base_contract);
     report.add("llm_retry", "preserved_base_output_contract");
+}
+
+pub(super) fn preserve_base_alias_state_patch_for_retry(
+    retry_out: &mut IntentNormalizerOut,
+    base_llm_out_for_parse: &str,
+    report: &mut ContractRepairReport,
+) {
+    if retry_state_patch_is_meaningful(retry_out.state_patch.as_ref()) {
+        return;
+    }
+    let Some(base_patch) = serde_json::from_str::<serde_json::Value>(base_llm_out_for_parse)
+        .ok()
+        .and_then(|value| value.get("state_patch").cloned())
+    else {
+        return;
+    };
+    if !crate::conversation_state::state_patch_is_alias_bindings_only(&base_patch) {
+        return;
+    }
+    retry_out.state_patch = Some(base_patch);
+    report.add("llm_retry", "preserved_base_alias_state_patch");
+}
+
+fn retry_state_patch_is_meaningful(state_patch: Option<&serde_json::Value>) -> bool {
+    match state_patch {
+        Some(serde_json::Value::Object(map)) => !map.is_empty(),
+        Some(serde_json::Value::Array(items)) => !items.is_empty(),
+        Some(serde_json::Value::Null) | None => false,
+        Some(_) => true,
+    }
 }
 
 fn output_contract_declares_retry_boundary_signal(
