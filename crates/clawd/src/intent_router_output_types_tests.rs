@@ -173,6 +173,23 @@ fn boundary_envelope_merges_session_binding_object_value() {
 }
 
 #[test]
+fn boundary_envelope_ignores_plain_session_binding_status_token() {
+    let envelope = BoundaryEnvelope::from_request(
+        "continue?",
+        None,
+        false,
+        &crate::IntentOutputContract::default(),
+        None,
+        crate::ResumeBehavior::None,
+    )
+    .merge_model_machine_fields(Some(&serde_json::json!({
+        "session_binding": "continuing"
+    })));
+
+    assert!(envelope.session_binding.is_none());
+}
+
+#[test]
 fn boundary_envelope_merges_session_binding_relevant_alias() {
     let envelope = BoundaryEnvelope::from_request(
         "remembered marker?",
