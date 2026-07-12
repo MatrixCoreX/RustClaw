@@ -1331,6 +1331,94 @@ fn requested_machine_kv_summary_preserves_rich_answer_with_requested_machine_lin
 }
 
 #[test]
+fn requested_machine_kv_summary_restores_rich_answer_over_marker_only_delivery() {
+    let task = claimed_task("task-machine-kv-restore-rich-over-marker");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"extract_field","field_path":"llm.selected_vendor","path":"configs/config.toml","value":"minimax","value_text":"minimax","value_type":"string"}}"#,
+    ));
+    let rich_answer = "仅预览不会写入 configs/config.toml；llm.selected_vendor 当前值为 minimax，目标值也是 minimax，因此本次预览无实际变更、无明显风险。";
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        &serde_json::json!({
+            "answer": rich_answer,
+            "qualified": true,
+            "publishable": true
+        })
+        .to_string(),
+    ));
+    loop_state.last_publishable_synthesis_output = Some(rich_answer.to_string());
+    let mut delivery_messages = vec!["llm.selected_vendor".to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "读取 configs/config.toml 的 llm.selected_vendor 当前值，并回答预览是否改变、当前值和风险。",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![rich_answer.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(rich_answer)
+    );
+}
+
+#[test]
+fn requested_machine_kv_summary_restores_structured_payload_over_marker_only_delivery() {
+    let task = claimed_task("task-machine-kv-restore-structured-payload-over-marker");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_basic",
+        r#"{"extra":{"action":"extract_field","exists":true,"field_path":"llm.selected_vendor","path":"configs/config.toml","value":"minimax","value_text":"minimax","value_type":"string"}}"#,
+    ));
+    let structured_answer = serde_json::json!({
+        "applied": false,
+        "current_value": "minimax",
+        "field_path": "llm.selected_vendor",
+        "message_key": "clawd.msg.config_edit.preview_read_guard",
+        "path": "configs/config.toml",
+        "reason_code": "config_edit_preview_read_guard",
+        "risk_count": 0,
+        "risks": [],
+        "would_write": false
+    })
+    .to_string();
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        &structured_answer,
+    ));
+    loop_state.last_publishable_synthesis_output = Some(structured_answer.clone());
+    let mut delivery_messages = vec!["llm.selected_vendor".to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.last().cloned();
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "读取 configs/config.toml 的 llm.selected_vendor 当前值，并回答预览是否改变、当前值和风险。",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec![structured_answer.clone()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(structured_answer.as_str())
+    );
+}
+
+#[test]
 fn requested_machine_kv_summary_preserves_latest_rich_answer_over_stale_machine_value() {
     let task = claimed_task("task-machine-kv-preserve-latest-rich-field");
     let mut loop_state = crate::agent_engine::LoopState::new(1);

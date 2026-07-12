@@ -32,7 +32,9 @@ fn config_edit_observable_action(action: &str) -> bool {
             | "apply_config_change"
             | "validate_config"
             | "guard_config"
+            | "extract_field"
             | "extract_fields"
+            | "read_field"
             | "read_fields"
             | "read_back"
             | "restart_if_requested"
@@ -434,6 +436,59 @@ fn direct_config_edit_guard_answer(
     )
 }
 
+fn direct_config_edit_read_guard_answer(
+    outputs: &[ConfigEditObservedOutput],
+    _prefer_english: bool,
+) -> Option<String> {
+    let read = outputs.iter().rev().find(|item| {
+        matches!(
+            config_edit_output_action(&item.value),
+            Some("extract_field" | "read_field")
+        ) && item
+            .value
+            .get("exists")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+    })?;
+    let field_path = config_edit_field_label(&read.value);
+    let path = config_edit_path_label(&read.value);
+    let value = config_edit_value_label(&read.value, "value")?;
+    let guard = outputs.iter().rev().find(|item| {
+        item.index > read.index
+            && config_edit_output_action(&item.value) == Some("guard_config")
+            && config_edit_path_label(&item.value) == path
+    });
+    let risk_count = guard
+        .and_then(|item| {
+            item.value
+                .get("risk_count")
+                .and_then(|value| value.as_u64())
+        })
+        .unwrap_or(0);
+    let risks = guard
+        .map(|item| config_edit_risk_labels(&item.value))
+        .unwrap_or_default();
+    let candidates = guard
+        .map(|item| config_edit_candidate_labels(&item.value))
+        .unwrap_or_default();
+    Some(
+        serde_json::json!({
+            "message_key": "clawd.msg.config_edit.preview_read_guard",
+            "reason_code": "config_edit_preview_read_guard",
+            "path": path,
+            "field_path": field_path,
+            "current_value": value,
+            "applied": false,
+            "would_write": false,
+            "risk_count": risk_count,
+            "count": risk_count,
+            "risks": risks,
+            "candidates": candidates,
+        })
+        .to_string(),
+    )
+}
+
 fn direct_config_edit_read_back_answer(
     outputs: &[ConfigEditObservedOutput],
     _prefer_english: bool,
@@ -479,6 +534,7 @@ pub(crate) fn direct_config_edit_observed_answer(
     let answer = direct_config_edit_apply_answer(&outputs, prefer_english)
         .or_else(|| direct_config_edit_plan_answer(&outputs, prefer_english))
         .or_else(|| agent_hook_policy_surface_answer(&outputs, prefer_english))
+        .or_else(|| direct_config_edit_read_guard_answer(&outputs, prefer_english))
         .or_else(|| direct_config_edit_guard_answer(&outputs, prefer_english))
         .or_else(|| direct_config_edit_validate_answer(&outputs, prefer_english))
         .or_else(|| direct_config_edit_read_back_answer(&outputs, prefer_english))?;

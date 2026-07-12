@@ -173,6 +173,47 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
             return false;
         }
     }
+    if marker_only_requested_summary(&answer)
+        && !strict_machine_field_contract_requested(agent_run_context)
+    {
+        if let Some(restored) = latest_publishable_delivery_for_marker_only_summary(
+            loop_state,
+            delivery_messages,
+            &answer,
+        ) {
+            delivery_messages.clear();
+            delivery_messages.push(restored.clone());
+            loop_state.delivery_messages.clear();
+            append_delivery_message(
+                &task.task_id,
+                &mut loop_state.delivery_messages,
+                restored.clone(),
+            );
+            loop_state.last_user_visible_respond = Some(restored);
+            *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                parsed: true,
+                contract_ok: true,
+                completion_ok: Some(true),
+                grounded_ok: Some(true),
+                format_ok: Some(true),
+                needs_clarify: Some(false),
+                used_evidence_ids_count: loop_state.executed_step_results.len(),
+                ..Default::default()
+            });
+            log_deterministic_delivery_record(
+                &task.task_id,
+                "requested_machine_kv_summary_marker_only_rich_delivery",
+                "restored",
+                agent_run_context,
+                loop_state.executed_step_results.len(),
+            );
+            return true;
+        }
+        loop_state.last_user_visible_respond = Some(current);
+        return false;
+    }
     if should_restore_config_guard_payload(agent_run_context, &answer) {
         if let Some(payload) = latest_config_guard_machine_payload(loop_state, delivery_messages) {
             delivery_messages.clear();
@@ -1116,6 +1157,130 @@ fn current_delivery_is_service_control_observed_field_projection(current: &str) 
         && has_key("status")
         && has_key("verified")
         && (has_key("post_state") || has_key("pre_state"))
+}
+
+fn marker_only_requested_summary(summary: &str) -> bool {
+    let summary = summary.trim();
+    !summary.is_empty()
+        && !summary.contains('=')
+        && summary
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count()
+            == 1
+        && valid_machine_unit_key(summary)
+}
+
+fn latest_publishable_delivery_for_marker_only_summary(
+    loop_state: &LoopState,
+    delivery_messages: &[String],
+    marker: &str,
+) -> Option<String> {
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok() || !matches!(step.skill.as_str(), "respond" | "synthesize_answer") {
+            continue;
+        }
+        if let Some(candidate) = step
+            .output
+            .as_deref()
+            .and_then(|candidate| publishable_delivery_for_marker_only_summary(candidate, marker))
+        {
+            return Some(candidate);
+        }
+    }
+    for candidate in [
+        loop_state.last_user_visible_respond.as_deref(),
+        loop_state.last_publishable_synthesis_output.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(candidate) = publishable_delivery_for_marker_only_summary(candidate, marker) {
+            return Some(candidate);
+        }
+    }
+    for candidate in loop_state
+        .delivery_messages
+        .iter()
+        .rev()
+        .chain(delivery_messages.iter().rev())
+    {
+        if let Some(candidate) = publishable_delivery_for_marker_only_summary(candidate, marker) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn publishable_delivery_for_marker_only_summary(candidate: &str, marker: &str) -> Option<String> {
+    let candidate = candidate.trim();
+    if candidate.is_empty()
+        || candidate == marker.trim()
+        || marker_only_requested_summary(candidate)
+        || crate::finalize::is_execution_summary_message(candidate)
+    {
+        return None;
+    }
+    if let Ok(Value::Object(object)) = serde_json::from_str::<Value>(candidate) {
+        if object.contains_key("steps") {
+            return None;
+        }
+        if let Some(answer) = object.get("answer").and_then(Value::as_str) {
+            return publishable_delivery_for_marker_only_summary(answer, marker);
+        }
+        if structured_marker_evidence_payload(&object, marker) {
+            return Some(candidate.to_string());
+        }
+    }
+    if crate::finalize::looks_like_planner_artifact(candidate)
+        || crate::finalize::looks_like_internal_trace_artifact(candidate)
+    {
+        return None;
+    }
+    candidate
+        .contains(marker.trim())
+        .then(|| candidate.to_string())
+}
+
+fn structured_marker_evidence_payload(
+    object: &serde_json::Map<String, Value>,
+    marker: &str,
+) -> bool {
+    let marker = marker.trim();
+    if marker.is_empty()
+        || !(object.contains_key("message_key") || object.contains_key("reason_code"))
+        || !object
+            .values()
+            .any(|value| value_contains_text(value, marker))
+    {
+        return false;
+    }
+    [
+        "current_value",
+        "value",
+        "value_text",
+        "field_path",
+        "path",
+        "risk_count",
+        "count",
+        "candidates",
+        "risks",
+        "applied",
+        "would_write",
+    ]
+    .iter()
+    .any(|key| object.contains_key(*key))
+}
+
+fn value_contains_text(value: &Value, needle: &str) -> bool {
+    match value {
+        Value::String(text) => text.contains(needle),
+        Value::Array(items) => items.iter().any(|item| value_contains_text(item, needle)),
+        Value::Object(object) => object
+            .values()
+            .any(|item| value_contains_text(item, needle)),
+        Value::Null | Value::Bool(_) | Value::Number(_) => false,
+    }
 }
 
 fn current_delivery_has_conflicting_values_for_requested_keys(
