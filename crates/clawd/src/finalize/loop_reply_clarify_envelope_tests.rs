@@ -243,7 +243,7 @@ async fn finalize_loop_reply_attaches_requested_clarify_machine_envelope() {
 }
 
 #[tokio::test]
-async fn finalize_loop_reply_preserves_agent_loop_nonblocking_clarify_machine_line() {
+async fn finalize_loop_reply_keeps_agent_loop_clarify_machine_fields_structured_only() {
     let state = test_state();
     let task = claimed_task("task-agent-loop-nonblocking-clarify-line");
     let mut route = free_route_result();
@@ -295,28 +295,28 @@ async fn finalize_loop_reply_preserves_agent_loop_nonblocking_clarify_machine_li
         Some(&agent_run_context),
     )
     .await
-    .expect("finalize should preserve agent-loop clarify machine line");
+    .expect("finalize should preserve user-visible clarify text");
 
     assert!(!reply.should_fail_task, "reply: {}", reply.text);
     assert!(reply.text.contains(model_question), "reply: {}", reply.text);
     assert!(
-        reply.text.contains("terminal_intent=clarify"),
-        "reply should expose terminal clarify machine line: {}",
+        !reply.text.contains("terminal_intent=clarify"),
+        "reply should not expose terminal clarify machine line: {}",
         reply.text
     );
     assert!(
-        reply.text.contains("clarify_reason_code=missing_locator"),
-        "reply should expose clarify reason: {}",
+        !reply.text.contains("clarify_reason_code=missing_locator"),
+        "reply should not expose clarify reason as visible text: {}",
         reply.text
     );
     assert!(
-        reply.text.contains("missing_slot=locator"),
-        "reply should expose missing slot: {}",
+        !reply.text.contains("missing_slot=locator"),
+        "reply should not expose missing slot as visible text: {}",
         reply.text
     );
     assert!(
-        reply.text.contains("locator_kind=path"),
-        "reply should expose locator kind: {}",
+        !reply.text.contains("locator_kind=path"),
+        "reply should not expose locator kind as visible text: {}",
         reply.text
     );
     assert!(
