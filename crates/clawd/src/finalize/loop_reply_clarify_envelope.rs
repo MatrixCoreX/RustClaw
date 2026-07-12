@@ -28,28 +28,15 @@ pub(super) fn attach_agent_loop_clarify_machine_line(
     let Some(machine_line) = agent_loop_clarify_machine_line(loop_state) else {
         return false;
     };
-    let Some(index) = delivery_messages
-        .iter()
-        .rposition(|message| !message.trim().is_empty())
-    else {
-        return false;
-    };
-    if delivery_messages[index].contains(machine_line.as_str()) {
-        return false;
-    }
-
-    let rendered = format!("{}\n{}", delivery_messages[index].trim_end(), machine_line);
-    delivery_messages[index] = rendered.clone();
-    loop_state.delivery_messages = delivery_messages.clone();
-    loop_state.last_user_visible_respond = Some(rendered);
     log_deterministic_delivery_record(
         &task.task_id,
         "agent_loop_clarify_machine_line",
-        "attached",
+        "structured_only",
         agent_run_context,
         loop_state.executed_step_results.len(),
     );
-    true
+    let _ = machine_line;
+    false
 }
 
 pub(super) fn attach_route_clarify_machine_envelope(

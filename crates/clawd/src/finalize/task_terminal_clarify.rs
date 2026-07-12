@@ -21,9 +21,6 @@ pub(super) fn preserve_terminal_clarify_from_journal(
     let Some(intent) = latest_terminal_clarify_intent(journal) else {
         return false;
     };
-    let Some(machine_line) = terminal_clarify_machine_line(&intent) else {
-        return false;
-    };
     let base = answer_text
         .trim()
         .is_empty()
@@ -33,7 +30,7 @@ pub(super) fn preserve_terminal_clarify_from_journal(
     if base.is_empty() {
         return false;
     }
-    *answer_text = format!("{base}\n{machine_line}");
+    *answer_text = base.to_string();
     answer_messages.clear();
     answer_messages.push(answer_text.clone());
     true
@@ -110,22 +107,6 @@ fn string_field<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
         .filter(|value| !value.is_empty())
 }
 
-fn terminal_clarify_machine_line(intent: &TerminalClarifyIntent) -> Option<String> {
-    let mut parts = vec!["terminal_intent=clarify".to_string()];
-    for (key, value) in [
-        ("clarify_reason_code", intent.clarify_reason_code.as_deref()),
-        ("missing_slot", intent.missing_slot.as_deref()),
-        ("message_key", intent.message_key.as_deref()),
-        ("field_path", intent.field_path.as_deref()),
-        ("locator_kind", intent.locator_kind.as_deref()),
-    ] {
-        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-            parts.push(format!("{key}={value}"));
-        }
-    }
-    (parts.len() > 1).then(|| parts.join(" "))
-}
-
 fn answer_has_terminal_clarify_machine_fields(text: &str, messages: &[String]) -> bool {
     std::iter::once(text)
         .chain(messages.iter().map(String::as_str))
@@ -173,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn preserves_latest_raw_plan_terminal_clarify_machine_line() {
+    fn preserves_latest_raw_plan_terminal_clarify_user_text_only() {
         let raw_plan = r#"{"steps":[{"type":"respond","terminal_intent":"clarify","clarify_reason_code":"missing_locator","missing_slot":"locator","locator_kind":"path","content":"Which file do you want me to read?"}]}"#;
         let mut journal =
             crate::task_journal::TaskJournal::for_task("task-1", "ask", "missing locator");
@@ -194,10 +175,11 @@ mod tests {
             &mut answer_messages
         ));
 
-        assert!(answer_text.contains("terminal_intent=clarify"));
-        assert!(answer_text.contains("clarify_reason_code=missing_locator"));
-        assert!(answer_text.contains("missing_slot=locator"));
-        assert!(answer_text.contains("locator_kind=path"));
+        assert!(!answer_text.trim().is_empty());
+        assert!(!answer_text.contains("terminal_intent=clarify"));
+        assert!(!answer_text.contains("clarify_reason_code=missing_locator"));
+        assert!(!answer_text.contains("missing_slot=locator"));
+        assert!(!answer_text.contains("locator_kind=path"));
         assert_eq!(answer_messages, vec![answer_text]);
     }
 }

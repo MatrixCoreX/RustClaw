@@ -371,6 +371,11 @@ pub(crate) fn sync_output_payload(
     if preserve_terminal_clarify_machine_delivery(normalized_text, normalized_messages) {
         return;
     }
+    *normalized_text = strip_legacy_terminal_clarify_machine_line(normalized_text);
+    for message in normalized_messages.iter_mut() {
+        *message = strip_legacy_terminal_clarify_machine_line(message);
+    }
+    normalized_messages.retain(|message| !message.trim().is_empty());
 
     let file_contract = output_contract.delivery_required
         || matches!(
@@ -462,13 +467,29 @@ fn has_terminal_clarify_machine_fields(raw: &str) -> bool {
         {
             return true;
         }
-        if payload
-            .get("terminal_intent")
-            .and_then(serde_json::Value::as_str)
-            == Some("clarify")
-        {
-            return true;
-        }
+    }
+    false
+}
+
+fn strip_legacy_terminal_clarify_machine_line(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || serde_json::from_str::<serde_json::Value>(trimmed).is_ok() {
+        return trimmed.to_string();
+    }
+    let mut lines = trimmed.lines().collect::<Vec<_>>();
+    while lines
+        .last()
+        .is_some_and(|line| legacy_terminal_clarify_machine_line(line))
+    {
+        lines.pop();
+    }
+    lines.join("\n").trim().to_string()
+}
+
+fn legacy_terminal_clarify_machine_line(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || serde_json::from_str::<serde_json::Value>(trimmed).is_ok() {
+        return false;
     }
     let markers = crate::RouteReasonMarkers::new(trimmed);
     markers.machine_value("terminal_intent") == Some("clarify")

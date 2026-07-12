@@ -326,7 +326,7 @@ fn scalar_contract_preserves_structured_missing_field_line() {
 }
 
 #[test]
-fn one_sentence_contract_preserves_terminal_clarify_machine_line() {
+fn one_sentence_contract_strips_terminal_clarify_machine_line() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let contract = IntentOutputContract {
         exact_sentence_count: None,
@@ -346,12 +346,12 @@ fn one_sentence_contract_preserves_terminal_clarify_machine_line() {
         &mut messages,
     );
 
-    assert_eq!(text, expected);
-    assert_eq!(messages, vec![expected.to_string()]);
+    assert_eq!(text, "Which file should I read?");
+    assert_eq!(messages, vec!["Which file should I read?".to_string()]);
 }
 
 #[test]
-fn sync_output_payload_prefers_terminal_clarify_machine_message() {
+fn sync_output_payload_ignores_legacy_terminal_clarify_machine_message() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::OneSentence,
@@ -363,6 +363,6 @@ fn sync_output_payload_prefers_terminal_clarify_machine_message() {
 
     sync_output_payload(&contract, &mut text, &mut messages);
 
-    assert_eq!(text, expected);
-    assert_eq!(messages, vec![expected.to_string()]);
+    assert_eq!(text, "Which file should I read?");
+    assert_eq!(messages, vec!["Which file should I read?".to_string()]);
 }

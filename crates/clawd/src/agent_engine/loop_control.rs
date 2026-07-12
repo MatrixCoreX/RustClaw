@@ -520,7 +520,7 @@ fn apply_structured_respond_clarify_to_loop_state(
         .map(str::trim)
         .filter(|text| !text.is_empty())
     {
-        let content = append_structured_clarify_machine_line(content, intent);
+        let content = content.to_string();
         loop_state.delivery_messages.push(content.clone());
         loop_state.last_user_visible_respond = Some(content);
     }
@@ -706,7 +706,7 @@ fn apply_nonblocking_structured_clarify_as_answer(
         .map(str::trim)
         .filter(|text| !text.is_empty())
     {
-        let content = append_structured_clarify_machine_line(content, intent);
+        let content = content.to_string();
         loop_state.delivery_messages.push(content.clone());
         loop_state.last_user_visible_respond = Some(content);
     }
@@ -744,35 +744,6 @@ fn record_structured_clarify_machine_fields(
                 .insert(key.to_string(), value.to_string());
         }
     }
-}
-
-fn append_structured_clarify_machine_line(
-    content: &str,
-    intent: &StructuredRespondTerminalIntent,
-) -> String {
-    let Some(machine_line) = structured_clarify_machine_line(intent) else {
-        return content.to_string();
-    };
-    if content.contains(machine_line.as_str()) {
-        return content.to_string();
-    }
-    format!("{content}\n{machine_line}")
-}
-
-fn structured_clarify_machine_line(intent: &StructuredRespondTerminalIntent) -> Option<String> {
-    let mut parts = vec!["terminal_intent=clarify".to_string()];
-    for (key, value) in [
-        ("clarify_reason_code", intent.clarify_reason_code.as_deref()),
-        ("missing_slot", intent.missing_slot.as_deref()),
-        ("message_key", intent.message_key.as_deref()),
-        ("field_path", intent.field_path.as_deref()),
-        ("locator_kind", intent.locator_kind.as_deref()),
-    ] {
-        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-            parts.push(format!("{key}={value}"));
-        }
-    }
-    (parts.len() > 1).then(|| parts.join(" "))
 }
 
 fn try_recover_inconsistent_boundary_clarify(
