@@ -51,7 +51,12 @@ pub(super) fn successful_content_observation_should_precede_status_summary(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    if !route.output_contract.requires_content_evidence {
+    let agent_loop_rich_content = route
+        .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+        && route.output_contract.response_shape == crate::OutputResponseShape::Free
+        && !route.output_contract.delivery_required
+        && successful_content_observation_count(loop_state) >= 2;
+    if !route.output_contract.requires_content_evidence && !agent_loop_rich_content {
         return false;
     }
     if route.output_contract_marker_is_any(&[
@@ -61,18 +66,46 @@ pub(super) fn successful_content_observation_should_precede_status_summary(
     {
         return false;
     }
-    loop_state.executed_step_results.iter().any(|step| {
-        step.is_ok()
-            && !matches!(
-                step.skill.as_str(),
-                "respond" | "think" | "synthesize_answer"
-            )
-            && step
-                .output
-                .as_deref()
-                .map(str::trim)
-                .is_some_and(|text| !text.is_empty())
-    })
+    successful_content_observation_count(loop_state) > 0
+}
+
+fn successful_content_observation_count(loop_state: &crate::agent_engine::LoopState) -> usize {
+    loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| {
+            step.is_ok()
+                && !matches!(
+                    step.skill.as_str(),
+                    "respond" | "think" | "synthesize_answer"
+                )
+                && step
+                    .output
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(successful_content_observation_text)
+        })
+        .count()
+}
+
+fn successful_content_observation_text(text: &str) -> bool {
+    let text = text.trim();
+    !text.is_empty()
+        && !machine_separator_only_output(text)
+        && !crate::finalize::is_execution_summary_message(text)
+        && !crate::finalize::looks_like_planner_artifact(text)
+        && !crate::finalize::looks_like_internal_trace_artifact(text)
+}
+
+fn machine_separator_only_output(text: &str) -> bool {
+    let mut saw_line = false;
+    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        saw_line = true;
+        if !(line.len() >= 6 && line.starts_with("---") && line.ends_with("---")) {
+            return false;
+        }
+    }
+    saw_line
 }
 
 pub(super) fn delivery_is_content_answer_candidate(

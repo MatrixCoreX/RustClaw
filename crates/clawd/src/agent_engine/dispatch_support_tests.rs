@@ -31,6 +31,8 @@ mod filesystem_mutation_lifecycle;
 mod machine_envelope;
 #[path = "dispatch_support_tests/read_range_synthesis_fallback.rs"]
 mod read_range_synthesis_fallback;
+#[path = "dispatch_support_tests/status_answer.rs"]
+mod status_answer;
 #[path = "dispatch_support_tests/synthesize_failure_replan.rs"]
 mod synthesize_failure_replan;
 #[path = "dispatch_support_tests/text_protocol_boundary.rs"]
@@ -949,6 +951,7 @@ fn deterministic_status_answer_uses_observed_step_status_before_llm() {
         &task,
         "先列目录，再执行缺失命令，总结成功和失败。",
         &loop_state,
+        None,
     )
     .expect("deterministic status answer");
 
@@ -1005,6 +1008,7 @@ fn deterministic_status_answer_defers_after_recovery_success() {
         &task,
         "检查文件里是否包含目标分支",
         &loop_state,
+        None,
     )
     .is_none());
 }
@@ -1056,6 +1060,7 @@ fn deterministic_status_answer_uses_structured_run_cmd_stderr() {
         &task,
         "执行两个命令，总结成功和失败，并说明错误输出。",
         &loop_state,
+        None,
     )
     .expect("deterministic status answer");
 

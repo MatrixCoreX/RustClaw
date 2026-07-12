@@ -1171,6 +1171,10 @@ pub(crate) async fn finalize_loop_reply(
             &loop_state.delivery_messages,
         )
         && !route_prefers_language_rendered_execution_failed_step(agent_run_context)
+        && !successful_content_observation_should_precede_status_summary(
+            agent_run_context,
+            &loop_state,
+        )
     {
         replace_delivery_with_deterministic_observed_execution_status_answer(
             state,

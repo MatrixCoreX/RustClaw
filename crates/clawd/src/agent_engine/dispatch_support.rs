@@ -17,6 +17,8 @@ use crate::{AgentAction, OutputResponseShape};
 mod dispatch_local_code_projection_gate;
 #[path = "dispatch_synthesis.rs"]
 mod dispatch_synthesis;
+#[path = "dispatch_support/status_answer.rs"]
+mod status_answer;
 
 use dispatch_local_code_projection_gate::{
     local_code_strict_json_projection_should_defer_observed_synthesis as gate_defer_observed_synthesis,
@@ -35,6 +37,7 @@ use dispatch_synthesis::{
     synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
     synthesize_route_prefers_model_language_observed_status, synthesize_user_language_source,
 };
+use status_answer::agent_loop_rich_content_should_defer_status;
 
 pub(super) fn local_code_strict_json_projection_should_defer_observed_synthesis(
     user_text: &str,
@@ -228,7 +231,11 @@ fn deterministic_observed_execution_status_answer(
     _task: &ClaimedTask,
     _user_text: &str,
     loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
+    if agent_loop_rich_content_should_defer_status(agent_run_context, loop_state) {
+        return None;
+    }
     let observed_steps = loop_state
         .executed_step_results
         .iter()
@@ -1553,7 +1560,11 @@ pub(super) async fn handle_synthesize_answer_action(
             }
             if !synthesize_route_prefers_model_language_observed_status(agent_run_context) {
                 if let Some(answer) = deterministic_observed_execution_status_answer(
-                    state, task, user_text, loop_state,
+                    state,
+                    task,
+                    user_text,
+                    loop_state,
+                    agent_run_context,
                 ) {
                     return Ok(answer);
                 }

@@ -63,6 +63,56 @@ fn status_shape_does_not_precede_with_generic_content_answer() {
 }
 
 #[test]
+fn agent_loop_rich_content_precedes_status_summary_without_legacy_content_flag() {
+    let mut route = free_route_result();
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "notes.txt\nnested/config.ini\n",
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "run_cmd",
+        "fixture archive notes\n",
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_3",
+        "db_basic",
+        r#"{"extra":{"action":"schema_version","field_value":{"schema_version":7},"schema_version":7}}"#,
+    ));
+    loop_state.executed_step_results.push(err_step_result(
+        "step_4",
+        "fs_basic",
+        "__RC_SKILL_ERROR__:{\"error_kind\":\"invalid_data\",\"error_text\":\"binary file is not utf8\"}",
+    ));
+    let delivery_messages = vec![
+        "| item | value |\n| --- | --- |\n| archive members | notes.txt, nested/config.ini |\n| schema_version | 7 |".to_string(),
+    ];
+
+    assert!(
+        successful_content_observation_should_precede_status_summary(
+            Some(&agent_run_context),
+            &loop_state,
+        )
+    );
+    assert!(delivery_is_content_answer_candidate(
+        Some(&agent_run_context),
+        &loop_state,
+        &delivery_messages,
+    ));
+}
+
+#[test]
 fn deterministic_missing_observed_target_answer_reports_missing_scalar_count_path() {
     let state = test_state();
     let mut route = free_route_result();
