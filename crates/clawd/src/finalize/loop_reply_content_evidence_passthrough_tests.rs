@@ -75,6 +75,60 @@ fn content_evidence_one_sentence_terminal_answer_is_kept_without_semantic_kind()
 }
 
 #[test]
+fn content_evidence_keeps_strict_json_projection_before_meta_classifier() {
+    let answer = r#"{"created_files":["/workspace/calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#;
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.last_user_visible_respond = Some(answer.to_string());
+    loop_state.delivery_messages.push(answer.to_string());
+    loop_state.last_publishable_synthesis_output = Some(answer.to_string());
+    loop_state.output_vars.insert(
+        "agent_loop.strict_json_projection_publishable".to_string(),
+        "true".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.strict_json_projection_output".to_string(),
+        answer.to_string(),
+    );
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"status":"ok","path":"/workspace/calc_core.py"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "run_cmd",
+        "Ran 7 tests in 0.001s\nOK\n",
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "synthesize_answer", answer));
+    let mut route = free_route_result();
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        should_drop_passthrough_delivery_for_content_evidence(
+            &loop_state,
+            true,
+            Some(&agent_run_context),
+            answer,
+        ),
+        Some(false)
+    );
+    assert!(content_evidence_terminal_respond_is_contractual_answer(
+        &loop_state,
+        Some(&agent_run_context),
+        answer,
+    ));
+}
+
+#[test]
 fn content_evidence_scalar_heading_terminal_answer_is_kept_before_meta_classifier() {
     let answer = "Service Notes";
     let mut loop_state = crate::agent_engine::LoopState::new(3);

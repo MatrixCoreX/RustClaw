@@ -130,6 +130,7 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
         .unwrap_or("data/rustclaw.db");
     let sql = match action {
         "schema_version" | "sqlite_schema_version" => "PRAGMA schema_version;".to_string(),
+        "user_version" | "sqlite_user_version" => "PRAGMA user_version;".to_string(),
         "list_tables" | "table_names" | "sqlite_table_names" | "sqlite_tables" => {
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;".to_string()
         }
@@ -152,7 +153,7 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
 
     match action {
         "schema_version" | "sqlite_schema_version" => run_query(&conn, &sql, obj).map(|payload| {
-            let schema_version = schema_version_from_query_payload(&payload);
+            let schema_version = version_from_query_payload(&payload, "schema_version");
             (
                 payload.to_string(),
                 json!({
@@ -163,6 +164,22 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
                     "schema_version": schema_version,
                     "field_value": {
                         "schema_version": schema_version,
+                    },
+                }),
+            )
+        }),
+        "user_version" | "sqlite_user_version" => run_query(&conn, &sql, obj).map(|payload| {
+            let user_version = version_from_query_payload(&payload, "user_version");
+            (
+                payload.to_string(),
+                json!({
+                    "action": "user_version",
+                    "db_path": db_path_text,
+                    "sql": sql,
+                    "result": payload,
+                    "user_version": user_version,
+                    "field_value": {
+                        "user_version": user_version,
                     },
                 }),
             )
@@ -237,12 +254,12 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
         }
         _ => Err(SkillError::new(
             "unsupported_action",
-            "unsupported action; use sqlite_query|sqlite_execute|schema_version|list_tables",
+            "unsupported action; use sqlite_query|sqlite_execute|schema_version|user_version|list_tables",
         )
         .with_extra(json!({
             "error_kind": "unsupported_action",
             "action": action,
-            "allowed_actions": ["sqlite_query", "sqlite_execute", "schema_version", "list_tables"],
+            "allowed_actions": ["sqlite_query", "sqlite_execute", "schema_version", "user_version", "list_tables"],
         }))),
     }
 }
@@ -262,13 +279,13 @@ fn table_names_from_query_payload(payload: &Value) -> Vec<String> {
         .collect()
 }
 
-fn schema_version_from_query_payload(payload: &Value) -> Option<i64> {
+fn version_from_query_payload(payload: &Value, column: &str) -> Option<i64> {
     payload
         .get("rows")
         .and_then(Value::as_array)
         .and_then(|rows| rows.first())
         .and_then(Value::as_object)
-        .and_then(|row| row.get("schema_version"))
+        .and_then(|row| row.get(column))
         .and_then(Value::as_i64)
 }
 

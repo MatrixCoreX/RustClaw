@@ -158,6 +158,12 @@ pub(super) fn normalize_legacy_compatibility_actions(
         skip_legacy_semantic_rewrites,
         actions,
     );
+    let actions = rewrite_sqlite_user_version_plan_to_db_basic(
+        route_result,
+        auto_locator_path,
+        skip_legacy_semantic_rewrites,
+        actions,
+    );
     let actions = rewrite_sqlite_table_probe_to_requested_schema_value(
         route_result,
         user_text,

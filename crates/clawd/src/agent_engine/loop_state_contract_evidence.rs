@@ -20,6 +20,55 @@ pub(super) fn active_plan_file_targets_for_loop_seed(ctx: &AgentRunContext) -> V
     targets
 }
 
+pub(super) fn boundary_observation_needs_clarify_for_loop_seed(ctx: &AgentRunContext) -> bool {
+    [
+        ctx.user_request.as_deref(),
+        ctx.context_bundle_summary.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(boundary_observation_needs_clarify_from_summary)
+}
+
+fn boundary_observation_needs_clarify_from_summary(summary: &str) -> bool {
+    const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    for tail in summary.split(START).skip(1) {
+        let block = tail.split(END).next().unwrap_or(tail).trim();
+        let Ok(value) = serde_json::from_str::<Value>(block) else {
+            continue;
+        };
+        if value
+            .get("needs_clarify")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        if value
+            .get("post_route_boundary_record")
+            .and_then(Value::as_object)
+            .and_then(|record| record.get("outcome"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            == Some("boundary_clarify")
+        {
+            return true;
+        }
+        if value
+            .get("missing_referent")
+            .and_then(Value::as_object)
+            .and_then(|record| record.get("status_code"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            == Some("missing_referent")
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn active_plan_file_targets_from_boundary_observation_blocks(summary: &str) -> Vec<String> {
     const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
     const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";

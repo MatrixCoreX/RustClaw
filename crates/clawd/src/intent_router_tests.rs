@@ -1,12 +1,15 @@
 use super::{
-    apply_current_turn_structural_contract_repair, parse_execution_recipe_hint,
+    apply_current_turn_structural_contract_repair,
+    execution_recipe_target_locator_contract_yields_to_agent_loop,
+    inline_structured_payload_repair_yields_to_execution_context, parse_execution_recipe_hint,
     parse_runtime_async_job_start_plan_hint, structural_alias_binding_fallback_decision,
-    structured_execution_signal_for_effective_route, IntentExecutionRecipeOut,
-    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, RouteTraceDecision, ScheduleKind, TargetTaskPolicy, TurnType,
+    structured_execution_signal_for_effective_route, ExecutionRecipePlanHint,
+    IntentExecutionRecipeOut, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputSemanticKind, RouteTraceDecision, ScheduleKind, TargetTaskPolicy,
+    TurnType,
 };
 use crate::execution_recipe::{
-    ExecutionRecipeKind, ExecutionRecipeProfile, ExecutionRecipeTargetScope,
+    ExecutionRecipeKind, ExecutionRecipeProfile, ExecutionRecipeSpec, ExecutionRecipeTargetScope,
 };
 use serde_json::Value;
 
@@ -23,6 +26,86 @@ fn parse_execution_recipe_hint_accepts_explicit_ops_service_contract() {
     assert_eq!(spec.target_scope, ExecutionRecipeTargetScope::System);
     assert!(spec.inspect_first);
     assert!(spec.validation_required);
+}
+
+#[test]
+fn inline_structured_payload_repair_yields_to_machine_execution_context() {
+    assert!(
+        inline_structured_payload_repair_yields_to_execution_context(
+            Some("inline_structured_payload_context_execute"),
+            Some(ExecutionRecipeSpec {
+                kind: ExecutionRecipeKind::OpsClosedLoop,
+                profile: ExecutionRecipeProfile::CodeChange,
+                target_scope: ExecutionRecipeTargetScope::CurrentRepo,
+                inspect_first: true,
+                validation_required: true,
+                max_repairs: 1,
+            }),
+            None,
+            false,
+        )
+    );
+
+    assert!(
+        inline_structured_payload_repair_yields_to_execution_context(
+            Some("inline_structured_transform_contract_repair"),
+            None,
+            Some(&ExecutionRecipePlanHint {
+                kind: "none".to_string(),
+                command: Some("python3 test_calc_core.py".to_string()),
+                execution_mode: None,
+                async_adapter_kind: None,
+            }),
+            false,
+        )
+    );
+
+    assert!(
+        !inline_structured_payload_repair_yields_to_execution_context(
+            Some("inline_structured_payload_context_execute"),
+            None,
+            Some(&ExecutionRecipePlanHint {
+                kind: "none".to_string(),
+                command: None,
+                execution_mode: None,
+                async_adapter_kind: None,
+            }),
+            false,
+        )
+    );
+}
+
+#[test]
+fn execution_recipe_target_locator_contract_cleanup_clears_path_content_contract() {
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "calc_core.py".to_string(),
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    };
+    let repair = execution_recipe_target_locator_contract_yields_to_agent_loop(
+        &mut contract,
+        Some(&ExecutionRecipePlanHint {
+            kind: "ops_closed_loop".to_string(),
+            command: None,
+            execution_mode: None,
+            async_adapter_kind: None,
+        }),
+        false,
+    );
+
+    assert_eq!(
+        repair,
+        Some("execution_recipe_target_locator_preserved_for_agent_loop")
+    );
+    assert!(!contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
 }
 
 #[test]
@@ -337,6 +420,211 @@ fn route_result_uses_machine_execution_signal_not_legacy_normalizer_hint() {
     assert!(route
         .route_reason
         .contains("contract:workspace_project_summary"));
+}
+
+#[test]
+fn route_result_required_machine_fields_clear_contradictory_file_delivery_hint() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        task_id: "task-required-machine-fields-clear-file-delivery".to_string(),
+        user_id: 91,
+        chat_id: 202,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"modify project and output strict json"})
+            .to_string(),
+    };
+    let decision = super::RouteDecision {
+        resolved_user_intent: "modify project and output strict machine fields".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "executable_contract_preserved_for_agent_loop".to_string(),
+        confidence: Some(0.95),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: true,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: OutputResponseShape::FileToken,
+            requires_content_evidence: true,
+            delivery_required: false,
+            delivery_intent: OutputDeliveryIntent::None,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "/workspace/project".to_string(),
+            ..IntentOutputContract::default()
+        },
+    };
+    let mut out = super::normalizer_output_from_fallback(
+        "modify project and output strict json",
+        "test_fallback",
+        decision,
+        None,
+    );
+    out.turn_analysis = Some(super::TurnAnalysis {
+        turn_type: None,
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: Some(serde_json::json!({
+            "required_machine_fields": [
+                "changed_files",
+                "test_command",
+                "test_status",
+                "functions",
+                "error_codes"
+            ]
+        })),
+        attachment_processing_required: false,
+    });
+
+    let route = super::route_result_from_normalizer(&state, &task, &out);
+
+    assert!(!route.wants_file_delivery);
+    assert!(!route.output_contract.delivery_required);
+    assert_eq!(
+        route.output_contract.delivery_intent,
+        OutputDeliveryIntent::None
+    );
+    assert_eq!(
+        route.output_contract.response_shape,
+        OutputResponseShape::Strict
+    );
+    assert!(route
+        .route_reason
+        .contains("required_machine_fields_clear_delivery_contract"));
+}
+
+#[test]
+fn route_result_preserves_execution_recipe_boundary_despite_executionless_marker() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        task_id: "task-execution-recipe-boundary-marker".to_string(),
+        user_id: 91,
+        chat_id: 202,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"continue code project"}).to_string(),
+    };
+    let decision = super::RouteDecision {
+        resolved_user_intent: "continue code project and output strict machine fields".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "executionless_finalize_trace_plain".to_string(),
+        confidence: Some(0.95),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: true,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: OutputResponseShape::FileToken,
+            requires_content_evidence: true,
+            delivery_required: false,
+            delivery_intent: OutputDeliveryIntent::None,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "/workspace/project".to_string(),
+            ..IntentOutputContract::default()
+        },
+    };
+    let mut out = super::normalizer_output_from_fallback(
+        "continue code project",
+        "test_fallback",
+        decision,
+        None,
+    );
+    out.execution_recipe_hint = Some(ExecutionRecipeSpec {
+        kind: ExecutionRecipeKind::OpsClosedLoop,
+        profile: ExecutionRecipeProfile::CodeChange,
+        target_scope: ExecutionRecipeTargetScope::CurrentRepo,
+        inspect_first: true,
+        validation_required: true,
+        max_repairs: 1,
+    });
+    out.turn_analysis = Some(super::TurnAnalysis {
+        turn_type: None,
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: Some(serde_json::json!({
+            "required_machine_fields": ["changed_files", "test_command", "test_status", "functions"]
+        })),
+        attachment_processing_required: false,
+    });
+
+    let route = super::route_result_from_normalizer(&state, &task, &out);
+
+    assert!(route
+        .route_reason
+        .contains("executionless_finalize_trace_plain"));
+    assert!(route
+        .route_reason
+        .contains("executable_contract_preserved_for_agent_loop"));
+    assert!(!route.wants_file_delivery);
+    assert!(route.ask_mode.is_execute_gate());
+}
+
+#[test]
+fn route_result_marks_alias_only_state_patch_for_deterministic_ack() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        task_id: "task-alias-state-patch".to_string(),
+        user_id: 91,
+        chat_id: 202,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"remember id"}).to_string(),
+    };
+    let decision = super::RouteDecision {
+        resolved_user_intent: "bind session alias".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "memory_boundary".to_string(),
+        confidence: Some(0.95),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: OutputResponseShape::OneSentence,
+            requires_content_evidence: false,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: OutputDeliveryIntent::None,
+            ..IntentOutputContract::default()
+        },
+    };
+    let mut out =
+        super::normalizer_output_from_fallback("remember id", "test_fallback", decision, None);
+    out.turn_analysis = Some(super::TurnAnalysis {
+        turn_type: Some(TurnType::PreferenceOrMemory),
+        target_task_policy: Some(TargetTaskPolicy::Standalone),
+        should_interrupt_active_run: false,
+        state_patch: Some(serde_json::json!({
+            "alias_bindings": [{
+                "alias": "RC-CONT-CN-0428-A",
+                "target": "continuous_test_round_id",
+                "scope": "session"
+            }]
+        })),
+        attachment_processing_required: false,
+    });
+
+    let route = super::route_result_from_normalizer(&state, &task, &out);
+
+    assert!(route.route_reason.contains("alias_state_patch_ack"));
+    assert!(!route.needs_clarify);
+    assert!(!route.wants_file_delivery);
+    assert!(!route.output_contract.requires_content_evidence);
+    assert!(!route.output_contract.delivery_required);
 }
 
 #[test]

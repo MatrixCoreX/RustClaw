@@ -3,9 +3,14 @@ use super::{
     answer_verifier_gap_requests_observed_content_rewrite,
     answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_budget_available,
     answer_verifier_retry_summary, apply_structured_respond_clarify_to_loop_state,
-    commit_answer_verifier_retry_answer, evaluate_round_outcome, initial_execution_recipe_spec,
+    commit_answer_verifier_retry_answer, commit_local_code_strict_json_projection_after_readback,
+    evaluate_round_outcome, executable_contract_observe_only_round_should_continue,
+    forced_boundary_observation_clarify_intent, initial_execution_recipe_spec,
     machine_status_visible_output_format_gap, mark_reply_failed_after_answer_verifier_exhausted,
-    parse_log_analyze_finding, prefer_terminal_model_answer_for_verifier_candidate,
+    parse_log_analyze_finding, post_write_content_evidence_readback_recovery_policy,
+    prefer_terminal_model_answer_for_verifier_candidate,
+    promote_local_code_projection_from_machine_evidence_for_verifier_candidate,
+    promote_publishable_strict_json_projection_for_verifier_candidate,
     record_agent_loop_decision_envelope_output_vars, retry_verifier_accepts_rewritten_answer,
     selected_contract_structured_evidence_gap, should_stop_for_observed_finalize,
     structured_respond_terminal_intent_from_plan,
@@ -1598,6 +1603,8 @@ mod machine_status_visible;
 
 #[path = "loop_control_tests/observed_finalize.rs"]
 mod observed_finalize;
+#[path = "loop_control_tests/post_write_validation_reserve.rs"]
+mod post_write_validation_reserve;
 #[path = "loop_control_tests/recent_artifacts_recovery.rs"]
 mod recent_artifacts_recovery;
 #[path = "loop_control_tests/soft_budget_checkpoint.rs"]

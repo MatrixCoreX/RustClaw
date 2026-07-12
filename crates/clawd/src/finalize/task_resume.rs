@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use serde_json::{json, Value};
 use tracing::warn;
 
@@ -215,6 +217,166 @@ pub(super) fn answer_verifier_retry_applicable(
         && journal_has_successful_non_terminal_step(journal)
         && !journal_has_failed_non_terminal_step(journal);
     pure_chat_agent_loop || observed_tool_evidence
+}
+
+pub(crate) fn answer_verifier_retry_answer_has_required_machine_evidence(
+    journal: Option<&crate::task_journal::TaskJournal>,
+    answer: &str,
+) -> bool {
+    let Some(requirement) = local_code_answer_machine_evidence_requirement(answer) else {
+        return true;
+    };
+    let Some(journal) = journal else {
+        return false;
+    };
+    if !journal_has_code_or_test_artifact_step(journal) {
+        return false;
+    }
+    !requirement.requires_validation_signal
+        || journal.step_results.iter().any(step_has_validation_signal)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LocalCodeAnswerEvidenceRequirement {
+    requires_validation_signal: bool,
+}
+
+fn local_code_answer_machine_evidence_requirement(
+    answer: &str,
+) -> Option<LocalCodeAnswerEvidenceRequirement> {
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(answer.trim()) else {
+        return None;
+    };
+    if object.is_empty() || !object.keys().all(|key| local_code_json_key(key)) {
+        return None;
+    }
+    let has_local_code_result_field = object.keys().any(|key| {
+        matches!(
+            key.as_str(),
+            "created_files"
+                | "changed_files"
+                | "test_command"
+                | "test_status"
+                | "functions"
+                | "error_codes"
+                | "evidence_files"
+                | "project_dir"
+        )
+    });
+    if !has_local_code_result_field {
+        return None;
+    }
+    Some(LocalCodeAnswerEvidenceRequirement {
+        requires_validation_signal: object.contains_key("test_status")
+            || object.contains_key("test_command"),
+    })
+}
+
+fn journal_has_code_or_test_artifact_step(journal: &crate::task_journal::TaskJournal) -> bool {
+    journal.step_results.iter().any(|step| {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            return false;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            return false;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(output.trim()) else {
+            return false;
+        };
+        let extra = value
+            .get("extra")
+            .filter(|extra| extra.is_object())
+            .unwrap_or(&value);
+        let action = extra
+            .get("action")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        if !matches!(
+            action,
+            "write_text" | "append_text" | "read_range" | "read_text_range" | "grep_text"
+        ) {
+            return false;
+        }
+        ["resolved_path", "effective_path", "path"]
+            .iter()
+            .find_map(|field| extra.get(*field).and_then(Value::as_str))
+            .is_some_and(path_looks_like_code_or_test)
+    })
+}
+
+fn step_has_validation_signal(step: &crate::task_journal::TaskJournalStepTrace) -> bool {
+    if step.status != crate::executor::StepExecutionStatus::Ok {
+        return false;
+    }
+    if matches!(step.skill.as_str(), "run_cmd" | "process_basic") {
+        return true;
+    }
+    step.output_excerpt
+        .as_deref()
+        .and_then(|text| serde_json::from_str::<Value>(text.trim()).ok())
+        .is_some_and(output_has_validation_payload)
+}
+
+fn output_has_validation_payload(value: Value) -> bool {
+    value
+        .get("validation_result")
+        .or_else(|| value.get("validation"))
+        .is_some_and(|validation| {
+            validation
+                .get("status")
+                .or_else(|| validation.get("status_code"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|status| !status.is_empty())
+        })
+}
+
+fn local_code_json_key(key: &str) -> bool {
+    matches!(
+        key,
+        "created_files"
+            | "changed_files"
+            | "test_command"
+            | "test_status"
+            | "functions"
+            | "error_codes"
+            | "evidence_files"
+            | "project_dir"
+    )
+}
+
+fn path_looks_like_code_or_test(path: &str) -> bool {
+    let normalized = path.trim().replace('\\', "/");
+    let extension = Path::new(&normalized)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase());
+    let Some(extension) = extension else {
+        return false;
+    };
+    matches!(
+        extension.as_str(),
+        "py" | "rs"
+            | "js"
+            | "jsx"
+            | "ts"
+            | "tsx"
+            | "go"
+            | "java"
+            | "c"
+            | "h"
+            | "cc"
+            | "cpp"
+            | "hpp"
+            | "cs"
+            | "rb"
+            | "php"
+            | "swift"
+            | "kt"
+            | "scala"
+            | "sh"
+    )
 }
 
 fn journal_has_successful_non_terminal_step(journal: &crate::task_journal::TaskJournal) -> bool {

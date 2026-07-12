@@ -223,7 +223,8 @@ pub(crate) async fn run_intent_normalizer(
             execution_recipe_hint,
             execution_finalize_style,
         );
-        let structural_contract_repair = apply_current_turn_structural_contract_repair(
+        let output_contract_before_structural_repair = output_contract.clone();
+        let mut structural_contract_repair = apply_current_turn_structural_contract_repair(
             &out.reason,
             &mut output_contract,
             &surface_req,
@@ -232,6 +233,32 @@ pub(crate) async fn run_intent_normalizer(
             parsed_turn_type,
             parsed_target_task_policy,
         );
+        if inline_structured_payload_repair_yields_to_execution_context(
+            structural_contract_repair,
+            execution_recipe_hint,
+            execution_recipe_plan_hint.as_ref(),
+            command_payload_declared,
+        ) {
+            output_contract = output_contract_before_structural_repair;
+            if output_contract.semantic_kind_is_unclassified()
+                && matches!(output_contract.locator_kind, OutputLocatorKind::None)
+                && !output_contract.delivery_required
+                && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+            {
+                output_contract.requires_content_evidence = false;
+            }
+            structural_contract_repair =
+                Some("inline_structured_payload_preserved_as_execution_spec");
+            execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
+            synced_route_label = route_trace_label_from_state(
+                needs_clarify,
+                &output_contract,
+                wants_file_delivery,
+                schedule_kind,
+                execution_recipe_hint,
+                execution_finalize_style,
+            );
+        }
         let fs_basic_lifecycle_contract_repair =
             apply_fs_basic_lifecycle_machine_contract_repair(&mut output_contract, &out.reason);
         if fs_basic_lifecycle_contract_repair.is_some() {
@@ -333,6 +360,12 @@ pub(crate) async fn run_intent_normalizer(
             execution_recipe_hint,
         )
         .then_some("executable_contract_preserved_for_agent_loop");
+        let execution_recipe_target_locator_contract_repair =
+            execution_recipe_target_locator_contract_yields_to_agent_loop(
+                &mut output_contract,
+                execution_recipe_plan_hint.as_ref(),
+                command_payload_declared,
+            );
         let explicit_command_execution_repair = apply_explicit_command_execution_contract_repair(
             &state.policy.command_intent,
             req,
@@ -405,6 +438,15 @@ pub(crate) async fn run_intent_normalizer(
         }
         let state_patch_replacement_literal_conflict_repair =
             repair_state_patch_replacement_literal_conflicts(&mut state_patch);
+        let state_patch_required_machine_fields_contract_repair =
+            apply_state_patch_required_machine_fields_contract(
+                &mut output_contract,
+                state_patch.as_ref(),
+            );
+        if state_patch_required_machine_fields_contract_repair.is_some() {
+            wants_file_delivery = false;
+            execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
+        }
         let deictic_missing_locator_state_patch_repair =
             apply_deictic_missing_locator_state_patch_clarify_repair(
                 &mut output_contract,
@@ -566,7 +608,9 @@ pub(crate) async fn run_intent_normalizer(
         for repair_reason in [
             structural_contract_repair,
             state_patch_replacement_literal_conflict_repair,
+            state_patch_required_machine_fields_contract_repair,
             fs_basic_lifecycle_contract_repair,
+            execution_recipe_target_locator_contract_repair,
             active_ordered_scalar_path_loop_context,
             active_observed_output_loop_context,
             structured_contract_hint_repair,
@@ -997,6 +1041,7 @@ pub(crate) async fn run_intent_normalizer(
                 active_ordered_scalar_path_loop_context,
                 active_observed_output_loop_context,
                 structured_contract_hint_repair,
+                state_patch_required_machine_fields_contract_repair,
                 current_turn_anchor_drift_repair,
                 archive_unpack_missing_archive_locator_clarify_repair,
                 structured_clarify_repair,
@@ -1040,6 +1085,85 @@ fn route_trace_decision_from_state(
     } else {
         RouteTraceDecision::Respond
     }
+}
+
+pub(crate) fn inline_structured_payload_repair_yields_to_execution_context(
+    structural_contract_repair: Option<&str>,
+    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+    execution_recipe_plan_hint: Option<&crate::intent_router::ExecutionRecipePlanHint>,
+    command_payload_declared: bool,
+) -> bool {
+    if !matches!(
+        structural_contract_repair,
+        Some(
+            "inline_structured_payload_context_execute"
+                | "inline_structured_transform_contract_repair"
+        )
+    ) {
+        return false;
+    }
+    execution_recipe_hint.is_some_and(|spec| {
+        !matches!(
+            spec.kind,
+            crate::execution_recipe::ExecutionRecipeKind::None
+        )
+    }) || execution_recipe_plan_hint_declares_execution(execution_recipe_plan_hint)
+        || command_payload_declared
+}
+
+pub(crate) fn execution_recipe_target_locator_contract_yields_to_agent_loop(
+    output_contract: &mut IntentOutputContract,
+    execution_recipe_plan_hint: Option<&crate::intent_router::ExecutionRecipePlanHint>,
+    command_payload_declared: bool,
+) -> Option<&'static str> {
+    if !execution_recipe_plan_hint_declares_execution(execution_recipe_plan_hint)
+        && !command_payload_declared
+    {
+        return None;
+    }
+    if !output_contract.semantic_kind_is_unclassified()
+        || output_contract.delivery_required
+        || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        || !matches!(
+            output_contract.response_shape,
+            OutputResponseShape::Free
+                | OutputResponseShape::OneSentence
+                | OutputResponseShape::Strict
+        )
+    {
+        return None;
+    }
+    if !output_contract.requires_content_evidence
+        && matches!(output_contract.locator_kind, OutputLocatorKind::None)
+        && output_contract.locator_hint.trim().is_empty()
+    {
+        return None;
+    }
+    output_contract.requires_content_evidence = false;
+    output_contract.locator_kind = OutputLocatorKind::None;
+    output_contract.locator_hint.clear();
+    Some("execution_recipe_target_locator_preserved_for_agent_loop")
+}
+
+fn execution_recipe_plan_hint_declares_execution(
+    execution_recipe_plan_hint: Option<&crate::intent_router::ExecutionRecipePlanHint>,
+) -> bool {
+    execution_recipe_plan_hint.is_some_and(|hint| {
+        let kind = hint.kind.trim();
+        !kind.is_empty() && kind != "none"
+            || hint
+                .command
+                .as_deref()
+                .is_some_and(|command| !command.trim().is_empty())
+            || hint
+                .execution_mode
+                .as_deref()
+                .is_some_and(|mode| !mode.trim().is_empty())
+            || hint
+                .async_adapter_kind
+                .as_deref()
+                .is_some_and(|adapter| !adapter.trim().is_empty())
+    })
 }
 
 fn route_trace_label_from_decision(

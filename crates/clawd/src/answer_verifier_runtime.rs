@@ -687,11 +687,387 @@ pub(super) fn structured_machine_projection_can_skip_answer_verifier(
     if route_result.needs_clarify {
         return false;
     }
+    if journal_grounded_local_code_strict_json_projection_can_skip_answer_verifier(
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
+        return true;
+    }
     finalizer_grounded_machine_payload_can_skip_verifier(journal)
         && is_structured_machine_projection(candidate_answer)
 }
 
+pub(crate) fn post_write_content_evidence_missing_before_verifier(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    route_result.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+        && local_code_strict_json_projection_has_supported_keys(candidate_answer)
+        && journal_has_code_write_validation_missing_readback(journal)
+}
+
+fn journal_grounded_local_code_strict_json_projection_can_skip_answer_verifier(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    let contract = route_result.effective_output_contract();
+    if !local_code_strict_json_projection_has_supported_keys(candidate_answer)
+        || !journal_has_successful_nonterminal_observation(journal)
+    {
+        return false;
+    }
+    let strict_contract_matches = contract.requires_content_evidence
+        && !contract.delivery_required
+        && matches!(contract.response_shape, crate::OutputResponseShape::Strict)
+        && (latest_synthesis_step_matches_candidate(journal, candidate_answer)
+            || strict_json_projection_observation_matches_candidate(journal, candidate_answer))
+        && crate::task_journal::evidence_coverage_for_route(route_result, journal).is_complete();
+    let publishable_projection_matches = route_result
+        .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+        && strict_json_projection_observation_matches_candidate(journal, candidate_answer)
+        && (journal_has_code_write_readback_validation_evidence(journal)
+            || journal_has_readback_only_code_validation_evidence(journal));
+    strict_contract_matches || publishable_projection_matches
+}
+
+fn strict_json_projection_observation_matches_candidate(
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    let candidate = candidate_answer.trim();
+    if candidate.is_empty() {
+        return false;
+    }
+    journal.task_observations.iter().rev().any(|observation| {
+        observation.get("kind").and_then(serde_json::Value::as_str)
+            == Some("agent_loop_strict_json_projection")
+            && observation
+                .get("owner_layer")
+                .and_then(serde_json::Value::as_str)
+                == Some("agent_loop")
+            && observation
+                .get("publishable")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            && observation
+                .get("output")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                == Some(candidate)
+    })
+}
+
+fn local_code_strict_json_projection_has_supported_keys(candidate_answer: &str) -> bool {
+    let Ok(serde_json::Value::Object(object)) =
+        serde_json::from_str::<serde_json::Value>(candidate_answer.trim())
+    else {
+        return false;
+    };
+    if object.len() < 2 || object.len() > 8 {
+        return false;
+    }
+    object.iter().all(|(key, value)| {
+        matches!(
+            key.as_str(),
+            "created_files"
+                | "changed_files"
+                | "test_command"
+                | "test_status"
+                | "functions"
+                | "error_codes"
+                | "evidence_files"
+                | "project_dir"
+        ) && json_machine_projection_value_has_payload(value)
+    })
+}
+
+fn latest_synthesis_step_matches_candidate(
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    let candidate = candidate_answer.trim();
+    journal
+        .step_results
+        .iter()
+        .rev()
+        .find(|step| {
+            step.status == crate::executor::StepExecutionStatus::Ok
+                && step.skill == "synthesize_answer"
+        })
+        .is_some_and(|step| {
+            step.output_excerpt
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|output| output == candidate)
+        })
+}
+
+fn journal_has_successful_nonterminal_observation(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    journal.step_results.iter().any(|step| {
+        step.status == crate::executor::StepExecutionStatus::Ok
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+            && step
+                .output_excerpt
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|output| !output.is_empty())
+    })
+}
+
+fn journal_has_code_write_readback_validation_evidence(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    let (written_paths, readback_paths, validation_ok) =
+        journal_code_write_readback_validation_state(journal);
+    validation_ok
+        && !written_paths.is_empty()
+        && written_paths
+            .iter()
+            .all(|path| readback_paths.contains(path))
+}
+
+fn journal_has_code_write_validation_missing_readback(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    let (written_paths, readback_paths, validation_ok) =
+        journal_code_write_readback_validation_state(journal);
+    validation_ok
+        && !written_paths.is_empty()
+        && written_paths
+            .iter()
+            .any(|path| !readback_paths.contains(path))
+}
+
+fn journal_has_readback_only_code_validation_evidence(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    let mut source_dirs = std::collections::BTreeSet::new();
+    let mut test_dirs = std::collections::BTreeSet::new();
+    let mut validation_ok = false;
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            continue;
+        }
+        if step.skill == "run_cmd" {
+            validation_ok = true;
+            continue;
+        }
+        let Some(extra) = step_output_extra_object(step) else {
+            continue;
+        };
+        if !matches!(
+            extra.get("action").and_then(serde_json::Value::as_str),
+            Some("read_range" | "read_text_range")
+        ) {
+            continue;
+        }
+        if !extra
+            .get("excerpt")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|excerpt| !excerpt.trim().is_empty())
+        {
+            continue;
+        }
+        let Some(path) = extra
+            .get("resolved_path")
+            .or_else(|| extra.get("effective_path"))
+            .or_else(|| extra.get("path"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        else {
+            continue;
+        };
+        let Some(parent) = normalized_code_evidence_parent(path) else {
+            continue;
+        };
+        if path_looks_like_test_code_file(path) {
+            test_dirs.insert(parent);
+        } else if path_looks_like_code_file(path) {
+            source_dirs.insert(parent);
+        }
+    }
+    validation_ok
+        && !source_dirs.is_empty()
+        && !test_dirs.is_empty()
+        && source_dirs.iter().any(|dir| test_dirs.contains(dir))
+}
+
+fn journal_code_write_readback_validation_state(
+    journal: &crate::task_journal::TaskJournal,
+) -> (
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
+    bool,
+) {
+    let mut latest_write_indices = std::collections::BTreeMap::<String, usize>::new();
+    let mut readback_records = Vec::<(String, usize)>::new();
+    let mut validation_indices = Vec::<usize>::new();
+    let mut readback_paths = std::collections::BTreeSet::new();
+    for (index, step) in journal.step_results.iter().enumerate() {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            continue;
+        }
+        if step.skill == "run_cmd" {
+            validation_indices.push(index);
+            continue;
+        }
+        let Some(extra) = step_output_extra_object(step) else {
+            continue;
+        };
+        let action = extra.get("action").and_then(serde_json::Value::as_str);
+        let path = extra
+            .get("resolved_path")
+            .or_else(|| extra.get("effective_path"))
+            .or_else(|| extra.get("path"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty());
+        match (action, path) {
+            (Some("write_text" | "append_text"), Some(path)) => {
+                latest_write_indices.insert(normalize_code_evidence_path(path), index);
+            }
+            (Some("read_range" | "read_text_range"), Some(path))
+                if extra
+                    .get("excerpt")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|excerpt| !excerpt.trim().is_empty()) =>
+            {
+                readback_records.push((normalize_code_evidence_path(path), index));
+            }
+            _ => {}
+        }
+    }
+    let written_paths = latest_write_indices
+        .keys()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    for (written_path, write_index) in &latest_write_indices {
+        if readback_records.iter().any(|(readback_path, read_index)| {
+            *read_index > *write_index && code_evidence_paths_match(readback_path, written_path)
+        }) {
+            readback_paths.insert(written_path.clone());
+        }
+    }
+    let validation_ok =
+        latest_write_indices
+            .values()
+            .max()
+            .copied()
+            .is_some_and(|latest_write_index| {
+                validation_indices
+                    .iter()
+                    .any(|validation_index| *validation_index > latest_write_index)
+            });
+    (written_paths, readback_paths, validation_ok)
+}
+
+fn normalize_code_evidence_path(path: &str) -> String {
+    path.trim()
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .to_string()
+}
+
+fn normalized_code_evidence_parent(path: &str) -> Option<String> {
+    let normalized = normalize_code_evidence_path(path);
+    std::path::Path::new(&normalized)
+        .parent()
+        .map(|parent| parent.to_string_lossy().replace('\\', "/"))
+        .filter(|parent| !parent.trim().is_empty())
+}
+
+fn path_looks_like_code_file(path: &str) -> bool {
+    let normalized = normalize_code_evidence_path(path);
+    let extension = std::path::Path::new(&normalized)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase());
+    matches!(
+        extension.as_deref(),
+        Some(
+            "py" | "rs"
+                | "js"
+                | "jsx"
+                | "ts"
+                | "tsx"
+                | "go"
+                | "java"
+                | "c"
+                | "h"
+                | "cc"
+                | "cpp"
+                | "hpp"
+                | "cs"
+                | "rb"
+                | "php"
+                | "swift"
+                | "kt"
+                | "scala"
+                | "sh"
+        )
+    )
+}
+
+fn path_looks_like_test_code_file(path: &str) -> bool {
+    if !path_looks_like_code_file(path) {
+        return false;
+    }
+    let normalized = normalize_code_evidence_path(path);
+    let Some(name) = std::path::Path::new(&normalized)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_ascii_lowercase())
+    else {
+        return false;
+    };
+    name.starts_with("test_")
+        || name.ends_with("_test.py")
+        || name.ends_with("_test.rs")
+        || name.ends_with(".test.js")
+        || name.ends_with(".test.ts")
+        || name.ends_with(".spec.js")
+        || name.ends_with(".spec.ts")
+}
+
+fn code_evidence_paths_match(candidate: &str, expected: &str) -> bool {
+    let candidate = normalize_code_evidence_path(candidate);
+    let expected = normalize_code_evidence_path(expected);
+    if candidate == expected {
+        return true;
+    }
+    let (shorter, longer) = if candidate.len() <= expected.len() {
+        (candidate.as_str(), expected.as_str())
+    } else {
+        (expected.as_str(), candidate.as_str())
+    };
+    !shorter.starts_with('/') && !shorter.is_empty() && longer.ends_with(&format!("/{shorter}"))
+}
+
+fn step_output_extra_object(
+    step: &crate::task_journal::TaskJournalStepTrace,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let output = step.output_excerpt.as_deref()?.trim();
+    let value = serde_json::from_str::<serde_json::Value>(output).ok()?;
+    value
+        .get("extra")
+        .and_then(serde_json::Value::as_object)
+        .or_else(|| value.as_object())
+        .cloned()
+}
+
 fn is_structured_machine_projection(candidate_answer: &str) -> bool {
+    if json_object_is_structured_machine_projection(candidate_answer) {
+        return true;
+    }
     let mut field_count = 0usize;
     let mut anchor_count = 0usize;
     for line in candidate_answer
@@ -714,6 +1090,60 @@ fn is_structured_machine_projection(candidate_answer: &str) -> bool {
         }
     }
     field_count >= 2 && anchor_count > 0
+}
+
+fn json_object_is_structured_machine_projection(candidate_answer: &str) -> bool {
+    let Ok(serde_json::Value::Object(object)) =
+        serde_json::from_str::<serde_json::Value>(candidate_answer.trim())
+    else {
+        return false;
+    };
+    if object.len() < 2 || object.len() > 24 {
+        return false;
+    }
+    let mut anchor_count = 0usize;
+    for (key, value) in &object {
+        if !is_machine_projection_key(key) || !json_machine_projection_value_has_payload(value) {
+            return false;
+        }
+        if machine_projection_key_is_anchor(key)
+            || json_machine_projection_value_is_structured(value)
+        {
+            anchor_count += 1;
+        }
+    }
+    anchor_count > 0
+}
+
+fn json_machine_projection_value_has_payload(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => false,
+        serde_json::Value::String(text) => json_machine_projection_string_has_payload(text),
+        serde_json::Value::Array(items) => {
+            !items.is_empty() && items.iter().all(json_machine_projection_value_has_payload)
+        }
+        serde_json::Value::Object(object) => {
+            !object.is_empty()
+                && object
+                    .values()
+                    .all(json_machine_projection_value_has_payload)
+        }
+        serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
+    }
+}
+
+fn json_machine_projection_string_has_payload(text: &str) -> bool {
+    let trimmed = text.trim();
+    !trimmed.is_empty()
+        && !trimmed.contains("{{")
+        && !matches!(trimmed, "<missing>" | "not_observed" | "null")
+}
+
+fn json_machine_projection_value_is_structured(value: &serde_json::Value) -> bool {
+    matches!(
+        value,
+        serde_json::Value::Array(_) | serde_json::Value::Object(_)
+    )
 }
 
 fn is_machine_projection_key(key: &str) -> bool {

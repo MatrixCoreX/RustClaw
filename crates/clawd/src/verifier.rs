@@ -376,6 +376,14 @@ fn effective_step_risk_level(
     if crate::execution_recipe::dry_run_observes_only_action(normalized_skill, args) {
         return SkillRiskLevel::Low;
     }
+    if normalized_skill == "run_cmd"
+        && crate::execution_recipe::action_targets_external_workspace(state, normalized_skill, args)
+    {
+        return SkillRiskLevel::High;
+    }
+    if validation_run_cmd_can_run_autonomously(state, normalized_skill, args) {
+        return SkillRiskLevel::Low;
+    }
     if let Some(risk) = action_scoped_risk_level(state, normalized_skill, args) {
         return risk;
     }
@@ -442,8 +450,14 @@ fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
         crate::execution_recipe::dry_run_observes_only_action(&normalized_skill, &step.args);
     let registry_non_mutating_action =
         registry_declares_non_mutating_planner_action(state, &normalized_skill, &step.args);
+    let autonomous_workspace_fs_mutation =
+        workspace_filesystem_mutation_can_run_autonomously(state, &normalized_skill, &step.args);
+    let autonomous_validation_run_cmd =
+        validation_run_cmd_can_run_autonomously(state, &normalized_skill, &step.args);
     let requires_confirmation = !dry_run_observe_only
         && !registry_non_mutating_action
+        && !autonomous_workspace_fs_mutation
+        && !autonomous_validation_run_cmd
         && (state
             .skill_invocation_requires_confirmation_policy(&normalized_skill, Some(&step.args))
             || is_confirmation_like_skill(&normalized_skill)
@@ -583,6 +597,47 @@ fn risk_exceeds_ceiling(risk: SkillRiskLevel, risk_ceiling: crate::RiskCeiling) 
         crate::RiskCeiling::Medium => 2,
     };
     risk_rank > ceiling_rank
+}
+
+fn fs_basic_action(args: &Value) -> Option<String> {
+    args.as_object()
+        .and_then(|obj| obj.get("action"))
+        .and_then(Value::as_str)
+        .map(normalize_schema_token)
+        .filter(|action| !action.is_empty())
+}
+
+fn workspace_filesystem_mutation_can_run_autonomously(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &Value,
+) -> bool {
+    if normalized_skill != "fs_basic"
+        || !matches!(
+            fs_basic_action(args).as_deref(),
+            Some("make_dir" | "write_text" | "append_text")
+        )
+    {
+        return false;
+    }
+    path_args(args)
+        .into_iter()
+        .any(|path| path_value_is_workspace_scoped(path, &state.skill_rt.workspace_root))
+}
+
+fn validation_run_cmd_can_run_autonomously(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &Value,
+) -> bool {
+    if normalized_skill != "run_cmd"
+        || crate::execution_recipe::action_targets_external_workspace(state, normalized_skill, args)
+    {
+        return false;
+    }
+    let effect =
+        crate::execution_recipe::classify_skill_action_effect(state, normalized_skill, args);
+    effect.validates && !effect.mutates
 }
 
 fn arg_value_is_present(value: &serde_json::Value) -> bool {
@@ -779,12 +834,23 @@ fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
 fn route_requires_contract(route_result: Option<&crate::RouteResult>) -> bool {
     route_result
         .map(|route| {
+            if route_uses_agent_loop_execution_boundary(route) {
+                return false;
+            }
             let contract = route.effective_output_contract();
             !route.output_contract_is_unclassified()
                 || contract.requires_content_evidence
                 || contract.delivery_required
         })
         .unwrap_or(false)
+}
+
+fn route_uses_agent_loop_execution_boundary(route: &crate::RouteResult) -> bool {
+    !route.needs_clarify
+        && !route.output_contract.delivery_required
+        && !route.wants_file_delivery
+        && matches!(route.schedule_kind, crate::ScheduleKind::None)
+        && route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
 }
 
 fn route_requires_clarify_before_tools(
@@ -1561,6 +1627,14 @@ pub(crate) fn verify_plan(
             }
             let safe_autonomous_creation =
                 safe_autonomous_creation_step(state, &normalized_skill, &step.args);
+            let autonomous_workspace_fs_mutation =
+                workspace_filesystem_mutation_can_run_autonomously(
+                    state,
+                    &normalized_skill,
+                    &step.args,
+                );
+            let autonomous_validation_run_cmd =
+                validation_run_cmd_can_run_autonomously(state, &normalized_skill, &step.args);
             let step_risk = effective_step_risk_level(state, &normalized_skill, &step.args);
             let effect = crate::execution_recipe::classify_skill_action_effect(
                 state,
@@ -1570,6 +1644,7 @@ pub(crate) fn verify_plan(
             if input
                 .route_result
                 .is_some_and(|route| risk_exceeds_ceiling(step_risk, route.risk_ceiling))
+                && !autonomous_workspace_fs_mutation
             {
                 issues.push(VerifyIssue {
                     step_id: step.step_id.clone(),
@@ -1583,6 +1658,8 @@ pub(crate) fn verify_plan(
             }
             if !confirmation_already_granted
                 && !safe_autonomous_creation
+                && !autonomous_workspace_fs_mutation
+                && !autonomous_validation_run_cmd
                 && !registry_declares_non_mutating_planner_action(
                     state,
                     &normalized_skill,

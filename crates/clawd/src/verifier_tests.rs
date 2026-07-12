@@ -83,6 +83,8 @@ input_schema = { type = "object", required = ["action"], properties = { action =
 planner_capabilities = [
   { name = "filesystem.stat_paths", action = "stat_paths", effect = "observe", required = ["path|paths"] },
   { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"] },
+  { name = "filesystem.write_file", action = "write_text", effect = "mutate", required = ["path", "content"], risk_level = "high" },
+  { name = "filesystem.make_dir", action = "make_dir", effect = "mutate", required = ["path"], risk_level = "high" },
   { name = "filesystem.remove_path", action = "remove_path", effect = "mutate", required = ["path"], risk_level = "high" },
 ]
 
@@ -697,7 +699,11 @@ fn enforce_mode_blocks_unresolved_call_capability() {
         VerifyMode::Enforce,
     );
 
-    assert!(!result.approved);
+    assert!(
+        !result.approved,
+        "issues: {:?}; permission_decision: {}",
+        result.issues, result.permission_decision
+    );
     assert!(result.blocked_reason.is_some());
     assert!(result
         .issues
@@ -775,7 +781,11 @@ fn enforce_mode_blocks_missing_required_arg() {
         },
         VerifyMode::Enforce,
     );
-    assert!(!result.approved);
+    assert!(
+        !result.approved,
+        "issues: {:?}; permission_decision: {}",
+        result.issues, result.permission_decision
+    );
     assert!(matches!(
         result.issues.first().map(|issue| issue.kind),
         Some(VerifyIssueKind::MissingRequiredArg)
@@ -903,6 +913,112 @@ fn enforce_mode_blocks_mutation_above_low_risk_ceiling() {
             .and_then(serde_json::Value::as_str),
         Some("high")
     );
+}
+
+#[test]
+fn workspace_fs_basic_mutation_does_not_emit_route_ceiling_or_confirmation_noise() {
+    let state = test_state();
+    let task = test_task();
+    let route = route_result_with_risk(false, crate::RiskCeiling::Low);
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "fs_basic".to_string(),
+                    args: json!({
+                        "action": "make_dir",
+                        "path": "run/nl_eval_tmp/verifier_workspace_mutation"
+                    }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "fs_basic".to_string(),
+                    args: json!({
+                        "action": "write_text",
+                        "path": "run/nl_eval_tmp/verifier_workspace_mutation/calc_core.py",
+                        "content": "def add(a, b):\n    return a + b\n"
+                    }),
+                    depends_on: vec!["s1".to_string()],
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation, "issues: {:?}", result.issues);
+    assert!(result.issues.iter().all(|issue| {
+        !matches!(
+            issue.kind,
+            VerifyIssueKind::RiskBudgetExceeded | VerifyIssueKind::ConfirmationRequired
+        )
+    }));
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/1/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
+    );
+}
+
+#[test]
+fn external_fs_basic_mutation_still_exceeds_low_route_ceiling() {
+    let state = test_state();
+    let task = test_task();
+    let route = route_result_with_risk(false, crate::RiskCeiling::Low);
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({
+                    "action": "write_text",
+                    "path": "/etc/rustclaw-verifier-outside.txt",
+                    "content": "outside"
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(
+        !result.approved,
+        "issues: {:?}; permission_decision: {}",
+        result.issues, result.permission_decision
+    );
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::RiskBudgetExceeded)));
 }
 
 #[test]
@@ -1850,3 +1966,6 @@ mod media_artifact;
 
 #[path = "verifier_tests/registry_confirmation.rs"]
 mod registry_confirmation;
+
+#[path = "verifier_tests/agent_loop_execution_contract.rs"]
+mod agent_loop_execution_contract;

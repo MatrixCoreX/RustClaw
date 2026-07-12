@@ -17,19 +17,34 @@ mod loop_control_answer_recovery;
 mod loop_control_answer_recovery_parse;
 #[path = "loop_control_answer_recovery_text.rs"]
 mod loop_control_answer_recovery_text;
+#[path = "loop_control_executable_contract_observe.rs"]
+mod loop_control_executable_contract_observe;
 #[path = "loop_control_filesystem_mutation_recovery.rs"]
 mod loop_control_filesystem_mutation_recovery;
+#[path = "loop_control_finalization_gate.rs"]
+mod loop_control_finalization_gate;
 #[path = "loop_control_local_health_recovery.rs"]
 mod loop_control_local_health_recovery;
+#[path = "loop_control_post_write_evidence_guard.rs"]
+mod loop_control_post_write_evidence_guard;
 #[path = "loop_control_recent_artifacts_recovery.rs"]
 mod loop_control_recent_artifacts_recovery;
+#[path = "loop_control_verifier_retry_commit.rs"]
+mod loop_control_verifier_retry_commit;
 
 use loop_control_answer_recovery::*;
 use loop_control_answer_recovery_parse::*;
 use loop_control_answer_recovery_text::*;
+use loop_control_executable_contract_observe::{
+    executable_contract_observation_round_needs_planner,
+    executable_contract_observe_only_round_should_continue,
+};
 use loop_control_filesystem_mutation_recovery::*;
+use loop_control_finalization_gate::*;
 use loop_control_local_health_recovery::*;
+use loop_control_post_write_evidence_guard::*;
 use loop_control_recent_artifacts_recovery::*;
+use loop_control_verifier_retry_commit::verifier_retry_answer_has_required_machine_evidence;
 
 fn has_authoritative_delivery(loop_state: &LoopState) -> bool {
     !loop_state.delivery_messages.is_empty()
@@ -54,6 +69,10 @@ fn answer_verifier_output_format_machine_payload_gap(
             .missing_evidence_fields
             .iter()
             .any(|field| field == "output_format")
+        || verifier
+            .missing_evidence_fields
+            .iter()
+            .any(|field| field != "output_format")
     {
         return false;
     }
@@ -221,13 +240,11 @@ fn answer_verifier_summary_to_out(
     .normalized()
 }
 
-fn retry_verifier_accepts_rewritten_answer(
-    verifier: &crate::answer_verifier::AnswerVerifierOut,
-) -> bool {
-    verifier.pass && !verifier.high_confidence_gap()
-}
-
-fn commit_answer_verifier_retry_answer(reply: &mut AskReply, retried_answer: String) {
+fn commit_answer_verifier_retry_answer(reply: &mut AskReply, retried_answer: String) -> bool {
+    if !verifier_retry_answer_has_required_machine_evidence(reply, &retried_answer) {
+        info!("answer_verifier_retry_commit_rejected_missing_machine_validation_evidence");
+        return false;
+    }
     let mut messages = reply
         .messages
         .iter()
@@ -248,6 +265,7 @@ fn commit_answer_verifier_retry_answer(reply: &mut AskReply, retried_answer: Str
     reply.should_fail_task = false;
     reply.error_text = None;
     reply.is_llm_reply = true;
+    true
 }
 
 fn record_session_start_hooks(task: &ClaimedTask, user_text: &str, loop_state: &mut LoopState) {
@@ -428,6 +446,53 @@ fn structured_respond_terminal_intent_from_route_owned_clarify(
         message_key: None,
         field_path: None,
         locator_kind: Some(route.output_contract.locator_kind.as_str().to_string()),
+    })
+}
+
+fn structured_respond_terminal_intent_from_boundary_observation_clarify(
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> Option<StructuredRespondTerminalIntent> {
+    if !loop_state.boundary_observation_needs_clarify
+        || !actions_allow_structured_respond_terminal_intent(actions)
+    {
+        return None;
+    }
+    let content = actions.iter().find_map(|action| match action {
+        AgentAction::Respond { content } => Some(content.trim()),
+        _ => None,
+    })?;
+    if content.is_empty() {
+        return None;
+    }
+    Some(StructuredRespondTerminalIntent {
+        terminal_intent: "clarify".to_string(),
+        content: Some(content.to_string()),
+        clarify_reason_code: Some("boundary_observation_needs_clarify".to_string()),
+        missing_slot: None,
+        message_key: None,
+        field_path: None,
+        locator_kind: None,
+    })
+}
+
+fn forced_boundary_observation_clarify_intent(
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> Option<StructuredRespondTerminalIntent> {
+    if !loop_state.boundary_observation_needs_clarify
+        || actions_allow_structured_respond_terminal_intent(actions)
+    {
+        return None;
+    }
+    Some(StructuredRespondTerminalIntent {
+        terminal_intent: "clarify".to_string(),
+        content: None,
+        clarify_reason_code: Some("boundary_observation_needs_clarify".to_string()),
+        missing_slot: Some("referent".to_string()),
+        message_key: Some("clawd.clarify.missing_referent".to_string()),
+        field_path: Some("agent_loop.boundary_observations.missing_referent".to_string()),
+        locator_kind: Some("none".to_string()),
     })
 }
 
@@ -791,6 +856,32 @@ fn record_agent_loop_decision_envelope_output_vars(
         .output_vars
         .entry("agent_loop.first_decision_envelope".to_string())
         .or_insert_with(|| envelope.to_string());
+    for field in [
+        "clarify_reason_code",
+        "missing_slot",
+        "message_key",
+        "field_path",
+        "locator_kind",
+    ] {
+        let mut loop_key = String::from("agent_loop.");
+        loop_key.push_str(field);
+        loop_state.output_vars.remove(&loop_key);
+        let mut envelope_key = String::from("agent_loop.decision_envelope.");
+        envelope_key.push_str(field);
+        loop_state.output_vars.remove(&envelope_key);
+    }
+    if envelope
+        .get("terminal_intent")
+        .and_then(Value::as_str)
+        .is_some_and(|intent| intent != "clarify")
+    {
+        loop_state
+            .output_vars
+            .remove("agent_loop.recovered_terminal_intent");
+        loop_state
+            .output_vars
+            .remove("agent_loop.nonblocking_clarify_answer");
+    }
     if envelope
         .get("control_intent")
         .and_then(Value::as_str)
@@ -961,6 +1052,9 @@ fn should_stop_for_observed_finalize(
     let Some(route_result) = route_result else {
         return false;
     };
+    if executable_contract_observation_round_needs_planner(route_result, loop_state, actions) {
+        return false;
+    }
     if route_result.needs_clarify
         || !loop_state.has_tool_or_skill_output
         || has_authoritative_delivery(loop_state)
@@ -1321,6 +1415,12 @@ async fn run_agent_round(
                 &prepared_round.actions,
             )
         })
+        .or_else(|| {
+            structured_respond_terminal_intent_from_boundary_observation_clarify(
+                loop_state,
+                &prepared_round.actions,
+            )
+        })
     {
         if let Some(outcome) =
             try_replan_avoidable_low_risk_freeform_clarify(loop_state, route_result, &intent)
@@ -1363,6 +1463,19 @@ async fn run_agent_round(
         return Ok(outcome);
     }
     let actions = prepared_round.actions;
+    if let Some(intent) = forced_boundary_observation_clarify_intent(loop_state, &actions) {
+        let outcome = apply_structured_respond_clarify_to_loop_state(loop_state, &intent);
+        info!(
+            "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
+            task.task_id,
+            loop_state.round_no,
+            outcome.executed_actions,
+            outcome.no_progress,
+            outcome.stop_signal.as_deref().unwrap_or(""),
+            crate::truncate_for_log(outcome.next_goal_hint.as_deref().unwrap_or(""))
+        );
+        return Ok(outcome);
+    }
     let mut outcome = execute_actions_once(
         state,
         task,
@@ -1378,6 +1491,18 @@ async fn run_agent_round(
         if let Some(stop_signal) = terminal_user_answer_stop_signal(loop_state) {
             outcome.stop_signal = Some(stop_signal.to_string());
         }
+    }
+    if outcome.stop_signal.is_none()
+        && route_result.is_some_and(|route| {
+            executable_contract_observe_only_round_should_continue(route, loop_state, &actions)
+        })
+    {
+        loop_state.has_recoverable_failure_context = true;
+        loop_state.output_vars.insert(
+            "agent_loop.executable_contract_observe_only_continue".to_string(),
+            "true".to_string(),
+        );
+        outcome.stop_signal = Some("recoverable_failure_continue_round".to_string());
     }
     if outcome.stop_signal.is_none()
         && should_stop_for_observed_finalize(agent_run_context, loop_state, &actions)
@@ -1538,10 +1663,41 @@ pub(super) async fn run_agent_with_loop_seeded(
         .await?;
         let answer_contract_route_result =
             answer_contract_route_result_for_reply(agent_run_context, &reply);
+        promote_local_code_projection_from_machine_evidence_for_verifier_candidate(
+            &mut reply,
+            answer_contract_route_result.as_ref(),
+            user_text,
+            &pre_finalize_loop_state,
+            agent_run_context,
+        );
+        promote_publishable_strict_json_projection_for_verifier_candidate(
+            &mut reply,
+            answer_contract_route_result.as_ref(),
+            &pre_finalize_loop_state,
+        );
         prefer_terminal_model_answer_for_verifier_candidate(
             &mut reply,
             answer_contract_route_result.as_ref(),
         );
+        enforce_post_write_content_evidence_guard(&mut reply);
+        enforce_code_mutation_validation_success_guard(&mut reply);
+        let mut pre_verifier_recovery_loop_state = pre_finalize_loop_state.clone();
+        if try_run_post_write_validation_reserve_recovery(
+            state,
+            task,
+            goal,
+            user_text,
+            &policy,
+            &mut pre_verifier_recovery_loop_state,
+            &reply,
+            agent_run_context,
+        )
+        .await?
+        {
+            loop_state = pre_verifier_recovery_loop_state;
+            round = loop_state.max_rounds + 1;
+            continue;
+        }
         attach_answer_verifier_if_missing(
             state,
             task,
@@ -1551,6 +1707,8 @@ pub(super) async fn run_agent_with_loop_seeded(
             &mut reply,
         )
         .await;
+        enforce_post_write_content_evidence_guard(&mut reply);
+        enforce_code_mutation_validation_success_guard(&mut reply);
         let route_result = answer_contract_route_result.as_ref();
         suppress_answer_verifier_retry_if_structurally_satisfied(&mut reply, route_result);
         suppress_answer_verifier_retry_if_user_locator_disambiguation(&mut reply, route_result);
@@ -1587,20 +1745,35 @@ pub(super) async fn run_agent_with_loop_seeded(
                         )
                         .await;
                         if let Some(retry_verifier) = retry_verifier {
-                            if retry_verifier_accepts_rewritten_answer(&retry_verifier) {
-                                commit_answer_verifier_retry_answer(&mut reply, retried_answer);
+                            if retry_verifier_accepts_rewritten_answer(
+                                &retry_verifier,
+                                route_result,
+                                &retried_answer,
+                            ) {
+                                if commit_answer_verifier_retry_answer(&mut reply, retried_answer) {
+                                    info!(
+                                        "answer_verifier_machine_payload_rewritten_to_visible_answer"
+                                    );
+                                    return Ok(reply);
+                                }
+                            }
+                            if let Some(journal) = reply.task_journal.as_mut() {
+                                journal.record_answer_verifier_summary(retry_verifier);
+                            }
+                        } else if retry_rewritten_answer_is_publishable(
+                            route_result,
+                            &retried_answer,
+                        ) {
+                            if commit_answer_verifier_retry_answer(&mut reply, retried_answer) {
                                 info!(
                                     "answer_verifier_machine_payload_rewritten_to_visible_answer"
                                 );
                                 return Ok(reply);
                             }
-                            if let Some(journal) = reply.task_journal.as_mut() {
-                                journal.record_answer_verifier_summary(retry_verifier);
-                            }
                         } else {
-                            commit_answer_verifier_retry_answer(&mut reply, retried_answer);
-                            info!("answer_verifier_machine_payload_rewritten_to_visible_answer");
-                            return Ok(reply);
+                            info!(
+                                "answer_verifier_retry_rewritten_answer_unpublishable_unresolved_machine_fields"
+                            );
                         }
                     }
                 }
@@ -1620,6 +1793,41 @@ pub(super) async fn run_agent_with_loop_seeded(
                 .await
             {
                 return Ok(reply);
+            }
+            let mut deterministic_recovery_loop_state = pre_finalize_loop_state.clone();
+            if try_run_post_write_validation_reserve_recovery(
+                state,
+                task,
+                goal,
+                user_text,
+                &policy,
+                &mut deterministic_recovery_loop_state,
+                &reply,
+                agent_run_context,
+            )
+            .await?
+            {
+                loop_state = deterministic_recovery_loop_state;
+                round = loop_state.max_rounds + 1;
+                continue;
+            }
+            if answer_verifier_retry_budget_available(&policy, answer_verifier_retry_count) {
+                loop_state = pre_finalize_loop_state.clone();
+                if try_run_post_write_content_evidence_readback_recovery(
+                    state,
+                    task,
+                    goal,
+                    user_text,
+                    &policy,
+                    &mut loop_state,
+                    &reply,
+                    agent_run_context,
+                )
+                .await?
+                {
+                    round = loop_state.max_rounds + 1;
+                    continue;
+                }
             }
             if answer_verifier_retry_budget_available(&policy, answer_verifier_retry_count) {
                 loop_state = pre_finalize_loop_state;
@@ -1748,99 +1956,6 @@ pub(super) async fn run_agent_with_loop_seeded(
         }
         return Ok(reply);
     }
-}
-
-fn answer_verifier_retry_budget_available(
-    policy: &AgentLoopGuardPolicy,
-    answer_verifier_retry_count: usize,
-) -> bool {
-    answer_verifier_retry_count < policy.answer_verifier_retry_limit
-}
-
-async fn attach_answer_verifier_if_missing(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
-    policy: &AgentLoopGuardPolicy,
-    route_result: Option<&RouteResult>,
-    reply: &mut AskReply,
-) {
-    if reply.should_fail_task || reply_final_status_is_clarify(reply) {
-        return;
-    }
-    let Some(route_result) = route_result else {
-        return;
-    };
-    let Some(journal) = reply.task_journal.as_mut() else {
-        return;
-    };
-    if journal.answer_verifier_summary.is_some() {
-        return;
-    }
-    if let Some((selected_class, answer_verifier)) =
-        selected_contract_structured_evidence_gap(policy, route_result, journal)
-    {
-        journal.record_answer_verifier_summary(answer_verifier);
-        let summary = journal.answer_verifier_summary.as_ref();
-        journal.rollout_attribution.push(
-            crate::task_journal::TaskJournalRolloutAttribution::selected_contract_structured_evidence_block(
-                summary,
-                selected_class,
-            ),
-        );
-        return;
-    }
-    if let Some(answer_verifier) =
-        machine_status_visible_output_format_gap(route_result, journal, &reply.text)
-    {
-        journal.record_answer_verifier_summary(answer_verifier);
-        return;
-    }
-    if let Some(answer_verifier) = crate::answer_verifier::verify_answer_observe_only(
-        state,
-        task,
-        user_text,
-        route_result,
-        journal,
-        &reply.text,
-    )
-    .await
-    {
-        journal.record_answer_verifier_summary(answer_verifier);
-    }
-}
-
-fn answer_contract_route_result_for_reply(
-    agent_run_context: Option<&AgentRunContext>,
-    reply: &AskReply,
-) -> Option<RouteResult> {
-    reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.route_result.clone())
-        .or_else(|| agent_run_context.and_then(|ctx| ctx.route_result.clone()))
-}
-
-fn selected_contract_structured_evidence_gap(
-    policy: &AgentLoopGuardPolicy,
-    route_result: &RouteResult,
-    journal: &crate::task_journal::TaskJournal,
-) -> Option<(&'static str, crate::answer_verifier::AnswerVerifierOut)> {
-    if !policy.structured_evidence_required_for_selected_contracts {
-        return None;
-    }
-    if route_result.risk_ceiling == crate::RiskCeiling::High
-        || route_result.schedule_kind != crate::ScheduleKind::None
-    {
-        return None;
-    }
-    let selected_class =
-        super::migration_class::agent_decides_eligible_migration_class(route_result);
-    if selected_class == "none" {
-        return None;
-    }
-    crate::answer_verifier::local_missing_evidence_verifier_gap(route_result, journal)
-        .map(|gap| (selected_class, gap))
 }
 
 #[cfg(test)]

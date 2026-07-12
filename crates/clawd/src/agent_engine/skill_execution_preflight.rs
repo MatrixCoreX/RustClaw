@@ -157,6 +157,14 @@ pub(super) fn evidence_policy_action_policy_error(
     ) {
         return None;
     }
+    if let Some(err) = executionless_boundary_tool_policy_error(
+        state,
+        loop_state,
+        normalized_skill,
+        classification_args,
+    ) {
+        return Some(err);
+    }
     if let Some(err) = run_cmd_dry_run_policy_error(
         state,
         loop_state.route_policy_context.as_ref(),
@@ -186,6 +194,17 @@ pub(super) fn evidence_policy_action_policy_error(
         )
     })?;
     if policy.is_allowed() {
+        return None;
+    }
+    if literal_run_cmd_allows_contract_override(
+        normalized_skill,
+        classification_args,
+        policy.decision,
+    ) {
+        info!(
+            "preflight_keep_literal_run_cmd_despite_contract skill={} action={} contract={}",
+            normalized_skill, policy.action_key, policy.contract_match
+        );
         return None;
     }
     if active_ops_recipe_allows_mutation_despite_contract(
@@ -291,6 +310,98 @@ pub(super) fn evidence_policy_action_policy_error(
             ),
         })),
     ))
+}
+
+fn literal_run_cmd_allows_contract_override(
+    normalized_skill: &str,
+    classification_args: &Value,
+    decision: crate::evidence_policy::ActionPolicyDecision,
+) -> bool {
+    normalized_skill.eq_ignore_ascii_case("run_cmd")
+        && run_cmd_is_literal_user_command(classification_args)
+        && classification_args
+            .get("command")
+            .and_then(Value::as_str)
+            .is_some_and(|command| !command.trim().is_empty())
+        && matches!(
+            decision,
+            crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
+                | crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed
+        )
+}
+
+fn executionless_boundary_tool_policy_error(
+    state: &AppState,
+    loop_state: &LoopState,
+    normalized_skill: &str,
+    classification_args: &Value,
+) -> Option<String> {
+    let route = loop_state.route_policy_context.as_ref()?;
+    if !route_is_executionless_terminal_boundary(route) {
+        return None;
+    }
+    if executionless_boundary_allows_literal_run_cmd(normalized_skill, classification_args) {
+        return None;
+    }
+    Some(crate::skills::structured_skill_error_from_parts(
+        normalized_skill,
+        "contract_action_rejected",
+        "executionless_boundary_tool_call_blocked",
+        None,
+        Some(json!({
+            "reason_code": "executionless_boundary_tool_call_blocked",
+            "message_key": "clawd.contract.executionless_boundary_tool_call_blocked",
+            "failure_attribution": crate::evidence_policy::FailureAttribution::ContractGap.as_str(),
+            "decision": crate::policy_decision::PolicyDecision::Deny.as_token(),
+            "action": crate::evidence_policy::ActionRef::from_skill_args(
+                normalized_skill,
+                classification_args,
+            )
+            .map(|action| action.as_key())
+            .unwrap_or_else(|| normalized_skill.to_string()),
+            "contract_match": "executionless_terminal_answer",
+            "required_evidence": Vec::<String>::new(),
+            "preferred_actions": ["respond", "synthesize_answer"],
+            "final_answer_shape": route.output_contract.response_shape.as_str(),
+            "policy_mode": "enforce",
+            "evidence_scope": "conversation",
+            "permission_decision": preflight_permission_decision(
+                state,
+                normalized_skill,
+                classification_args,
+                "executionless_boundary_tool_call_blocked",
+                "executionless_boundary_preflight",
+            ),
+        })),
+    ))
+}
+
+fn executionless_boundary_allows_literal_run_cmd(normalized_skill: &str, args: &Value) -> bool {
+    normalized_skill.eq_ignore_ascii_case("run_cmd")
+        && run_cmd_is_literal_user_command(args)
+        && args
+            .get("command")
+            .and_then(Value::as_str)
+            .is_some_and(|command| !command.trim().is_empty())
+}
+
+fn route_is_executionless_terminal_boundary(route: &crate::RouteResult) -> bool {
+    if !route.ask_mode.finalize_chat_wrapped() {
+        return false;
+    }
+    if route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop") {
+        return false;
+    }
+    (route.has_route_reason_machine_marker("executionless_finalize_trace_plain")
+        || route.has_route_reason_machine_marker("standalone_freeform_clarify_loop_context")
+        || route.has_route_reason_machine_marker("alias_state_patch_ack"))
+        && !route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
+        && !route.wants_file_delivery
+        && route.output_contract.locator_kind == crate::OutputLocatorKind::None
+        && route.output_contract.locator_hint.trim().is_empty()
+        && route.output_contract.delivery_intent == crate::OutputDeliveryIntent::None
+        && route.schedule_kind == crate::ScheduleKind::None
 }
 
 fn runtime_async_job_start_allows_run_cmd_despite_contract(

@@ -52,10 +52,51 @@ use self::arg_resolver::{
     rewrite_tool_path_with_written_aliases,
 };
 use self::dispatch_support::{classify_skill_failure_recovery, dispatch_round_action};
+
+pub(crate) fn local_code_strict_json_projection_from_machine_evidence(
+    user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    self::dispatch_support::local_code_strict_json_projection_from_machine_evidence(
+        user_text,
+        loop_state,
+        agent_run_context,
+    )
+}
+
+pub(crate) fn local_code_strict_json_answer_satisfies_request(
+    user_text: &str,
+    answer: &str,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    self::dispatch_support::local_code_strict_json_answer_satisfies_request(
+        user_text,
+        answer,
+        agent_run_context,
+    )
+}
+
+pub(crate) fn local_code_strict_json_projection_should_defer_finalizer_fallback(
+    user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    self::dispatch_support::local_code_strict_json_projection_should_defer_observed_synthesis(
+        user_text,
+        loop_state,
+        agent_run_context,
+    ) || self::dispatch_support::local_code_strict_json_projection_should_defer_until_validation(
+        user_text,
+        loop_state,
+        agent_run_context,
+    )
+}
 use self::execution_loop::execute_actions_once;
 use self::loop_control::{run_agent_with_loop, run_agent_with_loop_seeded};
 use self::loop_state_contract_evidence::{
-    active_plan_file_targets_for_loop_seed, contract_repair_candidate_evidence_for_loop_seed,
+    active_plan_file_targets_for_loop_seed, boundary_observation_needs_clarify_for_loop_seed,
+    contract_repair_candidate_evidence_for_loop_seed,
     default_main_config_contract_evidence_for_loop_seed, first_string_field,
     pre_loop_clarify_candidates_for_loop_seed, registry_capability_contract_evidence_for_loop_seed,
     registry_capability_contract_refs,
@@ -111,6 +152,8 @@ const LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str = "prompts/loop_incrementa
 const LIGHTWEIGHT_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str =
     "prompts/lightweight_incremental_plan_prompt.md";
 const PLAN_REPAIR_PROMPT_LOGICAL_PATH: &str = "prompts/plan_repair_prompt.md";
+const PLANNER_ABORT_COMPACT_RETRY_PROMPT_LOGICAL_PATH: &str =
+    "prompts/planner_abort_compact_retry_prompt.md";
 pub(crate) const TASK_CANCELED_ERR: &str = "__TASK_CANCELED_BY_USER__";
 
 fn ensure_task_running(state: &AppState, task: &ClaimedTask) -> Result<(), String> {
@@ -427,6 +470,10 @@ pub(crate) struct LoopState {
     /// Route-level policy context keeps planner capability refs available to
     /// preflight paths that otherwise only see `output_contract`.
     pub(crate) route_policy_context: Option<crate::RouteResult>,
+    /// Machine boundary fact from AGENT_LOOP_BOUNDARY_OBSERVATIONS. This lets
+    /// the loop accept a terminal clarification even when legacy RouteResult
+    /// fields were normalized back to an execution gate for planner entry.
+    pub(crate) boundary_observation_needs_clarify: bool,
 }
 
 impl LoopState {
@@ -650,6 +697,13 @@ fn seed_loop_state_from_agent_context(
                 .output_vars
                 .insert("active_plan_file_targets".to_string(), encoded);
         }
+    }
+    if boundary_observation_needs_clarify_for_loop_seed(ctx) {
+        loop_state.boundary_observation_needs_clarify = true;
+        loop_state.output_vars.insert(
+            "agent_loop.boundary_observation_needs_clarify".to_string(),
+            "true".to_string(),
+        );
     }
     let current_request_locator_evidence = current_request_locator_evidence_for_loop_seed(ctx);
     if !current_request_locator_evidence.is_empty() {

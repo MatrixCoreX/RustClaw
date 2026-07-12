@@ -320,6 +320,12 @@ pub(super) fn answer_verifier_gap_is_structurally_satisfied(
     if !summary.high_confidence_retry_gap() {
         return false;
     }
+    if summary
+        .answer_incomplete_reason
+        .starts_with("post_write_content_evidence_required")
+    {
+        return false;
+    }
     let Some(route) = route_result else {
         return false;
     };
@@ -1026,6 +1032,9 @@ pub(super) fn try_recover_latest_synthesis_answer_verifier_gap(
         return false;
     }
     if verifier_requires_structured_visible_rewrite(verifier) {
+        return false;
+    }
+    if super::loop_control_post_write_evidence_guard::journal_has_code_write_followed_by_failed_validation(journal) {
         return false;
     }
     let Some(candidate) = latest_recoverable_terminal_answer(route, journal, reply) else {

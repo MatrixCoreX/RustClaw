@@ -64,6 +64,67 @@ fn build_from_loop_state_records_budget_stop_signal() {
 }
 
 #[test]
+fn build_from_loop_state_records_finalizer_recovered_terminal_stop_signal() {
+    let task = ClaimedTask {
+        task_id: "task-finalizer-recovered".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut loop_state = LoopState::new(2);
+    loop_state.last_stop_signal = Some("synthesize_answer_failed".to_string());
+    let finalizer_summary = TaskJournalFinalizerSummary {
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        used_evidence_ids_count: 2,
+        ..Default::default()
+    };
+
+    let journal = build_from_loop_state(
+        &task,
+        "test",
+        &loop_state,
+        None,
+        Some(finalizer_summary),
+        true,
+        r#"{"status":"ok"}"#,
+        TaskJournalFinalStatus::Success,
+    );
+
+    assert_eq!(
+        journal.final_stop_signal.as_deref(),
+        Some("finalizer_recovered_terminal_answer")
+    );
+    let stop_observation = journal
+        .task_observations
+        .iter()
+        .find(|observation| {
+            observation
+                .pointer("/stage")
+                .and_then(serde_json::Value::as_str)
+                == Some("stop")
+        })
+        .expect("stop observation");
+    assert_eq!(
+        stop_observation
+            .pointer("/loop_stop_signal")
+            .and_then(serde_json::Value::as_str),
+        Some("synthesize_answer_failed")
+    );
+    assert_eq!(
+        stop_observation
+            .pointer("/final_stop_signal")
+            .and_then(serde_json::Value::as_str),
+        Some("finalizer_recovered_terminal_answer")
+    );
+}
+
+#[test]
 fn build_from_loop_state_records_rollout_switches() {
     let task = ClaimedTask {
         task_id: "task-rollout".to_string(),

@@ -134,6 +134,66 @@ fn answer_verifier_exhaustion_recovers_latest_contractual_synthesis() {
 }
 
 #[test]
+fn latest_synthesis_recovery_rejects_post_write_failed_validation() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/workspace/test_calc_core.py".to_string();
+    let stale_answer = r#"{"created_files":["calc_core.py","test_calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"not_observed"}"#;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-post-write-failed-validation",
+        "ask",
+        "prompt",
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"write_text","path":"/workspace/test_calc_core.py","resolved_path":"/workspace/test_calc_core.py"},"text":"written 120 bytes"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::new(
+            "step_2",
+            "run_cmd",
+            StepExecutionStatus::Error,
+            None,
+            Some(
+                r#"__RC_SKILL_ERROR__:{"skill":"run_cmd","error_kind":"nonzero_exit","error_text":"command failed with exit code 1","extra":{"exit_code":1,"stderr":"SyntaxError"}}"#
+                    .to_string(),
+            ),
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3",
+            "synthesize_answer",
+            stale_answer,
+        ));
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["content_excerpt".to_string()],
+        answer_incomplete_reason: "previous candidate missed validation success".to_string(),
+        should_retry: true,
+        retry_instruction: "repair and rerun validation".to_string(),
+        confidence: 0.95,
+    });
+    let mut reply = AskReply::non_llm("previous candidate".to_string()).with_task_journal(journal);
+
+    assert!(!try_recover_latest_synthesis_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+    assert_eq!(reply.text, "previous candidate");
+    assert!(reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+        .is_some());
+}
+
+#[test]
 fn answer_verifier_exhaustion_recovers_multi_source_terminal_answer_for_free_route() {
     let mut route = route_result(OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = false;

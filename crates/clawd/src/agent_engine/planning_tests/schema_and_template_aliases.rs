@@ -334,3 +334,171 @@ async fn parse_single_plan_accepts_synthesize_answer_only_step_with_top_level_re
             if evidence_refs.as_slice() == ["last_output".to_string()].as_slice()
     ));
 }
+
+#[tokio::test]
+async fn parse_single_plan_normalizes_terminal_call_tool_wrappers() {
+    let state = test_state_with_registry();
+    let task = test_task();
+    let raw = r#"{
+      "steps": [
+        {
+          "type": "call_tool",
+          "tool": "fs_basic",
+          "args": {
+            "action": "write_text",
+            "path": "calc_core.py",
+            "content": "def add(a, b):\n    return a + b\n"
+          }
+        },
+        {
+          "type": "call_tool",
+          "tool": "run_cmd",
+          "args": {
+            "command": "python3 test_calc_core.py"
+          }
+        },
+        {
+          "type": "call_tool",
+          "tool": "synthesize_answer",
+          "args": {
+            "evidence_refs": ["step_1", "step_2"]
+          }
+        },
+        {
+          "type": "call_tool",
+          "tool": "respond",
+          "args": {
+            "content": "{{last_output}}"
+          }
+        }
+      ]
+    }"#;
+
+    let actions = super::super::parse_single_plan_actions(raw, &state, &task)
+        .await
+        .expect("terminal call_tool wrappers should parse");
+
+    assert!(matches!(
+        actions.as_slice(),
+        [
+            AgentAction::CallTool { tool, .. },
+            AgentAction::CallSkill { skill, .. },
+            AgentAction::SynthesizeAnswer { evidence_refs },
+            AgentAction::Respond { content },
+        ] if tool == "fs_basic"
+            && skill == "run_cmd"
+            && evidence_refs.as_slice() == ["step_1".to_string(), "step_2".to_string()].as_slice()
+            && content == "{{last_output}}"
+    ));
+}
+
+#[tokio::test]
+async fn parse_single_plan_accepts_synthesize_answer_refs_inside_args() {
+    let state = test_state_with_registry();
+    let task = test_task();
+    let raw = r#"{
+      "steps": [
+        {
+          "type": "synthesize_answer",
+          "args": {
+            "evidence_refs": ["step_2"]
+          }
+        }
+      ]
+    }"#;
+
+    let actions = super::super::parse_single_plan_actions(raw, &state, &task)
+        .await
+        .expect("synthesize_answer args wrapper should parse");
+
+    assert!(matches!(
+        actions.as_slice(),
+        [AgentAction::SynthesizeAnswer { evidence_refs }]
+            if evidence_refs.as_slice() == ["step_2".to_string()].as_slice()
+    ));
+}
+
+fn safe_div_agent_loop_execution_actions() -> Vec<AgentAction> {
+    vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "/home/guagua/rustclaw/run/nl_eval_tmp/codex_cli_continuous_20260711_new/calc_core.py"
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "write_text",
+                "path": "/home/guagua/rustclaw/run/nl_eval_tmp/codex_cli_continuous_20260711_new/calc_core.py",
+                "content": "def safe_div(a, b):\n    if b == 0:\n        return {\"ok\": False, \"error_code\": \"division_by_zero\"}\n    return {\"ok\": True, \"value\": a / b}\n"
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "run_cmd".to_string(),
+            args: json!({
+                "command": "python3 test_calc_core.py",
+                "cwd": "/home/guagua/rustclaw/run/nl_eval_tmp/codex_cli_continuous_20260711_new"
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "run_cmd".to_string(),
+            args: json!({
+                "command": "python3 - <<'PY'\nfrom calc_core import safe_div\nprint(safe_div(1, 0))\nPY",
+                "cwd": "/home/guagua/rustclaw/run/nl_eval_tmp/codex_cli_continuous_20260711_new"
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec![
+                "last_output".to_string(),
+                "s3".to_string(),
+                "s4".to_string(),
+            ],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ]
+}
+
+#[test]
+fn agent_loop_execution_code_plan_defers_to_verifier_without_pre_repair() {
+    let state = test_state_with_enabled_skills(&["fs_basic", "run_cmd"]);
+    let mut route = base_route_result();
+    route.risk_ceiling = RiskCeiling::Medium;
+    route.route_reason = "inline_structured_payload_preserved_as_execution_spec; executable_contract_preserved_for_agent_loop; execution_recipe_target_locator_preserved_for_agent_loop".to_string();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    let loop_state = LoopState::new(1);
+    let actions = safe_div_agent_loop_execution_actions();
+
+    assert!(
+        !should_force_actionable_plan_repair(&state, Some(&route), &loop_state, &actions),
+        "agent-loop execution plan should reach verifier/loop without LLM repair"
+    );
+}
+
+#[test]
+fn agent_loop_execution_code_plan_can_fallback_when_repair_aborts() {
+    let state = test_state_with_enabled_skills(&["fs_basic", "run_cmd"]);
+    let mut route = base_route_result();
+    route.risk_ceiling = RiskCeiling::Medium;
+    route.route_reason = "inline_structured_payload_preserved_as_execution_spec; executable_contract_preserved_for_agent_loop; execution_recipe_target_locator_preserved_for_agent_loop".to_string();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    let loop_state = LoopState::new(1);
+    let actions = safe_div_agent_loop_execution_actions();
+
+    assert!(
+        can_fallback_to_initial_plan_after_repair_failure(
+            &state,
+            Some(&route),
+            &loop_state,
+            &actions
+        ),
+        "valid initial agent-loop execution plan should survive repair-model aborts"
+    );
+}

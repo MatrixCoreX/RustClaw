@@ -42,6 +42,116 @@ fn runtime_contract_snapshot_for_route_uses_route_trace_evidence() {
 }
 
 #[test]
+fn executable_agent_loop_route_does_not_match_generic_inline_transform() {
+    let route = RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "inline_structured_payload_context_execute; executable_contract_preserved_for_agent_loop".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Low,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            semantic_kind: OutputSemanticKind::None,
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: OutputDeliveryIntent::None,
+            ..IntentOutputContract::default()
+        },
+    };
+
+    let snapshot = runtime_contract_snapshot_for_route(&route).expect("runtime route snapshot");
+    assert_eq!(
+        snapshot
+            .pointer("/contract/contract_match")
+            .and_then(Value::as_str),
+        Some("agent_loop_execution")
+    );
+    assert_eq!(
+        snapshot
+            .pointer("/contract/required_evidence")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(final_answer_shape_for_route(&route), None);
+    assert!(compact_prompt_line_for_route(&route)
+        .expect("compact prompt line")
+        .contains("match=agent_loop_execution"));
+    assert!(crate::evidence_policy::required_evidence_fields_for_route(&route).is_empty());
+    assert_eq!(
+        crate::evidence_policy::operation_for_route(&route),
+        crate::evidence_policy::EvidenceOperation::Run
+    );
+}
+
+#[test]
+fn executable_agent_loop_action_trace_does_not_fall_back_to_generic_path_content() {
+    let route = RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason:
+            "inline_structured_payload_context_execute; executable_contract_preserved_for_agent_loop"
+                .to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Low,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            semantic_kind: OutputSemanticKind::None,
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: OutputDeliveryIntent::None,
+            ..IntentOutputContract::default()
+        },
+    };
+
+    let trace =
+        action_trace_for_route(&route, "db_basic.schema_version").expect("route action trace");
+
+    assert_eq!(
+        trace.get("contract_match").and_then(Value::as_str),
+        Some("agent_loop_execution")
+    );
+    assert_eq!(
+        trace.get("decision").and_then(Value::as_str),
+        Some("allowed")
+    );
+    assert_eq!(
+        trace
+            .get("observation_extractor")
+            .and_then(|value| value.get("source"))
+            .and_then(Value::as_str),
+        Some("db_basic.schema_version")
+    );
+    assert_eq!(
+        trace
+            .get("allowed_actions")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(1)
+    );
+}
+
+#[test]
 fn contract_matrix_final_answer_shapes_are_typed() {
     let matrix = load_workspace_matrix();
     let configured = matrix

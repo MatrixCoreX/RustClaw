@@ -383,3 +383,66 @@ fn requested_machine_kv_summary_final_guard_preserves_publishable_command_summar
     assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
     assert_ne!(journal.final_answer.as_deref(), Some("port=8787"));
 }
+
+#[test]
+fn requested_machine_kv_summary_does_not_recover_required_content_gap() {
+    let prompt =
+        "给 calc_core.py 增加 mul(a,b)，更新测试后只输出 changed_files、test_command、test_status、functions。";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-machine-kv-content-gap", "ask", prompt);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["content_excerpt".to_string(), "field_value".to_string()],
+        answer_incomplete_reason:
+            "requested code mutation was not observed after reading old add/sub content".to_string(),
+        should_retry: true,
+        retry_instruction: "modify files, collect post-write excerpts, and rerun tests".to_string(),
+        confidence: 0.96,
+    });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"read_range","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py","excerpt":"1|def add(a, b):\n2|    return a + b\n3|def sub(a, b):\n4|    return a - b"}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "synthesize_answer",
+            r#"{"changed_files":[],"test_command":"python3 test_calc_core.py","test_status":"OK","functions":["add","sub"]}"#,
+        ));
+    let mut answer_text =
+        r#"{"changed_files":[],"test_command":"python3 test_calc_core.py","test_status":"OK","functions":["add","sub"]}"#
+            .to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!recover_requested_machine_kv_summary_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+        true,
+    ));
+
+    assert!(journal
+        .answer_verifier_summary
+        .as_ref()
+        .is_some_and(|summary| {
+            !summary.pass
+                && summary
+                    .missing_evidence_fields
+                    .iter()
+                    .any(|field| field == "content_excerpt")
+        }));
+    assert_eq!(
+        answer_text,
+        r#"{"changed_files":[],"test_command":"python3 test_calc_core.py","test_status":"OK","functions":["add","sub"]}"#
+    );
+}

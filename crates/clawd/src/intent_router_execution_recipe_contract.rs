@@ -268,19 +268,6 @@ pub(super) fn normalize_output_contract_for_command_payload(
         );
     }
 
-    let contract_marker = contract
-        .get("contract_marker")
-        .and_then(scalar_json_value_text)
-        .unwrap_or_default();
-    if matches!(
-        parse_output_semantic_kind(&contract_marker),
-        OutputSemanticKind::None
-    ) {
-        contract.insert(
-            "contract_marker".to_string(),
-            Value::String(OutputSemanticKind::RawCommandOutput.as_str().to_string()),
-        );
-    }
     contract.insert("delivery_required".to_string(), Value::Bool(false));
 }
 

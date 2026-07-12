@@ -1,4 +1,8 @@
-use super::{build_incremental_plan_prompt, contract_scoped_lightweight_planner_skill_scope};
+use super::{
+    build_incremental_plan_prompt, classify_planning_prompt_class,
+    contract_scoped_lightweight_planner_skill_scope, contract_scoped_planner_skill_scope,
+    PlanningPromptClass,
+};
 use crate::agent_engine::{attempt_ledger::build_attempt_ledger_compact, LoopState};
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use serde_json::json;
@@ -82,7 +86,7 @@ fn base_route_result() -> crate::RouteResult {
 }
 
 #[test]
-fn lightweight_scope_uses_fs_basic_for_bounded_multi_locator_boundary() {
+fn lightweight_scope_uses_local_data_skills_for_bounded_multi_locator_boundary() {
     let mut route = base_route_result();
     route.route_reason = "current_workspace_generic_contract_deferred_to_agent_loop; auto_locator_suppressed_multiple_explicit_paths".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
@@ -90,8 +94,72 @@ fn lightweight_scope_uses_fs_basic_for_bounded_multi_locator_boundary() {
 
     assert_eq!(
         contract_scoped_lightweight_planner_skill_scope(Some(&route)),
-        Some(BTreeSet::from(["fs_basic".to_string()]))
+        Some(BTreeSet::from([
+            "archive_basic".to_string(),
+            "config_basic".to_string(),
+            "db_basic".to_string(),
+            "fs_basic".to_string()
+        ]))
     );
+}
+
+#[test]
+fn sqlite_locator_generic_scalar_scope_prefers_db_basic_only() {
+    let mut route = base_route_result();
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
+
+    let scope = contract_scoped_planner_skill_scope(Some(&route)).expect("sqlite scope");
+
+    assert_eq!(scope, BTreeSet::from(["db_basic".to_string()]));
+    assert_eq!(
+        contract_scoped_lightweight_planner_skill_scope(Some(&route)),
+        Some(scope)
+    );
+}
+
+#[test]
+fn lightweight_scope_omits_skill_playbooks_for_executionless_or_inline_payload_boundary() {
+    for marker in [
+        "executionless_finalize_trace_plain",
+        "inline_structured_payload_context_execute",
+    ] {
+        let mut route = base_route_result();
+        route.route_reason = marker.to_string();
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+
+        assert_eq!(
+            contract_scoped_lightweight_planner_skill_scope(Some(&route)),
+            Some(BTreeSet::new()),
+            "{marker} should not load unrelated skill playbooks"
+        );
+    }
+}
+
+#[test]
+fn lightweight_scope_omits_skill_playbooks_for_structured_clarify_boundary() {
+    for (needs_clarify, route_reason) in [
+        (true, ""),
+        (false, "standalone_freeform_clarify_loop_context"),
+        (false, "alias_state_patch_ack"),
+    ] {
+        let mut route = base_route_result();
+        route.needs_clarify = needs_clarify;
+        route.route_reason = route_reason.to_string();
+        route.clarify_question = "missing_slot=referent".to_string();
+
+        assert_eq!(
+            contract_scoped_lightweight_planner_skill_scope(Some(&route)),
+            Some(BTreeSet::new()),
+            "needs_clarify={needs_clarify} route_reason={route_reason}"
+        );
+    }
 }
 
 #[test]
@@ -107,5 +175,61 @@ fn lightweight_scope_uses_run_cmd_for_raw_command_boundary() {
     assert_eq!(
         contract_scoped_lightweight_planner_skill_scope(Some(&route)),
         Some(BTreeSet::from(["run_cmd".to_string()]))
+    );
+}
+
+#[test]
+fn local_workspace_execution_uses_lightweight_prompt_and_local_skill_scope() {
+    let mut route = base_route_result();
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "run/nl_eval_tmp/codex_cli_continuous_20260711_new".to_string();
+    route.wants_file_delivery = true;
+    let loop_state = LoopState::new(2);
+
+    assert_eq!(
+        classify_planning_prompt_class(Some(&route), "create files and run tests", &loop_state),
+        PlanningPromptClass::LightweightExecution
+    );
+    assert_eq!(
+        contract_scoped_lightweight_planner_skill_scope(Some(&route)),
+        Some(BTreeSet::from([
+            "fs_basic".to_string(),
+            "run_cmd".to_string(),
+            "system_basic".to_string(),
+        ]))
+    );
+}
+
+#[test]
+fn local_workspace_execution_with_delivery_noise_uses_lightweight_prompt_and_scope() {
+    let mut route = base_route_result();
+    route.risk_ceiling = crate::RiskCeiling::High;
+    route.route_reason = "file_token_delivery_contract_repair; executable_contract_preserved_for_agent_loop; contract:generated_file_delivery; normalizer_semantic_contract_demoted_to_route_marker; generated_file_delivery_allows_runtime_target".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "run/nl_eval_tmp/codex_cli_continuous_20260711_new".to_string();
+    route.wants_file_delivery = true;
+    let loop_state = LoopState::new(2);
+
+    assert_eq!(
+        classify_planning_prompt_class(Some(&route), "workspace execution", &loop_state),
+        PlanningPromptClass::LightweightExecution
+    );
+    assert_eq!(
+        contract_scoped_lightweight_planner_skill_scope(Some(&route)),
+        Some(BTreeSet::from([
+            "fs_basic".to_string(),
+            "run_cmd".to_string(),
+            "system_basic".to_string(),
+        ]))
     );
 }

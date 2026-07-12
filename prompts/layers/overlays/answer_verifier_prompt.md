@@ -86,6 +86,7 @@ Rules:
 19. For profile-based setup/channel rejections, prefer `missing_evidence_fields=["unsupported_claims"]` when the candidate adds unsupported wording; ask the next attempt to rewrite from observed user-facing evidence or collect bounded user-facing docs/config excerpts.
 20. For prose drafting requests where the output contract does not require file delivery, reject answers that ask the user for a target path, claim a file read/write was needed, or frame the blocker as a missing destination file. The gap, if any, should be missing content evidence for the chat answer, not a missing save path.
 21. Reject answers that cite checklist/note/test/fixture artifacts, verification steps, or setup paths that were not observed as relevant current product documentation. If the only source for such an artifact is memory or a test fixture path, ask the next attempt to ignore it and answer from current workspace docs/config evidence.
+22. For code modification tasks where the user asked to add or change a named behavior and also asked to update tests, a successful test command is not enough by itself when the observed evidence does not show that the new behavior was actually asserted or exercised. If the candidate reports success but observed evidence only proves generic command success, reject with `missing_evidence_fields=["content_excerpt"]` or `["field_value"]` and ask the next attempt to collect bounded file/test content evidence or run a direct behavior probe before finalizing.
 
 Output examples:
 

@@ -674,6 +674,118 @@ fn recipe_inspect_stage_does_not_stop_on_observed_output() {
 }
 
 #[test]
+fn executable_contract_read_only_round_continues_planner_without_runtime_recipe() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 1;
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"list_dir","path":"/tmp/demo","entries":["calc_core.py"]}}"#,
+    ));
+    let mut route = route_result(OutputResponseShape::Free);
+    route.route_reason = "boundary_only; executable_contract_preserved_for_agent_loop".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({"action":"list_dir","path":"/tmp/demo"}),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({"action":"read_text_range","path":"/tmp/demo/calc_core.py"}),
+        },
+    ];
+
+    assert!(!should_stop_for_observed_finalize(
+        Some(&AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        }),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
+fn executable_contract_strict_json_read_only_round_continues_planner_for_live_code_workspace() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 1;
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"list_dir","path":"/workspace/project","names":["calc_core.py","test_calc_core.py"]}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"read_text_range","path":"/workspace/project/calc_core.py","excerpt":"1|def add(a,b): return a+b\n2|def sub(a,b): return a-b"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_3",
+        "fs_basic",
+        r#"{"extra":{"action":"read_text_range","path":"/workspace/project/test_calc_core.py","excerpt":"1|from calc_core import add, sub"}}"#,
+    ));
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.route_reason = "execution_recipe_target_locator_preserved_for_agent_loop; executionless_finalize_trace_plain; command_payload_preserved_for_agent_loop; executable_contract_preserved_for_agent_loop; current_turn_locator_overrides_contextual_path".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({"action":"list_dir","path":"/workspace/project","names_only":true}),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({"action":"read_text_range","path":"/workspace/project/calc_core.py","mode":"full"}),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({"action":"read_text_range","path":"/workspace/project/test_calc_core.py","mode":"full"}),
+        },
+    ];
+
+    assert!(!should_stop_for_observed_finalize(
+        Some(&AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        }),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
+fn executable_contract_capability_observe_only_round_continues_at_round_cap() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 2;
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_text_range","path":"/workspace/project/calc_core.py","resolved_path":"/workspace/project/calc_core.py","excerpt":"1|def add(a,b): return a+b"}}"#,
+    ));
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    let actions = vec![AgentAction::CallCapability {
+        capability: "filesystem.read_text_range".to_string(),
+        args: json!({"path":"/workspace/project/calc_core.py","start_line":1,"end_line":16}),
+    }];
+
+    assert!(executable_contract_observe_only_round_should_continue(
+        &route,
+        &loop_state,
+        &actions,
+    ));
+    assert!(!should_stop_for_observed_finalize(
+        Some(&AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        }),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
 fn recipe_done_does_not_scan_user_text_for_success_marker() {
     let mut loop_state = LoopState::new(2);
     loop_state.execution_recipe = ExecutionRecipeRuntimeState {

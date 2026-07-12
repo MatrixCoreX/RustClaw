@@ -693,6 +693,8 @@ pub(super) fn normalize_execution_recipe_for_schema(
     req: &str,
 ) {
     promote_misnested_turn_analysis_from_execution_recipe(obj);
+    promote_structured_execution_recipe_for_schema(obj);
+    promote_structured_output_fields_to_state_patch(obj);
     if normalizer_object_declares_tool_action_payload(obj) {
         mark_output_contract_requires_content_evidence(obj);
     }
@@ -761,5 +763,70 @@ pub(super) fn normalize_execution_recipe_for_schema(
             "target_scope".to_string(),
             Value::String(target_scope.as_str().to_string()),
         );
+    }
+}
+
+fn promote_structured_execution_recipe_for_schema(obj: &mut serde_json::Map<String, Value>) {
+    let Some(structured_recipe) = obj
+        .get("structured")
+        .and_then(|value| value.get("execution_recipe"))
+        .filter(|value| state_patch_value_is_meaningful(value))
+        .cloned()
+    else {
+        return;
+    };
+    if execution_recipe_slot_has_meaningful_non_default_value(obj.get("execution_recipe")) {
+        return;
+    }
+    obj.insert("execution_recipe".to_string(), structured_recipe);
+}
+
+fn execution_recipe_slot_has_meaningful_non_default_value(value: Option<&Value>) -> bool {
+    let Some(Value::Object(recipe)) = value else {
+        return false;
+    };
+    for key in [
+        "kind",
+        "profile",
+        "target_scope",
+        "command",
+        "cmd",
+        "shell_command",
+    ] {
+        let Some(raw) = recipe.get(key) else {
+            continue;
+        };
+        let token = raw
+            .as_str()
+            .map(normalize_schema_token)
+            .unwrap_or_else(|| normalize_schema_token(&raw.to_string()));
+        if !token.is_empty() && !matches!(token.as_str(), "none" | "null" | "unknown") {
+            return true;
+        }
+    }
+    false
+}
+
+fn promote_structured_output_fields_to_state_patch(obj: &mut serde_json::Map<String, Value>) {
+    let Some(output_fields) = obj
+        .get("structured")
+        .and_then(|value| value.get("output_fields"))
+        .filter(|value| state_patch_value_is_meaningful(value))
+        .cloned()
+    else {
+        return;
+    };
+    match obj.get_mut("state_patch") {
+        Some(Value::Object(existing)) => {
+            existing
+                .entry("required_machine_fields".to_string())
+                .or_insert(output_fields);
+        }
+        _ => {
+            obj.insert(
+                "state_patch".to_string(),
+                serde_json::json!({ "required_machine_fields": output_fields }),
+            );
+        }
     }
 }

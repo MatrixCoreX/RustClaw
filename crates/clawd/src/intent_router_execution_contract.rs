@@ -157,24 +157,19 @@ pub(super) fn apply_command_payload_contract_repair(
         *needs_clarify,
         false,
     );
-    if matches!(
+    if preserve_command_summary_contract {
+        output_contract.apply_output_contract_ref(OutputContractRef::new(
+            OutputSemanticKind::CommandOutputSummary,
+        ));
+    } else if !matches!(
         output_contract.semantic_kind,
-        OutputSemanticKind::None | OutputSemanticKind::ServiceStatus
+        OutputSemanticKind::RawCommandOutput | OutputSemanticKind::ExecutionFailedStep
     ) {
-        let output_contract_ref = if preserve_command_summary_contract {
-            OutputSemanticKind::CommandOutputSummary
-        } else {
-            OutputSemanticKind::RawCommandOutput
-        };
-        output_contract.apply_output_contract_ref(OutputContractRef::new(output_contract_ref));
-    }
-    if !matches!(
-        output_contract.semantic_kind,
-        OutputSemanticKind::RawCommandOutput
-            | OutputSemanticKind::ExecutionFailedStep
-            | OutputSemanticKind::CommandOutputSummary
-    ) {
-        return None;
+        output_contract.requires_content_evidence = true;
+        *needs_clarify = false;
+        clarify_question.clear();
+        *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
+        return Some("command_payload_preserved_for_agent_loop");
     }
     output_contract.requires_content_evidence = true;
     output_contract.locator_kind = OutputLocatorKind::None;

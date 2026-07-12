@@ -403,6 +403,11 @@ pub(super) fn can_fallback_to_initial_plan_after_repair_failure(
     } else {
         true
     };
+    if fallback_shape_is_safe
+        && agent_loop_execution_plan_can_defer_to_verifier(state, route_result, loop_state, actions)
+    {
+        return true;
+    }
     !route_result.needs_clarify
         && !loop_state.has_tool_or_skill_output
         && !contains_unavailable_skill_action(state, actions)

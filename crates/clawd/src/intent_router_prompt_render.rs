@@ -4,7 +4,8 @@ use crate::llm_gateway;
 
 use super::{
     normalize_intent_normalizer_raw_for_schema_with_report, AppState, ClaimedTask,
-    ContractRepairReport, IntentNormalizerOut, ROUTING_POLICY_PERSONA_PROMPT,
+    ContractRepairReport, IntentExecutionRecipeOut, IntentNormalizerOut,
+    ROUTING_POLICY_PERSONA_PROMPT,
 };
 
 pub(super) fn render_intent_normalizer_prompt_for_route(
@@ -320,6 +321,7 @@ pub(super) async fn retry_intent_normalizer_json_parse(
     req: &str,
     prompt_source: &str,
     base_repair_report: &ContractRepairReport,
+    base_llm_out_for_parse: &str,
 ) -> Option<(IntentNormalizerOut, ContractRepairReport)> {
     let prompt = render_intent_normalizer_json_retry_prompt(
         route_view,
@@ -388,7 +390,13 @@ pub(super) async fn retry_intent_normalizer_json_parse(
                     crate::truncate_for_log(req)
                 );
             }
-            Some((validated.value, report))
+            let mut value = validated.value;
+            preserve_base_execution_recipe_for_retry(
+                &mut value,
+                base_llm_out_for_parse,
+                &mut report,
+            );
+            Some((value, report))
         }
         Err(err) => {
             warn!(
@@ -400,6 +408,47 @@ pub(super) async fn retry_intent_normalizer_json_parse(
             None
         }
     }
+}
+
+pub(super) fn preserve_base_execution_recipe_for_retry(
+    retry_out: &mut IntentNormalizerOut,
+    base_llm_out_for_parse: &str,
+    report: &mut ContractRepairReport,
+) {
+    if execution_recipe_declares_agent_loop_execution(retry_out.execution_recipe.as_ref()) {
+        return;
+    }
+    let Some(base_recipe) = serde_json::from_str::<serde_json::Value>(base_llm_out_for_parse)
+        .ok()
+        .and_then(|value| value.get("execution_recipe").cloned())
+        .and_then(|value| serde_json::from_value::<IntentExecutionRecipeOut>(value).ok())
+    else {
+        return;
+    };
+    if !execution_recipe_declares_agent_loop_execution(Some(&base_recipe)) {
+        return;
+    }
+    retry_out.execution_recipe = Some(base_recipe);
+    report.add("llm_retry", "preserved_base_execution_recipe");
+}
+
+fn execution_recipe_declares_agent_loop_execution(
+    recipe: Option<&IntentExecutionRecipeOut>,
+) -> bool {
+    let Some(recipe) = recipe else {
+        return false;
+    };
+    let kind = recipe.kind.trim();
+    (!kind.is_empty() && !kind.eq_ignore_ascii_case("none"))
+        || [
+            recipe.command.as_str(),
+            recipe.cmd.as_str(),
+            recipe.shell_command.as_str(),
+            recipe.execution_mode.as_str(),
+            recipe.async_adapter_kind.as_str(),
+        ]
+        .iter()
+        .any(|value| !value.trim().is_empty())
 }
 
 pub(super) fn cap_intent_normalizer_prompt_for_llm_budget(

@@ -291,6 +291,53 @@ fn structured_validation_marks_custom_run_cmd_as_code_validation() {
 }
 
 #[test]
+fn classify_inline_python_probe_as_validation() {
+    let state = test_state();
+    let effect = classify_skill_action_effect(
+        &state,
+        "run_cmd",
+        &json!({
+            "command": "python3 - <<'PY'\nfrom calc_core import safe_div\nprint(safe_div(1, 0))\nPY"
+        }),
+    );
+
+    assert!(effect.observes);
+    assert!(effect.validates);
+    assert!(!effect.mutates);
+}
+
+#[test]
+fn classify_inline_python_probe_with_arrow_output_as_validation() {
+    let state = test_state();
+    let effect = classify_skill_action_effect(
+        &state,
+        "run_cmd",
+        &json!({
+            "command": "cd /tmp/demo && python3 - <<'PY'\nfrom calc_core import safe_div\nresult = safe_div(1, 0)\nprint(\"safe_div(1,0) =>\", result)\nassert result == {\"ok\": False, \"error_code\": \"division_by_zero\"}, result\nPY\necho \"EXIT=$?\""
+        }),
+    );
+
+    assert!(effect.observes);
+    assert!(effect.validates);
+    assert!(!effect.mutates);
+}
+
+#[test]
+fn classify_inline_python_with_write_signal_is_not_autonomous_validation() {
+    let state = test_state();
+    let effect = classify_skill_action_effect(
+        &state,
+        "run_cmd",
+        &json!({
+            "command": "python3 - <<'PY'\nfrom pathlib import Path\nPath('probe.txt').write_text('changed')\nPY"
+        }),
+    );
+
+    assert!(!effect.validates);
+    assert!(!effect.mutates);
+}
+
+#[test]
 fn structured_validation_success_fallback_accepts_custom_command_output() {
     let state = test_state();
     let args = json!({

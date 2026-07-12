@@ -43,6 +43,36 @@ fn plan_step_to_agent_action_parses_synthesize_answer() {
 }
 
 #[test]
+fn plan_step_to_agent_action_normalizes_terminal_call_tool_wrappers() {
+    let synthesize_step = PlanStep {
+        step_id: "step_3".to_string(),
+        action_type: "call_tool".to_string(),
+        skill: "synthesize_answer".to_string(),
+        args: json!({ "evidence_refs": ["step_1", "step_2"] }),
+        depends_on: vec![],
+        why: String::new(),
+    };
+    assert!(matches!(
+        synthesize_step.to_agent_action(),
+        Some(AgentAction::SynthesizeAnswer { evidence_refs })
+            if evidence_refs == vec!["step_1".to_string(), "step_2".to_string()]
+    ));
+
+    let respond_step = PlanStep {
+        step_id: "step_4".to_string(),
+        action_type: "call_tool".to_string(),
+        skill: "respond".to_string(),
+        args: json!({ "content": "{{last_output}}" }),
+        depends_on: vec![],
+        why: String::new(),
+    };
+    assert!(matches!(
+        respond_step.to_agent_action(),
+        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+    ));
+}
+
+#[test]
 fn plan_step_from_agent_action_serializes_synthesize_answer() {
     let action = AgentAction::SynthesizeAnswer {
         evidence_refs: vec!["last_output".to_string()],

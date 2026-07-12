@@ -182,6 +182,48 @@ pub(super) fn apply_state_patch_structured_field_selector(
     Some(selector)
 }
 
+pub(super) fn apply_state_patch_required_machine_fields_contract(
+    output_contract: &mut IntentOutputContract,
+    state_patch: Option<&Value>,
+) -> Option<&'static str> {
+    if !state_patch_has_required_machine_fields(state_patch) {
+        return None;
+    }
+    let explicit_file_delivery = output_contract.delivery_required
+        && matches!(
+            output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+        && matches!(
+            output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::FileSingle
+        );
+    if explicit_file_delivery {
+        return None;
+    }
+    if !output_contract.delivery_required
+        && !matches!(
+            output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+        && !matches!(
+            output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::FileSingle
+        )
+    {
+        return None;
+    }
+    output_contract.delivery_required = false;
+    output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    if matches!(
+        output_contract.response_shape,
+        crate::OutputResponseShape::FileToken
+    ) {
+        output_contract.response_shape = crate::OutputResponseShape::Strict;
+    }
+    Some("required_machine_fields_clear_delivery_contract")
+}
+
 pub(super) fn state_patch_targets_task_lifecycle_fields(state_patch: Option<&Value>) -> bool {
     structured_field_selector_from_state_patch(state_patch)
         .as_deref()
@@ -209,6 +251,12 @@ fn required_machine_fields_target_task_lifecycle(value: Option<&Value>) -> bool 
         .take(2)
         .count()
         >= 2
+}
+
+fn state_patch_has_required_machine_fields(value: Option<&Value>) -> bool {
+    let mut fields = Vec::new();
+    collect_required_machine_fields(value, &mut fields);
+    !fields.is_empty()
 }
 
 fn collect_required_machine_fields(value: Option<&Value>, out: &mut Vec<String>) {

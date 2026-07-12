@@ -541,6 +541,11 @@ pub(crate) fn action_satisfies_greenfield_creation(
     }
     match state.resolve_canonical_skill_name(skill_name).as_str() {
         "write_file" | "make_dir" => true,
+        "fs_basic" => args
+            .get("action")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .is_some_and(|action| matches!(action, "make_dir" | "write_text")),
         "run_cmd" => args
             .get("command")
             .and_then(|value| value.as_str())
@@ -582,7 +587,7 @@ pub(crate) fn apply_target_scope_progress(
 fn run_cmd_has_explicit_write_marker(command: &str) -> bool {
     let lower = command.to_ascii_lowercase();
     let first_word = normalized_first_command_word(command);
-    command.contains('>')
+    shell_has_output_redirection_marker(command)
         || lower.contains(" tee ")
         || lower.starts_with("tee ")
         || lower.contains(" sed -i")
@@ -618,6 +623,48 @@ fn run_cmd_has_explicit_write_marker(command: &str) -> bool {
                     | "launchctl"
             )
         )
+}
+
+fn shell_has_output_redirection_marker(command: &str) -> bool {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    let chars: Vec<char> = command.chars().collect();
+    for (idx, ch) in chars.iter().enumerate() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if *ch == '\\' && !in_single {
+            escaped = true;
+            continue;
+        }
+        if *ch == '\'' && !in_double {
+            in_single = !in_single;
+            continue;
+        }
+        if *ch == '"' && !in_single {
+            in_double = !in_double;
+            continue;
+        }
+        if *ch != '>' || in_single || in_double {
+            continue;
+        }
+        let prev = chars[..idx]
+            .iter()
+            .rev()
+            .find(|value| !value.is_whitespace())
+            .copied();
+        let next = chars
+            .get(idx + 1)
+            .copied()
+            .filter(|value| !value.is_whitespace());
+        if prev == Some('=') || next == Some('=') {
+            continue;
+        }
+        return true;
+    }
+    false
 }
 
 fn shell_contains_command_invocation(command_lower: &str, word: &str) -> bool {
@@ -698,6 +745,75 @@ fn run_cmd_looks_validation(command: &str) -> bool {
     ) || ["curl", "wget", "nc", "ss", "lsof"]
         .into_iter()
         .any(|word| shell_contains_command_invocation(&lower, word))
+        || run_cmd_looks_inline_python_validation_probe(command)
+}
+
+fn run_cmd_looks_inline_python_validation_probe(command: &str) -> bool {
+    let lower = command.to_ascii_lowercase();
+    if !run_cmd_invokes_inline_python(&lower) {
+        return false;
+    }
+    if inline_python_probe_has_mutation_or_escape_signal(&lower) {
+        return false;
+    }
+    contains_any(
+        &lower,
+        &[
+            "print(", "assert ", "from ", "import ", "unittest", "pytest",
+        ],
+    )
+}
+
+fn run_cmd_invokes_inline_python(command_lower: &str) -> bool {
+    ["python", "python3"].into_iter().any(|word| {
+        let heredoc = format!("{word} - <<");
+        let heredoc_space = format!("{word} -  <<");
+        let inline = format!("{word} -c ");
+        command_lower.starts_with(&heredoc)
+            || command_lower.starts_with(&heredoc_space)
+            || command_lower.starts_with(&inline)
+            || ["&&", ";", "|", "||", "("].into_iter().any(|prefix| {
+                command_lower.contains(&format!("{prefix} {heredoc}"))
+                    || command_lower.contains(&format!("{prefix} {heredoc_space}"))
+                    || command_lower.contains(&format!("{prefix} {inline}"))
+            })
+    })
+}
+
+fn inline_python_probe_has_mutation_or_escape_signal(command_lower: &str) -> bool {
+    contains_any(
+        command_lower,
+        &[
+            " pip install",
+            "python -m pip",
+            "python3 -m pip",
+            "subprocess",
+            "os.system(",
+            "popen(",
+            "socket.",
+            "requests.",
+            "urllib.",
+            "http.client",
+            "open(",
+            ".write(",
+            ".write_text(",
+            ".write_bytes(",
+            "unlink(",
+            "remove(",
+            "rmdir(",
+            "rmtree(",
+            "mkdir(",
+            "makedirs(",
+            "rename(",
+            "replace(",
+            "chmod(",
+            "chown(",
+            "symlink(",
+            "truncate(",
+            "shutil.copy",
+            "shutil.move",
+        ],
+    )
 }
 
 fn combined_action_effect(mutates: bool, validates: bool) -> ActionEffect {

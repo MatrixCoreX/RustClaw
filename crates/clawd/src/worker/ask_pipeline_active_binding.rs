@@ -36,6 +36,7 @@ fn active_bound_targets(
             frame.op_kind,
             crate::followup_frame::FollowupOpKind::Read
                 | crate::followup_frame::FollowupOpKind::List
+                | crate::followup_frame::FollowupOpKind::CodeWorkspace
         ) {
             if let Some(target) = frame
                 .bound_target

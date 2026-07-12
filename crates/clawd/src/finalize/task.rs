@@ -22,6 +22,8 @@ mod task_structured_evidence_table;
 mod task_terminal_clarify;
 #[path = "task_tree_summary_recovery.rs"]
 mod task_tree_summary_recovery;
+#[path = "task_verifier_retry_commit.rs"]
+mod task_verifier_retry_commit;
 
 #[cfg(test)]
 use task_answer_verifier_failure::{
@@ -43,6 +45,7 @@ use task_payload_helpers::{
     ask_result_payload, non_failure_final_status, normalize_existing_file_delivery_token_answer,
     should_skip_ask_memory_pair,
 };
+pub(crate) use task_resume::answer_verifier_retry_answer_has_required_machine_evidence;
 use task_resume::{
     answer_verifier_retry_applicable, resume_context_execution_summary_messages,
     resume_failure_execution_failed_step_answer, resume_failure_is_missing_file_delivery_result,
@@ -53,6 +56,7 @@ use task_resume::{
 use task_structured_evidence_table::deterministic_structured_evidence_table_recovery;
 use task_structured_evidence_table::verified_terminal_answer_after_verifier_pass;
 use task_tree_summary_recovery::deterministic_tree_summary_rows_failure_recovery;
+use task_verifier_retry_commit::try_commit_answer_verifier_retry_answer;
 
 pub(crate) async fn retry_loop_answer_after_verifier(
     state: &AppState,
@@ -1396,26 +1400,18 @@ pub(crate) async fn finalize_ask_result(
                         )
                         .await
                         {
-                            answer_text = retried_answer;
-                            answer_messages.retain(|message| {
-                                crate::finalize::is_execution_summary_message(message)
-                            });
-                            answer_messages.push(answer_text.clone());
-                            journal.record_final_answer(&answer_text);
-                            journal.answer_verifier_summary = None;
-                            if let Some(retry_verifier) =
-                                crate::answer_verifier::verify_answer_observe_only(
-                                    state,
-                                    task,
-                                    prompt,
-                                    route_result,
-                                    &journal,
-                                    &answer_text,
-                                )
-                                .await
+                            if try_commit_answer_verifier_retry_answer(
+                                state,
+                                task,
+                                prompt,
+                                route_result,
+                                &mut journal,
+                                &mut answer_text,
+                                &mut answer_messages,
+                                retried_answer,
+                            )
+                            .await
                             {
-                                journal.record_answer_verifier_summary(retry_verifier);
-                            } else {
                                 failure_reply = false;
                                 semantic_clarify = false;
                             }

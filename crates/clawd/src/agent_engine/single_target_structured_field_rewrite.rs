@@ -132,6 +132,14 @@ pub(super) fn rewrite_single_target_file_read_to_auto_locator(
     if current_path == target_path {
         return actions;
     }
+    let target_matches_explicit_route_hint =
+        route_result.output_contract.locator_hint.trim() == target_path;
+    if action_path_is_concrete_locator(&current_path)
+        && !target_matches_explicit_route_hint
+        && !route_result.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+    {
+        return actions;
+    }
 
     // A route/auto-locator target is authoritative for this single-read action.
     // Multi-read plans are rejected by single_file_read_action() above.
@@ -170,7 +178,7 @@ pub(super) fn rewrite_session_alias_delivery_observations_to_route_locator(
     let rewritten = actions
         .into_iter()
         .map(|mut action| {
-            if rewrite_session_alias_delivery_observation_action_path(&mut action, &target) {
+            if rewrite_session_alias_delivery_observation_action_path(&mut action, &target, true) {
                 changed = true;
             }
             action
@@ -223,7 +231,7 @@ pub(super) fn rewrite_active_bound_target_observations_to_matching_locator_hint(
     let rewritten = actions
         .into_iter()
         .map(|mut action| {
-            if rewrite_session_alias_delivery_observation_action_path(&mut action, &target) {
+            if rewrite_session_alias_delivery_observation_action_path(&mut action, &target, false) {
                 changed = true;
             }
             action
@@ -298,6 +306,7 @@ fn path_basename_matches(path: &str, basename: &str) -> bool {
 pub(super) fn rewrite_session_alias_delivery_observation_action_path(
     action: &mut AgentAction,
     target: &str,
+    allow_concrete_locator_rewrite: bool,
 ) -> bool {
     let args = match action {
         AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args }
@@ -334,10 +343,11 @@ pub(super) fn rewrite_session_alias_delivery_observation_action_path(
             if paths.len() != 1 || paths.first().and_then(Value::as_str) == Some(target) {
                 return false;
             }
-            if paths
-                .first()
-                .and_then(Value::as_str)
-                .is_some_and(action_path_is_concrete_locator)
+            if !allow_concrete_locator_rewrite
+                && paths
+                    .first()
+                    .and_then(Value::as_str)
+                    .is_some_and(action_path_is_concrete_locator)
             {
                 return false;
             }
@@ -351,9 +361,10 @@ pub(super) fn rewrite_session_alias_delivery_observation_action_path(
             if path_value.as_str() == Some(target) {
                 return false;
             }
-            if path_value
-                .as_str()
-                .is_some_and(action_path_is_concrete_locator)
+            if !allow_concrete_locator_rewrite
+                && path_value
+                    .as_str()
+                    .is_some_and(action_path_is_concrete_locator)
             {
                 return false;
             }

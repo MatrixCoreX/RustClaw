@@ -76,6 +76,59 @@ fn content_evidence_route_keeps_terminal_synthesize_followup_for_planned_synthes
 }
 
 #[test]
+fn executable_contract_observe_prefix_strips_terminal_discussion_for_next_planner_round() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 1;
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "list_dir",
+                "path": "/workspace/project",
+                "names_only": true
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "read_text_range",
+                "path": "/workspace/project/calc_core.py",
+                "mode": "full"
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    let mut route = route_result(
+        crate::AskMode::act_with_chat_finalizer(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+
+    let stripped =
+        strip_terminal_discussion_for_observed_finalize(Some(&route), &loop_state, actions);
+
+    assert_eq!(stripped.len(), 2);
+    assert!(matches!(
+        &stripped[0],
+        AgentAction::CallTool { tool, args }
+            if tool == "fs_basic"
+                && args.get("action").and_then(Value::as_str) == Some("list_dir")
+    ));
+    assert!(matches!(
+        &stripped[1],
+        AgentAction::CallTool { tool, args }
+            if tool == "fs_basic"
+                && args.get("action").and_then(Value::as_str) == Some("read_text_range")
+    ));
+}
+
+#[test]
 fn content_evidence_route_keeps_multi_evidence_synthesize_followup() {
     let loop_state = LoopState::new(2);
     let actions = vec![

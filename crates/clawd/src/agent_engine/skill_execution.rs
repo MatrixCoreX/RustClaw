@@ -1770,5 +1770,8 @@ mod isolation_tests;
 #[path = "skill_execution_preflight_dry_run_tests.rs"]
 mod preflight_dry_run_tests;
 #[cfg(test)]
+#[path = "skill_execution_preflight_executionless_tests.rs"]
+mod preflight_executionless_tests;
+#[cfg(test)]
 #[path = "skill_execution_tests.rs"]
 pub(super) mod tests;

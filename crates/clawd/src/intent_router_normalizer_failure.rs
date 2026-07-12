@@ -9,9 +9,14 @@ use super::inline_transform::inline_json_transform_fallback_decision;
 use super::parse_failed_fallback::{
     empty_clarify_decision, parse_failed_explicit_existing_path_observation_fallback_decision,
 };
-use super::{normalizer_output_from_fallback, IntentNormalizerOutput};
+use super::{
+    normalizer_output_from_fallback, IntentNormalizerOutput, IntentOutputContract,
+    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
+    RouteDecision, ScheduleKind,
+};
 use crate::intent::surface_signals::PromptSurfaceSignals;
 use crate::{AppState, ClaimedTask};
+use serde_json::Value;
 
 pub(super) fn normalizer_prompt_missing_fallback_output(
     state: &AppState,
@@ -245,6 +250,21 @@ pub(super) fn normalizer_parse_failed_fallback_output(
             None,
         );
     }
+    if let Some(fallback) = parse_failed_executable_contract_fallback_decision(req, llm_out) {
+        info!(
+            "{} intent_normalizer task_id={} parse_failed_executable_contract_fallback reason={} input={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            fallback.reason,
+            crate::truncate_for_log(req)
+        );
+        return normalizer_output_from_fallback(
+            req,
+            "parse_failed_executable_contract_fallback",
+            fallback,
+            None,
+        );
+    }
     if let Some(fallback) = parse_failed_explicit_existing_path_observation_fallback_decision(
         req,
         &state.skill_rt.workspace_root,
@@ -265,4 +285,86 @@ pub(super) fn normalizer_parse_failed_fallback_output(
     }
     let fallback = empty_clarify_decision(req, "normalizer_parse_failed");
     normalizer_output_from_fallback(req, "parse_failed_safe_clarify", fallback, None)
+}
+
+pub(super) fn parse_failed_executable_contract_fallback_decision(
+    req: &str,
+    llm_out: &str,
+) -> Option<RouteDecision> {
+    let value = serde_json::from_str::<Value>(llm_out.trim()).ok()?;
+    if !raw_normalizer_execution_recipe_declares_execution(&value) {
+        return None;
+    }
+    let has_required_machine_fields = raw_json_nonempty(
+        value
+            .pointer("/state_patch/required_machine_fields")
+            .or_else(|| value.pointer("/output_contract/required_machine_fields")),
+    );
+    let raw_shape = value
+        .pointer("/output_contract/response_shape")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let response_shape = if has_required_machine_fields
+        || matches!(raw_shape.as_str(), "strict" | "json" | "exact")
+    {
+        OutputResponseShape::Strict
+    } else {
+        OutputResponseShape::Free
+    };
+    Some(RouteDecision {
+        resolved_user_intent: req.trim().to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "normalizer_parse_failed_executable_contract_fallback:executable_contract_preserved_for_agent_loop".to_string(),
+        confidence: Some(0.50),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::None,
+            locator_hint: String::new(),
+            ..Default::default()
+        },
+    })
+}
+
+fn raw_normalizer_execution_recipe_declares_execution(value: &Value) -> bool {
+    let Some(recipe) = value.get("execution_recipe").and_then(Value::as_object) else {
+        return false;
+    };
+    for key in [
+        "kind",
+        "command",
+        "cmd",
+        "shell_command",
+        "execution_mode",
+        "async_adapter_kind",
+    ] {
+        let Some(text) = recipe.get(key).and_then(Value::as_str).map(str::trim) else {
+            continue;
+        };
+        if !text.is_empty() && !text.eq_ignore_ascii_case("none") {
+            return true;
+        }
+    }
+    false
+}
+
+fn raw_json_nonempty(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(Value::Object(object)) => !object.is_empty(),
+        Some(Value::String(text)) => !text.trim().is_empty(),
+        Some(Value::Bool(_) | Value::Number(_)) => true,
+        Some(Value::Null) | None => false,
+    }
 }

@@ -49,6 +49,15 @@ overlay = ["prompts/layers/overlays/plan_repair_prompt.md"]
 vendor_patch = "execution/common.md"
 
 [[prompts]]
+logical_path = "prompts/planner_abort_compact_retry_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/execution/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/planner_abort_compact_retry_prompt.md"]
+vendor_patch = "execution/common.md"
+
+[[prompts]]
 logical_path = "prompts/intent_normalizer_prompt.md"
 base = [
   "prompts/layers/base/system_truth.md",

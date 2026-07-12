@@ -303,6 +303,9 @@ pub(super) fn append_synthesize_for_observation_only_terminal_answer(
     let Some(route_result) = route_result else {
         return actions;
     };
+    if executable_contract_observe_round_should_continue(Some(route_result), loop_state, &actions) {
+        return actions;
+    }
     if route_uses_runtime_owned_observed_finalizer(route_result)
         || !route_expects_terminal_user_answer(route_result)
         || has_authoritative_delivery(loop_state)
@@ -475,6 +478,13 @@ pub(super) fn strip_terminal_discussion_for_observed_finalize(
     loop_state: &LoopState,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
+    if let Some(stripped) = strip_executable_contract_terminal_discussion_for_loop_continuation(
+        route_result,
+        loop_state,
+        &actions,
+    ) {
+        return stripped;
+    }
     if should_prefer_observed_finalize(route_result, loop_state)
         && has_executable_observation_or_action(&actions)
         && has_discussion_followup_action(&actions)
@@ -530,6 +540,111 @@ pub(super) fn strip_terminal_discussion_for_observed_finalize(
     } else {
         actions
     }
+}
+
+fn strip_executable_contract_terminal_discussion_for_loop_continuation(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> Option<Vec<AgentAction>> {
+    if !has_discussion_followup_action(actions) {
+        return None;
+    }
+    let mut stripped = actions.to_vec();
+    while stripped.last().is_some_and(is_discussion_followup_action) {
+        stripped.pop();
+    }
+    if stripped.len() == actions.len()
+        || !executable_contract_observe_round_should_continue(route_result, loop_state, &stripped)
+    {
+        return None;
+    }
+    Some(stripped)
+}
+
+fn executable_contract_observe_round_should_continue(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> bool {
+    let Some(route_result) = route_result else {
+        return false;
+    };
+    route_result.is_execute_gate()
+        && route_result
+            .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+        && !route_result.needs_clarify
+        && loop_state.round_no < loop_state.max_rounds
+        && !has_authoritative_delivery(loop_state)
+        && !has_discussion_followup_action(actions)
+        && executable_contract_actions_are_observe_only_machine_steps(actions)
+}
+
+fn executable_contract_actions_are_observe_only_machine_steps(actions: &[AgentAction]) -> bool {
+    let mut saw_observe = false;
+    for action in actions {
+        match action {
+            AgentAction::Think { .. } => {}
+            AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args } => {
+                if !executable_contract_tool_action_is_observe_only(tool, args) {
+                    return false;
+                }
+                saw_observe = true;
+            }
+            AgentAction::CallCapability { .. }
+            | AgentAction::SynthesizeAnswer { .. }
+            | AgentAction::Respond { .. } => return false,
+        }
+    }
+    saw_observe
+}
+
+fn executable_contract_tool_action_is_observe_only(tool: &str, args: &Value) -> bool {
+    let tool = tool.trim().to_ascii_lowercase();
+    let (tool, dotted_action) = tool
+        .split_once('.')
+        .map(|(base, action)| (base, Some(action)))
+        .unwrap_or((tool.as_str(), None));
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .or(dotted_action)
+        .map(normalize_executable_contract_action_token)
+        .unwrap_or_default();
+    match tool {
+        "fs_basic" => matches!(
+            action.as_str(),
+            "list_dir"
+                | "read_range"
+                | "read_text"
+                | "read_text_range"
+                | "grep_text"
+                | "find_entries"
+                | "metadata"
+                | "stat"
+        ),
+        "system_basic" => matches!(
+            action.as_str(),
+            "list_dir" | "read_range" | "read_text" | "read_text_range" | "stat"
+        ),
+        "list_dir" | "read_file" | "read_range" | "fs_search" => true,
+        _ => false,
+    }
+}
+
+fn normalize_executable_contract_action_token(action: &str) -> String {
+    action
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if matches!(ch, '-' | ' ' | '.') {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect()
 }
 
 pub(super) fn strip_terminal_discussion_for_scalar_path_observation(
@@ -672,6 +787,28 @@ pub(super) fn observation_only_plan_missing_user_answer(
         && !has_discussion_followup_action(actions)
         && route_expects_terminal_user_answer(route_result)
         && !has_authoritative_delivery(loop_state)
+}
+
+pub(super) fn agent_loop_execution_plan_can_defer_to_verifier(
+    state: &AppState,
+    route_result: &RouteResult,
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> bool {
+    route_result.is_execute_gate()
+        && route_result
+            .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+        && !route_result.needs_clarify
+        && !loop_state.has_tool_or_skill_output
+        && has_executable_observation_or_action(actions)
+        && !contains_unavailable_skill_action(state, actions)
+        && !session_alias_targets_missing_from_plan(state, loop_state, actions)
+        && !actions_violate_recipe_target_scope(state, loop_state, actions)
+        && !structured_scalar_compare_missing_required_extracts_for_round(
+            route_result,
+            loop_state,
+            actions,
+        )
 }
 
 pub(super) fn action_is_likely_mutating(state: &AppState, action: &AgentAction) -> bool {
@@ -921,6 +1058,13 @@ pub(super) fn should_force_actionable_plan_repair(
     if route_result.needs_clarify {
         return false;
     }
+    if loop_state.boundary_observation_needs_clarify
+        && is_plain_respond_only_plan(actions)
+            .map(str::trim)
+            .is_some_and(|content| !content.is_empty())
+    {
+        return false;
+    }
     if route_result.output_contract.delivery_required
         && !loop_state.has_tool_or_skill_output
         && is_delivery_failure_terminal_reply(actions)
@@ -931,6 +1075,9 @@ pub(super) fn should_force_actionable_plan_repair(
         && !loop_state.has_tool_or_skill_output
         && delivery_success_terminal_reply(state, actions)
     {
+        return false;
+    }
+    if agent_loop_execution_plan_can_defer_to_verifier(state, route_result, loop_state, actions) {
         return false;
     }
     if loop_state.execution_recipe.is_active()
@@ -970,6 +1117,15 @@ pub(super) fn should_force_actionable_plan_repair(
     }
     if actions_use_ad_hoc_command_without_route_preferred_skill(state, route_result, actions) {
         return true;
+    }
+    if route_allows_context_only_terminal_respond(route_result, actions) {
+        return false;
+    }
+    if route_allows_existing_observed_context_terminal_respond(route_result, actions) {
+        return false;
+    }
+    if route_allows_active_bound_context_terminal_respond(route_result, loop_state, actions) {
+        return false;
     }
     if no_content_evidence_execute_route_read_only_file_plan_requires_repair(
         state,
@@ -1017,15 +1173,6 @@ pub(super) fn should_force_actionable_plan_repair(
         return false;
     }
     if route_allows_pure_chat_submode_terminal_respond(route_result, actions) {
-        return false;
-    }
-    if route_allows_context_only_terminal_respond(route_result, actions) {
-        return false;
-    }
-    if route_allows_existing_observed_context_terminal_respond(route_result, actions) {
-        return false;
-    }
-    if route_allows_active_bound_context_terminal_respond(route_result, loop_state, actions) {
         return false;
     }
     let requires_action_before_reply =
@@ -1116,7 +1263,9 @@ fn route_allows_active_bound_context_terminal_respond(
                 | crate::OutputLocatorKind::Filename
                 | crate::OutputLocatorKind::CurrentWorkspace
         )
-        || !route_allows_model_language_terminal_respond(Some(route_result))
+        || !(route_allows_model_language_terminal_respond(Some(route_result))
+            || route_result
+                .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop"))
     {
         return false;
     }

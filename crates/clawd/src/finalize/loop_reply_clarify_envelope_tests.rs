@@ -69,6 +69,78 @@ async fn finalize_loop_reply_keeps_clarify_machine_envelope_internal_by_default(
 }
 
 #[tokio::test]
+async fn finalize_loop_reply_marks_agent_loop_terminal_clarify_without_route_clarify() {
+    let state = test_state();
+    let task = claimed_task("task-loop-terminal-clarify-no-route-clarify");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.needs_clarify = false;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.pending_user_input_required = true;
+    loop_state.output_vars.insert(
+        "agent_loop.terminal_intent".to_string(),
+        "clarify".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.clarify_reason_code".to_string(),
+        "boundary_observation_needs_clarify".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.missing_slot".to_string(),
+        "referent".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.message_key".to_string(),
+        "clawd.clarify.missing_referent".to_string(),
+    );
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "continue the previous project",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should render loop clarify");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert_eq!(
+        reply
+            .task_journal
+            .as_ref()
+            .and_then(|journal| journal.final_status),
+        Some(crate::task_journal::TaskJournalFinalStatus::Clarify)
+    );
+    assert!(
+        !reply.text.trim().is_empty(),
+        "clarify reply should be language-rendered"
+    );
+    assert!(
+        reply.messages.iter().all(|message| {
+            serde_json::from_str::<serde_json::Value>(message.trim())
+                .ok()
+                .and_then(|payload| {
+                    payload
+                        .get("owner_layer")
+                        .and_then(serde_json::Value::as_str)
+                        .map(|owner| owner != "agent_loop_clarify")
+                })
+                .unwrap_or(true)
+        }),
+        "reply messages should not expose clarify envelope by default: {:?}",
+        reply.messages
+    );
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_attaches_requested_clarify_machine_envelope() {
     let state = test_state();
     let task = claimed_task("task-requested-clarify-envelope");

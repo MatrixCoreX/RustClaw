@@ -190,10 +190,18 @@ pub(super) fn normalize_skill_arg_aliases(normalized_skill: &str, args: &mut Val
         "image_edit" => normalize_image_edit_arg_aliases(args),
         "kb" => normalize_kb_arg_aliases(args),
         "music_generate" => normalize_music_generate_arg_aliases(args),
+        "run_cmd" => normalize_run_cmd_arg_aliases(args),
         "service_control" => normalize_service_control_arg_aliases(args),
         "video_generate" => normalize_video_generate_arg_aliases(args),
         _ => false,
     }
+}
+
+fn normalize_run_cmd_arg_aliases(args: &mut Value) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    move_string_alias_if_missing(obj, "command", &["cmd", "shell_command"])
 }
 
 fn normalize_config_edit_arg_aliases(args: &mut Value) -> bool {

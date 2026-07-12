@@ -2,11 +2,11 @@ use super::{
     answer_text_is_machine_json_payload, answer_verifier_failure_default_payload,
     answer_verifier_failure_machine_line, answer_verifier_failure_missing_fields_text,
     answer_verifier_failure_observed_facts, answer_verifier_forces_task_failure,
-    answer_verifier_retry_applicable, answer_verifier_retry_observed_trace,
-    answer_verifier_should_force_task_failure, apply_requested_machine_kv_summary_to_final_answer,
-    ask_runtime_failure_machine_payload, assistant_memory_source_text,
-    compose_answer_verifier_failure_user_message, delivery_path_gap_should_finalize_as_clarify,
-    deterministic_config_guard_candidates_recovery,
+    answer_verifier_retry_answer_has_required_machine_evidence, answer_verifier_retry_applicable,
+    answer_verifier_retry_observed_trace, answer_verifier_should_force_task_failure,
+    apply_requested_machine_kv_summary_to_final_answer, ask_runtime_failure_machine_payload,
+    assistant_memory_source_text, compose_answer_verifier_failure_user_message,
+    delivery_path_gap_should_finalize_as_clarify, deterministic_config_guard_candidates_recovery,
     deterministic_content_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
     deterministic_raw_tail_read_failure_recovery, deterministic_tree_summary_rows_failure_recovery,
     drop_execution_summaries_when_delivery_is_scalar, failed_task_lifecycle_payload,
@@ -41,6 +41,8 @@ mod machine_kv_final_guard;
 mod tree_summary_recovery;
 #[path = "task_tests/verified_terminal_promotion.rs"]
 mod verified_terminal_promotion;
+#[path = "task_tests/verifier_retry_machine_evidence.rs"]
+mod verifier_retry_machine_evidence;
 
 fn route_result(ask_mode: crate::AskMode) -> crate::RouteResult {
     crate::RouteResult {

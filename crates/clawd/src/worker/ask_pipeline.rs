@@ -409,11 +409,21 @@ fn agent_loop_boundary_observations_block(
     let route_reason_codes = boundary_observation_route_reason_codes(route);
     let session_alias_bindings = session_alias_binding_observations(session_snapshot);
     let active_bound_targets = active_bound_target_observations(session_snapshot);
-    let missing_referent = missing_referent_observation(route, &active_bound_targets);
+    let missing_referent =
+        missing_referent_observation(route, &active_bound_targets).or_else(|| {
+            unbound_contextual_locator_missing_referent_observation(
+                state,
+                prompt,
+                route,
+                &active_bound_targets,
+            )
+        });
     let file_delivery_target_candidates =
         file_delivery_target_candidate_observations(route, session_snapshot);
     let current_workspace_scope = current_workspace_scope_observation(state, route);
-    let active_plan_files = if missing_referent.is_some() {
+    let active_plan_files = if missing_referent.is_some()
+        || !route_allows_active_plan_file_observations(route, turn_analysis)
+    {
         Vec::new()
     } else {
         active_plan_file_observations(state)
@@ -518,6 +528,43 @@ fn missing_referent_observation(
         "reason_code": "unbound_deictic_reference",
         "status_code": "missing_referent",
         "missing_slot": "referent",
+    }))
+}
+
+fn unbound_contextual_locator_missing_referent_observation(
+    state: &AppState,
+    prompt: &str,
+    route: &crate::RouteResult,
+    active_bound_targets: &[serde_json::Value],
+) -> Option<serde_json::Value> {
+    if !active_bound_targets.is_empty() || route.needs_clarify {
+        return None;
+    }
+    if !route.has_route_reason_machine_marker("current_turn_locator_overrides_contextual_path")
+        || !route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+    {
+        return None;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
+    if surface.has_explicit_path_or_url()
+        || surface
+            .filename_candidates_excluding_field_selectors()
+            .is_empty()
+    {
+        return None;
+    }
+    if route.output_contract.locator_hint.trim().starts_with('/') {
+        return None;
+    }
+    if current_request_resolves_workspace_child_locator(state, prompt).is_some() {
+        return None;
+    }
+    Some(serde_json::json!({
+        "owner_layer": "agent_loop_boundary",
+        "reason_code": "unbound_deictic_reference",
+        "status_code": "missing_referent",
+        "missing_slot": "referent",
+        "source": "unbound_contextual_locator",
     }))
 }
 
@@ -692,6 +739,21 @@ fn current_workspace_scope_has_count_shape(route: &crate::RouteResult) -> bool {
         && route.output_contract.exact_sentence_count == Some(1))
 }
 
+fn route_allows_active_plan_file_observations(
+    route: &crate::RouteResult,
+    _turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    if !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.wants_file_delivery
+        || route.output_contract.locator_kind != crate::OutputLocatorKind::CurrentWorkspace
+    {
+        return false;
+    }
+
+    route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary)
+}
+
 fn active_plan_file_observations(state: &AppState) -> Vec<serde_json::Value> {
     let plan_root = state.skill_rt.workspace_root.join("plan");
     let Ok(entries) = std::fs::read_dir(&plan_root) else {
@@ -760,19 +822,37 @@ fn active_bound_target_observations(
 ) -> Vec<serde_json::Value> {
     let mut out = Vec::new();
     if let Some(frame) = session_snapshot.active_followup_frame.as_ref() {
-        let target = frame
-            .bound_target
-            .as_deref()
-            .map(str::trim)
-            .filter(|target| !target.is_empty());
-        let ordered_targets = active_followup_ordered_targets(frame);
-        if target.is_some() || !ordered_targets.is_empty() {
+        let expose_followup_target = matches!(
+            frame.op_kind,
+            crate::followup_frame::FollowupOpKind::Read
+                | crate::followup_frame::FollowupOpKind::List
+                | crate::followup_frame::FollowupOpKind::CodeWorkspace
+                | crate::followup_frame::FollowupOpKind::Delivery
+                | crate::followup_frame::FollowupOpKind::ClarifyPending
+        );
+        if expose_followup_target {
+            let target = frame
+                .bound_target
+                .as_deref()
+                .map(str::trim)
+                .filter(|target| !target.is_empty());
+            let ordered_targets = active_followup_ordered_targets(frame);
+            if target.is_some() || !ordered_targets.is_empty() {
+                out.push(serde_json::json!({
+                    "source": "active_followup_frame",
+                    "op_kind": followup_op_kind_token(frame.op_kind),
+                    "target": target.unwrap_or(""),
+                    "ordered_targets": ordered_targets,
+                    "ordered_entry_count": frame.ordered_entries.len(),
+                }));
+            }
+        } else if !frame.source_request.trim().is_empty() {
             out.push(serde_json::json!({
                 "source": "active_followup_frame",
                 "op_kind": followup_op_kind_token(frame.op_kind),
-                "target": target.unwrap_or(""),
-                "ordered_targets": ordered_targets,
-                "ordered_entry_count": frame.ordered_entries.len(),
+                "target": "",
+                "ordered_targets": Vec::<String>::new(),
+                "ordered_entry_count": 0,
             }));
         }
     }
@@ -858,6 +938,7 @@ fn followup_op_kind_token(kind: crate::followup_frame::FollowupOpKind) -> &'stat
         crate::followup_frame::FollowupOpKind::Generic => "generic",
         crate::followup_frame::FollowupOpKind::Read => "read",
         crate::followup_frame::FollowupOpKind::List => "list",
+        crate::followup_frame::FollowupOpKind::CodeWorkspace => "code_workspace",
         crate::followup_frame::FollowupOpKind::Delivery => "delivery",
         crate::followup_frame::FollowupOpKind::ClarifyPending => "clarify_pending",
     }
@@ -1502,6 +1583,14 @@ pub(super) async fn execute_ask_dispatch(
             state,
             &task.task_id,
             Some(crate::AskState::Routing),
+            crate::AskState::Executing,
+            "alias_state_patch_ack_direct",
+            None,
+        );
+        crate::log_ask_transition(
+            state,
+            &task.task_id,
+            Some(crate::AskState::Executing),
             crate::AskState::Finalizing,
             "alias_state_patch_ack",
             None,

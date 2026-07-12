@@ -5,6 +5,7 @@ use super::{
     AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome,
 };
 use crate::{AgentAction, AppState, ClaimedTask};
+use serde_json::Value;
 
 struct RoundProgressSnapshot {
     delivery_count: usize,
@@ -191,6 +192,69 @@ fn action_counts_as_tool_call(action: &AgentAction) -> bool {
     )
 }
 
+fn bare_last_output_placeholder(content: &str) -> bool {
+    let trimmed = content.trim();
+    if !trimmed.starts_with("{{") || !trimmed.ends_with("}}") {
+        return false;
+    }
+    let inner = trimmed[2..trimmed.len().saturating_sub(2)].trim();
+    let lower = inner.to_ascii_lowercase();
+    lower == "last_output" || lower.starts_with("last_output.") || lower.starts_with("last_output[")
+}
+
+fn terminal_synthesis_can_skip_remaining_actions(
+    action: &AgentAction,
+    remaining_actions: &[AgentAction],
+    loop_state: &LoopState,
+) -> bool {
+    if !matches!(action, AgentAction::SynthesizeAnswer { .. }) {
+        return false;
+    }
+    if loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .is_none_or(str::is_empty)
+    {
+        return false;
+    }
+    let strict_json_terminal = terminal_synthesis_strict_json_owns_response(loop_state);
+    !remaining_actions.is_empty()
+        && remaining_actions.iter().all(|action| match action {
+            AgentAction::Think { .. } => true,
+            AgentAction::Respond { content } => {
+                bare_last_output_placeholder(content)
+                    || (strict_json_terminal && !response_content_is_json_object(content))
+            }
+            AgentAction::CallSkill { .. }
+            | AgentAction::CallTool { .. }
+            | AgentAction::CallCapability { .. }
+            | AgentAction::SynthesizeAnswer { .. } => false,
+        })
+}
+
+fn terminal_synthesis_strict_json_owns_response(loop_state: &LoopState) -> bool {
+    if !loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .is_some_and(response_content_is_json_object)
+    {
+        return false;
+    }
+    loop_state
+        .output_vars
+        .get("agent_loop.strict_json_projection_publishable")
+        .is_some_and(|value| value == "true")
+        || loop_state
+            .output_contract
+            .as_ref()
+            .is_some_and(|contract| contract.response_shape == crate::OutputResponseShape::Strict)
+}
+
+fn response_content_is_json_object(content: &str) -> bool {
+    serde_json::from_str::<Value>(content.trim()).is_ok_and(|value| value.is_object())
+}
+
 pub(super) async fn execute_actions_once(
     state: &AppState,
     task: &ClaimedTask,
@@ -251,7 +315,7 @@ pub(super) async fn execute_actions_once(
             plan_step_label(action)
         );
         loop_state.last_actions_fingerprint = Some(fingerprint.clone());
-        match dispatch_round_action(
+        let decision = dispatch_round_action(
             state,
             task,
             goal,
@@ -269,8 +333,25 @@ pub(super) async fn execute_actions_once(
             &mut ended_with_user_visible_output,
             agent_run_context,
         )
-        .await?
+        .await?;
+        let executed_limit = policy.max_steps.max(1);
+        let remaining_actions = &actions[idx + 1..actions.len().min(executed_limit)];
+        if matches!(
+            decision,
+            ActionLoopDecision::NextAction | ActionLoopDecision::ContinueRound
+        ) && terminal_synthesis_can_skip_remaining_actions(action, remaining_actions, loop_state)
         {
+            info!(
+                "executor_terminal_synthesis_skip_placeholder_delivery task_id={} round={} step={} remaining={}",
+                task.task_id,
+                loop_state.round_no,
+                step_in_round,
+                remaining_actions.len()
+            );
+            stop_signal = Some("terminal_synthesis_ready".to_string());
+            break;
+        }
+        match decision {
             ActionLoopDecision::NextAction => {}
             ActionLoopDecision::ContinueRound => continue,
             ActionLoopDecision::StopRound(reason) => {

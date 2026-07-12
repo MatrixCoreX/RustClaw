@@ -464,7 +464,7 @@ fn normalizer_schema_normalization_does_not_infer_custom_recipe_text() {
         value
             .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
-        Some("none")
+        Some("raw_command_output")
     );
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
@@ -673,7 +673,8 @@ fn normalizer_schema_normalization_keeps_structured_contract_over_recipe_text() 
 }
 
 #[test]
-fn normalizer_schema_normalization_maps_command_payload_to_raw_output_when_semantic_missing() {
+fn normalizer_schema_normalization_preserves_command_payload_for_agent_loop_when_semantic_missing()
+{
     let raw = r#"{
           "resolved_user_intent":"列出 logs 目录下前 10 个文件名，不读取内容",
           "answer_candidate":"",
@@ -702,7 +703,7 @@ fn normalizer_schema_normalization_maps_command_payload_to_raw_output_when_seman
         value
             .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
-        Some("raw_command_output")
+        Some("none")
     );
     assert_eq!(
         value
@@ -849,7 +850,7 @@ fn normalizer_schema_normalization_maps_legacy_command_result_contract_to_raw_ou
         value
             .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
-        Some("raw_command_output")
+        Some("none")
     );
     assert_eq!(
         value
@@ -919,7 +920,7 @@ fn normalizer_schema_normalization_clears_empty_path_locator_for_command_payload
         value
             .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
-        Some("raw_command_output")
+        Some("none")
     );
     assert_eq!(
         value
@@ -1914,69 +1915,6 @@ fn normalizer_schema_normalization_trusts_explicit_none_recipe_for_skill_plan() 
             .pointer("/execution_recipe/profile")
             .and_then(|value| value.as_str()),
         Some("skill_authoring")
-    );
-    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
-        &normalized,
-        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
-    )
-    .expect("schema validation");
-}
-
-#[test]
-fn normalizer_schema_promotes_top_level_required_machine_fields_to_state_patch() {
-    let raw = r#"{
-          "resolved_user_intent":"检查当前 git 状态，只返回 branch、worktree_state、changed_count。",
-          "resume_behavior":"none",
-          "schedule_kind":"none",
-          "schedule_intent":null,
-          "wants_file_delivery":false,
-          "should_refresh_long_term_memory":false,
-          "agent_display_name_hint":"",
-          "needs_clarify":false,
-          "clarify_question":"",
-          "reason":"The user requested machine-readable status fields.",
-          "confidence":0.9,
-          "output_contract":{
-            "response_shape":"strict",
-            "requires_content_evidence":true,
-            "delivery_required":false,
-            "locator_kind":"current_workspace",
-            "delivery_intent":"none",
-            "contract_marker":"none",
-            "locator_hint":"workspace_root",
-            "self_extension":{"mode":"none","trigger":"none","execute_now":false}
-          },
-          "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"},
-          "turn_type":"task_request",
-          "target_task_policy":"standalone",
-          "should_interrupt_active_run":false,
-          "state_patch":null,
-          "required_machine_fields":["branch","worktree_state","changed_count"],
-          "attachment_processing_required":false
-        }"#;
-    let normalized = super::normalize_intent_normalizer_raw_for_schema(
-        raw,
-        "检查当前 git 状态，只返回 branch、worktree_state、changed_count。",
-    );
-    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-    assert!(value.get("required_machine_fields").is_none());
-    assert_eq!(
-        value
-            .pointer("/state_patch/required_machine_fields/0")
-            .and_then(|value| value.as_str()),
-        Some("branch")
-    );
-    assert_eq!(
-        value
-            .pointer("/state_patch/required_machine_fields/1")
-            .and_then(|value| value.as_str()),
-        Some("worktree_state")
-    );
-    assert_eq!(
-        value
-            .pointer("/state_patch/required_machine_fields/2")
-            .and_then(|value| value.as_str()),
-        Some("changed_count")
     );
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,

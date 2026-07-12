@@ -130,6 +130,9 @@ pub(super) fn action_should_be_sqlite_schema_version_query(action: &AgentAction)
             if skill == "db_basic" {
                 return false;
             }
+            if sqlite3_command_requests_pragma(&skill, args, "schema_version") {
+                return true;
+            }
             if skill != "system_basic" {
                 return false;
             }
@@ -157,6 +160,80 @@ pub(super) fn action_should_be_sqlite_schema_version_query(action: &AgentAction)
         | AgentAction::Respond { .. }
         | AgentAction::SynthesizeAnswer { .. } => false,
     }
+}
+
+pub(super) fn action_should_be_sqlite_user_version_query(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            let skill = skill.trim().to_ascii_lowercase();
+            if skill == "db_basic" {
+                return false;
+            }
+            if sqlite3_command_requests_pragma(&skill, args, "user_version") {
+                return true;
+            }
+            if skill != "system_basic" {
+                return false;
+            }
+            let action_name = args
+                .get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or("");
+            match action_name.to_ascii_lowercase().as_str() {
+                "user_version" | "sqlite_user_version" => true,
+                "extract_field" => args.get("field_path").is_some_and(|value| {
+                    value
+                        .as_str()
+                        .map(str::trim)
+                        .map(|field| field.eq_ignore_ascii_case("user_version"))
+                        .unwrap_or(false)
+                }),
+                "extract_fields" => args
+                    .get("field_paths")
+                    .and_then(Value::as_array)
+                    .filter(|fields| fields.len() == 1)
+                    .and_then(|fields| fields.first())
+                    .is_some_and(|value| {
+                        value
+                            .as_str()
+                            .map(str::trim)
+                            .map(|field| field.eq_ignore_ascii_case("user_version"))
+                            .unwrap_or(false)
+                    }),
+                _ => false,
+            }
+        }
+        AgentAction::CallCapability { .. }
+        | AgentAction::Think { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::SynthesizeAnswer { .. } => false,
+    }
+}
+
+fn sqlite3_command_requests_pragma(skill: &str, args: &Value, pragma: &str) -> bool {
+    let action_name = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    let command_allowed = skill == "run_cmd"
+        || (skill == "system_basic"
+            && matches!(
+                action_name.to_ascii_lowercase().as_str(),
+                "" | "run_cmd" | "shell_run" | "runtime_status"
+            ));
+    if !command_allowed {
+        return false;
+    }
+    let Some(command) = ["command", "cmd", "shell_command"]
+        .into_iter()
+        .find_map(|key| args.get(key).and_then(Value::as_str))
+    else {
+        return false;
+    };
+    let lower = command.to_ascii_lowercase();
+    lower.contains("sqlite3") && lower.contains("pragma") && lower.contains(pragma)
 }
 
 pub(super) fn rewrite_sqlite_schema_version_plan_to_db_basic(
@@ -198,6 +275,44 @@ pub(super) fn rewrite_sqlite_schema_version_plan_to_db_basic(
     }
     if changed {
         info!("plan_rewrite_sqlite_schema_version_to_db_basic");
+    }
+    rewritten
+}
+
+pub(super) fn rewrite_sqlite_user_version_plan_to_db_basic(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+    preserve_explicit_command: bool,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if preserve_explicit_command {
+        return actions;
+    }
+    let route_path =
+        route_result.and_then(|route| sqlite_locator_path_for_route(route, auto_locator_path));
+    let mut rewritten = actions;
+    let mut changed = false;
+    for action in rewritten.iter_mut() {
+        if !action_should_be_sqlite_user_version_query(action) {
+            continue;
+        }
+        let Some(db_path) = route_path
+            .clone()
+            .or_else(|| sqlite_locator_path_from_action(action))
+        else {
+            continue;
+        };
+        *action = AgentAction::CallSkill {
+            skill: "db_basic".to_string(),
+            args: serde_json::json!({
+                "action": "user_version",
+                "db_path": db_path,
+            }),
+        };
+        changed = true;
+    }
+    if changed {
+        info!("plan_rewrite_sqlite_user_version_to_db_basic");
     }
     rewritten
 }

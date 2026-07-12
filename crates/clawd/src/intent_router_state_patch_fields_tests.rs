@@ -76,3 +76,77 @@ fn task_lifecycle_required_machine_fields_normalize_to_service_status_contract()
     assert_eq!(contract.delivery_intent, crate::OutputDeliveryIntent::None);
     assert!(contract.locator_hint.is_empty());
 }
+
+#[test]
+fn required_machine_fields_clear_non_file_delivery_contract() {
+    let mut contract = output_contract_for_selector_test();
+    contract.response_shape = crate::OutputResponseShape::Strict;
+
+    let repair = apply_state_patch_required_machine_fields_contract(
+        &mut contract,
+        Some(&json!({
+            "required_machine_fields": [
+                "created_files",
+                "test_command",
+                "test_status"
+            ]
+        })),
+    );
+
+    assert_eq!(
+        repair,
+        Some("required_machine_fields_clear_delivery_contract")
+    );
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.delivery_intent, crate::OutputDeliveryIntent::None);
+    assert_eq!(contract.response_shape, crate::OutputResponseShape::Strict);
+}
+
+#[test]
+fn required_machine_fields_keep_true_file_token_delivery_contract() {
+    let mut contract = output_contract_for_selector_test();
+    contract.response_shape = crate::OutputResponseShape::FileToken;
+    contract.delivery_required = true;
+    contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+
+    let repair = apply_state_patch_required_machine_fields_contract(
+        &mut contract,
+        Some(&json!({"required_machine_fields": ["created_files"]})),
+    );
+
+    assert_eq!(repair, None);
+    assert!(contract.delivery_required);
+    assert_eq!(
+        contract.delivery_intent,
+        crate::OutputDeliveryIntent::FileSingle
+    );
+}
+
+#[test]
+fn required_machine_fields_clear_contradictory_file_token_contract() {
+    let mut contract = output_contract_for_selector_test();
+    contract.response_shape = crate::OutputResponseShape::FileToken;
+    contract.delivery_required = false;
+    contract.delivery_intent = crate::OutputDeliveryIntent::None;
+
+    let repair = apply_state_patch_required_machine_fields_contract(
+        &mut contract,
+        Some(&json!({
+            "required_machine_fields": [
+                "changed_files",
+                "test_command",
+                "test_status",
+                "functions",
+                "error_codes"
+            ]
+        })),
+    );
+
+    assert_eq!(
+        repair,
+        Some("required_machine_fields_clear_delivery_contract")
+    );
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.delivery_intent, crate::OutputDeliveryIntent::None);
+    assert_eq!(contract.response_shape, crate::OutputResponseShape::Strict);
+}

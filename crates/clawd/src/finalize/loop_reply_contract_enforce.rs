@@ -575,6 +575,11 @@ pub(super) fn content_evidence_terminal_respond_is_contractual_answer(
     ) {
         return false;
     }
+    if valid_publishable_synthesis_output(loop_state)
+        .is_some_and(|synthesis| synthesis.trim() == respond.trim())
+    {
+        return true;
+    }
     if matches!(
         route.effective_output_contract_semantic_kind(),
         crate::OutputSemanticKind::RawCommandOutput

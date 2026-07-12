@@ -8,6 +8,15 @@ pub(in crate::agent_engine::loop_control) fn answer_verifier_gap_requests_observ
             .missing_evidence_fields
             .iter()
             .any(|field| field == "unsupported_claims")
+        && !verifier.missing_evidence_fields.iter().any(|field| {
+            matches!(
+                field.as_str(),
+                "content_excerpt"
+                    | "field_value"
+                    | "any_of(command_output|content_excerpt|field_value)"
+                    | "any_of(command_output|content_excerpt|count|field_value)"
+            )
+        })
 }
 
 pub(in crate::agent_engine::loop_control) fn answer_verifier_gap_has_observed_content_evidence(
@@ -107,17 +116,29 @@ pub(in crate::agent_engine::loop_control) async fn try_rewrite_answer_verifier_g
     )
     .await
     {
-        if retry_verifier_accepts_rewritten_answer(&retry_verifier) {
-            commit_answer_verifier_retry_answer(reply, retried_answer);
-            tracing::info!("answer_verifier_retry_rewritten_with_observed_evidence");
-            return true;
+        if retry_verifier_accepts_rewritten_answer(&retry_verifier, Some(route), &retried_answer) {
+            if commit_answer_verifier_retry_answer(reply, retried_answer) {
+                tracing::info!("answer_verifier_retry_rewritten_with_observed_evidence");
+                return true;
+            }
+            return false;
         }
         if let Some(journal) = reply.task_journal.as_mut() {
             journal.record_answer_verifier_summary(retry_verifier);
         }
         return false;
     }
-    commit_answer_verifier_retry_answer(reply, retried_answer);
-    tracing::info!("answer_verifier_retry_rewritten_with_observed_evidence");
-    true
+    if retry_rewritten_answer_is_publishable(Some(route), &retried_answer) {
+        if commit_answer_verifier_retry_answer(reply, retried_answer) {
+            tracing::info!("answer_verifier_retry_rewritten_with_observed_evidence");
+            true
+        } else {
+            false
+        }
+    } else {
+        tracing::info!(
+            "answer_verifier_retry_observed_rewrite_unpublishable_unresolved_machine_fields"
+        );
+        false
+    }
 }

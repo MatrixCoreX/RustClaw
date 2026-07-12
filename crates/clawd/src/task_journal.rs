@@ -18,6 +18,8 @@ mod task_journal_evidence_registry;
 mod task_journal_rollout_attribution;
 #[path = "task_journal_trace_storage.rs"]
 mod task_journal_trace_storage;
+#[path = "task_journal_validation_result.rs"]
+mod task_journal_validation_result;
 
 use task_journal_event_stream::task_event_stream_json;
 use task_journal_evidence_collect::*;
@@ -32,6 +34,7 @@ pub(crate) use task_journal_evidence_registry::{
     observed_evidence_for_step_trace, observed_evidence_from_output,
 };
 use task_journal_trace_storage::*;
+use task_journal_validation_result::validation_result_json;
 
 const MAX_OBSERVED_EVIDENCE_ITEMS: usize = 40;
 const MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS: usize = 240;
@@ -210,8 +213,59 @@ impl TaskJournalStepTrace {
 }
 
 fn step_output_excerpt_for_journal(output: &str) -> String {
-    compact_structured_listing_output_for_journal(output)
+    compact_structured_action_output_for_journal(output)
+        .or_else(|| compact_structured_listing_output_for_journal(output))
         .unwrap_or_else(|| crate::truncate_for_log(output))
+}
+
+fn compact_structured_action_output_for_journal(output: &str) -> Option<String> {
+    let value = serde_json::from_str::<Value>(output.trim()).ok()?;
+    let text_json = value
+        .get("text")
+        .and_then(Value::as_str)
+        .and_then(|text| serde_json::from_str::<Value>(text.trim()).ok());
+    let source = value
+        .get("extra")
+        .filter(|extra| extra.is_object())
+        .or_else(|| text_json.as_ref())
+        .unwrap_or(&value);
+    let action = source.get("action").and_then(Value::as_str)?;
+    if !matches!(
+        action,
+        "make_dir" | "write_text" | "append_text" | "read_range" | "read_text_range" | "grep_text"
+    ) {
+        return None;
+    }
+    let mut compact = serde_json::Map::new();
+    copy_listing_field(source, &mut compact, "action");
+    copy_listing_field(source, &mut compact, "path");
+    copy_listing_field(source, &mut compact, "resolved_path");
+    copy_listing_field(source, &mut compact, "effective_path");
+    copy_listing_field(source, &mut compact, "append");
+    copy_listing_field(source, &mut compact, "content_bytes");
+    copy_listing_field(source, &mut compact, "start_line");
+    copy_listing_field(source, &mut compact, "end_line");
+    copy_listing_field(source, &mut compact, "total_lines");
+    copy_listing_field(source, &mut compact, "mode");
+    copy_listing_field(source, &mut compact, "requested_n");
+    copy_listing_field(source, &mut compact, "root");
+    copy_listing_field(source, &mut compact, "query");
+    copy_listing_field(source, &mut compact, "count");
+    copy_listing_field(source, &mut compact, "matches");
+    copy_listing_field(source, &mut compact, "match_count");
+    copy_listing_field(source, &mut compact, "name_count");
+    copy_listing_field(source, &mut compact, "name_patterns");
+    copy_listing_field(source, &mut compact, "name_results");
+    if let Some(excerpt) = source.get("excerpt").and_then(Value::as_str) {
+        compact.insert(
+            "excerpt".to_string(),
+            Value::String(crate::truncate_for_log(excerpt)),
+        );
+    }
+    if compact.len() <= 1 {
+        return None;
+    }
+    serde_json::to_string(&json!({ "extra": Value::Object(compact) })).ok()
 }
 
 fn compact_structured_listing_output_for_journal(output: &str) -> Option<String> {
@@ -1284,73 +1338,6 @@ fn cost_budget_json(journal: &TaskJournal) -> Value {
         },
         "signals": signals,
     })
-}
-
-fn validation_result_json(journal: &TaskJournal) -> Value {
-    let signals = journal
-        .step_results
-        .iter()
-        .filter_map(validation_signal_from_step)
-        .collect::<Vec<_>>();
-    let latest_status = signals
-        .last()
-        .and_then(|signal| signal.get("status"))
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    json!({
-        "schema_version": 1,
-        "source": "task_journal_step_trace",
-        "validation_step_count": signals.len(),
-        "latest_status": latest_status,
-        "signals": signals,
-    })
-}
-
-fn validation_signal_from_step(step: &TaskJournalStepTrace) -> Option<Value> {
-    if let Some(error) = step
-        .error_excerpt
-        .as_deref()
-        .and_then(crate::skills::parse_structured_skill_error)
-    {
-        if matches!(
-            error.error_kind.as_str(),
-            "validation_failed" | "validation_inconclusive"
-        ) {
-            return Some(json!({
-                "step_id": &step.step_id,
-                "source": "step_error",
-                "status": error.error_kind.as_str(),
-                "status_code": error.error_kind.as_str(),
-                "message_key": error
-                    .extra
-                    .as_ref()
-                    .and_then(|extra| extra.get("message_key"))
-                    .and_then(Value::as_str),
-            }));
-        }
-    }
-    let value = step
-        .output_excerpt
-        .as_deref()
-        .and_then(|text| serde_json::from_str::<Value>(text.trim()).ok())?;
-    let validation = value
-        .get("validation_result")
-        .or_else(|| value.get("validation"))?;
-    let status = validation
-        .get("status")
-        .or_else(|| validation.get("status_code"))
-        .and_then(Value::as_str)
-        .unwrap_or("present");
-    Some(json!({
-        "step_id": &step.step_id,
-        "source": "step_output",
-        "status": status,
-        "status_code": validation
-            .get("status_code")
-            .and_then(Value::as_str)
-            .unwrap_or(status),
-        "message_key": validation.get("message_key").and_then(Value::as_str),
-    }))
 }
 
 #[derive(Debug, Clone, Default)]

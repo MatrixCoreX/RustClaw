@@ -26,6 +26,7 @@ Rules:
 7) Do not invent facts, paths, files, command outputs, successful actions, or permissions that are not in the contract.
 8) If the contract says the model/tool is unavailable, keep the reply short, honest, and recoverable.
 9) For `tool_failure`, explain only the observed failure facts and recovery boundary. Do not rewrite raw command output unless the contract explicitly asks for natural-language wording.
+   If observed facts indicate a provider/planner/parser gap, do not claim the local execution environment or tools could not run unless the observed facts explicitly say no tool execution happened. Say only that a verified executable next step or verified final result could not be produced.
 10) For `policy_block`, clearly say the action is blocked by the current policy/permission boundary and give exactly one safe next step. Do not suggest bypassing policy, do not claim execution happened, and do not turn it into a generic apology.
 11) When `observed_facts` include command/skill output summaries, use those facts to explain what happened before giving the recovery path. Do not replace them with a generic "I could not determine the answer" message.
 

@@ -21,6 +21,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::{llm_gateway, AppState, ClaimedTask};
 
@@ -100,6 +101,74 @@ fn looks_like_concrete_delivery_artifact(text: &str) -> bool {
             && trimmed.as_bytes()[1] == b':'
             && matches!(trimmed.as_bytes()[2], b'/' | b'\\')
             && trimmed.as_bytes()[0].is_ascii_alphabetic())
+}
+
+fn looks_like_publishable_result_json(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty()
+        || crate::finalize::looks_like_planner_artifact(trimmed)
+        || crate::finalize::looks_like_internal_trace_artifact(trimmed)
+    {
+        return false;
+    }
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(Value::Object(object)) => publishable_result_json_object(&object),
+        Ok(Value::Array(values)) => {
+            !values.is_empty()
+                && values.len() <= 64
+                && values.iter().all(json_value_has_publishable_payload)
+        }
+        _ => false,
+    }
+}
+
+fn publishable_result_json_object(object: &serde_json::Map<String, Value>) -> bool {
+    if object.is_empty() || object.len() > 32 || looks_like_runtime_protocol_json_object(object) {
+        return false;
+    }
+    object
+        .iter()
+        .all(|(key, value)| valid_result_json_key(key) && json_value_has_publishable_payload(value))
+}
+
+fn looks_like_runtime_protocol_json_object(object: &serde_json::Map<String, Value>) -> bool {
+    let has = |key: &str| object.contains_key(key);
+    has("steps")
+        || (has("type") && (has("tool") || has("skill") || has("capability") || has("args")))
+        || (has("action")
+            && (has("path")
+                || has("resolved_path")
+                || has("excerpt")
+                || has("content_excerpt")
+                || has("args")))
+        || (has("status") && (has("request_id") || has("text") || has("error_text")))
+        || (has("extra") && (has("text") || has("error_text") || has("request_id")))
+        || (has("schema_version")
+            && (has("owner_layer") || has("reason_code") || has("status_code") || has("stage")))
+}
+
+fn valid_result_json_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 64
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+}
+
+fn json_value_has_publishable_payload(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(_) | Value::Number(_) => true,
+        Value::String(text) => !text.trim().is_empty(),
+        Value::Array(values) => {
+            !values.is_empty() && values.iter().any(json_value_has_publishable_payload)
+        }
+        Value::Object(object) => {
+            !object.is_empty()
+                && !looks_like_runtime_protocol_json_object(object)
+                && object.values().any(json_value_has_publishable_payload)
+        }
+    }
 }
 
 async fn classify_delivery_text_with_llm(
@@ -212,6 +281,9 @@ pub(crate) async fn is_meta_respond_instruction(
     if looks_like_concrete_delivery_artifact(trimmed) {
         return false;
     }
+    if looks_like_publishable_result_json(trimmed) {
+        return false;
+    }
     classify_delivery_text_with_llm(state, task, trimmed)
         .await
         .map(|out| out.is_meta_instruction && out.meta_confidence >= 0.55)
@@ -250,6 +322,9 @@ pub(crate) async fn is_publishable_raw(state: &AppState, task: &ClaimedTask, s: 
     }
     let trimmed = s.trim();
     if looks_like_concrete_delivery_artifact(trimmed) {
+        return true;
+    }
+    if looks_like_publishable_result_json(trimmed) {
         return true;
     }
     if trimmed.chars().count() > 180 {

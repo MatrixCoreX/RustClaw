@@ -222,6 +222,24 @@ fn fs_search_aliases_normalize_to_supported_contract() {
 }
 
 #[test]
+fn run_cmd_shell_command_alias_normalizes_to_command() {
+    let mut args = json!({
+        "shell_command": "python3 test_calc_core.py",
+        "cwd": "/tmp/project"
+    });
+
+    assert!(normalize_skill_arg_aliases("run_cmd", &mut args));
+    assert_eq!(
+        args.get("command").and_then(|v| v.as_str()),
+        Some("python3 test_calc_core.py")
+    );
+    assert_eq!(
+        args.get("shell_command").and_then(|v| v.as_str()),
+        Some("python3 test_calc_core.py")
+    );
+}
+
+#[test]
 fn browser_web_open_extract_numeric_ranges_normalize_to_skill_contract() {
     let mut args = json!({
         "action": "open_extract",

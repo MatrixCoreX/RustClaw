@@ -262,8 +262,16 @@ fn direct_free_text_conflicts_with_request_language(
     crate::language_policy::text_language_conflicts_with_hint(candidate, request_language_hint)
 }
 
+fn observed_answer_is_structured_machine_payload(candidate: &str) -> bool {
+    matches!(
+        serde_json::from_str::<serde_json::Value>(candidate.trim()),
+        Ok(serde_json::Value::Object(_) | serde_json::Value::Array(_))
+    )
+}
+
 fn observed_answer_language_compatible(candidate: &str, request_language_hint: &str) -> bool {
-    !direct_free_text_conflicts_with_request_language(candidate, request_language_hint)
+    observed_answer_is_structured_machine_payload(candidate)
+        || !direct_free_text_conflicts_with_request_language(candidate, request_language_hint)
 }
 
 fn observed_answer_language_compatible_for_route(

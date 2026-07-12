@@ -420,3 +420,27 @@ fn chat_wrapped_text_loop_terminal_respond_does_not_force_plan_repair() {
         &actions
     ));
 }
+
+#[test]
+fn boundary_observation_clarify_terminal_respond_does_not_force_plan_repair() {
+    let mut loop_state = LoopState::new(1);
+    loop_state.boundary_observation_needs_clarify = true;
+    let mut route = route_result(
+        crate::AskMode::act_with_chat_finalizer(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.needs_clarify = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.delivery_required = false;
+    route.wants_file_delivery = false;
+    let actions = vec![AgentAction::Respond {
+        content: r#"{"message_key":"clarify_missing_target","missing_slot":"target"}"#.to_string(),
+    }];
+
+    assert!(!should_force_plan_repair(
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+}

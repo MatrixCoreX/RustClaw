@@ -1435,6 +1435,70 @@ fn greenfield_scope_with_make_dir_and_write_file_keeps_plan() {
 }
 
 #[test]
+fn greenfield_scope_with_fs_basic_make_dir_and_write_text_keeps_plan() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
+        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+        profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+        target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::Greenfield,
+        phase: crate::execution_recipe::ExecutionRecipePhase::Apply,
+        inspect_first: true,
+        validation_required: true,
+        saw_inspect: true,
+        ..Default::default()
+    };
+    let project_dir = "/home/guagua/rustclaw/run/nl_eval_tmp/codex_cli_continuous_20260711_new";
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "make_dir",
+                "path": project_dir
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "write_text",
+                "path": format!("{project_dir}/calc_core.py"),
+                "content": "def add(a, b):\n    return a + b\n"
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "run_cmd".to_string(),
+            args: serde_json::json!({
+                "command": "python3 test_calc_core.py",
+                "cwd": project_dir,
+                "_clawd_validation": {
+                    "profile": "code_change",
+                    "validator_type": "test",
+                    "validated_target": project_dir
+                }
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    let mut route = route_result(
+        crate::AskMode::act_plain(),
+        false,
+        OutputResponseShape::Strict,
+    );
+    route.route_reason =
+        "execution_recipe_target_locator_preserved_for_agent_loop; executable_contract_preserved_for_agent_loop"
+            .to_string();
+    assert!(
+        !should_force_plan_repair(Some(&route), &loop_state, &actions),
+        "unexpected repair reason: {}",
+        repair_reason(Some(&route), &loop_state, Some(&actions))
+    );
+}
+
+#[test]
 fn external_workspace_scope_persists_across_rounds_without_repeating_path() {
     let mut loop_state = LoopState::new(2);
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {

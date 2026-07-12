@@ -103,6 +103,53 @@ fn route_owned_respond_only_clarify_marks_loop_pending_user_input() {
 }
 
 #[test]
+fn boundary_observation_tool_action_forces_machine_clarify_without_delivery() {
+    let actions = vec![AgentAction::CallCapability {
+        capability: "filesystem.find_name".to_string(),
+        args: json!({
+            "name": "test_calc_core.py"
+        }),
+    }];
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 1;
+    loop_state.boundary_observation_needs_clarify = true;
+
+    let intent = forced_boundary_observation_clarify_intent(&loop_state, &actions)
+        .expect("missing boundary referent should force clarify before tools");
+    let outcome = apply_structured_respond_clarify_to_loop_state(&mut loop_state, &intent);
+
+    assert!(loop_state.pending_user_input_required);
+    assert!(loop_state.delivery_messages.is_empty());
+    assert!(loop_state.last_user_visible_respond.is_none());
+    assert_eq!(outcome.executed_actions, 0);
+    assert_eq!(
+        outcome.stop_signal.as_deref(),
+        Some("structured_respond_clarify")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.clarify_reason_code")
+            .map(String::as_str),
+        Some("boundary_observation_needs_clarify")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.missing_slot")
+            .map(String::as_str),
+        Some("referent")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.message_key")
+            .map(String::as_str),
+        Some("clawd.clarify.missing_referent")
+    );
+}
+
+#[test]
 fn low_risk_freeform_topic_clarify_replans_without_publishing_question() {
     let plan = plan_result_with_raw_and_steps(
         "{}",
@@ -400,6 +447,72 @@ fn decision_envelope_output_vars_include_clarify_machine_fields_from_raw_plan() 
             Some(expected),
             "missing {key}"
         );
+    }
+}
+
+#[test]
+fn decision_envelope_answer_clears_stale_clarify_machine_fields() {
+    let route = route_result(OutputResponseShape::Free);
+    let clarify_plan = plan_result_with_raw_and_steps(
+        r#"{"steps":[{"type":"respond","content":"Need topic","terminal_intent":"clarify","clarify_reason_code":"missing_required_topic","missing_slot":"topic"}]}"#,
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({"content": "Need topic"}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let answer_plan = plan_result_with_raw_and_steps(
+        r#"{"steps":[{"type":"respond","content":"Draft answer"}]}"#,
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({"content": "Draft answer"}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let mut loop_state = LoopState::new(2);
+
+    record_agent_loop_decision_envelope_output_vars(&mut loop_state, Some(&route), &clarify_plan);
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.terminal_intent")
+            .map(String::as_str),
+        Some("clarify")
+    );
+    assert!(loop_state
+        .output_vars
+        .contains_key("agent_loop.clarify_reason_code"));
+
+    record_agent_loop_decision_envelope_output_vars(&mut loop_state, Some(&route), &answer_plan);
+
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.terminal_intent")
+            .map(String::as_str),
+        Some("answer")
+    );
+    for key in [
+        "agent_loop.clarify_reason_code",
+        "agent_loop.missing_slot",
+        "agent_loop.message_key",
+        "agent_loop.field_path",
+        "agent_loop.locator_kind",
+        "agent_loop.decision_envelope.clarify_reason_code",
+        "agent_loop.decision_envelope.missing_slot",
+        "agent_loop.decision_envelope.message_key",
+        "agent_loop.decision_envelope.field_path",
+        "agent_loop.decision_envelope.locator_kind",
+        "agent_loop.recovered_terminal_intent",
+        "agent_loop.nonblocking_clarify_answer",
+    ] {
+        assert!(!loop_state.output_vars.contains_key(key), "stale {key}");
     }
 }
 

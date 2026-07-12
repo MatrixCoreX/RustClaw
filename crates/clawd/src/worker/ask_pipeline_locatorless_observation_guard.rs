@@ -7,6 +7,7 @@ mod tests;
 pub(super) fn route_can_execute_without_locator(route_result: &crate::RouteResult) -> bool {
     super::route_has_capability_ref_machine_signal(route_result)
         || command_observation_marker_present(route_result)
+        || command_payload_agent_loop_marker_present(route_result)
 }
 
 pub(super) fn raw_command_output_has_explicit_command(state: &AppState, prompt: &str) -> bool {
@@ -24,6 +25,7 @@ pub(super) fn command_observation_route_has_runtime_evidence(
 ) -> bool {
     raw_command_output_has_explicit_command(state, prompt)
         || command_observation_marker_present(route_result)
+        || command_payload_agent_loop_marker_present(route_result)
 }
 
 pub(super) fn command_observation_marker_present(route_result: &crate::RouteResult) -> bool {
@@ -49,6 +51,10 @@ fn command_payload_observation_marker_present(route_result: &crate::RouteResult)
     )
 }
 
+fn command_payload_agent_loop_marker_present(route_result: &crate::RouteResult) -> bool {
+    route_reason_has_marker(route_result, "command_payload_preserved_for_agent_loop")
+}
+
 pub(super) fn locatorless_observation_route_should_defer_to_agent_loop(
     state: &AppState,
     prompt: &str,
@@ -65,6 +71,7 @@ pub(super) fn locatorless_observation_route_should_defer_to_agent_loop(
         && !raw_command_output_has_explicit_command(state, prompt)
         && !has_self_contained_payload
         && !has_raw_command_input_locator;
+    let command_payload_agent_loop = command_payload_agent_loop_marker_present(route_result);
     let has_structured_session_anchor =
         active_session_has_structured_observation_anchor(session_snapshot);
     let has_authoritative_deictic_anchor =
@@ -77,6 +84,7 @@ pub(super) fn locatorless_observation_route_should_defer_to_agent_loop(
         || has_self_contained_payload
         || state_patch_allows_deictic_locator_guard_bypass(turn_analysis)
         || capability_route_can_plan_without_locator(route_result)
+        || command_payload_agent_loop
         || runtime_status_query_route_can_plan_without_locator(turn_analysis, route_result)
         || (has_authoritative_deictic_anchor && !command_payload_without_input)
         || has_structured_session_anchor

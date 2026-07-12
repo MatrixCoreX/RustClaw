@@ -1065,10 +1065,7 @@ pub(super) fn replace_explicit_command_substitute_plan_with_run_cmd(
     original_user_text: Option<&str>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
-    if loop_state.has_tool_or_skill_output
-        || !route_allows_explicit_command_preservation(route_result)
-        || !run_cmd_available_for_plan(state)
-    {
+    if loop_state.has_tool_or_skill_output || !run_cmd_available_for_plan(state) {
         return actions;
     }
     let Some(original_user_text) = original_user_text
@@ -1081,6 +1078,11 @@ pub(super) fn replace_explicit_command_substitute_plan_with_run_cmd(
         return actions;
     }
     let exact_command = explicit_command_segment(&state.policy.command_intent, original_user_text);
+    if !route_allows_explicit_command_preservation(route_result)
+        && !executionless_route_can_preserve_explicit_command(route_result, exact_command.as_ref())
+    {
+        return actions;
+    }
     let has_literal_command_sequence = exact_command.is_some()
         || execution_failed_step_literal_command_segments(
             &state.policy.command_intent,
@@ -1137,6 +1139,20 @@ pub(super) fn replace_explicit_command_substitute_plan_with_run_cmd(
     };
     info!("plan_rewrite_explicit_command_substitute_to_run_cmd");
     rewritten
+}
+
+fn executionless_route_can_preserve_explicit_command(
+    route_result: Option<&RouteResult>,
+    exact_command: Option<&String>,
+) -> bool {
+    exact_command.is_some_and(|command| !command.trim().is_empty())
+        && route_result.is_some_and(|route| {
+            route.is_execute_gate()
+                && route.has_route_reason_machine_marker("executionless_finalize_trace_plain")
+                && !route.output_contract.delivery_required
+                && !route.wants_file_delivery
+                && route.output_contract.locator_kind == crate::OutputLocatorKind::None
+        })
 }
 
 fn planner_has_allowed_capability_ref_action(

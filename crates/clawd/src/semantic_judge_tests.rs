@@ -1,5 +1,6 @@
 use super::{
-    is_publishable_raw_local, looks_like_concrete_delivery_artifact, normalize_classifier_text,
+    is_publishable_raw_local, looks_like_concrete_delivery_artifact,
+    looks_like_publishable_result_json, normalize_classifier_text,
 };
 use serde_json::Value;
 
@@ -103,5 +104,34 @@ fn local_delivery_artifact_guard_accepts_paths_and_file_tokens() {
     assert!(!looks_like_concrete_delivery_artifact("pwd_line.txt"));
     assert!(!looks_like_concrete_delivery_artifact(
         "read pwd_line.txt and summarize it"
+    ));
+}
+
+#[test]
+fn local_result_json_guard_accepts_publishable_result_shapes() {
+    assert!(looks_like_publishable_result_json(
+        r#"{"created_files":["/workspace/calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#
+    ));
+    assert!(looks_like_publishable_result_json(
+        r#"{"project_dir":"/workspace","functions":["add","sub"],"error_codes":["division_by_zero"],"test_status":"passed"}"#
+    ));
+}
+
+#[test]
+fn local_result_json_guard_rejects_runtime_protocol_shapes() {
+    assert!(!looks_like_publishable_result_json(
+        r#"{"steps":[{"type":"call_tool","tool":"fs_basic","args":{"action":"list_dir"}}]}"#
+    ));
+    assert!(!looks_like_publishable_result_json(
+        r#"{"type":"call_tool","tool":"fs_basic","args":{"action":"read_text_range"}}"#
+    ));
+    assert!(!looks_like_publishable_result_json(
+        r#"{"action":"read_text_range","path":"/workspace/calc_core.py","excerpt":"1|def add(a,b): pass"}"#
+    ));
+    assert!(!looks_like_publishable_result_json(
+        r#"{"request_id":"r1","status":"ok","text":"done","error_text":null,"extra":{"path":"/workspace/a.txt"}}"#
+    ));
+    assert!(!looks_like_publishable_result_json(
+        r#"{"schema_version":1,"owner_layer":"agent_hooks","reason_code":"post_tool_use_ok","status_code":"post_tool_use_ok"}"#
     ));
 }

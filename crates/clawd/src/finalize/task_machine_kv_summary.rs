@@ -6,6 +6,9 @@ pub(super) fn recover_requested_machine_kv_summary_final_answer(
     answer_messages: &mut Vec<String>,
     force_structured: bool,
 ) -> bool {
+    if force_structured && machine_kv_recovery_blocked_by_required_content_gap(journal) {
+        return false;
+    }
     let applied = if force_structured {
         apply_requested_machine_kv_summary_to_final_answer_force_structured(
             prompt,
@@ -35,6 +38,24 @@ pub(super) fn recover_requested_machine_kv_summary_final_answer(
         confidence: 1.0,
     });
     true
+}
+
+fn machine_kv_recovery_blocked_by_required_content_gap(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    let Some(summary) = journal.answer_verifier_summary.as_ref() else {
+        return false;
+    };
+    if !summary.high_confidence_retry_gap() {
+        return false;
+    }
+    summary
+        .answer_incomplete_reason
+        .starts_with("post_write_content_evidence_required")
+        || summary
+            .missing_evidence_fields
+            .iter()
+            .any(|field| field.trim() == "content_excerpt")
 }
 
 pub(super) fn apply_requested_machine_kv_summary_to_final_answer(
@@ -138,6 +159,39 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
     {
         journal.record_final_answer(answer_text.as_str());
         return false;
+    }
+    if final_answer_json_satisfies_requested_machine_tokens(
+        answer_text,
+        answer_messages,
+        &request_surfaces,
+    ) {
+        journal.record_final_answer(answer_text.as_str());
+        return false;
+    }
+    if let Some(restored) =
+        latest_journal_json_answer_satisfies_requested_machine_tokens(journal, &request_surfaces)
+    {
+        if answer_text.trim() == restored.trim() {
+            journal.record_final_answer(answer_text.as_str());
+            return false;
+        }
+        answer_messages.clear();
+        answer_messages.push(restored.clone());
+        *answer_text = restored;
+        journal.record_final_answer(answer_text.as_str());
+        journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: journal.step_results.len(),
+            ..Default::default()
+        });
+        return true;
     }
     let Some(summary) = requested_summary else {
         journal.record_final_answer(answer_text.as_str());
@@ -664,6 +718,99 @@ fn final_answer_has_values_for_requested_marker_summary(
                     .iter()
                     .all(|marker| text_has_value_for_marker(candidate, marker))
             })
+}
+
+fn final_answer_json_satisfies_requested_machine_tokens(
+    answer_text: &str,
+    answer_messages: &[String],
+    request_surfaces: &[String],
+) -> bool {
+    std::iter::once(answer_text)
+        .chain(answer_messages.iter().map(String::as_str))
+        .any(|candidate| {
+            json_object_satisfies_requested_machine_tokens(candidate, request_surfaces)
+        })
+}
+
+fn latest_journal_json_answer_satisfies_requested_machine_tokens(
+    journal: &crate::task_journal::TaskJournal,
+    request_surfaces: &[String],
+) -> Option<String> {
+    for step in journal.step_results.iter().rev() {
+        if step.status != crate::executor::StepExecutionStatus::Ok
+            || !matches!(step.skill.as_str(), "respond" | "synthesize_answer")
+        {
+            continue;
+        }
+        if let Some(candidate) = step.output_excerpt.as_deref().and_then(|candidate| {
+            json_answer_satisfies_requested_machine_tokens(candidate, request_surfaces)
+        }) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn json_answer_satisfies_requested_machine_tokens(
+    candidate: &str,
+    request_surfaces: &[String],
+) -> Option<String> {
+    let candidate = candidate.trim();
+    if json_object_satisfies_requested_machine_tokens(candidate, request_surfaces) {
+        return Some(candidate.to_string());
+    }
+    let Ok(serde_json::Value::Object(object)) =
+        serde_json::from_str::<serde_json::Value>(candidate)
+    else {
+        return None;
+    };
+    let answer = object
+        .get("answer")
+        .and_then(serde_json::Value::as_str)?
+        .trim();
+    json_object_satisfies_requested_machine_tokens(answer, request_surfaces)
+        .then(|| answer.to_string())
+}
+
+fn json_object_satisfies_requested_machine_tokens(
+    candidate: &str,
+    request_surfaces: &[String],
+) -> bool {
+    let Ok(serde_json::Value::Object(object)) =
+        serde_json::from_str::<serde_json::Value>(candidate.trim())
+    else {
+        return false;
+    };
+    !object.is_empty()
+        && object.len() <= 16
+        && object.iter().all(|(key, value)| {
+            valid_machine_marker_key(key)
+                && json_value_has_payload(value)
+                && request_surfaces
+                    .iter()
+                    .any(|surface| surface_contains_machine_token(surface, key))
+        })
+}
+
+fn json_value_has_payload(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => false,
+        serde_json::Value::String(text) => !text.trim().is_empty(),
+        serde_json::Value::Array(items) => !items.is_empty(),
+        serde_json::Value::Object(object) => !object.is_empty(),
+        serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
+    }
+}
+
+fn surface_contains_machine_token(surface: &str, token: &str) -> bool {
+    !token.is_empty()
+        && surface
+            .split(|ch| !machine_token_char(ch))
+            .any(|segment| segment == token)
+}
+
+fn machine_token_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')
 }
 
 fn final_answer_preserves_publishable_evidence_summary(

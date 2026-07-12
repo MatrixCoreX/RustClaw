@@ -1397,6 +1397,60 @@ fn summary_json_includes_validation_result_machine_shape() {
 }
 
 #[test]
+fn summary_json_counts_successful_validation_command_in_code_context() {
+    let mut journal = TaskJournal::for_task("task-code-validation", "ask", "validate code");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "read_text_range",
+                    "path": "/workspace/test_calc_core.py",
+                    "resolved_path": "/workspace/test_calc_core.py",
+                    "excerpt": "1|from calc_core import safe_div"
+                }
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "run_cmd".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some("ALL_TESTS_PASSED".to_string()),
+        error: None,
+        started_at: 3,
+        finished_at: 4,
+    });
+
+    let summary = journal.to_summary_json();
+
+    assert_eq!(
+        summary
+            .pointer("/validation_result/validation_step_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        summary
+            .pointer("/validation_result/latest_status")
+            .and_then(Value::as_str),
+        Some("passed")
+    );
+    assert_eq!(
+        summary
+            .pointer("/validation_result/signals/0/status_code")
+            .and_then(Value::as_str),
+        Some("validation_command_ok")
+    );
+}
+
+#[test]
 fn trace_json_compacts_plan_action_ref_to_contract_action() {
     let mut journal = TaskJournal::for_task("task-service", "ask", "check service");
     journal.record_route_result(&crate::RouteResult {
@@ -1630,4 +1684,72 @@ fn structured_listing_journal_compact_unwraps_text_json_when_extra_is_missing() 
         Some("crates")
     );
     assert!(value.pointer("/extra/names").is_none());
+}
+
+#[test]
+fn step_output_excerpt_compacts_write_text_without_truncating_json() {
+    let long_path =
+        "/home/guagua/rustclaw/run/nl_eval_tmp/codex_cli_continuous_20260711_new/test_calc_core.py";
+    let output = json!({
+        "extra": {
+            "action": "write_text",
+            "append": false,
+            "content_bytes": 514,
+            "effective_path": long_path,
+            "path": long_path,
+            "resolved_path": long_path,
+            "schema_version": 1,
+            "source": "builtin_success_extra"
+        },
+        "text": format!("written 514 bytes to {long_path}")
+    })
+    .to_string();
+
+    let excerpt = super::step_output_excerpt_for_journal(&output);
+    let value: Value = serde_json::from_str(&excerpt).expect("compact write json");
+
+    assert_eq!(
+        value.pointer("/extra/action").and_then(Value::as_str),
+        Some("write_text")
+    );
+    assert_eq!(
+        value.pointer("/extra/path").and_then(Value::as_str),
+        Some(long_path)
+    );
+    assert_eq!(
+        value
+            .pointer("/extra/resolved_path")
+            .and_then(Value::as_str),
+        Some(long_path)
+    );
+    assert!(!excerpt.contains("truncated"));
+}
+
+#[test]
+fn step_output_excerpt_compacts_read_range_as_valid_json() {
+    let output = json!({
+        "extra": {
+            "action": "read_range",
+            "path": "/workspace/calc_core.py",
+            "resolved_path": "/workspace/calc_core.py",
+            "excerpt": "1|def add(a, b):\n2|    return a + b\n3|def sub(a, b):\n4|    return a - b",
+            "start_line": 1,
+            "end_line": 4,
+            "total_lines": 4
+        },
+        "text": "display text"
+    })
+    .to_string();
+
+    let excerpt = super::step_output_excerpt_for_journal(&output);
+    let value: Value = serde_json::from_str(&excerpt).expect("compact read json");
+
+    assert_eq!(
+        value.pointer("/extra/action").and_then(Value::as_str),
+        Some("read_range")
+    );
+    assert!(value
+        .pointer("/extra/excerpt")
+        .and_then(Value::as_str)
+        .is_some_and(|excerpt| excerpt.contains("def add")));
 }

@@ -203,7 +203,12 @@ fn alias_only_state_patch_ack_route_does_not_mask_content_evidence_contract() {
 }
 
 #[test]
-fn alias_only_state_patch_ack_route_allows_agent_loop_marker_without_execution_contract() {
+fn alias_only_state_patch_ack_route_does_not_mask_executable_agent_loop_marker() {
+    let state = repo_i18n_state();
+    let task = ask_task_with_payload_text(
+        "task-alias-read-should-enter-loop",
+        "读取甲文件的标题，只输出标题。",
+    );
     let turn_analysis =
         turn_analysis_with_alias_map("DEVICE_LOCAL", "scripts/nl_tests/fixtures/device_local");
     let mut route = ack_route_for_test();
@@ -215,8 +220,17 @@ fn alias_only_state_patch_ack_route_allows_agent_loop_marker_without_execution_c
 
     super::apply_alias_state_patch_ack_route(&mut route, Some(&turn_analysis), Some(&boundary));
 
-    assert_eq!(route.ask_mode, crate::AskMode::state_patch_ack());
-    assert!(route.route_reason.contains("alias_state_patch_ack"));
+    assert_eq!(route.ask_mode, crate::AskMode::act_with_chat_finalizer());
+    assert!(!route.route_reason.contains("alias_state_patch_ack"));
+    let reply = super::alias_state_patch_ack_reply(
+        &state,
+        &task,
+        "读取甲文件的标题，只输出标题。",
+        &route,
+        Some(&turn_analysis),
+        Some(&boundary),
+    );
+    assert!(reply.is_none());
 }
 
 #[test]
