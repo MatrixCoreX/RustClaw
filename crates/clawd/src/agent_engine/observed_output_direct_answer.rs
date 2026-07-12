@@ -838,11 +838,8 @@ fn inventory_dir_can_use_direct_names(
     is_plain_act: bool,
     allow_raw_listing_direct_answer: bool,
 ) -> bool {
-    let has_machine_names = value
-        .get("names_only")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-        && inventory_dir_names(value).is_some();
+    let has_machine_names =
+        value_requests_terminal_inventory_names(value) && inventory_dir_names(value).is_some();
     if has_machine_names
         && route.is_some_and(|route| {
             super::output_route_policy::route_contract_marker_is_any(
@@ -864,6 +861,9 @@ fn inventory_dir_can_use_direct_names(
     {
         return true;
     }
+    if has_machine_names && latest_plan_requests_observation_only_names_listing(loop_state) {
+        return true;
+    }
     (is_plain_act
         || route.is_some_and(|route| {
             super::output_route_policy::route_contract_marker_is(
@@ -872,6 +872,12 @@ fn inventory_dir_can_use_direct_names(
             )
         }))
         && allow_raw_listing_direct_answer
+}
+
+fn value_requests_terminal_inventory_names(value: &serde_json::Value) -> bool {
+    ["names_only", "dirs_only", "files_only"]
+        .into_iter()
+        .any(|key| value.get(key).and_then(|v| v.as_bool()).unwrap_or(false))
 }
 
 fn route_allows_latest_plan_names_direct(route: Option<&crate::RouteResult>) -> bool {
@@ -938,6 +944,77 @@ fn latest_plan_requests_names_only_listing(loop_state: &LoopState) -> bool {
         }
         _ => false,
     }
+}
+
+fn latest_plan_requests_observation_only_names_listing(loop_state: &LoopState) -> bool {
+    let Some(plan) = loop_state
+        .round_traces
+        .iter()
+        .rev()
+        .find_map(|round| round.plan_result.as_ref())
+    else {
+        return false;
+    };
+    let executable_steps = plan
+        .steps
+        .iter()
+        .filter(|step| {
+            matches!(
+                step.action_type.as_str(),
+                "call_capability" | "call_tool" | "call_skill"
+            )
+        })
+        .collect::<Vec<_>>();
+    if executable_steps.len() != 1 {
+        return false;
+    }
+    if plan
+        .steps
+        .iter()
+        .any(|step| !plan_step_is_observation_only_listing(step))
+    {
+        return false;
+    }
+    plan_step_requests_terminal_names_listing(executable_steps[0])
+}
+
+fn plan_step_is_observation_only_listing(step: &crate::PlanStep) -> bool {
+    matches!(
+        step.action_type.as_str(),
+        "call_capability" | "call_tool" | "call_skill"
+    )
+}
+
+fn plan_step_requests_terminal_names_listing(step: &crate::PlanStep) -> bool {
+    match step.action_type.as_str() {
+        "call_capability" => {
+            matches!(
+                step.skill.as_str(),
+                "filesystem.list_names"
+                    | "filesystem.list_dir"
+                    | "filesystem.list_entries"
+                    | "fs.list_names"
+                    | "fs.list_dir"
+                    | "fs.list_entries"
+            ) && step_args_request_terminal_inventory_names(&step.args)
+        }
+        "call_tool" | "call_skill" => {
+            matches!(
+                step.skill.as_str(),
+                "fs_basic" | "system_basic" | "list_dir"
+            ) && matches!(
+                step.args.get("action").and_then(|v| v.as_str()),
+                Some("inventory_dir" | "list_dir") | None
+            ) && step_args_request_terminal_inventory_names(&step.args)
+        }
+        _ => false,
+    }
+}
+
+fn step_args_request_terminal_inventory_names(args: &serde_json::Value) -> bool {
+    ["names_only", "dirs_only", "files_only"]
+        .into_iter()
+        .any(|key| args.get(key).and_then(|v| v.as_bool()).unwrap_or(false))
 }
 
 pub(crate) fn extract_answer_from_observed_output(

@@ -333,6 +333,55 @@ fn names_only_inventory_free_shape_defers_to_llm_synthesis() {
 }
 
 #[test]
+fn dirs_only_inventory_names_by_kind_can_direct_answer_observation_only_plan() {
+    let route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(2);
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: String::new(),
+            execution_recipe_summary: None,
+            plan_result: Some(crate::PlanResult {
+                goal: String::new(),
+                missing_slots: Vec::new(),
+                needs_confirmation: false,
+                steps: vec![crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_capability".to_string(),
+                    skill: "filesystem.list_dir".to_string(),
+                    args: serde_json::json!({
+                        "path": "scripts/nl_tests/fixtures/device_local",
+                        "dirs_only": true,
+                        "names_only": true,
+                    }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }],
+                planner_notes: String::new(),
+                plan_kind: crate::PlanKind::Single,
+                raw_plan_text: String::new(),
+            }),
+            verify_result: None,
+        });
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","counts":{"dirs":5,"files":0,"hidden":0,"total":5},"dirs_only":true,"files_only":false,"names_by_kind":{"dirs":["configs","data","docs","logs","tmp"],"files":[],"other":[]},"path":"/repo/scripts/nl_tests/fixtures/device_local","resolved_path":"/repo/scripts/nl_tests/fixtures/device_local","sort_by":"name"},"text":"{}"}"#,
+    ));
+
+    assert_eq!(
+        super::extract_answer_from_observed_output(&loop_state, Some(&agent_run_context))
+            .as_deref(),
+        Some("configs\ndata\ndocs\nlogs\ntmp")
+    );
+}
+
+#[test]
 fn observed_outputs_keep_latest_content_read_for_same_path() {
     let mut loop_state = LoopState::new(3);
     loop_state.executed_step_results.push(ok_step(

@@ -134,8 +134,47 @@ pub(super) fn inventory_dir_names(value: &serde_json::Value) -> Option<Vec<Strin
     if action != "inventory_dir" {
         return None;
     }
+    if let Some(names) = inventory_dir_string_array(value.get("names")) {
+        return Some(names);
+    }
+    if value
+        .get("dirs_only")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        let dirs = inventory_dir_names_by_kind(value, "dirs");
+        if !dirs.is_empty() {
+            return Some(dirs);
+        }
+    }
+    if value
+        .get("files_only")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        let files = inventory_dir_names_by_kind(value, "files");
+        if !files.is_empty() {
+            return Some(files);
+        }
+    }
+    if value
+        .get("names_only")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        let names = ["dirs", "files", "other"]
+            .into_iter()
+            .flat_map(|kind| inventory_dir_names_by_kind(value, kind))
+            .collect::<Vec<_>>();
+        if !names.is_empty() {
+            return Some(names);
+        }
+    }
+    None
+}
+
+fn inventory_dir_string_array(value: Option<&serde_json::Value>) -> Option<Vec<String>> {
     value
-        .get("names")
         .and_then(|v| v.as_array())
         .map(|items| {
             items
