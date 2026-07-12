@@ -150,6 +150,7 @@ pub(super) fn evidence_policy_action_policy_error(
     loop_state: &LoopState,
     normalized_skill: &str,
     classification_args: &Value,
+    action_trace_kind: &str,
 ) -> Option<String> {
     if matches!(
         normalized_skill,
@@ -162,6 +163,7 @@ pub(super) fn evidence_policy_action_policy_error(
         loop_state,
         normalized_skill,
         classification_args,
+        action_trace_kind,
     ) {
         return Some(err);
     }
@@ -335,12 +337,22 @@ fn executionless_boundary_tool_policy_error(
     loop_state: &LoopState,
     normalized_skill: &str,
     classification_args: &Value,
+    action_trace_kind: &str,
 ) -> Option<String> {
     let route = loop_state.route_policy_context.as_ref()?;
     if !route_is_executionless_terminal_boundary(route) {
         return None;
     }
     if executionless_boundary_allows_literal_run_cmd(normalized_skill, classification_args) {
+        return None;
+    }
+    if executionless_boundary_allows_verified_observe_capability(
+        state,
+        loop_state,
+        normalized_skill,
+        classification_args,
+        action_trace_kind,
+    ) {
         return None;
     }
     Some(crate::skills::structured_skill_error_from_parts(
@@ -374,6 +386,21 @@ fn executionless_boundary_tool_policy_error(
             ),
         })),
     ))
+}
+
+fn executionless_boundary_allows_verified_observe_capability(
+    state: &AppState,
+    loop_state: &LoopState,
+    normalized_skill: &str,
+    args: &Value,
+    action_trace_kind: &str,
+) -> bool {
+    if action_trace_kind != "call_capability" || !loop_state.verified_action_window_active {
+        return false;
+    }
+    let effect =
+        crate::execution_recipe::classify_skill_action_effect(state, normalized_skill, args);
+    effect.observes && !effect.mutates
 }
 
 fn executionless_boundary_allows_literal_run_cmd(normalized_skill: &str, args: &Value) -> bool {

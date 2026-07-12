@@ -1476,7 +1476,9 @@ async fn run_agent_round(
         );
         return Ok(outcome);
     }
-    let mut outcome = execute_actions_once(
+    loop_state.verified_action_window_active =
+        prepared_round.verify_result.approved && !actions.is_empty();
+    let execute_result = execute_actions_once(
         state,
         task,
         goal,
@@ -1486,7 +1488,9 @@ async fn run_agent_round(
         policy,
         agent_run_context,
     )
-    .await?;
+    .await;
+    loop_state.verified_action_window_active = false;
+    let mut outcome = execute_result?;
     if outcome.stop_signal.is_none() {
         if let Some(stop_signal) = terminal_user_answer_stop_signal(loop_state) {
             outcome.stop_signal = Some(stop_signal.to_string());

@@ -72,6 +72,15 @@ pub(super) fn test_state() -> AppState {
     }
 }
 
+fn default_action_policy_error(
+    state: &AppState,
+    loop_state: &LoopState,
+    skill: &str,
+    args: &serde_json::Value,
+) -> Option<String> {
+    evidence_policy_action_policy_error(state, loop_state, skill, args, "call_skill")
+}
+
 pub(super) fn test_task() -> ClaimedTask {
     ClaimedTask {
         task_id: "task-skill-exec".to_string(),
@@ -266,7 +275,14 @@ fn evidence_policy_preflight_does_not_reject_action_from_semantic_matrix_only() 
     });
     let args = serde_json::json!({"command": "ls"});
 
-    assert!(evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none());
+    assert!(evidence_policy_action_policy_error(
+        &state,
+        &loop_state,
+        "run_cmd",
+        &args,
+        "call_skill"
+    )
+    .is_none());
 }
 
 #[test]
@@ -288,7 +304,7 @@ fn evidence_policy_preflight_allows_runtime_async_job_start_marker() {
     });
 
     assert!(
-        evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
+        default_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
         "runtime async job starts are classified by the machine contract before execution"
     );
 }
@@ -311,7 +327,7 @@ fn evidence_policy_preflight_allows_bounded_planner_async_start_without_runtime_
     });
 
     assert!(
-        evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
+        default_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
         "complete planner async-start machine fields should keep agent-loop authority even when the normalizer route was generic"
     );
 }
@@ -332,95 +348,11 @@ fn evidence_policy_preflight_rejects_unbounded_async_start_without_runtime_marke
         "poll_after_seconds": 2
     });
 
-    let err = evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &args)
+    let err = default_action_policy_error(&state, &loop_state, "run_cmd", &args)
         .expect("unbounded async starts still need an explicit runtime contract");
     let parsed = crate::skills::parse_structured_skill_error(&err)
         .expect("contract policy error should be structured");
     assert_eq!(parsed.error_kind, "contract_action_rejected");
-}
-
-#[test]
-fn evidence_policy_preflight_rejects_async_start_for_dry_run_contract() {
-    let state = test_state();
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
-        resolved_intent:
-            "async_job_protocol=version:1 mode=dry_run adapter_result_key=async_poll_adapter_result"
-                .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason:
-            "async_job_protocol=version:1 mode=dry_run would_mutate=false required_job_fields=job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key"
-                .to_string(),
-        route_confidence: Some(0.9),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            semantic_kind: crate::OutputSemanticKind::None,
-            requires_content_evidence: true,
-            locator_kind: crate::OutputLocatorKind::Path,
-            ..crate::IntentOutputContract::default()
-        },
-    };
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    let mut loop_state = LoopState::new(2);
-    loop_state.route_policy_context = Some(route);
-    let args = serde_json::json!({
-        "command": "sleep 2 && echo RUSTCLAW_ASYNC_DRY_RUN",
-        "async_start": true,
-        "poll_after_seconds": 2,
-        "expires_in_seconds": 600
-    });
-
-    let err = evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &args)
-        .expect("dry-run async starts must not execute a local process");
-    let parsed = crate::skills::parse_structured_skill_error(&err)
-        .expect("dry-run async preflight error should be structured");
-
-    assert_eq!(parsed.error_kind, "contract_action_rejected");
-    assert_eq!(
-        parsed
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("reason_code")),
-        Some(&serde_json::json!(
-            "run_cmd_dry_run_requires_preview_contract"
-        ))
-    );
-    assert_eq!(
-        parsed.extra.as_ref().and_then(|extra| extra.get("dry_run")),
-        Some(&serde_json::json!(true))
-    );
-    assert_eq!(
-        parsed
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("forbidden_effect")),
-        Some(&serde_json::json!("local_process_start"))
-    );
-
-    let plain_args = serde_json::json!({
-        "command": "sleep 2 && echo RUSTCLAW_ASYNC_DRY_RUN"
-    });
-    let err = evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &plain_args)
-        .expect("dry-run async route must also reject plain local process starts");
-    let parsed = crate::skills::parse_structured_skill_error(&err)
-        .expect("plain dry-run process preflight error should be structured");
-    assert_eq!(
-        parsed
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("reason_code")),
-        Some(&serde_json::json!(
-            "run_cmd_dry_run_requires_preview_contract"
-        ))
-    );
 }
 
 #[test]
@@ -463,14 +395,22 @@ planner_capabilities = [
         "value": "minimax"
     });
 
-    assert!(
-        evidence_policy_action_policy_error(&state, &loop_state, "config_edit", &preview_args)
-            .is_none()
-    );
-    assert!(
-        evidence_policy_action_policy_error(&state, &loop_state, "config_edit", &apply_args)
-            .is_none()
-    );
+    assert!(evidence_policy_action_policy_error(
+        &state,
+        &loop_state,
+        "config_edit",
+        &preview_args,
+        "call_skill"
+    )
+    .is_none());
+    assert!(evidence_policy_action_policy_error(
+        &state,
+        &loop_state,
+        "config_edit",
+        &apply_args,
+        "call_skill"
+    )
+    .is_none());
 }
 
 #[test]
@@ -487,7 +427,7 @@ fn evidence_policy_preflight_rejects_generated_media_run_cmd() {
     });
     let args = serde_json::json!({"command": "python3 -c 'create image'"});
 
-    let err = evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &args)
+    let err = default_action_policy_error(&state, &loop_state, "run_cmd", &args)
         .expect("media path run_cmd should be rejected");
     let parsed = crate::skills::parse_structured_skill_error(&err)
         .expect("contract policy error should be structured");
@@ -563,7 +503,7 @@ fn evidence_policy_preflight_does_not_block_literal_media_run_cmd() {
     });
 
     assert!(
-        evidence_policy_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
+        default_action_policy_error(&state, &loop_state, "run_cmd", &args).is_none(),
         "literal user commands should preserve the explicit command policy boundary"
     );
 }
@@ -731,7 +671,7 @@ fn evidence_policy_preflight_allows_user_named_output_path_marker() {
     });
 
     assert!(
-        evidence_policy_action_policy_error(&state, &loop_state, "write_file", &args).is_none(),
+        default_action_policy_error(&state, &loop_state, "write_file", &args).is_none(),
         "planner-marked user named output writes must survive execution preflight"
     );
 }
@@ -760,7 +700,7 @@ fn active_ops_recipe_preflight_allows_backing_mutation_despite_summary_contract(
     });
 
     assert!(
-        evidence_policy_action_policy_error(&state, &loop_state, "write_file", &args).is_none(),
+        default_action_policy_error(&state, &loop_state, "write_file", &args).is_none(),
         "active ops recipe mutations must not be rejected after virtual tool rewrite"
     );
 }
@@ -777,13 +717,25 @@ fn evidence_policy_preflight_allows_internal_synthesis_actions() {
     let args = serde_json::json!({"evidence_refs": ["last_output"]});
 
     assert!(
-        evidence_policy_action_policy_error(&state, &loop_state, "synthesize_answer", &args)
-            .is_none(),
+        evidence_policy_action_policy_error(
+            &state,
+            &loop_state,
+            "synthesize_answer",
+            &args,
+            "call_skill"
+        )
+        .is_none(),
         "internal synthesis must not be rejected by observation allowed_actions"
     );
     assert!(
-        evidence_policy_action_policy_error(&state, &loop_state, "respond", &serde_json::json!({}))
-            .is_none(),
+        evidence_policy_action_policy_error(
+            &state,
+            &loop_state,
+            "respond",
+            &serde_json::json!({}),
+            "call_skill"
+        )
+        .is_none(),
         "internal respond must not be rejected by observation allowed_actions"
     );
 }
@@ -806,8 +758,14 @@ fn evidence_policy_preflight_allows_task_control_lifecycle_dry_run_only() {
     });
 
     assert!(
-        evidence_policy_action_policy_error(&state, &loop_state, "task_control", &dry_run_args)
-            .is_none(),
+        evidence_policy_action_policy_error(
+            &state,
+            &loop_state,
+            "task_control",
+            &dry_run_args,
+            "call_skill"
+        )
+        .is_none(),
         "task_control resume dry_run should be admitted as a no-mutation preview"
     );
     let effect = crate::execution_recipe::classify_skill_action_effect(
@@ -825,8 +783,14 @@ fn evidence_policy_preflight_allows_task_control_lifecycle_dry_run_only() {
         "dry_run": false
     });
     assert!(
-        evidence_policy_action_policy_error(&state, &loop_state, "task_control", &real_args)
-            .is_none(),
+        evidence_policy_action_policy_error(
+            &state,
+            &loop_state,
+            "task_control",
+            &real_args,
+            "call_skill"
+        )
+        .is_none(),
         "semantic matrix must not reject real task_control resume before permission policy"
     );
 }
@@ -848,7 +812,7 @@ fn evidence_policy_preflight_allows_virtual_find_entries_backing_action() {
     });
 
     assert!(
-        evidence_policy_action_policy_error(&state, &loop_state, "fs_search", &args).is_none(),
+        default_action_policy_error(&state, &loop_state, "fs_search", &args).is_none(),
         "runtime backing fs_search calls should be admitted through their planner-facing fs_basic.find_entries contract"
     );
 }

@@ -1202,6 +1202,7 @@ pub(super) async fn handle_call_tool_action(
     ended_with_user_visible_output: &mut bool,
     tool: &str,
     args: &Value,
+    action_trace_kind: &'static str,
 ) -> Result<ActionLoopDecision, String> {
     let mut resolved_args = resolve_arg_value(args, loop_state);
     let mut normalized_skill = state.resolve_canonical_skill_name(tool);
@@ -1328,7 +1329,7 @@ pub(super) async fn handle_call_tool_action(
         write_file_effective_path,
         read_file_requested_path,
         args_summary,
-        "call_skill(legacy_tool)",
+        action_trace_kind,
     )
     .await?;
     Ok(apply_skill_action_outcome(
@@ -1357,6 +1358,7 @@ pub(super) async fn handle_call_skill_action(
     ended_with_user_visible_output: &mut bool,
     skill: &str,
     args: &Value,
+    action_trace_kind: &'static str,
 ) -> Result<ActionLoopDecision, String> {
     let mut resolved_args = resolve_arg_value(args, loop_state);
     loop_state.tool_calls_total += 1;
@@ -1472,7 +1474,7 @@ pub(super) async fn handle_call_skill_action(
         write_file_effective_path,
         read_file_requested_path,
         args_summary,
-        "call_skill",
+        action_trace_kind,
     )
     .await?;
     Ok(apply_skill_action_outcome(
@@ -1849,7 +1851,8 @@ pub(super) async fn dispatch_round_action(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<ActionLoopDecision, String> {
     let resolved_capability_action;
-    let action = if matches!(action, AgentAction::CallCapability { .. }) {
+    let resolved_from_call_capability = matches!(action, AgentAction::CallCapability { .. });
+    let action = if resolved_from_call_capability {
         resolved_capability_action = Some(
             crate::capability_resolver::resolve_agent_action_for_state(state, action.clone()),
         );
@@ -1877,6 +1880,11 @@ pub(super) async fn dispatch_round_action(
                 ended_with_user_visible_output,
                 tool,
                 args,
+                if resolved_from_call_capability {
+                    "call_capability"
+                } else {
+                    "call_tool_legacy"
+                },
             )
             .await
         }
@@ -1899,6 +1907,11 @@ pub(super) async fn dispatch_round_action(
                 ended_with_user_visible_output,
                 skill,
                 args,
+                if resolved_from_call_capability {
+                    "call_capability"
+                } else {
+                    "call_skill"
+                },
             )
             .await
         }
