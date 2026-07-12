@@ -149,6 +149,119 @@ fn boundary_envelope_merges_model_machine_fields_without_overriding_runtime_auth
 }
 
 #[test]
+fn boundary_envelope_merges_session_binding_object_value() {
+    let envelope = BoundaryEnvelope::from_request(
+        "remembered marker?",
+        None,
+        false,
+        &crate::IntentOutputContract::default(),
+        None,
+        crate::ResumeBehavior::None,
+    )
+    .merge_model_machine_fields(Some(&serde_json::json!({
+        "session_binding": {
+            "referenced_alias": "current_test_id",
+            "alias_resolved": true,
+            "alias_value": "RC-CONT-CN-0428-A"
+        }
+    })));
+
+    assert_eq!(
+        envelope.session_binding.as_deref(),
+        Some("RC-CONT-CN-0428-A")
+    );
+}
+
+#[test]
+fn boundary_envelope_merges_session_binding_relevant_alias() {
+    let envelope = BoundaryEnvelope::from_request(
+        "remembered marker?",
+        None,
+        false,
+        &crate::IntentOutputContract::default(),
+        None,
+        crate::ResumeBehavior::None,
+    )
+    .merge_model_machine_fields(Some(&serde_json::json!({
+        "session_binding": {
+            "relevant_aliases": ["RC-CONT-CN-0428-A"]
+        }
+    })));
+
+    assert_eq!(
+        envelope.session_binding.as_deref(),
+        Some("RC-CONT-CN-0428-A")
+    );
+}
+
+#[test]
+fn boundary_envelope_merges_single_session_binding_alias_map_value() {
+    let envelope = BoundaryEnvelope::from_request(
+        "remembered marker?",
+        None,
+        false,
+        &crate::IntentOutputContract::default(),
+        None,
+        crate::ResumeBehavior::None,
+    )
+    .merge_model_machine_fields(Some(&serde_json::json!({
+        "session_binding": {
+            "aliases": {
+                "test_code": "RC-CONT-CN-0428-A"
+            }
+        }
+    })));
+
+    assert_eq!(
+        envelope.session_binding.as_deref(),
+        Some("RC-CONT-CN-0428-A")
+    );
+}
+
+#[test]
+fn boundary_envelope_ignores_multi_value_session_binding_alias_map() {
+    let envelope = BoundaryEnvelope::from_request(
+        "remembered marker?",
+        None,
+        false,
+        &crate::IntentOutputContract::default(),
+        None,
+        crate::ResumeBehavior::None,
+    )
+    .merge_model_machine_fields(Some(&serde_json::json!({
+        "session_binding": {
+            "aliases": {
+                "first": "RC-CONT-CN-0428-A",
+                "second": "RC-CONT-CN-0428-B"
+            }
+        }
+    })));
+
+    assert!(envelope.session_binding.is_none());
+}
+
+#[test]
+fn boundary_envelope_ignores_unresolved_session_binding_object() {
+    let envelope = BoundaryEnvelope::from_request(
+        "remembered marker?",
+        None,
+        false,
+        &crate::IntentOutputContract::default(),
+        None,
+        crate::ResumeBehavior::None,
+    )
+    .merge_model_machine_fields(Some(&serde_json::json!({
+        "session_binding": {
+            "referenced_alias": "current_test_id",
+            "alias_resolved": false,
+            "alias_value": "RC-CONT-CN-0428-A"
+        }
+    })));
+
+    assert!(envelope.session_binding.is_none());
+}
+
+#[test]
 fn boundary_envelope_uses_model_language_hint_only_when_runtime_hint_is_unclear() {
     let clear_envelope = BoundaryEnvelope {
         language_hint: Some("en".to_string()),

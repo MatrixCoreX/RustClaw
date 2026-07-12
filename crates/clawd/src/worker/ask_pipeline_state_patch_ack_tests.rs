@@ -621,3 +621,29 @@ fn alias_state_patch_ack_reply_prefers_boundary_language_hint_for_mixed_path_tex
     assert!(!reply.is_llm_reply);
     assert_eq!(reply.text, "已更新这个临时指代。");
 }
+
+#[test]
+fn session_binding_value_reply_projects_boundary_machine_value_directly() {
+    let route = ack_route_for_test();
+    let boundary = crate::intent_router::BoundaryEnvelope {
+        session_binding: Some("RC-CONT-CN-0428-A".to_string()),
+        ..Default::default()
+    };
+
+    let reply = super::session_binding_value_reply(&route, Some(&boundary))
+        .expect("session binding direct reply");
+
+    assert!(!reply.is_llm_reply);
+    assert_eq!(reply.text, "RC-CONT-CN-0428-A");
+}
+
+#[test]
+fn session_binding_value_reply_ignores_resume_control_tokens() {
+    let route = ack_route_for_test();
+    let boundary = crate::intent_router::BoundaryEnvelope {
+        session_binding: Some("resume_execute".to_string()),
+        ..Default::default()
+    };
+
+    assert!(super::session_binding_value_reply(&route, Some(&boundary)).is_none());
+}

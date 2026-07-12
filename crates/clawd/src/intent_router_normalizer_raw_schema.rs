@@ -201,6 +201,10 @@ fn insert_boundary_envelope_for_schema(obj: &mut serde_json::Map<String, Value>,
         .filter(|value| !value.is_empty() && value != "none")
         .map(Value::String)
         .or_else(|| {
+            boundary_string_for_schema(obj.get("session_binding"), BoundaryStringKind::Reference)
+                .map(Value::String)
+        })
+        .or_else(|| {
             boundary_string_for_schema(
                 model_boundary.get("session_binding"),
                 BoundaryStringKind::Reference,
@@ -257,7 +261,11 @@ fn push_unique_boundary_value(values: &mut Vec<Value>, value: Value) {
 }
 
 fn boundary_string_for_schema(value: Option<&Value>, kind: BoundaryStringKind) -> Option<String> {
-    let text = value?.as_str()?.trim();
+    let value = value?;
+    let text = value
+        .as_str()
+        .or_else(|| boundary_object_reference_for_schema(value, kind))?
+        .trim();
     if text.is_empty() {
         return None;
     }
@@ -269,4 +277,40 @@ fn boundary_string_for_schema(value: Option<&Value>, kind: BoundaryStringKind) -
         return None;
     }
     Some(text.to_string())
+}
+
+fn boundary_object_reference_for_schema(value: &Value, kind: BoundaryStringKind) -> Option<&str> {
+    if !matches!(kind, BoundaryStringKind::Reference) {
+        return None;
+    }
+    let obj = value.as_object()?;
+    if obj.get("alias_resolved").and_then(Value::as_bool) == Some(false) {
+        return None;
+    }
+    [
+        "alias_value",
+        "resolved_value",
+        "target",
+        "value",
+        "alias_target",
+        "locator",
+        "path",
+    ]
+    .into_iter()
+    .find_map(|key| obj.get(key).and_then(Value::as_str))
+    .or_else(|| {
+        obj.get("relevant_aliases")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(Value::as_str)
+    })
+    .or_else(|| {
+        let aliases = obj.get("aliases")?.as_object()?;
+        let mut values = aliases
+            .values()
+            .filter_map(Value::as_str)
+            .filter(|text| !text.trim().is_empty());
+        let first = values.next()?;
+        values.next().is_none().then_some(first)
+    })
 }

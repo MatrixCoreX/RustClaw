@@ -81,6 +81,22 @@ pub(super) fn alias_state_patch_ack_reply(
     Some(crate::AskReply::non_llm(text))
 }
 
+pub(super) fn session_binding_value_reply(
+    route_result: &crate::RouteResult,
+    boundary_envelope: Option<&crate::intent_router::BoundaryEnvelope>,
+) -> Option<crate::AskReply> {
+    if !route_allows_alias_state_patch_ack(route_result, boundary_envelope) {
+        return None;
+    }
+    let value = boundary_envelope
+        .and_then(|envelope| envelope.session_binding.as_deref())
+        .map(str::trim)
+        .filter(|value| {
+            !value.is_empty() && !matches!(*value, "resume_execute" | "resume_discuss")
+        })?;
+    Some(crate::AskReply::non_llm(value.to_string()))
+}
+
 fn alias_state_patch_ack_language_hint(
     state: &crate::AppState,
     task: &crate::ClaimedTask,

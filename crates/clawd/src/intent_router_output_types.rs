@@ -197,7 +197,11 @@ fn boundary_string_field(
     value: Option<&serde_json::Value>,
     kind: BoundaryStringKind,
 ) -> Option<String> {
-    let text = value?.as_str()?.trim();
+    let value = value?;
+    let text = value
+        .as_str()
+        .or_else(|| boundary_object_reference_field(value, kind))?
+        .trim();
     if text.is_empty() {
         return None;
     }
@@ -209,6 +213,49 @@ fn boundary_string_field(
         return None;
     }
     Some(text.to_string())
+}
+
+fn boundary_object_reference_field(
+    value: &serde_json::Value,
+    kind: BoundaryStringKind,
+) -> Option<&str> {
+    if !matches!(kind, BoundaryStringKind::Reference) {
+        return None;
+    }
+    let obj = value.as_object()?;
+    if obj
+        .get("alias_resolved")
+        .and_then(serde_json::Value::as_bool)
+        == Some(false)
+    {
+        return None;
+    }
+    [
+        "alias_value",
+        "resolved_value",
+        "target",
+        "value",
+        "alias_target",
+        "locator",
+        "path",
+    ]
+    .into_iter()
+    .find_map(|key| obj.get(key).and_then(serde_json::Value::as_str))
+    .or_else(|| {
+        obj.get("relevant_aliases")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(serde_json::Value::as_str)
+    })
+    .or_else(|| {
+        let aliases = obj.get("aliases")?.as_object()?;
+        let mut values = aliases
+            .values()
+            .filter_map(serde_json::Value::as_str)
+            .filter(|text| !text.trim().is_empty());
+        let first = values.next()?;
+        values.next().is_none().then_some(first)
+    })
 }
 
 fn non_empty_token(value: &str) -> &str {

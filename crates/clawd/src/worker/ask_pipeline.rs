@@ -120,7 +120,9 @@ use quantity_pair_binding::{
 use runtime_status::{
     append_runtime_status_capability_context, turn_analysis_has_runtime_status_query,
 };
-use state_patch_ack::{alias_state_patch_ack_reply, apply_alias_state_patch_ack_route};
+use state_patch_ack::{
+    alias_state_patch_ack_reply, apply_alias_state_patch_ack_route, session_binding_value_reply,
+};
 use structured_anchor_guard::{
     active_session_has_structured_observation_anchor, apply_structured_anchor_evidence_repair,
     followup_frame_has_matching_target, observed_facts_have_matching_target,
@@ -420,7 +422,7 @@ fn agent_loop_boundary_observations_block(
             crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady
         );
     let missing_referent =
-        missing_referent_observation(route, &active_bound_targets).or_else(|| {
+        missing_referent_observation(state, prompt, route, &active_bound_targets).or_else(|| {
             unbound_contextual_locator_missing_referent_observation(
                 state,
                 prompt,
@@ -525,11 +527,18 @@ fn agent_loop_boundary_observations_block(
 }
 
 fn missing_referent_observation(
+    state: &AppState,
+    prompt: &str,
     route: &crate::RouteResult,
     active_bound_targets: &[serde_json::Value],
 ) -> Option<serde_json::Value> {
     if !route.has_route_reason_machine_marker("standalone_freeform_clarify_loop_context")
         || !active_bound_targets.is_empty()
+    {
+        return None;
+    }
+    if !current_request_has_concrete_locator_surface(prompt)
+        && current_request_resolves_workspace_child_locator(state, prompt).is_none()
     {
         return None;
     }
@@ -1603,6 +1612,25 @@ pub(super) async fn execute_ask_dispatch(
             Some(crate::AskState::Executing),
             crate::AskState::Finalizing,
             "alias_state_patch_ack",
+            None,
+        );
+        return Ok(Some(Ok(reply)));
+    }
+    if let Some(reply) = session_binding_value_reply(route_result, boundary_envelope) {
+        crate::log_ask_transition(
+            state,
+            &task.task_id,
+            Some(crate::AskState::Routing),
+            crate::AskState::Executing,
+            "session_binding_value_direct",
+            None,
+        );
+        crate::log_ask_transition(
+            state,
+            &task.task_id,
+            Some(crate::AskState::Executing),
+            crate::AskState::Finalizing,
+            "session_binding_value_direct",
             None,
         );
         return Ok(Some(Ok(reply)));
