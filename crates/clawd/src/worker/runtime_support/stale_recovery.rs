@@ -203,6 +203,7 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
     let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
 
     let mut candidates = Vec::new();
+    let mut active_current_worker_task_ids = Vec::new();
     {
         let mut stmt = db.prepare(
             "SELECT task_id, result_json, lease_owner,
@@ -231,10 +232,10 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
             if recovery_should_preserve_recoverable_state(result_json.as_deref(), now) {
                 continue;
             }
-            if reason == StaleRunningRecoveryReason::WorkerLeaseExpired
-                && lease_owner.as_deref() == Some(state.worker.worker_id.as_str())
+            if lease_owner.as_deref() == Some(state.worker.worker_id.as_str())
                 && state.worker.is_task_active(&task_id)
             {
+                active_current_worker_task_ids.push(task_id);
                 continue;
             }
             candidates.push(StaleRunningTaskCandidate {
@@ -242,6 +243,15 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
                 reason,
                 result_json,
             });
+        }
+    }
+
+    for task_id in active_current_worker_task_ids {
+        if let Err(err) = refresh_active_current_worker_task_lease(&db, state, &task_id) {
+            warn!(
+                "runtime stale-running active-task lease refresh failed: worker_id={} task_id={} err={}",
+                state.worker.worker_id, task_id, err
+            );
         }
     }
 
@@ -292,6 +302,29 @@ pub(crate) fn recover_stale_running_tasks_by_no_progress(
         .into_iter()
         .map(|candidate| candidate.task_id)
         .collect())
+}
+
+fn refresh_active_current_worker_task_lease(
+    db: &Connection,
+    state: &AppState,
+    task_id: &str,
+) -> anyhow::Result<()> {
+    let heartbeat_at = now_ts_u64() as i64;
+    db.execute(
+        "UPDATE tasks
+         SET updated_at = ?2,
+             lease_owner = ?3,
+             lease_expires_at = ?4
+         WHERE task_id = ?1
+           AND status = 'running'",
+        rusqlite::params![
+            task_id,
+            heartbeat_at.to_string(),
+            state.worker.worker_id,
+            crate::repo::worker_task_lease_expires_at(state, heartbeat_at)
+        ],
+    )?;
+    Ok(())
 }
 
 fn parse_recovery_reason(raw: &str) -> StaleRunningRecoveryReason {
