@@ -90,6 +90,68 @@ fn normalizer_retry_keeps_retry_execution_recipe_when_present() {
 }
 
 #[test]
+fn normalizer_retry_preserves_base_output_contract_boundary_signal() {
+    let mut retry_out = empty_normalizer_out_for_retry_test();
+    let mut report = super::ContractRepairReport::default();
+    let base = r#"{
+        "resolved_user_intent": "list observed directory entries",
+        "output_contract": {
+            "response_shape": "strict",
+            "requires_content_evidence": true,
+            "delivery_required": false,
+            "locator_kind": "path",
+            "delivery_intent": "none",
+            "contract_marker": "none",
+            "locator_hint": "logs"
+        }
+    }"#;
+
+    super::prompt_render::preserve_base_output_contract_for_retry(
+        &mut retry_out,
+        base,
+        &mut report,
+    );
+
+    let contract = retry_out
+        .output_contract
+        .as_ref()
+        .expect("base contract should be preserved");
+    assert_eq!(contract.response_shape, "strict");
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, "path");
+    assert_eq!(contract.locator_hint, "logs");
+    assert!(report
+        .detail_csv()
+        .contains("preserved_base_output_contract"));
+}
+
+#[test]
+fn normalizer_retry_does_not_preserve_shape_only_delivery_noise() {
+    let mut retry_out = empty_normalizer_out_for_retry_test();
+    let mut report = super::ContractRepairReport::default();
+    let base = r#"{
+        "resolved_user_intent": "create files and run validation",
+        "execution_recipe": {"kind": "ops_closed_loop"},
+        "output_contract": {
+            "response_shape": "file_token",
+            "delivery_required": true,
+            "contract_marker": "none"
+        }
+    }"#;
+
+    super::prompt_render::preserve_base_output_contract_for_retry(
+        &mut retry_out,
+        base,
+        &mut report,
+    );
+
+    assert!(retry_out.output_contract.is_none());
+    assert!(!report
+        .detail_csv()
+        .contains("preserved_base_output_contract"));
+}
+
+#[test]
 fn compact_normalizer_prompt_pins_boundary_schema() {
     let route_view = crate::task_context_builder::RouteContextView {
         request_surface_hints: "locator_target_pair: Cargo.toml | Cargo.lock".to_string(),
