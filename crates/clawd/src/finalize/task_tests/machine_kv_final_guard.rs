@@ -497,3 +497,93 @@ fn requested_machine_kv_summary_does_not_recover_required_content_gap() {
         r#"{"changed_files":[],"test_command":"python3 test_calc_core.py","test_status":"OK","functions":["add","sub"]}"#
     );
 }
+
+#[test]
+fn requested_machine_kv_summary_force_patches_archive_db_json_instead_of_scalar_replace() {
+    let prompt = "Return required machine field user_version.";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-archive-db-force-merge", "ask", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "archive_basic",
+            r#"{"extra":{"action":"list","archive":"scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip","entries":[{"name":"notes.txt","kind":"file"},{"name":"nested/config.ini","kind":"file"}]}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "archive_basic",
+            r#"{"extra":{"action":"read","archive":"scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip","member":"notes.txt","content":"fixture archive notes","content_excerpt":"fixture archive notes"}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_3",
+            "db_basic",
+            r#"{"extra":{"action":"list_tables","db_path":"scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite","table_count":3,"tables":["orders","service_logs","users"],"field_value":{"table_count":3,"tables":["orders","service_logs","users"]}}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_4",
+            "db_basic",
+            r#"{"extra":{"action":"user_version","db_path":"scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite","field_value":{"user_version":7},"user_version":7},"text":"user_version=7"}"#,
+        ));
+    let mut answer_text = serde_json::json!({
+        "archive": {
+            "entries": ["notes.txt", "nested/config.ini"],
+            "member": {"name": "notes.txt", "content": "fixture archive notes"}
+        },
+        "database": {
+            "tables": ["orders", "service_logs", "users"]
+        }
+    })
+    .to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(recover_requested_machine_kv_summary_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+        true,
+    ));
+
+    let value: serde_json::Value = serde_json::from_str(&answer_text).expect("patched json");
+    assert_eq!(
+        value
+            .pointer("/archive/entries/0")
+            .and_then(serde_json::Value::as_str),
+        Some("notes.txt")
+    );
+    assert_eq!(
+        value
+            .pointer("/archive/member/content")
+            .and_then(serde_json::Value::as_str),
+        Some("fixture archive notes")
+    );
+    assert_eq!(
+        value
+            .pointer("/database/tables/1")
+            .and_then(serde_json::Value::as_str),
+        Some("service_logs")
+    );
+    assert_eq!(
+        value
+            .get("user_version")
+            .and_then(serde_json::Value::as_i64),
+        Some(7)
+    );
+    assert_ne!(answer_text, "user_version=7");
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
+    assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
+}

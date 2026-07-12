@@ -130,6 +130,18 @@ pub(crate) async fn run_intent_normalizer(
         let mut needs_clarify = out.needs_clarify;
         let mut attachment_processing_required = out.attachment_processing_required;
         let mut execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
+        let boundary_locator_content_evidence_contract =
+            apply_boundary_locator_content_evidence_contract(
+                &mut output_contract,
+                out.boundary_envelope.as_ref(),
+                needs_clarify,
+                wants_file_delivery,
+                schedule_kind,
+                execution_recipe_hint,
+            );
+        if boundary_locator_content_evidence_contract.is_some() {
+            execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
+        }
         let schedule_route_contract_repair = apply_schedule_route_contract_repair(
             schedule_kind,
             &mut output_contract,
@@ -614,6 +626,7 @@ pub(crate) async fn run_intent_normalizer(
             active_ordered_scalar_path_loop_context,
             active_observed_output_loop_context,
             structured_contract_hint_repair,
+            boundary_locator_content_evidence_contract,
         ]
         .into_iter()
         .flatten()
@@ -1041,6 +1054,7 @@ pub(crate) async fn run_intent_normalizer(
                 active_ordered_scalar_path_loop_context,
                 active_observed_output_loop_context,
                 structured_contract_hint_repair,
+                boundary_locator_content_evidence_contract,
                 state_patch_required_machine_fields_contract_repair,
                 current_turn_anchor_drift_repair,
                 archive_unpack_missing_archive_locator_clarify_repair,
@@ -1167,6 +1181,79 @@ fn execution_recipe_plan_hint_declares_execution(
     })
 }
 
+fn execution_recipe_spec_declares_execution(
+    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+) -> bool {
+    execution_recipe_hint.is_some_and(|spec| {
+        !matches!(
+            spec.kind,
+            crate::execution_recipe::ExecutionRecipeKind::None
+        )
+    })
+}
+
+fn apply_boundary_locator_content_evidence_contract(
+    output_contract: &mut IntentOutputContract,
+    model_boundary_envelope: Option<&Value>,
+    needs_clarify: bool,
+    wants_file_delivery: bool,
+    schedule_kind: ScheduleKind,
+    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+) -> Option<&'static str> {
+    if needs_clarify
+        || wants_file_delivery
+        || !matches!(schedule_kind, ScheduleKind::None)
+        || execution_recipe_spec_declares_execution(execution_recipe_hint)
+        || output_contract.requires_content_evidence
+        || output_contract.delivery_required
+        || !matches!(output_contract.response_shape, OutputResponseShape::Free)
+        || !matches!(output_contract.locator_kind, OutputLocatorKind::None)
+        || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        || !output_contract.semantic_kind_is_unclassified()
+        || !boundary_envelope_has_local_locator(model_boundary_envelope)
+    {
+        return None;
+    }
+    output_contract.requires_content_evidence = true;
+    output_contract.locator_kind = OutputLocatorKind::Path;
+    Some("boundary_locator_content_evidence_contract")
+}
+
+fn boundary_envelope_has_local_locator(model_boundary_envelope: Option<&Value>) -> bool {
+    let Some(envelope) = model_boundary_envelope.and_then(Value::as_object) else {
+        return false;
+    };
+    ["explicit_locators", "attachment_refs"]
+        .into_iter()
+        .any(|key| {
+            envelope
+                .get(key)
+                .and_then(Value::as_array)
+                .is_some_and(|items| items.iter().any(boundary_locator_value_is_local_path))
+        })
+}
+
+fn boundary_locator_value_is_local_path(value: &Value) -> bool {
+    match value {
+        Value::String(text) => boundary_locator_text_is_local_path(text),
+        Value::Object(object) => ["path", "value", "hint"]
+            .into_iter()
+            .filter_map(|key| object.get(key).and_then(Value::as_str))
+            .any(boundary_locator_text_is_local_path),
+        _ => false,
+    }
+}
+
+fn boundary_locator_text_is_local_path(text: &str) -> bool {
+    let text = text.trim();
+    !text.is_empty()
+        && !text.contains("://")
+        && (text.starts_with('/')
+            || text.starts_with("./")
+            || text.starts_with("../")
+            || text.contains('/'))
+}
+
 fn route_trace_label_from_decision(
     decision: RouteTraceDecision,
     finalize_style: ActFinalizeStyle,
@@ -1199,4 +1286,80 @@ fn route_trace_label_from_state(
         ),
         execution_finalize_style,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn boundary_locator_fallback_restores_content_evidence_contract() {
+        let mut contract = IntentOutputContract::default();
+        let boundary = json!({
+            "explicit_locators": [
+                "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
+                {"path": "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"}
+            ]
+        });
+
+        let repair = apply_boundary_locator_content_evidence_contract(
+            &mut contract,
+            Some(&boundary),
+            false,
+            false,
+            ScheduleKind::None,
+            None,
+        );
+
+        assert_eq!(repair, Some("boundary_locator_content_evidence_contract"));
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(contract.response_shape, OutputResponseShape::Free);
+    }
+
+    #[test]
+    fn boundary_locator_fallback_allows_inactive_execution_recipe_hint() {
+        let mut contract = IntentOutputContract::default();
+        let boundary = json!({
+            "explicit_locators": [
+                "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"
+            ]
+        });
+
+        let repair = apply_boundary_locator_content_evidence_contract(
+            &mut contract,
+            Some(&boundary),
+            false,
+            false,
+            ScheduleKind::None,
+            Some(crate::execution_recipe::ExecutionRecipeSpec::default()),
+        );
+
+        assert_eq!(repair, Some("boundary_locator_content_evidence_contract"));
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    }
+
+    #[test]
+    fn boundary_locator_fallback_ignores_non_path_boundary_values() {
+        let mut contract = IntentOutputContract::default();
+        let boundary = json!({
+            "explicit_locators": ["task-id-123", {"value": "none"}],
+            "attachment_refs": []
+        });
+
+        let repair = apply_boundary_locator_content_evidence_contract(
+            &mut contract,
+            Some(&boundary),
+            false,
+            false,
+            ScheduleKind::None,
+            None,
+        );
+
+        assert_eq!(repair, None);
+        assert!(!contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    }
 }
