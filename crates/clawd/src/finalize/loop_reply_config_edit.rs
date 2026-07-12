@@ -59,7 +59,9 @@ fn step_may_contain_config_edit_observation(step: &crate::executor::StepExecutio
     matches!(
         step.skill.as_str(),
         "config_edit" | "config_basic" | "config_guard"
-    )
+    ) || step.skill.starts_with("config.")
+        || step.skill.starts_with("config_edit.")
+        || step.skill.starts_with("config_basic.")
 }
 
 fn config_edit_observed_outputs(
@@ -77,13 +79,94 @@ fn config_edit_observed_outputs(
         .iter()
         .enumerate()
         .filter_map(|(index, step)| {
-            if !step.is_ok() || !step_may_contain_config_edit_observation(step) {
+            if !step.is_ok() {
                 return None;
             }
             let value = config_edit_observed_value_from_output(step.output.as_deref()?)?;
+            if !step_may_contain_config_edit_observation(step)
+                && !config_edit_value_has_target(&value)
+            {
+                return None;
+            }
             Some(ConfigEditObservedOutput { index, value })
         })
         .collect()
+}
+
+fn config_edit_value_has_target(value: &serde_json::Value) -> bool {
+    value.get("path").is_some()
+        || value.get("resolved_path").is_some()
+        || value.get("field_path").is_some()
+        || value.get("resolved_field_path").is_some()
+}
+
+fn config_edit_machine_payload(value: &serde_json::Value) -> bool {
+    let message_key = config_edit_string_field(value, "message_key");
+    let reason_code = config_edit_string_field(value, "reason_code");
+    if message_key == Some("clawd.msg.config_edit.preview_read_guard")
+        || reason_code == Some("config_edit_preview_read_guard")
+    {
+        return false;
+    }
+    let config_message = message_key.is_some_and(|key| key.starts_with("clawd.msg.config_edit."));
+    let config_reason = reason_code.is_some_and(|code| code.starts_with("config_edit_"));
+    (config_message || config_reason)
+        && (value.get("field_path").is_some()
+            || value.get("path").is_some()
+            || value.get("risk_count").is_some()
+            || value.get("would_change").is_some()
+            || value.get("would_write").is_some()
+            || value.get("applied").is_some())
+}
+
+pub(super) fn direct_config_edit_terminal_machine_payload_answer(
+    loop_state: &crate::agent_engine::LoopState,
+) -> Option<String> {
+    if let Some(answer) = loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .and_then(config_edit_machine_payload_text)
+    {
+        return Some(answer);
+    }
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| {
+            step.is_ok() && matches!(step.skill.as_str(), "synthesize_answer" | "respond")
+        })
+        .filter_map(|step| step.output.as_deref())
+        .find_map(config_edit_machine_payload_text)
+}
+
+pub(super) fn config_edit_machine_payload_text(output: &str) -> Option<String> {
+    let output = output.trim();
+    if output.is_empty() {
+        return None;
+    }
+    let value = serde_json::from_str::<serde_json::Value>(output).ok()?;
+    config_edit_machine_payload_value_text(&value)
+        .or_else(|| config_edit_machine_payload(&value).then(|| output.to_string()))
+}
+
+fn config_edit_machine_payload_value_text(value: &serde_json::Value) -> Option<String> {
+    if config_edit_machine_payload(value) {
+        return Some(value.to_string());
+    }
+    if let Some(text) = value
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        if let Some(answer) = config_edit_machine_payload_text(text) {
+            return Some(answer);
+        }
+    }
+    value
+        .get("extra")
+        .and_then(config_edit_machine_payload_value_text)
 }
 
 fn config_edit_string_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
@@ -473,13 +556,11 @@ fn direct_config_edit_read_guard_answer(
         .unwrap_or_default();
     Some(
         serde_json::json!({
-            "message_key": "clawd.msg.config_edit.preview_read_guard",
-            "reason_code": "config_edit_preview_read_guard",
+            "message_key": "clawd.msg.config_edit.read_guard",
+            "reason_code": "config_edit_read_guard",
             "path": path,
             "field_path": field_path,
             "current_value": value,
-            "applied": false,
-            "would_write": false,
             "risk_count": risk_count,
             "count": risk_count,
             "risks": risks,
@@ -524,6 +605,9 @@ pub(crate) fn direct_config_edit_observed_answer(
     user_text: &str,
     loop_state: &crate::agent_engine::LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if let Some(answer) = direct_config_edit_terminal_machine_payload_answer(loop_state) {
+        return Some((answer, config_edit_summary()));
+    }
     let outputs = config_edit_observed_outputs(loop_state);
     if outputs.is_empty() {
         return None;

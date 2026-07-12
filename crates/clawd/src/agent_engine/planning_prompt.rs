@@ -557,6 +557,9 @@ pub(super) fn contract_scoped_planner_skill_scope(
             return None;
         }
         Some(skills)
+    } else if route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+    {
+        None
     } else {
         generic_local_content_contract_skill_scope(route)
     }

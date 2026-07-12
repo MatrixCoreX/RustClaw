@@ -261,6 +261,57 @@ fn requested_machine_kv_summary_final_guard_preserves_workspace_grounded_summary
 }
 
 #[test]
+fn requested_machine_kv_summary_final_guard_preserves_verified_config_summary() {
+    let prompt = "只预览把 configs/config.toml 里的 llm.selected_vendor 改成 minimax，不要写入；然后读取当前 llm.selected_vendor，并运行配置风险检查；回答预览是否会改变、当前值和是否有明显风险。";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-config-verified-summary", "ask", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "config_basic",
+            r#"{"extra":{"action":"read_fields","path":"configs/config.toml","results":[{"field_path":"llm.selected_vendor","value":"minimax","value_text":"minimax"}]}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "config_basic",
+            r#"{"extra":{"action":"guard_config","path":"configs/config.toml","valid":false,"risk_count":2,"risks":["tools.allow_sudo=true","tools.allow_path_outside_workspace=true"]}}"#,
+        ));
+    journal.record_answer_verifier_summary(crate::answer_verifier::AnswerVerifierOut {
+        pass: true,
+        missing_evidence_fields: Vec::new(),
+        answer_incomplete_reason: String::new(),
+        should_retry: false,
+        retry_instruction: String::new(),
+        confidence: 0.95,
+    });
+    let mut answer_text = "仅预览，未写入磁盘；llm.selected_vendor 当前值是 minimax，目标值也是 minimax，所以预览不会改变该字段。配置风险检查发现 2 项既有风险：tools.allow_sudo=true 和 tools.allow_path_outside_workspace=true。"
+        .to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert!(answer_text.contains("预览不会改变"));
+    assert_ne!(answer_text, "llm.selected_vendor");
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
+    assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
+}
+
+#[test]
 fn requested_machine_kv_summary_final_guard_preserves_delivery_file_token() {
     let prompt = "Create a text file in tmp/notes.txt, write content, and send the file.";
     let mut route = route_result(crate::AskMode::act_plain());
