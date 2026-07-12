@@ -607,3 +607,116 @@ fn normalizer_schema_promotes_session_binding_locator_hint_into_state_patch() {
     )
     .expect("schema validation");
 }
+
+#[test]
+fn normalizer_schema_keeps_resolved_session_binding_out_of_state_patch() {
+    let raw = r#"{
+          "schema_version":1,
+          "raw_chars":24,
+          "language_hint":"zh-CN",
+          "schedule_intent":{"kind":"none"},
+          "attachment_refs":[],
+          "session_binding":{
+            "alias":"round_test_id",
+            "target":"RC-CONT-CN-0428-A"
+          },
+          "needs_clarify":false,
+          "resolved_user_intent":"Recall the previously bound session marker.",
+          "output_contract":{
+            "response_shape":"strict",
+            "requires_content_evidence":false,
+            "delivery_required":false,
+            "locator_kind":"none",
+            "delivery_intent":"none",
+            "contract_marker":"none"
+          }
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(
+        raw,
+        "刚才让你记住的连续测试编号是什么？只回答编号。",
+    );
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/boundary_envelope/session_binding")
+            .and_then(|value| value.as_str()),
+        Some("RC-CONT-CN-0428-A")
+    );
+    assert!(value.pointer("/state_patch/alias_bindings").is_none());
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
+}
+
+#[test]
+fn normalizer_schema_keeps_relevant_alias_session_binding_out_of_state_patch() {
+    let raw = r#"{
+          "schema_version":1,
+          "raw_chars":24,
+          "language_hint":"zh-CN",
+          "schedule_intent":{"kind":"none"},
+          "attachment_refs":[],
+          "session_binding":{
+            "relevant_aliases":["RC-CONT-CN-0428-A"]
+          },
+          "needs_clarify":false,
+          "resolved_user_intent":"Recall the previously bound session marker.",
+          "output_contract":{"response_shape":"strict","contract_marker":"none"}
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(
+        raw,
+        "刚才让你记住的连续测试编号是什么？只回答编号。",
+    );
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/boundary_envelope/session_binding")
+            .and_then(|value| value.as_str()),
+        Some("RC-CONT-CN-0428-A")
+    );
+    assert!(value.pointer("/state_patch/alias_bindings").is_none());
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
+}
+
+#[test]
+fn normalizer_schema_keeps_single_alias_map_session_binding_out_of_state_patch() {
+    let raw = r#"{
+          "schema_version":1,
+          "raw_chars":24,
+          "language_hint":"zh-CN",
+          "schedule_intent":{"kind":"none"},
+          "attachment_refs":[],
+          "session_binding":{
+            "aliases":{"test_code":"RC-CONT-CN-0428-A"}
+          },
+          "needs_clarify":false,
+          "resolved_user_intent":"Recall the previously bound session marker.",
+          "output_contract":{"response_shape":"strict","contract_marker":"none"}
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(
+        raw,
+        "刚才让你记住的连续测试编号是什么？只回答编号。",
+    );
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/boundary_envelope/session_binding")
+            .and_then(|value| value.as_str()),
+        Some("RC-CONT-CN-0428-A")
+    );
+    assert!(value.pointer("/state_patch/alias_bindings").is_none());
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
+}

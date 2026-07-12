@@ -642,6 +642,9 @@ fn session_binding_alias_state_patch_value(value: Option<&Value>) -> Option<Valu
     {
         return Some(bindings.clone());
     }
+    if !session_binding_object_declares_alias_write(obj) {
+        return None;
+    }
     let alias = obj
         .get("alias")
         .or_else(|| obj.get("alias_key"))
@@ -673,6 +676,21 @@ fn session_binding_alias_state_patch_value(value: Option<&Value>) -> Option<Valu
             .filter(|value| !value.is_empty())
             .unwrap_or("session"),
     }]))
+}
+
+fn session_binding_object_declares_alias_write(obj: &serde_json::Map<String, Value>) -> bool {
+    [
+        "alias_bindings",
+        "alias_key",
+        "alias_name",
+        "alias_target",
+        "alias_target_path",
+        "locator_hint",
+        "locator_value",
+        "target_path",
+    ]
+    .iter()
+    .any(|key| obj.contains_key(*key))
 }
 
 fn state_patch_value_is_meaningful(value: &Value) -> bool {

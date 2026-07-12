@@ -359,6 +359,47 @@ fn boundary_observation_redacts_non_boundary_clarify_workspace_child_path() {
 }
 
 #[test]
+fn boundary_observation_does_not_mark_locatorless_freeform_draft_as_missing_referent() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut route = base_route();
+    route.route_reason = "standalone_freeform_clarify_loop_context".to_string();
+    let post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: None,
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: false,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::with_owner(
+            "agent_loop_boundary_defer",
+            "post_route_non_boundary_clarify_deferred_to_agent_loop",
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
+        ),
+    };
+
+    let block = agent_loop_boundary_observations_block(
+        &state,
+        &post_route,
+        &crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        },
+        None,
+        "帮我写个方案",
+        "帮我写个方案",
+        &[],
+    )
+    .expect("observation block");
+
+    assert!(block.contains("standalone_freeform_clarify_loop_context"));
+    assert!(block.contains("\"missing_referent\":null"));
+    assert!(!block.contains("unbound_deictic_reference"));
+}
+
+#[test]
 fn boundary_observation_hides_active_plan_files_for_unbound_referent() {
     let root = temp_workspace_root("unbound_referent_plan_files");
     let plan_dir = root.join("plan");
@@ -395,8 +436,8 @@ fn boundary_observation_hides_active_plan_files_for_unbound_referent() {
             active_observed_facts: None,
         },
         None,
-        "summarize it",
-        "summarize it",
+        "summarize README.md",
+        "summarize README.md",
         &[],
     )
     .expect("observation block");
