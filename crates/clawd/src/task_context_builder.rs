@@ -577,6 +577,20 @@ fn route_uses_bounded_observation_summary_light_budget(route_result: &RouteResul
     ]) || route_has_capability_ref_machine_token(route_result)
 }
 
+fn route_uses_bounded_scalar_boundary_light_budget(route_result: &RouteResult) -> bool {
+    route_result.ask_mode.is_plain_act()
+        && !matches!(route_result.risk_ceiling, crate::RiskCeiling::High)
+        && route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar
+        && !route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+        && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
+        && route_result.output_contract.delivery_intent == crate::OutputDeliveryIntent::None
+        && route_result.schedule_kind == crate::ScheduleKind::None
+        && !route_result.wants_file_delivery
+        && !route_result.should_refresh_long_term_memory
+        && !route_has_any_output_contract_marker(route_result)
+}
+
 fn route_uses_bounded_local_machine_boundary_light_budget(route_result: &RouteResult) -> bool {
     if route_result.output_contract.delivery_required
         || route_result.wants_file_delivery
@@ -677,6 +691,9 @@ pub(crate) fn uses_light_execution_context_budget(
         return true;
     }
     if route_uses_bounded_observation_summary_light_budget(route_result) {
+        return true;
+    }
+    if route_uses_bounded_scalar_boundary_light_budget(route_result) {
         return true;
     }
     if route_uses_bounded_local_machine_boundary_light_budget(route_result) {
@@ -1062,12 +1079,18 @@ pub(crate) fn build_execution_task_context_bundle(
     let has_active_primary_task_state =
         session_snapshot_has_primary_task_context(&session_snapshot);
     let has_active_task_context = has_active_session_state || has_active_primary_task_state;
-    let suppress_execution_text_context = route_result.is_execute_gate()
-        && matches!(budget_tier, ExecutionContextBudgetTier::Full)
-        && has_active_session_state
-        && !needs_recent_execution_history;
-    let suppress_execution_anchor_context =
-        should_suppress_execution_anchor_context(route_result, &session_snapshot, budget_tier);
+    let suppress_preference_context =
+        should_suppress_active_task_context(route_result, turn_analysis);
+    let suppress_execution_text_context = suppress_preference_context
+        || route_result.is_execute_gate()
+            && matches!(budget_tier, ExecutionContextBudgetTier::Full)
+            && has_active_session_state
+            && !needs_recent_execution_history;
+    let suppress_boundary_only_execution_anchor =
+        should_suppress_boundary_only_execution_anchor_context(route_result, turn_analysis);
+    let suppress_execution_anchor_context = suppress_preference_context
+        || suppress_boundary_only_execution_anchor
+        || should_suppress_execution_anchor_context(route_result, &session_snapshot, budget_tier);
     let planner_memory_decision = memory::use_policy::decide_planner_memory_use_policy(
         state,
         budget_tier,
@@ -1094,9 +1117,23 @@ pub(crate) fn build_execution_task_context_bundle(
         budget_tier,
         memory_ctx,
         runtime_context: build_runtime_context(state),
-        active_task_context: build_active_task_context(&session_snapshot),
-        active_execution_anchor_context: build_active_execution_anchor_context(&session_snapshot),
-        session_alias_context: build_session_alias_context(&session_snapshot),
+        active_task_context: if suppress_preference_context {
+            "<none>".to_string()
+        } else {
+            build_active_task_context(&session_snapshot)
+        },
+        active_execution_anchor_context: if suppress_preference_context
+            || suppress_boundary_only_execution_anchor
+        {
+            "<none>".to_string()
+        } else {
+            build_active_execution_anchor_context(&session_snapshot)
+        },
+        session_alias_context: if suppress_preference_context {
+            "<none>".to_string()
+        } else {
+            build_session_alias_context(&session_snapshot)
+        },
         recent_turns_full: if matches!(budget_tier, ExecutionContextBudgetTier::Full)
             && !suppress_execution_text_context
         {
@@ -1258,6 +1295,95 @@ fn current_request_only_memory_context(
         && contract.locator_kind == crate::OutputLocatorKind::None
         && contract.delivery_intent == crate::OutputDeliveryIntent::None
         && !route_has_any_output_contract_marker(route_result)
+}
+
+fn should_suppress_active_task_context(
+    route_result: &RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    let Some(analysis) = turn_analysis else {
+        return false;
+    };
+    if analysis.turn_type != Some(crate::intent_router::TurnType::PreferenceOrMemory)
+        || !matches!(
+            analysis.target_task_policy,
+            None | Some(crate::intent_router::TargetTaskPolicy::Standalone)
+        )
+        || analysis.attachment_processing_required
+        || analysis.should_interrupt_active_run
+        || route_result.needs_clarify
+        || route_result.wants_file_delivery
+        || route_result.schedule_kind != crate::ScheduleKind::None
+        || route_result.should_refresh_long_term_memory
+    {
+        return false;
+    }
+    let contract = &route_result.output_contract;
+    !contract.requires_content_evidence
+        && !contract.delivery_required
+        && contract.locator_kind == crate::OutputLocatorKind::None
+        && contract.delivery_intent == crate::OutputDeliveryIntent::None
+        && !route_has_any_output_contract_marker(route_result)
+}
+
+fn should_suppress_boundary_only_execution_anchor_context(
+    route_result: &RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    if route_result.needs_clarify
+        || route_result.wants_file_delivery
+        || route_result.schedule_kind != crate::ScheduleKind::None
+        || route_result.should_refresh_long_term_memory
+    {
+        return false;
+    }
+    if let Some(analysis) = turn_analysis {
+        if analysis.attachment_processing_required
+            || analysis.should_interrupt_active_run
+            || matches!(
+                analysis.turn_type,
+                Some(
+                    crate::intent_router::TurnType::TaskAppend
+                        | crate::intent_router::TurnType::TaskCorrect
+                        | crate::intent_router::TurnType::TaskReplace
+                        | crate::intent_router::TurnType::TaskScopeUpdate
+                        | crate::intent_router::TurnType::RunControl
+                )
+            )
+            || matches!(
+                analysis.target_task_policy,
+                Some(
+                    crate::intent_router::TargetTaskPolicy::ReuseActive
+                        | crate::intent_router::TargetTaskPolicy::ReplaceActive
+                        | crate::intent_router::TargetTaskPolicy::PauseAndQueue
+                )
+            )
+            || analysis
+                .state_patch
+                .as_ref()
+                .is_some_and(task_context_state_patch_is_meaningful)
+        {
+            return false;
+        }
+    }
+    let contract = &route_result.output_contract;
+    let is_boundary_only_finalize = route_result.is_resume_discussion_mode()
+        || route_result.has_route_reason_machine_marker("executionless_finalize_trace_plain");
+    is_boundary_only_finalize
+        && !contract.requires_content_evidence
+        && !contract.delivery_required
+        && contract.locator_kind == crate::OutputLocatorKind::None
+        && contract.delivery_intent == crate::OutputDeliveryIntent::None
+        && !route_has_any_output_contract_marker(route_result)
+}
+
+fn task_context_state_patch_is_meaningful(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(_) | Value::Number(_) | Value::String(_) => true,
+        Value::Array(items) => items.iter().any(task_context_state_patch_is_meaningful),
+        Value::Object(map) => map.values().any(task_context_state_patch_is_meaningful),
+    }
 }
 
 pub(crate) fn set_execution_image_context(
