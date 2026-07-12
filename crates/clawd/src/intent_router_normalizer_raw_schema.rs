@@ -111,6 +111,7 @@ pub(super) fn normalize_intent_normalizer_raw_for_schema_with_report(
         }
     }
     normalize_output_contract_for_schema(obj);
+    promote_session_binding_alias_pair_to_state_patch(obj);
     insert_boundary_envelope_for_schema(obj, req);
     retain_intent_normalizer_top_level_schema_fields(obj);
     let report = contract_repair_report_from_before_after(&before, &value);
@@ -118,6 +119,92 @@ pub(super) fn normalize_intent_normalizer_raw_for_schema_with_report(
         serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string()),
         report,
     )
+}
+
+fn promote_session_binding_alias_pair_to_state_patch(obj: &mut serde_json::Map<String, Value>) {
+    let binding = obj
+        .get("session_binding")
+        .and_then(session_binding_alias_pair_for_state_patch)
+        .or_else(|| {
+            obj.get("boundary_envelope")
+                .and_then(|value| value.get("session_binding"))
+                .and_then(session_binding_alias_pair_for_state_patch)
+        });
+    let Some((alias, target)) = binding else {
+        return;
+    };
+    let patch = obj
+        .entry("state_patch".to_string())
+        .or_insert_with(|| json!({}));
+    if patch.is_null() {
+        *patch = json!({});
+    }
+    let Some(patch_obj) = patch.as_object_mut() else {
+        return;
+    };
+    let bindings = patch_obj
+        .entry("alias_bindings".to_string())
+        .or_insert_with(|| json!([]));
+    if bindings.is_null() {
+        *bindings = json!([]);
+    }
+    let Some(items) = bindings.as_array_mut() else {
+        return;
+    };
+    if items.iter().any(|item| {
+        item.get("alias")
+            .or_else(|| item.get("alias_name"))
+            .and_then(Value::as_str)
+            .is_some_and(|existing| existing.trim().eq_ignore_ascii_case(&alias))
+    }) {
+        return;
+    }
+    items.push(json!({
+        "alias": alias,
+        "target": target,
+    }));
+}
+
+fn session_binding_alias_pair_for_state_patch(value: &Value) -> Option<(String, String)> {
+    let obj = value.as_object()?;
+    if obj.get("alias_resolved").and_then(Value::as_bool) == Some(false) {
+        return None;
+    }
+    let alias = ["alias", "alias_name", "alias_key", "surface", "name"]
+        .into_iter()
+        .find_map(|key| obj.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.chars().count() <= 128)?
+        .to_string();
+    let (target, strong_locator_field) = [
+        ("alias_target", true),
+        ("locator_hint", true),
+        ("locator", true),
+        ("path", true),
+        ("target", false),
+        ("value", false),
+    ]
+    .into_iter()
+    .find_map(|(key, strong_locator_field)| {
+        obj.get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && value.chars().count() <= 1024)
+            .map(|value| (value.to_string(), strong_locator_field))
+    })?;
+    if !strong_locator_field && !binding_target_looks_like_locator(&target) {
+        return None;
+    }
+    Some((alias, target))
+}
+
+fn binding_target_looks_like_locator(target: &str) -> bool {
+    let trimmed = target.trim();
+    trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains("://")
+        || trimmed.starts_with('.')
+        || trimmed.starts_with('~')
 }
 
 fn insert_boundary_envelope_for_schema(obj: &mut serde_json::Map<String, Value>, req: &str) {

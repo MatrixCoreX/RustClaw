@@ -45,6 +45,7 @@ Context binding:
 - Do not import stale paths, old failures, old workspace scopes, or old capability claims unless the current request explicitly points to them.
 - Memory scores are metadata, not user facts.
 - Reuse an active task only when the current request explicitly modifies, narrows, corrects, resumes, or asks about that task. A complete current request with its own object, deliverable, scope, or constraints is standalone.
+- A current request that only sets response style, priority, brevity, or output-format constraints for a future/subsequent answer is a standalone preference boundary, not an active-task edit. Do not bind it to `active_task_reference`, do not answer/rewrite the previous deliverable, and when turn analysis is emitted use `turn_type="preference_or_memory"` with `target_task_policy="standalone"`.
 - For explicit temporary alias mappings in the current turn, use `state_patch.alias_bindings` with machine fields.
 
 State patch discipline:

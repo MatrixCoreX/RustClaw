@@ -7,9 +7,11 @@ use super::{
     request_can_fill_active_clarify_target, request_qualifies_for_anchor_only_route_context,
     route_needs_recent_execution_history, session_snapshot_has_primary_task_context,
     session_snapshot_provides_execution_state_anchor,
-    should_prefer_light_execution_memory_from_session, should_suppress_execution_anchor_context,
-    uses_light_execution_context_budget, ExecutionContextView, PlannerContextView,
-    RouteContextBudgetTier, TaskContextBundle, TaskContextRawSources,
+    should_prefer_light_execution_memory_from_session, should_suppress_active_task_context,
+    should_suppress_boundary_only_execution_anchor_context,
+    should_suppress_execution_anchor_context, uses_light_execution_context_budget,
+    ExecutionContextView, PlannerContextView, RouteContextBudgetTier, TaskContextBundle,
+    TaskContextRawSources,
 };
 
 #[test]
@@ -844,6 +846,86 @@ fn explicit_preference_or_memory_turn_keeps_default_memory_policy() {
 }
 
 #[test]
+fn standalone_preference_turn_suppresses_active_task_context() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::respond_trace();
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert!(should_suppress_active_task_context(&route, Some(&analysis)));
+}
+
+#[test]
+fn active_task_scope_update_keeps_active_task_context() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::respond_trace();
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskScopeUpdate),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert!(!should_suppress_active_task_context(
+        &route,
+        Some(&analysis)
+    ));
+}
+
+#[test]
+fn boundary_only_discussion_suppresses_execution_anchor_context() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::respond_trace();
+
+    assert!(should_suppress_boundary_only_execution_anchor_context(
+        &route, None
+    ));
+}
+
+#[test]
+fn executionless_finalize_marker_suppresses_execution_anchor_context() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::act_plain();
+    route.route_reason = "executionless_finalize_trace_plain".to_string();
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert!(should_suppress_boundary_only_execution_anchor_context(
+        &route,
+        Some(&analysis)
+    ));
+}
+
+#[test]
+fn active_task_update_keeps_execution_anchor_context() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::respond_trace();
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskCorrect),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert!(!should_suppress_boundary_only_execution_anchor_context(
+        &route,
+        Some(&analysis)
+    ));
+}
+
+#[test]
 fn active_task_scope_update_uses_active_task_context_only_for_chat_memory() {
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::respond_trace();
@@ -879,6 +961,38 @@ fn light_execution_budget_detects_scalar_manifest_reads() {
     route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "package.json".to_string();
     assert!(uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
+}
+
+#[test]
+fn light_execution_budget_detects_bounded_scalar_boundary_answers() {
+    let mut route = base_route_result();
+    route.risk_ceiling = crate::RiskCeiling::Medium;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+
+    assert!(uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
+}
+
+#[test]
+fn light_execution_budget_keeps_high_risk_scalar_boundary_full() {
+    let mut route = base_route_result();
+    route.risk_ceiling = crate::RiskCeiling::High;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+
+    assert!(!uses_light_execution_context_budget(
         &route,
         &route.resolved_intent
     ));

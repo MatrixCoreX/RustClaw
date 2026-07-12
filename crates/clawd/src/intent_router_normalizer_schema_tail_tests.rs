@@ -508,7 +508,7 @@ fn normalizer_schema_promotes_legacy_top_level_language_hint_into_boundary_envel
 }
 
 #[test]
-fn normalizer_schema_keeps_session_binding_alias_pair_out_of_state_patch() {
+fn normalizer_schema_promotes_session_binding_alias_pair_to_state_patch() {
     let raw = r#"{
           "schema_version":1,
           "raw_chars":101,
@@ -539,7 +539,18 @@ fn normalizer_schema_keeps_session_binding_alias_pair_out_of_state_patch() {
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert!(value.pointer("/state_patch/alias_bindings").is_none());
+    assert_eq!(
+        value
+            .pointer("/state_patch/alias_bindings/0/alias")
+            .and_then(|value| value.as_str()),
+        Some("자료A")
+    );
+    assert_eq!(
+        value
+            .pointer("/state_patch/alias_bindings/0/target")
+            .and_then(|value| value.as_str()),
+        Some("scripts/nl_tests/fixtures/device_local/docs/service_notes.md")
+    );
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
         crate::prompt_utils::PromptSchemaId::IntentNormalizer,
@@ -548,7 +559,7 @@ fn normalizer_schema_keeps_session_binding_alias_pair_out_of_state_patch() {
 }
 
 #[test]
-fn normalizer_schema_keeps_session_binding_locator_hint_out_of_state_patch() {
+fn normalizer_schema_promotes_session_binding_locator_hint_to_state_patch() {
     let raw = r#"{
           "schema_version":1,
           "raw_chars":101,
@@ -578,7 +589,73 @@ fn normalizer_schema_keeps_session_binding_locator_hint_out_of_state_patch() {
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert!(value.pointer("/state_patch/alias_bindings").is_none());
+    assert_eq!(
+        value
+            .pointer("/state_patch/alias_bindings/0/alias")
+            .and_then(|value| value.as_str()),
+        Some("자료A")
+    );
+    assert_eq!(
+        value
+            .pointer("/state_patch/alias_bindings/0/target")
+            .and_then(|value| value.as_str()),
+        Some("scripts/nl_tests/fixtures/device_local/docs/service_notes.md")
+    );
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
+}
+
+#[test]
+fn normalizer_schema_promotes_boundary_session_binding_alias_target_to_state_patch() {
+    let raw = r#"{
+          "boundary_envelope":{
+            "schema_version":1,
+            "raw_chars":101,
+            "language_hint":"en",
+            "schedule_intent":{"kind":"none"},
+            "attachment_refs":[],
+            "explicit_locators":[{"locator":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md","locator_kind":"path"}],
+            "active_task_reference":null,
+            "session_binding":{
+              "alias_name":"the note file",
+              "alias_target":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+              "scope":"session"
+            },
+            "safety_budget_hint":null
+          },
+          "needs_clarify":false,
+          "resolved_user_intent":"Bind temporary alias to a path.",
+          "output_contract":{
+            "response_shape":"strict",
+            "exact_sentence_count":1,
+            "requires_content_evidence":false,
+            "delivery_required":false,
+            "locator_kind":"path",
+            "delivery_intent":"none",
+            "contract_marker":"none"
+          }
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(
+        raw,
+        "Remember that the note file means scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only confirmed.",
+    );
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/state_patch/alias_bindings/0/alias")
+            .and_then(|value| value.as_str()),
+        Some("the note file")
+    );
+    assert_eq!(
+        value
+            .pointer("/state_patch/alias_bindings/0/target")
+            .and_then(|value| value.as_str()),
+        Some("scripts/nl_tests/fixtures/device_local/docs/service_notes.md")
+    );
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
         crate::prompt_utils::PromptSchemaId::IntentNormalizer,
