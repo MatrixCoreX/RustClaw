@@ -420,6 +420,15 @@ fn state_patch_replacement_literals(
             );
         }
     }
+    if let Some(primary_update) = map.get("primary_task_update").and_then(Value::as_object) {
+        for key in ["replacement_pairs", "replacements", "replace"] {
+            collect_state_patch_replacements_from_values(
+                primary_update.get(key),
+                &mut from_literals,
+                &mut to_literals,
+            );
+        }
+    }
     (from_literals, to_literals)
 }
 

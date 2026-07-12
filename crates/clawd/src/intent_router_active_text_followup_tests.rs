@@ -216,6 +216,33 @@ fn replacement_pairs_seed_required_new_literals_even_without_old_required_confli
 }
 
 #[test]
+fn nested_primary_task_update_replacement_pairs_seed_required_and_forbidden_literals() {
+    let mut state_patch = Some(serde_json::json!({
+        "primary_task_update": {
+            "active_task_ref": "last_primary_task_prompt",
+            "revision": "replace runtime version",
+            "replacement_pairs": {"from": "Python 3.10", "to": "Python 3.11"}
+        }
+    }));
+
+    let reason = super::repair_state_patch_replacement_literal_conflicts(&mut state_patch);
+    let patch = state_patch.expect("patch");
+
+    assert_eq!(
+        reason,
+        Some("state_patch_replacement_literal_conflict_repair")
+    );
+    assert_eq!(
+        patch["required_content_literals"],
+        serde_json::json!(["Python 3.11"])
+    );
+    assert_eq!(
+        patch["forbidden_visible_literals"],
+        serde_json::json!(["Python 3.10"])
+    );
+}
+
+#[test]
 fn active_task_mutation_with_content_evidence_stays_executable() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
