@@ -481,6 +481,10 @@ mod current_turn_structural_repair_tests;
 mod normalizer_schema_guard_tests;
 
 #[cfg(test)]
+#[path = "intent_router_normalizer_state_patch_schema_tests.rs"]
+mod normalizer_state_patch_schema_tests;
+
+#[cfg(test)]
 #[path = "intent_router_normalizer_schema_machine_field_tests.rs"]
 mod normalizer_schema_machine_field_tests;
 

@@ -544,7 +544,13 @@ fn normalize_state_patch_for_schema(obj: &mut serde_json::Map<String, Value>) {
         return;
     };
     match value {
-        Value::Null | Value::Object(_) => {}
+        Value::Null => {}
+        Value::Object(map) => {
+            sanitize_state_patch_object_for_schema(map);
+            if map.is_empty() {
+                *value = Value::Null;
+            }
+        }
         Value::String(raw) => {
             let normalized = normalize_schema_token(raw);
             if normalized.is_empty() || matches!(normalized.as_str(), "none" | "null" | "no") {
@@ -564,6 +570,15 @@ fn normalize_state_patch_for_schema(obj: &mut serde_json::Map<String, Value>) {
         _ => {
             *value = Value::Null;
         }
+    }
+}
+
+fn sanitize_state_patch_object_for_schema(map: &mut serde_json::Map<String, Value>) {
+    map.remove("required_visible_literals");
+    map.remove("active_task_required_visible_literals");
+    if let Some(Value::Object(constraints)) = map.get_mut("visible_constraints") {
+        constraints.remove("required_visible_literals");
+        constraints.remove("active_task_required_visible_literals");
     }
 }
 
