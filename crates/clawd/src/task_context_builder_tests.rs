@@ -1281,6 +1281,34 @@ fn light_execution_budget_detects_explicit_tail_reads() {
 }
 
 #[test]
+fn light_execution_budget_detects_explicit_locator_surface_with_executable_contract() {
+    let mut route = base_route_result();
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.risk_ceiling = crate::RiskCeiling::Low;
+    route.resolved_intent =
+        "查询 SQLite 文件 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 中包含的所有表名"
+            .to_string();
+
+    assert!(uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
+}
+
+#[test]
+fn light_execution_budget_keeps_high_risk_explicit_locator_surface_full() {
+    let mut route = base_route_result();
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.risk_ceiling = crate::RiskCeiling::High;
+    route.resolved_intent = "检查 /tmp/app.log 并执行高风险变更".to_string();
+
+    assert!(!uses_light_execution_context_budget(
+        &route,
+        &route.resolved_intent
+    ));
+}
+
+#[test]
 fn light_execution_budget_detects_bounded_listing_and_existence() {
     let mut listing = base_route_result();
     listing.resolved_intent = "列出 logs 目录下前 5 个文件名".to_string();
