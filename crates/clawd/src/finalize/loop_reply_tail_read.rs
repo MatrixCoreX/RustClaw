@@ -137,6 +137,297 @@ fn latest_bounded_read_range_failure_recovery_answer(
     ))
 }
 
+fn latest_tail_read_directory_inventory_answer(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if !route_allows_tail_read_directory_inventory_projection(agent_run_context) {
+        return None;
+    }
+    let answer = latest_tail_read_directory_inventory_projection(loop_state)?;
+    if answer.trim().is_empty() {
+        return None;
+    }
+    Some((
+        answer,
+        crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: loop_state.executed_step_results.len().max(1),
+            ..Default::default()
+        },
+    ))
+}
+
+pub(super) fn tail_read_directory_inventory_projection_available(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    latest_tail_read_directory_inventory_answer(loop_state, agent_run_context).is_some()
+}
+
+fn route_allows_tail_read_directory_inventory_projection(
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return true;
+    };
+    let contract = route.effective_output_contract();
+    !contract.delivery_required
+        && !matches!(
+            contract.response_shape,
+            crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
+        )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlannedTailReadRequest {
+    path: String,
+    requested_n: usize,
+}
+
+fn latest_tail_read_directory_inventory_projection(loop_state: &LoopState) -> Option<String> {
+    if !loop_has_directory_read_error(loop_state) {
+        return None;
+    }
+    let request = latest_planned_tail_read_request(loop_state)?;
+    let value = latest_inventory_dir_value_for_path(loop_state, &request.path)?;
+    let names = inventory_dir_ordered_entry_names(&value)?;
+    let selected = tail_entries(&names, request.requested_n);
+    if selected.is_empty() {
+        return None;
+    }
+    let mut lines = vec![
+        format!("entries.count={}", selected.len()),
+        "entries:".to_string(),
+    ];
+    lines.extend(selected.into_iter().map(|name| format!("- {name}")));
+    Some(lines.join("\n"))
+}
+
+fn latest_planned_tail_read_request(loop_state: &LoopState) -> Option<PlannedTailReadRequest> {
+    loop_state.round_traces.iter().rev().find_map(|round| {
+        let plan = round.plan_result.as_ref()?;
+        plan.steps
+            .iter()
+            .rev()
+            .find_map(planned_step_tail_read_request)
+            .or_else(|| raw_plan_tail_read_request(&plan.raw_plan_text))
+    })
+}
+
+fn planned_step_tail_read_request(step: &crate::PlanStep) -> Option<PlannedTailReadRequest> {
+    planned_tail_read_request_from_args(&step.skill, &step.args)
+}
+
+fn raw_plan_tail_read_request(raw_plan_text: &str) -> Option<PlannedTailReadRequest> {
+    let value = serde_json::from_str::<serde_json::Value>(raw_plan_text.trim()).ok()?;
+    let steps = value.get("steps").and_then(|value| value.as_array())?;
+    steps.iter().rev().find_map(|step| {
+        let args = step.get("args")?;
+        let skill = step
+            .get("capability")
+            .or_else(|| step.get("tool"))
+            .or_else(|| step.get("skill"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        planned_tail_read_request_from_args(skill, args)
+    })
+}
+
+fn planned_tail_read_request_from_args(
+    skill: &str,
+    args: &serde_json::Value,
+) -> Option<PlannedTailReadRequest> {
+    if !planned_args_are_read_range(skill, args) {
+        return None;
+    }
+    if args.get("mode").and_then(|value| value.as_str()) != Some("tail") {
+        return None;
+    }
+    let requested_n = tail_read_requested_n(args)?;
+    if requested_n == 0 || requested_n > 100 {
+        return None;
+    }
+    let path = args
+        .get("path")
+        .or_else(|| args.get("resolved_path"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    Some(PlannedTailReadRequest {
+        path: path.to_string(),
+        requested_n: requested_n as usize,
+    })
+}
+
+fn planned_args_are_read_range(skill: &str, args: &serde_json::Value) -> bool {
+    let skill = skill.trim().to_ascii_lowercase();
+    let action = args
+        .get("action")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase());
+    matches!(action.as_deref(), Some("read_range" | "read_text_range"))
+        || matches!(
+            skill.as_str(),
+            "filesystem.read_range"
+                | "filesystem.read_text_range"
+                | "fs_basic.read_range"
+                | "fs_basic.read_text_range"
+                | "system_basic.read_range"
+                | "system_basic.read_text_range"
+        )
+        || (matches!(skill.as_str(), "fs_basic" | "system_basic")
+            && args.get("path").is_some()
+            && args.get("mode").is_some()
+            && tail_read_requested_n(args).is_some())
+}
+
+fn loop_has_directory_read_error(loop_state: &LoopState) -> bool {
+    loop_state.executed_step_results.iter().any(|step| {
+        matches!(step.skill.as_str(), "fs_basic" | "system_basic")
+            && !step.is_ok()
+            && step_error_kind(step).as_deref() == Some("is_directory")
+    })
+}
+
+fn step_error_kind(step: &crate::executor::StepExecutionResult) -> Option<String> {
+    let raw = step.error.as_deref()?.trim();
+    let payload = raw.strip_prefix("__RC_SKILL_ERROR__:").unwrap_or(raw);
+    serde_json::from_str::<serde_json::Value>(payload)
+        .ok()?
+        .get("error_kind")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+}
+
+fn latest_inventory_dir_value_for_path(
+    loop_state: &LoopState,
+    request_path: &str,
+) -> Option<serde_json::Value> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && matches!(step.skill.as_str(), "fs_basic" | "system_basic"))
+        .find_map(|step| {
+            let output = step.output.as_deref()?.trim();
+            let body =
+                crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
+                    output,
+                );
+            let value = serde_json::from_str::<serde_json::Value>(body.trim()).ok()?;
+            let value = inventory_dir_payload(value);
+            (inventory_dir_path_matches(&value, request_path)).then_some(value)
+        })
+}
+
+fn inventory_dir_payload(value: serde_json::Value) -> serde_json::Value {
+    value
+        .get("extra")
+        .filter(|extra| {
+            extra
+                .get("action")
+                .and_then(|value| value.as_str())
+                .is_some()
+        })
+        .cloned()
+        .unwrap_or(value)
+}
+
+fn inventory_dir_path_matches(value: &serde_json::Value, request_path: &str) -> bool {
+    if value.get("action").and_then(|value| value.as_str()) != Some("inventory_dir") {
+        return false;
+    }
+    let request_path = normalize_inventory_path_token(request_path);
+    if request_path.is_empty() {
+        return false;
+    }
+    ["resolved_path", "path"].into_iter().any(|key| {
+        value
+            .get(key)
+            .and_then(|value| value.as_str())
+            .map(normalize_inventory_path_token)
+            .is_some_and(|path| path == request_path)
+    })
+}
+
+fn normalize_inventory_path_token(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed == "/" {
+        return trimmed.to_string();
+    }
+    trimmed.trim_end_matches('/').to_string()
+}
+
+fn inventory_dir_ordered_entry_names(value: &serde_json::Value) -> Option<Vec<String>> {
+    if let Some(names) = string_array_field(value, "names").filter(|names| !names.is_empty()) {
+        return Some(names);
+    }
+    if let Some(entries) = value.get("entries").and_then(|value| value.as_array()) {
+        let names = entries
+            .iter()
+            .filter_map(|entry| entry.get("name").and_then(|value| value.as_str()))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        if !names.is_empty() {
+            return Some(names);
+        }
+    }
+    let mut names = ["dirs", "files", "other"]
+        .into_iter()
+        .flat_map(|kind| {
+            value
+                .get("names_by_kind")
+                .and_then(|names_by_kind| names_by_kind.get(kind))
+                .and_then(|items| items.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(ToString::to_string)
+        })
+        .collect::<Vec<_>>();
+    if names.is_empty() {
+        return None;
+    }
+    names.sort();
+    names.dedup();
+    Some(names)
+}
+
+fn string_array_field(value: &serde_json::Value, key: &str) -> Option<Vec<String>> {
+    value
+        .get(key)
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+}
+
+fn tail_entries(names: &[String], requested_n: usize) -> Vec<String> {
+    if requested_n == 0 {
+        return Vec::new();
+    }
+    let start = names.len().saturating_sub(requested_n);
+    names[start..].to_vec()
+}
+
 pub(super) fn latest_tail_read_range_answer_from_loop(
     loop_state: &LoopState,
     prefer_english: bool,
@@ -624,6 +915,26 @@ pub(super) fn replace_delivery_with_latest_tail_read_range_answer(
     agent_run_context: Option<&AgentRunContext>,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
+    if let Some((answer, summary)) =
+        latest_tail_read_directory_inventory_answer(loop_state, agent_run_context)
+    {
+        loop_state.delivery_messages.clear();
+        append_delivery_message(
+            &task.task_id,
+            &mut loop_state.delivery_messages,
+            answer.clone(),
+        );
+        loop_state.last_user_visible_respond = Some(answer);
+        *finalizer_summary = Some(summary);
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "replace_with_tail_read_directory_inventory",
+            "replaced",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return true;
+    }
     let Some((answer, summary)) = latest_tail_read_range_observed_answer(
         state,
         task,

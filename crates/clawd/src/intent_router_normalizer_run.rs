@@ -1236,12 +1236,33 @@ fn boundary_envelope_has_local_locator(model_boundary_envelope: Option<&Value>) 
 fn boundary_locator_value_is_local_path(value: &Value) -> bool {
     match value {
         Value::String(text) => boundary_locator_text_is_local_path(text),
-        Value::Object(object) => ["path", "value", "hint"]
-            .into_iter()
-            .filter_map(|key| object.get(key).and_then(Value::as_str))
-            .any(boundary_locator_text_is_local_path),
+        Value::Object(object) => {
+            boundary_locator_object_has_current_workspace_scope(object)
+                || ["path", "value", "hint"]
+                    .into_iter()
+                    .filter_map(|key| object.get(key).and_then(Value::as_str))
+                    .any(boundary_locator_text_is_local_path)
+        }
         _ => false,
     }
+}
+
+fn boundary_locator_object_has_current_workspace_scope(
+    object: &serde_json::Map<String, Value>,
+) -> bool {
+    let has_workspace_scope = ["kind", "scope", "locator_kind", "target_scope"]
+        .into_iter()
+        .filter_map(|key| object.get(key).and_then(Value::as_str))
+        .map(normalize_schema_token)
+        .any(|token| matches!(token.as_str(), "current_workspace" | "workspace"));
+    if !has_workspace_scope {
+        return false;
+    }
+    ["path", "value", "hint", "display"]
+        .into_iter()
+        .filter_map(|key| object.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .any(|value| !value.is_empty() && value != "." && value != "none")
 }
 
 fn boundary_locator_text_is_local_path(text: &str) -> bool {
@@ -1334,6 +1355,29 @@ mod tests {
             false,
             ScheduleKind::None,
             Some(crate::execution_recipe::ExecutionRecipeSpec::default()),
+        );
+
+        assert_eq!(repair, Some("boundary_locator_content_evidence_contract"));
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    }
+
+    #[test]
+    fn boundary_locator_fallback_accepts_current_workspace_object_locator() {
+        let mut contract = IntentOutputContract::default();
+        let boundary = json!({
+            "explicit_locators": [
+                {"kind": "current_workspace", "path": "logs", "display": "logs directory"}
+            ]
+        });
+
+        let repair = apply_boundary_locator_content_evidence_contract(
+            &mut contract,
+            Some(&boundary),
+            false,
+            false,
+            ScheduleKind::None,
+            None,
         );
 
         assert_eq!(repair, Some("boundary_locator_content_evidence_contract"));
