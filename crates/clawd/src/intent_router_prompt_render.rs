@@ -3,9 +3,9 @@ use tracing::{info, warn};
 use crate::llm_gateway;
 
 use super::{
-    normalize_intent_normalizer_raw_for_schema_with_report, AppState, ClaimedTask,
-    ContractRepairReport, IntentExecutionRecipeOut, IntentNormalizerOut,
-    ROUTING_POLICY_PERSONA_PROMPT,
+    normalize_intent_normalizer_raw_for_schema_with_report, parse_output_contract, AppState,
+    ClaimedTask, ContractRepairReport, IntentExecutionRecipeOut, IntentNormalizerOut,
+    IntentOutputContractOut, OutputLocatorKind, SelfExtensionMode, ROUTING_POLICY_PERSONA_PROMPT,
 };
 
 pub(super) fn render_intent_normalizer_prompt_for_route(
@@ -396,6 +396,11 @@ pub(super) async fn retry_intent_normalizer_json_parse(
                 base_llm_out_for_parse,
                 &mut report,
             );
+            preserve_base_output_contract_for_retry(
+                &mut value,
+                base_llm_out_for_parse,
+                &mut report,
+            );
             Some((value, report))
         }
         Err(err) => {
@@ -430,6 +435,61 @@ pub(super) fn preserve_base_execution_recipe_for_retry(
     }
     retry_out.execution_recipe = Some(base_recipe);
     report.add("llm_retry", "preserved_base_execution_recipe");
+}
+
+pub(super) fn preserve_base_output_contract_for_retry(
+    retry_out: &mut IntentNormalizerOut,
+    base_llm_out_for_parse: &str,
+    report: &mut ContractRepairReport,
+) {
+    if output_contract_declares_retry_boundary_signal(retry_out.output_contract.as_ref()) {
+        return;
+    }
+    let Some(base_contract) = serde_json::from_str::<serde_json::Value>(base_llm_out_for_parse)
+        .ok()
+        .and_then(|value| value.get("output_contract").cloned())
+        .and_then(|value| serde_json::from_value::<IntentOutputContractOut>(value).ok())
+    else {
+        return;
+    };
+    if !output_contract_declares_retry_boundary_signal(Some(&base_contract)) {
+        return;
+    }
+    retry_out.output_contract = Some(base_contract);
+    report.add("llm_retry", "preserved_base_output_contract");
+}
+
+fn output_contract_declares_retry_boundary_signal(
+    contract: Option<&IntentOutputContractOut>,
+) -> bool {
+    let Some(contract) = contract else {
+        return false;
+    };
+    let parsed = parse_output_contract(Some(contract.clone()), false);
+    let has_locator_boundary = match parsed.locator_kind {
+        OutputLocatorKind::None => !parsed.locator_hint.trim().is_empty(),
+        OutputLocatorKind::CurrentWorkspace => true,
+        _ => !parsed.locator_hint.trim().is_empty(),
+    };
+    parsed.requires_content_evidence
+        || has_locator_boundary
+        || parsed.self_extension.scalar_count_filter.has_constraints()
+        || parsed.self_extension.list_selector.target_kind_specified
+        || parsed.self_extension.list_selector.limit.is_some()
+        || parsed.self_extension.list_selector.sort_by.is_some()
+        || parsed
+            .self_extension
+            .list_selector
+            .include_metadata
+            .is_some()
+        || parsed.self_extension.list_selector.include_hidden.is_some()
+        || !matches!(parsed.self_extension.mode, SelfExtensionMode::None)
+        || parsed.self_extension.execute_now
+        || parsed
+            .self_extension
+            .structured_field_selector
+            .as_deref()
+            .is_some_and(|selector| !selector.trim().is_empty())
 }
 
 fn execution_recipe_declares_agent_loop_execution(
