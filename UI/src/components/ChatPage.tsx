@@ -7,16 +7,24 @@ import {
   attachmentIsImage,
   formatAttachmentSize,
 } from "../lib/chat-attachments";
-import type { ChatAttachment, ChatMessage } from "../types/api";
+import type { ChatAttachment, ChatMessage, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
+import { TaskLlmTracePanel } from "./TaskLlmTracePanel";
 
 type Translate = (zh: string, en: string) => string;
+type TranslateSlash = (text: string) => string;
 
 export interface ChatPageProps {
   t: Translate;
+  tSlash: TranslateSlash;
   chatMessages: ChatMessage[];
   chatInput: string;
   chatAttachments: ChatAttachment[];
   chatAgentMode: boolean;
+  chatTeachingMode: boolean;
+  chatTeachingTaskResult: TaskQueryResponse | null;
+  chatTeachingLlmDebug: TaskLlmDebugResponse | null;
+  chatTeachingLlmDebugLoading: boolean;
+  chatTeachingLlmDebugError: string | null;
   chatSending: boolean;
   chatRecording: boolean;
   chatVoiceRecordingSupported: boolean;
@@ -24,6 +32,7 @@ export interface ChatPageProps {
   chatAttachmentInputRef: RefObject<HTMLInputElement | null>;
   toLocalTime: (value: number | null | undefined) => string;
   onChatAgentModeChange: (value: boolean) => void;
+  onChatTeachingModeChange: (value: boolean) => void;
   onClearMessages: () => void;
   onChatInputChange: (value: string) => void;
   onChatInputKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -32,14 +41,21 @@ export interface ChatPageProps {
   onStartVoiceRecording: () => unknown | Promise<unknown>;
   onStopVoiceRecording: () => unknown | Promise<unknown>;
   onSendMessage: () => unknown | Promise<unknown>;
+  onQueryChatTeachingLlmDebug: (taskId?: string) => unknown | Promise<unknown>;
 }
 
 export function ChatPage({
   t,
+  tSlash,
   chatMessages,
   chatInput,
   chatAttachments,
   chatAgentMode,
+  chatTeachingMode,
+  chatTeachingTaskResult,
+  chatTeachingLlmDebug,
+  chatTeachingLlmDebugLoading,
+  chatTeachingLlmDebugError,
   chatSending,
   chatRecording,
   chatVoiceRecordingSupported,
@@ -47,6 +63,7 @@ export function ChatPage({
   chatAttachmentInputRef,
   toLocalTime,
   onChatAgentModeChange,
+  onChatTeachingModeChange,
   onClearMessages,
   onChatInputChange,
   onChatInputKeyDown,
@@ -55,6 +72,7 @@ export function ChatPage({
   onStartVoiceRecording,
   onStopVoiceRecording,
   onSendMessage,
+  onQueryChatTeachingLlmDebug,
 }: ChatPageProps) {
   return (
     <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
@@ -64,6 +82,14 @@ export function ChatPage({
           <label className="inline-flex items-center gap-2 text-white/80">
             <input type="checkbox" checked={chatAgentMode} onChange={(event) => onChatAgentModeChange(event.target.checked)} />
             agent_mode
+          </label>
+          <label className="inline-flex items-center gap-2 text-white/80">
+            <input
+              type="checkbox"
+              checked={chatTeachingMode}
+              onChange={(event) => onChatTeachingModeChange(event.target.checked)}
+            />
+            {t("教学模式", "Teaching mode")}
           </label>
           <button
             type="button"
@@ -113,6 +139,27 @@ export function ChatPage({
           </div>
         ))}
       </div>
+
+      {chatTeachingMode ? (
+        chatTeachingTaskResult ? (
+          <TaskLlmTracePanel
+            t={t}
+            tSlash={tSlash}
+            taskResult={chatTeachingTaskResult}
+            taskLlmDebug={chatTeachingLlmDebug}
+            taskLlmDebugLoading={chatTeachingLlmDebugLoading}
+            taskLlmDebugError={chatTeachingLlmDebugError}
+            onQueryTaskLlmDebug={onQueryChatTeachingLlmDebug}
+          />
+        ) : (
+          <div className="mt-4 rounded-xl border border-white/10 bg-[#12151f] p-3 text-xs text-white/55">
+            {t(
+              "教学模式已开启。发送一条消息后，这里会按 LLM #1、LLM #2 展示请求数据和返回数据。",
+              "Teaching mode is on. After you send a message, this area will show request and response data as LLM #1, LLM #2, and so on.",
+            )}
+          </div>
+        )
+      ) : null}
 
       <div className="mt-4 grid shrink-0 gap-3 md:grid-cols-[1fr_auto]">
         <div className="min-w-0">
