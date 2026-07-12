@@ -727,10 +727,7 @@ pub(crate) fn step_reads_text_content(step: &TaskJournalStepTrace) -> bool {
     let Ok(value) = serde_json::from_str::<Value>(output) else {
         return false;
     };
-    let action = value
-        .get("action")
-        .and_then(Value::as_str)
-        .map(normalize_evidence_field);
+    let action = step_output_action_value(&value).map(normalize_evidence_field);
     match step.skill.as_str() {
         "fs_basic" | "system_basic" => matches!(
             action.as_deref(),
@@ -739,6 +736,13 @@ pub(crate) fn step_reads_text_content(step: &TaskJournalStepTrace) -> bool {
         "archive_basic" => matches!(action.as_deref(), Some("read")),
         _ => false,
     }
+}
+
+fn step_output_action_value(value: &Value) -> Option<&str> {
+    value
+        .get("action")
+        .and_then(Value::as_str)
+        .or_else(|| value.pointer("/extra/action").and_then(Value::as_str))
 }
 
 pub(super) fn observed_field_present(observed_fields: &BTreeSet<String>, field: &str) -> bool {

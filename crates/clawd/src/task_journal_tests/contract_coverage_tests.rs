@@ -822,6 +822,38 @@ fn evidence_coverage_ignores_failed_and_synthesis_outputs() {
 }
 
 #[test]
+fn wrapped_fs_read_range_step_counts_as_text_content_read() {
+    let mut journal = TaskJournal::for_task(
+        "task-wrapped-read-range-content",
+        "ask",
+        "inspect bounded file content",
+    );
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_read".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "path": "logs/model_io.log",
+                    "excerpt": "1|{\"call_id\":\"abc\"}"
+                },
+                "text": "{}"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    assert!(crate::task_journal::step_reads_text_content(
+        &journal.step_results[0]
+    ));
+}
+
+#[test]
 fn raw_command_output_error_step_supplies_command_output_evidence() {
     let mut journal = TaskJournal::for_task(
         "task-run-cmd-failure-evidence",

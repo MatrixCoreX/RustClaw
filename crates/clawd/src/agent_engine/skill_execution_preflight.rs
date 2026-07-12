@@ -337,7 +337,7 @@ fn executionless_boundary_tool_policy_error(
     loop_state: &LoopState,
     normalized_skill: &str,
     classification_args: &Value,
-    action_trace_kind: &str,
+    _action_trace_kind: &str,
 ) -> Option<String> {
     let route = loop_state.route_policy_context.as_ref()?;
     if !route_is_executionless_terminal_boundary(route) {
@@ -346,12 +346,11 @@ fn executionless_boundary_tool_policy_error(
     if executionless_boundary_allows_literal_run_cmd(normalized_skill, classification_args) {
         return None;
     }
-    if executionless_boundary_allows_verified_observe_capability(
+    if executionless_boundary_allows_verified_observe_action(
         state,
         loop_state,
         normalized_skill,
         classification_args,
-        action_trace_kind,
     ) {
         return None;
     }
@@ -388,14 +387,13 @@ fn executionless_boundary_tool_policy_error(
     ))
 }
 
-fn executionless_boundary_allows_verified_observe_capability(
+fn executionless_boundary_allows_verified_observe_action(
     state: &AppState,
     loop_state: &LoopState,
     normalized_skill: &str,
     args: &Value,
-    action_trace_kind: &str,
 ) -> bool {
-    if action_trace_kind != "call_capability" || !loop_state.verified_action_window_active {
+    if !loop_state.verified_action_window_active {
         return false;
     }
     let effect =
