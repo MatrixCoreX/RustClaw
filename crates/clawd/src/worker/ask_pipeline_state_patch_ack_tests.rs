@@ -234,6 +234,38 @@ fn alias_only_state_patch_ack_route_does_not_mask_executable_agent_loop_marker()
 }
 
 #[test]
+fn alias_only_state_patch_ack_marker_overrides_compat_executable_marker() {
+    let state = repo_i18n_state();
+    let task = ask_task_with_payload_text(
+        "task-alias-ack-with-compat-exec-marker",
+        "先记一下，甲文件是 scripts/nl_tests/fixtures/device_local/docs/service_notes.md。只回复已记住。",
+    );
+    let turn_analysis = turn_analysis_with_alias(
+        "甲文件",
+        "scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+    );
+    let mut route = ack_route_for_test();
+    route.route_reason =
+        "boundary_locator_content_evidence_contract; executable_contract_preserved_for_agent_loop; alias_state_patch_ack"
+            .to_string();
+
+    super::apply_alias_state_patch_ack_route(&mut route, Some(&turn_analysis), None);
+
+    assert_eq!(route.ask_mode, crate::AskMode::state_patch_ack());
+    let reply = super::alias_state_patch_ack_reply(
+        &state,
+        &task,
+        "先记一下，甲文件是 scripts/nl_tests/fixtures/device_local/docs/service_notes.md。只回复已记住。",
+        &route,
+        Some(&turn_analysis),
+        None,
+    )
+    .expect("ack reply");
+    assert!(!reply.is_llm_reply);
+    assert_eq!(reply.text, "已记住这个临时指代。");
+}
+
+#[test]
 fn alias_state_patch_ack_reply_uses_current_request_locale_for_korean_remember() {
     let state = repo_i18n_state();
     let task = ask_task_with_payload_text(

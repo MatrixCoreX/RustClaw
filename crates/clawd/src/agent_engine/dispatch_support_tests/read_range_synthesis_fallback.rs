@@ -165,3 +165,92 @@ fn synthesize_direct_fallback_blocks_nested_extra_multiline_read_range() {
         synthesize_direct_fallback_would_passthrough_multiline_read_range(&loop_state, Some(&ctx))
     );
 }
+
+#[test]
+fn deterministic_scalar_markdown_heading_uses_title_field_selector_for_free_route() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r##"{"extra":{"action":"read_range","field_selector":"title","field_value":"Service Notes","value_text":"Service Notes","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"/tmp/service_notes.md"}}"##,
+    ));
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "agent_loop_execution".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::None,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let ctx = AgentRunContext {
+        route_result: Some(route),
+        ..AgentRunContext::default()
+    };
+
+    assert_eq!(
+        deterministic_scalar_markdown_heading_answer(&loop_state, Some(&ctx)).as_deref(),
+        Some("Service Notes")
+    );
+}
+
+#[test]
+fn deterministic_scalar_markdown_heading_keeps_free_route_without_title_selector() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r##"{"extra":{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"/tmp/service_notes.md"}}"##,
+    ));
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "agent_loop_execution".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::None,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let ctx = AgentRunContext {
+        route_result: Some(route),
+        ..AgentRunContext::default()
+    };
+
+    assert!(deterministic_scalar_markdown_heading_answer(&loop_state, Some(&ctx)).is_none());
+}

@@ -261,7 +261,7 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
     step_json_extractor(
         "fs_basic.read_text_range",
         "fs_basic.read_text_range.structured_json_v1",
-        &["content_excerpt", "path"],
+        &["content_excerpt", "field_value", "path"],
     ),
     step_json_extractor(
         "fs_basic.write_text",

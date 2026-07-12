@@ -84,6 +84,7 @@ Bounded execution preferences:
 - For local process inventory, running-process checks, top-process checks, or listening-port observation, prefer `process_basic` actions such as `ps` and `port_list` over ad hoc shell commands unless the user supplied an exact command.
 - For current runtime identity, host, cwd, username, service status, or lightweight system fields, collect one bounded runtime/system/process observation before answering; do not answer from memory alone.
 - For local file metadata, existence, counts, listing, or bounded text evidence, prefer the structured `fs_basic` / `config_basic` / `git_basic` capability that matches the contract.
+- When the remaining scalar is a known text/markdown file's document title or heading, call `fs_basic.read_text_range` with `field_selector="title"`, `mode="head"`, and a bounded `n`; finish from observed `field_value` / `value_text` when present.
 - For command-output summary contracts that combine an already observed command result with a remaining status/process/port/local observation, keep the command result as evidence and collect only the missing observation. The final answer must include both sides.
 - For content-excerpt contracts, use a content-producing action. Candidate discovery, listing, metadata, and path-only observations are not enough unless the output contract only asks for those fields.
 - For generated file/media delivery, do not overwrite binary media with text. Verify or deliver the generated path/token using metadata or the producing skill output.

@@ -17,10 +17,11 @@ pub(super) fn apply_alias_state_patch_ack_route(
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     boundary_envelope: Option<&crate::intent_router::BoundaryEnvelope>,
 ) {
-    if !route_allows_alias_state_patch_ack(route_result, boundary_envelope) {
+    let bindings = alias_only_state_patch_bindings(turn_analysis);
+    if bindings.is_empty() {
         return;
     }
-    if alias_only_state_patch_bindings(turn_analysis).is_empty() {
+    if !route_allows_alias_state_patch_ack(route_result, boundary_envelope, true) {
         return;
     }
     route_result.needs_clarify = false;
@@ -44,11 +45,11 @@ pub(super) fn alias_state_patch_ack_reply(
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     boundary_envelope: Option<&crate::intent_router::BoundaryEnvelope>,
 ) -> Option<crate::AskReply> {
-    if !route_allows_alias_state_patch_ack(route_result, boundary_envelope) {
-        return None;
-    }
     let bindings = alias_only_state_patch_bindings(turn_analysis);
     if bindings.is_empty() {
+        return None;
+    }
+    if !route_allows_alias_state_patch_ack(route_result, boundary_envelope, true) {
         return None;
     }
     let prior_aliases = crate::conversation_state::load_active_session_snapshot(state, task)
@@ -85,7 +86,7 @@ pub(super) fn session_binding_value_reply(
     route_result: &crate::RouteResult,
     boundary_envelope: Option<&crate::intent_router::BoundaryEnvelope>,
 ) -> Option<crate::AskReply> {
-    if !route_allows_alias_state_patch_ack(route_result, boundary_envelope) {
+    if !route_allows_alias_state_patch_ack(route_result, boundary_envelope, false) {
         return None;
     }
     let value = boundary_envelope
@@ -135,12 +136,16 @@ fn alias_state_patch_ack_payload(
 fn route_allows_alias_state_patch_ack(
     route_result: &crate::RouteResult,
     _boundary_envelope: Option<&crate::intent_router::BoundaryEnvelope>,
+    has_alias_only_state_patch: bool,
 ) -> bool {
+    let explicit_alias_ack_marker = has_alias_only_state_patch
+        && route_result.has_route_reason_machine_marker("alias_state_patch_ack");
     route_result.schedule_kind == crate::ScheduleKind::None
         && !route_result.needs_clarify
         && !route_result.wants_file_delivery
-        && !route_result
-            .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+        && (explicit_alias_ack_marker
+            || !route_result
+                .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop"))
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && route_result.output_contract.delivery_intent == crate::OutputDeliveryIntent::None

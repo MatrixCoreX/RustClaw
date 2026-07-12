@@ -901,6 +901,62 @@ fn read_range_uses_range_mode_when_line_bounds_are_present() {
 }
 
 #[test]
+fn read_range_title_field_selector_projects_markdown_heading() {
+    let root = temp_root("read_range_title_selector");
+    let target = root.join("service_notes.md");
+    std::fs::write(
+        &target,
+        "# Service Notes\n\nRustClaw test fixture service notes.\n",
+    )
+    .expect("write markdown");
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!(target.display().to_string()));
+    obj.insert("field_selector".to_string(), json!("title"));
+    obj.insert("mode".to_string(), json!("head"));
+    obj.insert("n".to_string(), json!(10));
+
+    let out = read_range(&root, &obj, true).expect("read range");
+    let value: Value = serde_json::from_str(&out).expect("json");
+
+    assert_eq!(
+        value.get("field_selector").and_then(Value::as_str),
+        Some("title")
+    );
+    assert_eq!(value.get("exists").and_then(Value::as_bool), Some(true));
+    assert_eq!(
+        value.get("field_value").and_then(Value::as_str),
+        Some("Service Notes")
+    );
+    assert_eq!(
+        value.get("value_text").and_then(Value::as_str),
+        Some("Service Notes")
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn read_range_title_field_selector_reports_missing_without_heading() {
+    let root = temp_root("read_range_title_selector_missing");
+    let target = root.join("note.txt");
+    std::fs::write(&target, "plain note\nwithout markdown heading\n").expect("write note");
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!(target.display().to_string()));
+    obj.insert("field_selector".to_string(), json!("title"));
+
+    let out = read_range(&root, &obj, true).expect("read range");
+    let value: Value = serde_json::from_str(&out).expect("json");
+
+    assert_eq!(
+        value.get("field_selector").and_then(Value::as_str),
+        Some("title")
+    );
+    assert_eq!(value.get("exists").and_then(Value::as_bool), Some(false));
+    assert!(value.get("field_value").is_some_and(Value::is_null));
+    assert_eq!(value.get("value_text").and_then(Value::as_str), Some(""));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn read_range_compacts_internal_model_io_json_lines_by_default() {
     let root = temp_root("read_range_model_io_compact");
     let target = root.join("model_io.log");

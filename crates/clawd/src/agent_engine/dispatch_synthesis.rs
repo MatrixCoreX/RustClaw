@@ -11,6 +11,8 @@ mod dispatch_synthesis_local_code_fields;
 mod dispatch_synthesis_local_code_readbacks;
 #[path = "dispatch_synthesis_local_code_writes.rs"]
 mod dispatch_synthesis_local_code_writes;
+#[path = "dispatch_synthesis_markdown.rs"]
+mod dispatch_synthesis_markdown;
 use dispatch_synthesis_local_code_fields::{
     local_code_json_projection_field_value_supported, machine_error_code_token,
 };
@@ -18,6 +20,10 @@ use dispatch_synthesis_local_code_readbacks::readbacks_for_local_code_projection
 use dispatch_synthesis_local_code_writes::{
     successful_fs_changed_write_paths, successful_fs_write_paths,
     successful_fs_write_readbacks_from_plan_trace,
+};
+use dispatch_synthesis_markdown::{
+    markdown_heading_from_read_output, selected_markdown_title_from_read_output,
+    strip_markdown_read_line_prefix,
 };
 
 pub(super) fn synthesize_answer_allows_direct_fallback(evidence_refs: &[String]) -> bool {
@@ -1773,8 +1779,7 @@ pub(super) fn deterministic_scalar_markdown_heading_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     let route = agent_run_context?.route_result.as_ref()?;
-    if route.output_contract.response_shape != OutputResponseShape::Scalar
-        || route.output_contract.delivery_required
+    if route.output_contract.delivery_required
         || route.output_contract_marker_is_any(&[
             crate::OutputSemanticKind::FileNames,
             crate::OutputSemanticKind::DirectoryNames,
@@ -1795,72 +1800,13 @@ pub(super) fn deterministic_scalar_markdown_heading_answer(
         .find(|output| {
             output.contains("\"read_range\"") || output.contains("\"read_text_range\"")
         })?;
+    if let Some(answer) = selected_markdown_title_from_read_output(output) {
+        return Some(answer);
+    }
+    if route.output_contract.response_shape != OutputResponseShape::Scalar {
+        return None;
+    }
     markdown_heading_from_read_output(output)
-}
-
-fn markdown_heading_from_read_output(output: &str) -> Option<String> {
-    let value = serde_json::from_str::<Value>(output.trim()).ok()?;
-    let text = value
-        .get("content")
-        .or_else(|| value.get("excerpt"))
-        .and_then(Value::as_str)?;
-    standalone_markdown_heading_from_text(text)
-}
-
-fn standalone_markdown_heading_from_text(text: &str) -> Option<String> {
-    let mut heading: Option<String> = None;
-    for line in text.lines() {
-        let stripped = strip_markdown_read_line_prefix(line).trim();
-        if stripped.is_empty() {
-            continue;
-        }
-        if let Some(candidate) = markdown_heading_from_line(stripped) {
-            if heading.is_some() {
-                return None;
-            }
-            heading = Some(candidate);
-            continue;
-        }
-        if markdown_line_is_non_answer_separator_heading(stripped) {
-            continue;
-        }
-        return None;
-    }
-    heading
-}
-
-fn strip_markdown_read_line_prefix(line: &str) -> &str {
-    let trimmed = line.trim();
-    if let Some((prefix, rest)) = trimmed.split_once('|') {
-        if !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit()) {
-            return rest.trim();
-        }
-    }
-    line
-}
-
-fn markdown_heading_from_line(line: &str) -> Option<String> {
-    let trimmed = strip_markdown_read_line_prefix(line).trim();
-    let hashes = trimmed.chars().take_while(|ch| *ch == '#').count();
-    if !(1..=6).contains(&hashes) {
-        return None;
-    }
-    let rest = trimmed.get(hashes..)?.trim();
-    (!rest.is_empty()).then(|| rest.to_string())
-}
-
-fn markdown_line_is_non_answer_separator_heading(line: &str) -> bool {
-    let trimmed = strip_markdown_read_line_prefix(line).trim();
-    let hashes = trimmed.chars().take_while(|ch| *ch == '#').count();
-    if !(1..=6).contains(&hashes) {
-        return false;
-    }
-    trimmed.get(hashes..).map(str::trim).is_some_and(|rest| {
-        !rest.is_empty()
-            && rest
-                .chars()
-                .all(|ch| matches!(ch, '=' | '-' | '_' | '*' | '#'))
-    })
 }
 
 pub(super) fn synthesize_user_language_source<'a>(

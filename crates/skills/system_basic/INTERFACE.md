@@ -91,6 +91,7 @@
 | `read_range` | `n` | no | integer | `20` | Number of lines for `head`/`tail`, or fallback window for `range`. |
 | `read_range` | `start_line` | no | integer | `1` | Range start for `mode=range`. |
 | `read_range` | `end_line` | no | integer | auto | Range end for `mode=range`; derived from `n` when omitted. |
+| `read_range` | `field_selector` | no | string | - | Use machine token `title` to project the first markdown/document heading into `field_value`. Prefer the virtual `fs_basic.read_text_range` contract for new plans. |
 | `compare_paths` | `left_path` | yes | string(path) | - | First path to compare. |
 | `compare_paths` | `right_path` | yes | string(path) | - | Second path to compare. |
 | `path_batch_facts` | `paths` | yes | string[]/string | - | Explicit paths to inspect in batch. |
@@ -138,7 +139,7 @@
 - `find_path` success `extra` fields:
   - `action`, `root`, `count`, and `results`; evidence roles `path`, `results`, and `count`.
 - `read_range` success `extra` fields:
-  - `action`, `path`, `start_line`, `end_line`, `line_count`, and `excerpt`; evidence roles `path`, `field_value`, and `count`.
+  - `action`, `path`, `start_line`, `end_line`, `line_count`, `excerpt`, optional `field_selector`, optional `field_value` / `value_text` for selector projections; evidence roles `path`, `field_value`, and `count`.
 - `compare_paths` success `extra` fields:
   - `left` and `right` structured path fact objects with `exists`, `kind`, `size`, and modified time fields.
   - `comparison` structured comparison fields such as `same_path`, `same_kind`, `same_name`, `same_size`, `size_delta_bytes`, `left_newer`, and `same_content`.

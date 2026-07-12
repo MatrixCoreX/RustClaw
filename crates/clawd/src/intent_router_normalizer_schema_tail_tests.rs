@@ -508,7 +508,7 @@ fn normalizer_schema_promotes_legacy_top_level_language_hint_into_boundary_envel
 }
 
 #[test]
-fn normalizer_schema_promotes_session_binding_alias_pair_into_state_patch() {
+fn normalizer_schema_keeps_session_binding_alias_pair_out_of_state_patch() {
     let raw = r#"{
           "schema_version":1,
           "raw_chars":101,
@@ -539,18 +539,7 @@ fn normalizer_schema_promotes_session_binding_alias_pair_into_state_patch() {
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value
-            .pointer("/state_patch/alias_bindings/0/alias")
-            .and_then(|value| value.as_str()),
-        Some("자료A")
-    );
-    assert_eq!(
-        value
-            .pointer("/state_patch/alias_bindings/0/target")
-            .and_then(|value| value.as_str()),
-        Some("scripts/nl_tests/fixtures/device_local/docs/service_notes.md")
-    );
+    assert!(value.pointer("/state_patch/alias_bindings").is_none());
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
         crate::prompt_utils::PromptSchemaId::IntentNormalizer,
@@ -559,7 +548,7 @@ fn normalizer_schema_promotes_session_binding_alias_pair_into_state_patch() {
 }
 
 #[test]
-fn normalizer_schema_promotes_session_binding_locator_hint_into_state_patch() {
+fn normalizer_schema_keeps_session_binding_locator_hint_out_of_state_patch() {
     let raw = r#"{
           "schema_version":1,
           "raw_chars":101,
@@ -589,18 +578,7 @@ fn normalizer_schema_promotes_session_binding_locator_hint_into_state_patch() {
     );
     let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-    assert_eq!(
-        value
-            .pointer("/state_patch/alias_bindings/0/alias")
-            .and_then(|value| value.as_str()),
-        Some("자료A")
-    );
-    assert_eq!(
-        value
-            .pointer("/state_patch/alias_bindings/0/target")
-            .and_then(|value| value.as_str()),
-        Some("scripts/nl_tests/fixtures/device_local/docs/service_notes.md")
-    );
+    assert!(value.pointer("/state_patch/alias_bindings").is_none());
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
         crate::prompt_utils::PromptSchemaId::IntentNormalizer,
@@ -713,6 +691,38 @@ fn normalizer_schema_keeps_single_alias_map_session_binding_out_of_state_patch()
             .and_then(|value| value.as_str()),
         Some("RC-CONT-CN-0428-A")
     );
+    assert!(value.pointer("/state_patch/alias_bindings").is_none());
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
+}
+
+#[test]
+fn normalizer_schema_keeps_boundary_alias_bindings_out_of_state_patch() {
+    let raw = r#"{
+          "boundary_envelope":{
+            "schema_version":1,
+            "raw_chars":15,
+            "language_hint":"zh-CN",
+            "schedule_intent":{"kind":"none"},
+            "attachment_refs":[],
+            "explicit_locators":[{"kind":"path","value":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md"}],
+            "active_task_reference":null,
+            "session_binding":{
+              "alias_bindings":[{"alias":"甲文件","target":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md"}]
+            },
+            "safety_budget_hint":null
+          },
+          "resolved_user_intent":"Read the title from the already-bound alias target.",
+          "execution_recipe":{"kind":"none"},
+          "needs_clarify":false
+        }"#;
+    let normalized =
+        super::normalize_intent_normalizer_raw_for_schema(raw, "读取甲文件的标题，只输出标题。");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
     assert!(value.pointer("/state_patch/alias_bindings").is_none());
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,

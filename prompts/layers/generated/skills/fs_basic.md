@@ -43,6 +43,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 | `read_text_range` | `path` | yes | string(path) | - | Text file to slice. |
 | `read_text_range` | `mode` | no | string | `head` | `head|tail|range`. |
 | `read_text_range` | `n` / `start_line` / `end_line` | no | integer | action default | Bounded line controls. |
+| `read_text_range` | `field_selector` | no | string | - | Use machine token `title` when the requested scalar is the document/markdown heading; runtime returns `field_value` when observed. |
 | `find_entries` | `root` | no | string(path) | workspace | Bounded search root. |
 | `find_entries` | `pattern` | conditional | string/string[] | - | Name/basename pattern for name search. |
 | `find_entries` | `ext` | conditional | string/string[] | - | Extension selector for extension search. |
@@ -66,6 +67,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 - Directory counts: use `count_entries`, not `run_cmd` pipelines, unless shell behavior itself is the task.
 - Content search or matching-line requests: use `grep_text`, not `read_text_range`. For a known single file, set `root` to that file and `query` to the requested content token, then answer from returned `matches` lines rather than the full file excerpt.
 - Raw file excerpts: use `read_text_range`; semantic document understanding belongs to `doc_parse`.
+- Document heading/title scalar from a known text/markdown file: use `read_text_range` with `field_selector="title"` and a bounded head read, then answer from observed `field_value` when present.
 - File appends: use `append_text`, not `read_text_range` and not `run_cmd` redirection.
 - Shell semantics, pipelines, or platform-specific commands belong to `run_cmd`.
 - Legacy `read_file`, `write_file`, `list_dir`, `make_dir`, `remove_file`, `fs_search`, and `system_basic` remain accepted for compatibility, but prefer `fs_basic` when this contract covers the task.
