@@ -662,9 +662,13 @@ async fn try_auto_sudo_retry_after_permission_denied(
         return Ok(None);
     };
     let retry_trace_kind = "auto_sudo_retry";
-    if let Some(err) =
-        evidence_policy_action_policy_error(state, loop_state, "run_cmd", &retry_args)
-    {
+    if let Some(err) = evidence_policy_action_policy_error(
+        state,
+        loop_state,
+        "run_cmd",
+        &retry_args,
+        retry_trace_kind,
+    ) {
         let outcome = handle_preflight_argument_failure(
             state,
             task,
@@ -1512,6 +1516,7 @@ pub(super) async fn execute_prepared_skill_action(
         loop_state,
         normalized_skill,
         classification_args,
+        action_trace_kind,
     ) {
         return Ok(handle_preflight_argument_failure(
             state,

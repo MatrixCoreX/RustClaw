@@ -470,6 +470,11 @@ pub(crate) struct LoopState {
     /// Route-level policy context keeps planner capability refs available to
     /// preflight paths that otherwise only see `output_contract`.
     pub(crate) route_policy_context: Option<crate::RouteResult>,
+    /// True only while executing the current round's verifier-approved actions.
+    /// Preflight uses this as a narrow bridge from legacy route guards to the
+    /// agent-loop authority model; it must be cleared immediately after action
+    /// dispatch returns.
+    pub(crate) verified_action_window_active: bool,
     /// Machine boundary fact from AGENT_LOOP_BOUNDARY_OBSERVATIONS. This lets
     /// the loop accept a terminal clarification even when legacy RouteResult
     /// fields were normalized back to an execution gate for planner entry.
