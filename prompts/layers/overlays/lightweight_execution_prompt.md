@@ -48,10 +48,11 @@ Return exactly one JSON object:
 }
 
 Allowed AgentAction forms:
-1) {"type":"call_tool","tool":"<enabled_tool_name>","args":{...}}  (preferred for capabilities marked `planner_kind=tool`)
-2) {"type":"call_skill","skill":"<enabled_skill_name>","args":{...}}  (use for `planner_kind=skill` or `planner_kind=workflow`; legacy-compatible for tools)
-3) {"type":"synthesize_answer","evidence_refs":["last_output","s1",...]}
-4) {"type":"respond","content":"<text>"}
+1) {"type":"call_capability","capability":"<planner_capability_name>","args":{...}}  (preferred when the contract exposes a matching `planner_capabilities` entry; runtime resolves it to the concrete tool/skill)
+2) {"type":"call_tool","tool":"<enabled_tool_name>","args":{...}}  (legacy-compatible direct tool call; use only when the concrete tool contract is the better or only exposed contract)
+3) {"type":"call_skill","skill":"<enabled_skill_name>","args":{...}}  (use for `planner_kind=skill` or `planner_kind=workflow`; legacy-compatible for tools)
+4) {"type":"synthesize_answer","evidence_refs":["last_output","s1",...]}
+5) {"type":"respond","content":"<text>"}
 
 Core rules:
 - Treat this as a bounded local execution request, not open planning.
@@ -66,6 +67,7 @@ Core rules:
 - When `final_answer_shape=lifecycle_result` (or compatibility `contract_marker=filesystem_mutation_result`), prefer `fs_basic` structured mutation actions such as `make_dir`, `write_text`, `append_text`, or `remove_path` with the concrete path. Finalize from the observed action result; do not route the task as an execution-failure explanation unless the user requested failure analysis.
 - When evidence-policy context, registry capability metadata, or already selected capability indicates Docker lifecycle readiness without a concrete container target, call the dedicated Docker capability or `docker_basic` with `action="version"` first. Do not use generic process listing as the only observation for Docker container-management capability.
 - For local process inventory, top CPU/process ranking, or listening-port inspection, prefer `process_basic` (`ps` / `port_list`) over ad hoc `ps`, `top`, `lsof`, `ss`, or shell pipelines unless the user supplied the exact shell command to run.
+- If evidence-policy context points to a filesystem/workspace locator but the original request semantically targets a skill-managed resource such as a namespace, collection, index, catalog, task/job set, provider/model inventory, or similar runtime-owned resource, do not treat the workspace locator as exclusive route authority. Choose the matching capability from `Lightweight skill notes` / `Allowed tools and skill contract` and pass structured args for that resource. Only use filesystem tools or CLI help when the user asks to inspect backing files, directories, or CLI surfaces themselves.
 - For RustClaw module-specific config reads, status checks, and mutations, use the actual module config entry point when it is exposed by the relevant skill playbook, registry metadata, or observed main-config migration note. An explicit `configs/config.toml` target or `[AUTO_LOCATOR]` hit is a valid starting observation, not exclusive evidence, when the requested module's active config is declared elsewhere. Do not finalize a module status answer from only all-missing fields in the main config.
 - If `required_evidence_fields` includes metadata fields such as `exists`, `kind`, `size_bytes`, `modified`, or `path`, gather those facts with bounded metadata actions such as `fs_basic.stat_paths` / `compare_paths` (or compatibility `system_basic.path_batch_facts` / `compare_paths`) instead of reading whole files.
 - If `Turn analysis` or `Goal/context` indicates an active-task append/correct/scope-update/replace for writing/planning work, this lightweight prompt is not the right abstraction unless a bounded execution step is still explicitly required. Prefer a concise terminal `respond` when the active task is pure drafting/rewriting; do not reinterpret conceptual scope/audience/format terms as filesystem targets.
@@ -80,6 +82,7 @@ Core rules:
 - Clarification is last resort. Ask only when the target still cannot be resolved after current-turn explicit input and one bounded locator resolution.
 
 Execution preferences:
+- Prefer capability-level planning: when a `planner_capabilities` entry in the contract matches the operation, emit `call_capability` with that capability name and semantic args. Let the runtime CapabilityResolver choose the concrete tool/skill. Use direct `call_tool` / `call_skill` mainly for explicit concrete commands, legacy contracts, workflows, or capabilities not yet exposed at planner level.
 - If the user explicitly supplies a concrete shell/system command and asks to run/execute it or return its command result/output, preserve that command through `run_cmd`. Do not replace the command with a higher-level semantic skill even when the observable result would be similar.
 - For code modification tasks where the user asks to update tests for a newly added or changed behavior, the validation step must actually exercise that behavior. Prefer tests or probes whose observed output, file content evidence, or structured result makes the requested behavior visible. Do not treat a generic success marker as behavior coverage when the new assertion/test content was not observed.
 - For code/source/test file creation or modification, prefer structured `fs_basic.write_text` / `fs_basic.append_text` for the write and then collect bounded post-write content evidence with `fs_basic.read_text_range` or `fs_basic.grep_text` before finalizing. Use shell redirection (`>` / `>>` / heredoc) only when the user explicitly asked for shell semantics or no structured filesystem capability can perform the write.

@@ -572,9 +572,6 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
     {
         return Some(BTreeSet::new());
     }
-    if let Some(scope) = local_workspace_execution_skill_scope(route) {
-        return Some(scope);
-    }
     if let Some(scope) = contract_scoped_planner_skill_scope(Some(route)) {
         return Some(scope);
     }
@@ -595,17 +592,6 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
     }
 }
 
-fn local_workspace_execution_skill_scope(route: &RouteResult) -> Option<BTreeSet<String>> {
-    if !crate::task_context_builder::uses_local_workspace_execution_context_budget(route) {
-        return None;
-    }
-    Some(BTreeSet::from([
-        "fs_basic".to_string(),
-        "run_cmd".to_string(),
-        "system_basic".to_string(),
-    ]))
-}
-
 fn bounded_local_machine_boundary_skill_scope(route: &RouteResult) -> Option<BTreeSet<String>> {
     if route.needs_clarify
         || route.output_contract.delivery_required
@@ -620,12 +606,18 @@ fn bounded_local_machine_boundary_skill_scope(route: &RouteResult) -> Option<BTr
     {
         return Some(BTreeSet::from(["run_cmd".to_string()]));
     }
+    let executable_agent_loop_boundary =
+        route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop");
     if route.has_route_reason_machine_marker("inline_structured_payload_context_execute")
         || route.has_route_reason_machine_marker("executionless_finalize_trace_plain")
     {
-        return Some(BTreeSet::new());
+        if !executable_agent_loop_boundary {
+            return Some(BTreeSet::new());
+        }
     }
-    if route.has_route_reason_machine_marker("auto_locator_suppressed_multiple_explicit_paths") {
+    if route.has_route_reason_machine_marker("auto_locator_suppressed_multiple_explicit_paths")
+        && !executable_agent_loop_boundary
+    {
         return Some(BTreeSet::from([
             "archive_basic".to_string(),
             "config_basic".to_string(),

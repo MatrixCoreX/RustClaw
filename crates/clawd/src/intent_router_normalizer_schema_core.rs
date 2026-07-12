@@ -742,10 +742,21 @@ pub(super) fn normalize_execution_recipe_for_schema(
     let Some(recipe) = value.as_object_mut() else {
         return;
     };
-    recipe.retain(|key, _| matches!(key.as_str(), "kind" | "profile" | "target_scope"));
+    recipe.retain(|key, _| {
+        matches!(
+            key.as_str(),
+            "kind"
+                | "profile"
+                | "target_scope"
+                | "requires_content_evidence"
+                | "attachment_processing_required"
+        )
+    });
     normalize_string_field_with_default(recipe, "kind", "none");
     normalize_string_field_with_default(recipe, "profile", "none");
     normalize_string_field_with_default(recipe, "target_scope", "none");
+    normalize_bool_field_with_default(recipe, "requires_content_evidence", false);
+    normalize_bool_field_with_default(recipe, "attachment_processing_required", false);
     if let Some(raw) = recipe.get("kind").and_then(Value::as_str) {
         let kind = crate::execution_recipe::parse_execution_recipe_kind_text(raw);
         recipe.insert("kind".to_string(), Value::String(kind.as_str().to_string()));
@@ -801,6 +812,18 @@ fn execution_recipe_slot_has_meaningful_non_default_value(value: Option<&Value>)
             .map(normalize_schema_token)
             .unwrap_or_else(|| normalize_schema_token(&raw.to_string()));
         if !token.is_empty() && !matches!(token.as_str(), "none" | "null" | "unknown") {
+            return true;
+        }
+    }
+    for key in [
+        "requires_content_evidence",
+        "attachment_processing_required",
+    ] {
+        if recipe
+            .get(key)
+            .and_then(Value::as_bool)
+            .is_some_and(|value| value)
+        {
             return true;
         }
     }

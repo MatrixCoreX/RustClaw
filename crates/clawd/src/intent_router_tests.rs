@@ -55,6 +55,8 @@ fn inline_structured_payload_repair_yields_to_machine_execution_context() {
                 command: Some("python3 test_calc_core.py".to_string()),
                 execution_mode: None,
                 async_adapter_kind: None,
+                requires_content_evidence: false,
+                attachment_processing_required: false,
             }),
             false,
         )
@@ -69,6 +71,24 @@ fn inline_structured_payload_repair_yields_to_machine_execution_context() {
                 command: None,
                 execution_mode: None,
                 async_adapter_kind: None,
+                requires_content_evidence: false,
+                attachment_processing_required: false,
+            }),
+            false,
+        )
+    );
+
+    assert!(
+        inline_structured_payload_repair_yields_to_execution_context(
+            Some("inline_structured_payload_context_execute"),
+            None,
+            Some(&ExecutionRecipePlanHint {
+                kind: "none".to_string(),
+                command: None,
+                execution_mode: None,
+                async_adapter_kind: None,
+                requires_content_evidence: true,
+                attachment_processing_required: true,
             }),
             false,
         )
@@ -94,6 +114,8 @@ fn execution_recipe_target_locator_contract_cleanup_clears_path_content_contract
             command: None,
             execution_mode: None,
             async_adapter_kind: None,
+            requires_content_evidence: false,
+            attachment_processing_required: false,
         }),
         false,
     );
@@ -569,6 +591,67 @@ fn route_result_preserves_execution_recipe_boundary_despite_executionless_marker
 }
 
 #[test]
+fn route_result_preserves_content_evidence_recipe_boundary_despite_executionless_marker() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        task_id: "task-content-evidence-recipe-boundary-marker".to_string(),
+        user_id: 91,
+        chat_id: 202,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"process an attached knowledge resource"})
+            .to_string(),
+    };
+    let decision = super::RouteDecision {
+        resolved_user_intent: "process attached resource using agent loop".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "executionless_finalize_trace_plain".to_string(),
+        confidence: Some(0.95),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            delivery_intent: OutputDeliveryIntent::None,
+            locator_kind: OutputLocatorKind::None,
+            ..IntentOutputContract::default()
+        },
+    };
+    let mut out = super::normalizer_output_from_fallback(
+        "process an attached knowledge resource",
+        "test_fallback",
+        decision,
+        None,
+    );
+    out.execution_recipe_plan_hint = Some(ExecutionRecipePlanHint {
+        kind: "none".to_string(),
+        command: None,
+        execution_mode: None,
+        async_adapter_kind: None,
+        requires_content_evidence: true,
+        attachment_processing_required: true,
+    });
+
+    let route = super::route_result_from_normalizer(&state, &task, &out);
+
+    assert!(route
+        .route_reason
+        .contains("executionless_finalize_trace_plain"));
+    assert!(route
+        .route_reason
+        .contains("executable_contract_preserved_for_agent_loop"));
+    assert!(route.ask_mode.is_execute_gate());
+}
+
+#[test]
 fn route_result_marks_alias_only_state_patch_for_deterministic_ack() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = crate::ClaimedTask {
@@ -810,10 +893,7 @@ Provided target or content: [{"name":"alpha","score":7},{"name":"beta","score":1
     assert_eq!(contract.response_shape, OutputResponseShape::Strict);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
-    assert_eq!(
-        contract.locator_hint,
-        state.skill_rt.workspace_root.display().to_string()
-    );
+    assert!(contract.locator_hint.is_empty());
 }
 
 #[test]
@@ -855,7 +935,7 @@ fn current_workspace_generic_summary_contract_repair_uses_workspace_project_summ
         contract.locator_hint,
         state.skill_rt.workspace_root.display().to_string()
     );
-    assert!(!contract.requires_content_evidence);
+    assert!(contract.requires_content_evidence);
     assert!(!contract.delivery_required);
 }
 

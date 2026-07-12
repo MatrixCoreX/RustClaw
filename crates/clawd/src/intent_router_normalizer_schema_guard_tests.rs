@@ -464,7 +464,7 @@ fn normalizer_schema_normalization_does_not_infer_custom_recipe_text() {
         value
             .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
-        Some("raw_command_output")
+        Some("none")
     );
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
@@ -850,7 +850,7 @@ fn normalizer_schema_normalization_maps_legacy_command_result_contract_to_raw_ou
         value
             .pointer("/output_contract/contract_marker")
             .and_then(|v| v.as_str()),
-        Some("none")
+        Some("raw_command_output")
     );
     assert_eq!(
         value
@@ -1915,6 +1915,62 @@ fn normalizer_schema_normalization_trusts_explicit_none_recipe_for_skill_plan() 
             .pointer("/execution_recipe/profile")
             .and_then(|value| value.as_str()),
         Some("skill_authoring")
+    );
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
+}
+
+#[test]
+fn normalizer_schema_preserves_execution_recipe_boundary_bools_with_none_kind() {
+    let raw = r#"{
+          "resolved_user_intent":"process attached resource through the agent loop",
+          "resume_behavior":"none",
+          "schedule_kind":"none",
+          "schedule_intent":null,
+          "wants_file_delivery":false,
+          "should_refresh_long_term_memory":false,
+          "agent_display_name_hint":"",
+          "needs_clarify":false,
+          "clarify_question":"",
+          "reason":"content evidence required",
+          "confidence":0.95,
+          "output_contract":{"response_shape":"free","requires_content_evidence":true},
+          "execution_recipe":{
+            "kind":"none",
+            "profile":"none",
+            "target_scope":"none",
+            "requires_content_evidence":true,
+            "attachment_processing_required":true
+          },
+          "turn_type":"task_request",
+          "target_task_policy":"standalone",
+          "should_interrupt_active_run":false,
+          "state_patch":null,
+          "attachment_processing_required":true
+        }"#;
+    let normalized =
+        super::normalize_intent_normalizer_raw_for_schema(raw, "process attached resource");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+    assert_eq!(
+        value
+            .pointer("/execution_recipe/kind")
+            .and_then(|value| value.as_str()),
+        Some("none")
+    );
+    assert_eq!(
+        value
+            .pointer("/execution_recipe/requires_content_evidence")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        value
+            .pointer("/execution_recipe/attachment_processing_required")
+            .and_then(|value| value.as_bool()),
+        Some(true)
     );
     crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
         &normalized,
