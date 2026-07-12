@@ -176,6 +176,34 @@ fn fs_basic_read_text_range_limit_only_normalizes_to_n_not_max_entries() {
 }
 
 #[test]
+fn fs_basic_read_text_range_field_selector_alias_normalizes_and_rewrites() {
+    let mut args = json!({
+        "action": "read_text_range",
+        "path": "README.md",
+        "selector": "title"
+    });
+
+    assert!(normalize_virtual_tool_arg_aliases("fs_basic", &mut args));
+    assert_eq!(
+        args.get("field_selector").and_then(|v| v.as_str()),
+        Some("title")
+    );
+    assert!(args.get("selector").is_none());
+
+    let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+        .unwrap()
+        .expect("rewrite");
+    assert_eq!(rewrite.runtime_tool, "system_basic");
+    assert_eq!(
+        rewrite
+            .runtime_args
+            .get("field_selector")
+            .and_then(|v| v.as_str()),
+        Some("title")
+    );
+}
+
+#[test]
 fn fs_basic_stat_paths_rewrites_to_system_basic_path_batch_facts() {
     let mut args = json!({"action":"stat", "path":"README.md"});
     assert!(normalize_virtual_tool_arg_aliases("fs_basic", &mut args));

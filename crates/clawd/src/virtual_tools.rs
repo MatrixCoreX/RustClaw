@@ -684,6 +684,22 @@ fn normalize_read_text_range_args(obj: &mut serde_json::Map<String, Value>) -> b
         &["line_start", "from_line", "start", "from", "offset"],
     );
     changed |= move_value_alias_if_missing(obj, "end_line", &["line_end", "to_line", "end", "to"]);
+    changed |= move_value_alias_if_missing(
+        obj,
+        "field_selector",
+        &["selector", "field", "structured_field_selector"],
+    );
+    if let Some(normalized) = obj
+        .get("field_selector")
+        .and_then(Value::as_str)
+        .map(normalize_tool_token)
+        .filter(|value| !value.is_empty())
+    {
+        if obj.get("field_selector").and_then(Value::as_str) != Some(normalized.as_str()) {
+            obj.insert("field_selector".to_string(), Value::String(normalized));
+            changed = true;
+        }
+    }
 
     let count = read_nonzero_u64_arg(obj, &["n", "line_count", "lines", "count", "limit"]);
     if obj.get("end_line").is_none() {

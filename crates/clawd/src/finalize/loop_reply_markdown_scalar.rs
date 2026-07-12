@@ -12,8 +12,7 @@ pub(super) fn deterministic_scalar_markdown_heading_answer_from_loop(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if !route_allows_direct_scalar_observed_answer(route)
-        || route.output_contract.delivery_required
+    if route.output_contract.delivery_required
         || matches!(
             route.effective_output_contract_semantic_kind(),
             crate::OutputSemanticKind::FileNames
@@ -28,21 +27,27 @@ pub(super) fn deterministic_scalar_markdown_heading_answer_from_loop(
     {
         return None;
     }
-    loop_state
+    let observed_output = loop_state
         .executed_step_results
         .iter()
         .rev()
         .filter(|step| step.is_ok())
         .filter_map(|step| step.output.as_deref())
-        .find(|output| output.contains("\"read_range\"") || output.contains("\"read_text_range\""))
-        .and_then(|output| {
-            if route_requests_title_scalar_selector(route) {
-                first_markdown_heading_from_read_output(output)
-                    .or_else(|| markdown_heading_from_read_output(output))
-            } else {
-                markdown_heading_from_read_output(output)
-            }
-        })
+        .find(|output| {
+            output.contains("\"read_range\"") || output.contains("\"read_text_range\"")
+        })?;
+    if let Some(answer) = selected_markdown_title_from_read_output(observed_output) {
+        return Some(answer);
+    }
+    if !route_allows_direct_scalar_observed_answer(route) {
+        return None;
+    }
+    if route_requests_title_scalar_selector(route) {
+        first_markdown_heading_from_read_output(observed_output)
+            .or_else(|| markdown_heading_from_read_output(observed_output))
+    } else {
+        markdown_heading_from_read_output(observed_output)
+    }
 }
 
 pub(super) fn route_allows_observed_markdown_heading_scalar_delivery(
@@ -173,6 +178,44 @@ fn route_requests_title_scalar_selector(route: &crate::RouteResult) -> bool {
             .is_some_and(|selector| selector == "title")
 }
 
+fn selected_markdown_title_from_read_output(output: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
+    if !read_value_requests_title_field_selector(&value) {
+        return None;
+    }
+    scalar_string_field_from_read_value(&value, "field_value")
+        .or_else(|| scalar_string_field_from_read_value(&value, "value_text"))
+        .or_else(|| scalar_string_field_from_read_value(&value, "value"))
+        .or_else(|| first_markdown_heading_from_read_value(&value))
+}
+
+fn read_value_requests_title_field_selector(value: &serde_json::Value) -> bool {
+    value
+        .get("field_selector")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .is_some_and(|selector| selector == "title")
+        || value
+            .get("extra")
+            .filter(|extra| extra.is_object())
+            .is_some_and(read_value_requests_title_field_selector)
+}
+
+fn scalar_string_field_from_read_value(value: &serde_json::Value, key: &str) -> Option<String> {
+    if let Some(text) = value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        return Some(text.to_string());
+    }
+    value
+        .get("extra")
+        .filter(|extra| extra.is_object())
+        .and_then(|extra| scalar_string_field_from_read_value(extra, key))
+}
+
 fn delivery_is_bounded_wrapper_around_observed_heading(delivery: &str, heading: &str) -> bool {
     let delivery = delivery.trim();
     let heading = heading.trim();
@@ -279,7 +322,12 @@ pub(super) fn markdown_heading_from_read_output(output: &str) -> Option<String> 
 }
 
 pub(super) fn first_markdown_heading_from_read_output(output: &str) -> Option<String> {
-    let text = markdown_text_from_read_output(output)?;
+    let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
+    first_markdown_heading_from_read_value(&value)
+}
+
+fn first_markdown_heading_from_read_value(value: &serde_json::Value) -> Option<String> {
+    let text = markdown_text_from_read_value(value)?;
     text.lines().find_map(markdown_heading_from_line)
 }
 

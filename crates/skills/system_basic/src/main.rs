@@ -1297,6 +1297,11 @@ fn read_range(
     let n = u64_arg(obj, "n", 20).clamp(1, 500) as usize;
     let raw = bool_arg(obj, "raw", false) || bool_arg(obj, "verbatim", false);
     let max_line_chars = u64_arg(obj, "max_line_chars", 800).clamp(80, 4000) as usize;
+    let field_selector = obj
+        .get("field_selector")
+        .or_else(|| obj.get("selector"))
+        .and_then(Value::as_str)
+        .and_then(normalize_read_range_field_selector);
 
     let (from, to) = if total_lines == 0 {
         (0, 0)
@@ -1335,7 +1340,8 @@ fn read_range(
         }
     }
 
-    Ok(json!({
+    let excerpt = excerpt_lines.join("\n");
+    let mut output = json!({
         "action": "read_range",
         "path": path,
         "resolved_path": real.display().to_string(),
@@ -1344,15 +1350,70 @@ fn read_range(
         "start_line": from,
         "end_line": to,
         "total_lines": total_lines,
-        "excerpt": excerpt_lines.join("\n"),
+        "excerpt": excerpt,
         "line_safety": {
             "raw": raw,
             "max_line_chars": max_line_chars,
             "compacted_lines": compacted_lines,
             "truncated_lines": truncated_lines,
         },
+    });
+    if let Some(selector) = field_selector {
+        if let Some(obj) = output.as_object_mut() {
+            obj.insert("field_selector".to_string(), json!(selector));
+            if selector == "title" {
+                if let Some(title) = markdown_title_from_read_range_excerpt(&excerpt) {
+                    obj.insert("field_value".to_string(), json!(title));
+                    obj.insert("value".to_string(), json!(title));
+                    obj.insert("value_text".to_string(), json!(title));
+                    obj.insert("value_type".to_string(), json!("string"));
+                    obj.insert("exists".to_string(), json!(true));
+                } else {
+                    obj.insert("field_value".to_string(), Value::Null);
+                    obj.insert("value".to_string(), Value::Null);
+                    obj.insert("value_text".to_string(), json!(""));
+                    obj.insert("value_type".to_string(), json!("null"));
+                    obj.insert("exists".to_string(), json!(false));
+                }
+            }
+        }
+    }
+
+    Ok(output.to_string())
+}
+
+fn normalize_read_range_field_selector(selector: &str) -> Option<&'static str> {
+    match selector
+        .trim()
+        .to_ascii_lowercase()
+        .replace([' ', '-', '.'], "_")
+        .as_str()
+    {
+        "title" | "heading" | "document_title" | "markdown_title" | "h1" => Some("title"),
+        _ => None,
+    }
+}
+
+fn markdown_title_from_read_range_excerpt(excerpt: &str) -> Option<&str> {
+    excerpt.lines().find_map(|line| {
+        let stripped = strip_read_range_line_prefix(line).trim();
+        let hashes = stripped.chars().take_while(|ch| *ch == '#').count();
+        if !(1..=6).contains(&hashes) {
+            return None;
+        }
+        let title = stripped.get(hashes..)?.trim();
+        (!title.is_empty()).then_some(title)
     })
-    .to_string())
+}
+
+fn strip_read_range_line_prefix(line: &str) -> &str {
+    let trimmed = line.trim();
+    if let Some((prefix, rest)) = trimmed.split_once('|') {
+        if !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit()) {
+            return rest.trim();
+        }
+    }
+    line
 }
 
 #[derive(Debug, Clone)]
