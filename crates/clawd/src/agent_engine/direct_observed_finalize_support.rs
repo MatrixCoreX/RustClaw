@@ -183,17 +183,26 @@ pub(super) fn action_supports_structured_direct_observed_finalize(
                     crate::OutputSemanticKind::FilePaths,
                 ])
             }),
-            Some("list_dir") => route_result.is_some_and(|route| {
-                route.output_contract_marker_is_any(&[
-                    crate::OutputSemanticKind::FileNames,
-                    crate::OutputSemanticKind::DirectoryNames,
-                    crate::OutputSemanticKind::DirectoryEntryGroups,
-                ])
-            }),
+            Some("list_dir") => {
+                plan_args_request_terminal_inventory_names(args)
+                    || route_result.is_some_and(|route| {
+                        route.output_contract_marker_is_any(&[
+                            crate::OutputSemanticKind::FileNames,
+                            crate::OutputSemanticKind::DirectoryNames,
+                            crate::OutputSemanticKind::DirectoryEntryGroups,
+                        ])
+                    })
+            }
             _ => false,
         },
         _ => false,
     }
+}
+
+fn plan_args_request_terminal_inventory_names(args: &Value) -> bool {
+    ["names_only", "dirs_only", "files_only"]
+        .into_iter()
+        .any(|key| args.get(key).and_then(Value::as_bool).unwrap_or(false))
 }
 
 fn route_requests_config_guard(route: &RouteResult) -> bool {

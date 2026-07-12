@@ -769,6 +769,41 @@ fn plain_act_read_range_plan_uses_direct_observed_finalizer_without_synthesis() 
 }
 
 #[test]
+fn observation_only_filtered_list_dir_can_finalize_without_route_semantic_kind() {
+    let mut route = route_result(
+        crate::AskMode::act_with_chat_finalizer(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/tmp/device".to_string();
+    route.output_contract.delivery_required = false;
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "list_dir",
+            "path": "/tmp/device",
+            "dirs_only": true,
+            "names_only": true,
+        }),
+    }];
+    let state = test_state_with_registry();
+
+    assert!(observation_only_plan_can_finalize_from_direct_output(
+        &state,
+        Some(&route),
+        &actions
+    ));
+    assert!(!should_force_actionable_plan_repair(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        &actions
+    ));
+}
+
+#[test]
 fn chat_wrapped_read_range_plan_adds_synthesis_terminal_answer() {
     let mut route = route_result(
         crate::AskMode::act_with_chat_finalizer(),
