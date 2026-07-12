@@ -212,6 +212,7 @@ use tail_read::{
     latest_tail_read_range_answer_from_loop, latest_tail_read_range_observed_answer,
     replace_delivery_with_latest_tail_read_range_answer,
     route_allows_latest_tail_read_range_delivery, route_requires_raw_tail_read_passthrough,
+    tail_read_directory_inventory_projection_available,
 };
 
 #[path = "loop_reply_matrix_shape.rs"]
@@ -1190,6 +1191,7 @@ pub(crate) async fn finalize_loop_reply(
         || route_requires_raw_tail_read_passthrough(
             agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
         )
+        || tail_read_directory_inventory_projection_available(&loop_state, agent_run_context)
     {
         replace_delivery_with_latest_tail_read_range_answer(
             state,
@@ -1685,6 +1687,18 @@ pub(crate) async fn finalize_loop_reply(
         &mut delivery_deduped,
     )
     .await;
+    if tail_read_directory_inventory_projection_available(&loop_state, agent_run_context)
+        && replace_delivery_with_latest_tail_read_range_answer(
+            state,
+            task,
+            user_text,
+            &mut loop_state,
+            agent_run_context,
+            &mut finalizer_summary,
+        )
+    {
+        delivery_deduped = loop_state.delivery_messages.clone();
+    }
 
     let final_text = final_answer_text_from_delivery(&delivery_deduped);
 

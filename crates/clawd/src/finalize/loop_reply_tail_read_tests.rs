@@ -67,6 +67,82 @@ fn tail_read_range_observed_answer_replaces_failed_synthesis_for_content_excerpt
 }
 
 #[test]
+fn tail_read_directory_inventory_projection_uses_planned_tail_count() {
+    let state = test_state();
+    let task = claimed_task("task-tail-directory-inventory");
+    let route = free_route_result();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    loop_state.delivery_messages.push(
+        "files.count=4\nfiles:\n- alpha.log\n- beta.log\n- gamma.log\n- omega.log".to_string(),
+    );
+    loop_state.last_user_visible_respond = loop_state.delivery_messages.last().cloned();
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            plan_result: Some(crate::PlanResult {
+                goal: String::new(),
+                missing_slots: Vec::new(),
+                needs_confirmation: false,
+                steps: vec![crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "fs_basic".to_string(),
+                    args: serde_json::json!({}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }],
+                planner_notes: String::new(),
+                plan_kind: crate::PlanKind::Single,
+                raw_plan_text: r#"{"steps":[{"type":"call_capability","capability":"filesystem.read_text_range","args":{"path":"/tmp/rustclaw/logs/base_skill_contracts","mode":"tail","n":2}}]}"#.to_string(),
+            }),
+            ..Default::default()
+        });
+    loop_state.executed_step_results.push(err_step_result(
+        "step_1",
+        "fs_basic",
+        r#"__RC_SKILL_ERROR__:{"error_kind":"is_directory","error_text":"directory target","extra":null}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","path":"/tmp/rustclaw/logs/base_skill_contracts","resolved_path":"/tmp/rustclaw/logs/base_skill_contracts","names_by_kind":{"dirs":[],"files":["alpha.log","beta.log","gamma.log","omega.log"],"other":[]},"counts":{"dirs":0,"files":4,"hidden":0,"total":4},"sort_by":"name"}}"#,
+    ));
+    let mut finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        ..Default::default()
+    });
+
+    assert!(replace_delivery_with_latest_tail_read_range_answer(
+        &state,
+        &task,
+        "tail selected directory",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+    ));
+
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("entries.count=2\nentries:\n- gamma.log\n- omega.log")
+    );
+    assert_eq!(
+        loop_state.delivery_messages,
+        vec!["entries.count=2\nentries:\n- gamma.log\n- omega.log"]
+    );
+}
+
+#[test]
 fn bounded_head_read_range_observed_answer_replaces_failed_synthesis_for_content_excerpt() {
     let state = test_state();
     let task = claimed_task("task-head-read");
