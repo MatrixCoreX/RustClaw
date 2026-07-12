@@ -99,7 +99,11 @@ pub(crate) fn route_result_from_normalizer(
         );
     }
     let execution_finalize_style = normalizer_out.execution_finalize_style;
-    if normalizer_out
+    if alias_state_patch_ack_allowed_for_route_output(
+        &output_contract,
+        wants_file_delivery,
+        normalizer_out,
+    ) && normalizer_out
         .turn_analysis
         .as_ref()
         .and_then(|analysis| analysis.state_patch.as_ref())
@@ -170,6 +174,18 @@ pub(crate) fn route_result_from_normalizer(
         agent_display_name_hint,
         output_contract,
     }
+}
+
+fn alias_state_patch_ack_allowed_for_route_output(
+    output_contract: &crate::IntentOutputContract,
+    wants_file_delivery: bool,
+    normalizer_out: &IntentNormalizerOutput,
+) -> bool {
+    !wants_file_delivery
+        && !normalizer_out.needs_clarify
+        && !output_contract.requires_content_evidence
+        && !output_contract.delivery_required
+        && output_contract.delivery_intent == crate::OutputDeliveryIntent::None
 }
 
 fn normalizer_declares_agent_loop_execution_boundary(out: &IntentNormalizerOutput) -> bool {
