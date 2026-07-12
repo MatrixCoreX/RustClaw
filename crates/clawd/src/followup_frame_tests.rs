@@ -297,6 +297,76 @@ fn bound_target_accepts_extra_machine_payload() {
 }
 
 #[test]
+fn workspace_project_summary_evidence_path_does_not_persist_followup_target() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        task_id: "task-followup-workspace-summary-evidence".to_string(),
+        user_id: 431,
+        chat_id: 432,
+        user_key: Some("test-user-workspace-summary".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            serde_json::json!({
+                "extra": {
+                    "action": "read_text_range",
+                    "resolved_path": "/home/guagua/rustclaw/plan/post_migration.md",
+                    "excerpt": "workspace evidence only"
+                }
+            })
+            .to_string(),
+        ));
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: "write a short RustClaw release note".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "contract:workspace_project_summary".to_string(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Medium,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: crate::OutputResponseShape::Free,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            semantic_kind: crate::OutputSemanticKind::WorkspaceProjectSummary,
+            ..IntentOutputContract::default()
+        },
+    };
+
+    replace_active_frame_from_ask_outcome(
+        &state,
+        &task,
+        "write a short RustClaw release note",
+        &route_result,
+        "RustClaw release note draft.",
+        &[],
+        false,
+        &journal,
+    );
+
+    assert!(
+        load_active_followup_frame(&state, &task).is_none(),
+        "workspace summary evidence files must not become the next text-drafting target"
+    );
+}
+
+#[test]
 fn code_workspace_journal_persists_project_dir_for_followup() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {

@@ -278,6 +278,43 @@ fn ignores_plain_scalar_answer_as_bound_target_without_path_contract() {
 }
 
 #[test]
+fn workspace_project_summary_does_not_bind_evidence_file_path() {
+    let mut journal = crate::task_journal::TaskJournal::new("workspace_summary");
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "s1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output_excerpt: Some(
+                serde_json::json!({
+                    "extra": {
+                        "action": "read_text_range",
+                        "resolved_path": "/workspace/plan/current.md",
+                        "excerpt": "current project evidence"
+                    }
+                })
+                .to_string(),
+            ),
+            ..Default::default()
+        });
+    let mut route = dummy_route_result();
+    route.route_reason = "contract:workspace_project_summary".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+
+    let facts = derive_observed_facts_from_ask_outcome(
+        "RustClaw release note draft.",
+        &[],
+        &journal,
+        &route,
+    );
+
+    assert_eq!(facts.bound_target, None);
+}
+
+#[test]
 fn derives_output_shape_hint_from_output_contract() {
     let journal = crate::task_journal::TaskJournal::new("send");
     let mut route = dummy_route_result();
