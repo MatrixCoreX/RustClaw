@@ -532,6 +532,9 @@ pub(super) fn replace_delivery_with_deterministic_rustclaw_config_risk_answer(
     loop_state: &mut crate::agent_engine::LoopState,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
+    if config_edit_machine_payload_already_available(loop_state) {
+        return false;
+    }
     let Some((answer, summary)) = direct_rustclaw_config_risk_answer(state, user_text, loop_state)
     else {
         return false;
@@ -562,4 +565,25 @@ pub(super) fn replace_delivery_with_deterministic_rustclaw_config_risk_answer(
         loop_state.executed_step_results.len(),
     );
     true
+}
+
+fn config_edit_machine_payload_already_available(
+    loop_state: &crate::agent_engine::LoopState,
+) -> bool {
+    loop_state
+        .delivery_messages
+        .iter()
+        .any(|message| super::config_edit::config_edit_machine_payload_text(message).is_some())
+        || loop_state
+            .last_user_visible_respond
+            .as_deref()
+            .is_some_and(|message| {
+                super::config_edit::config_edit_machine_payload_text(message).is_some()
+            })
+        || loop_state
+            .last_publishable_synthesis_output
+            .as_deref()
+            .is_some_and(|message| {
+                super::config_edit::config_edit_machine_payload_text(message).is_some()
+            })
 }

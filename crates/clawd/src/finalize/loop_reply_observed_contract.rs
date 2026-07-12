@@ -26,6 +26,34 @@ pub(super) fn direct_scalar_observed_answer(
     if !route_allows_direct_scalar_observed_answer(route) {
         return None;
     }
+    if let Some(answer) =
+        super::config_edit::direct_config_edit_terminal_machine_payload_answer(loop_state)
+    {
+        return Some((
+            answer,
+            crate::task_journal::TaskJournalFinalizerSummary {
+                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                parsed: true,
+                contract_ok: true,
+                completion_ok: Some(true),
+                grounded_ok: Some(true),
+                format_ok: Some(true),
+                needs_clarify: Some(false),
+                used_evidence_ids_count: 1,
+                ..Default::default()
+            },
+        ));
+    }
+    if let Some((answer, summary)) = state.and_then(|state| {
+        super::config_edit::direct_config_edit_observed_answer(
+            state,
+            route.resolved_intent.as_str(),
+            loop_state,
+        )
+    }) {
+        return Some((answer, summary));
+    }
     if let Some((answer, summary)) =
         super::direct_observed_count_answer_for_scalar_contract(route, loop_state)
     {
@@ -636,6 +664,11 @@ fn scalar_contract_delivery_should_be_replaced_with_observed_scalar(
     if delivery.is_empty() || answer.is_empty() || delivery == answer {
         return false;
     }
+    if super::config_edit::config_edit_machine_payload_text(answer).is_some()
+        && scalar_machine_selector_projection(delivery)
+    {
+        return true;
+    }
     machine_field_placeholder_delivery_for_scalar_contract(delivery, route)
         || delivery_message_is_json_container(delivery)
         || looks_like_structured_machine_output(delivery)
@@ -646,6 +679,21 @@ fn scalar_contract_delivery_should_be_replaced_with_observed_scalar(
             > 1
         || recent_scalar_observed_answer_extends_delivery(delivery, answer, route)
         || delivery.contains(answer)
+}
+
+fn scalar_machine_selector_projection(delivery: &str) -> bool {
+    let mut lines = delivery
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let Some(line) = lines.next() else {
+        return false;
+    };
+    if lines.next().is_some() || line.contains('=') {
+        return false;
+    }
+    line.chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
 }
 
 fn recent_scalar_observed_answer_extends_delivery(

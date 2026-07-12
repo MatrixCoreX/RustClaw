@@ -118,6 +118,28 @@ fn executable_agent_loop_boundary_keeps_lightweight_skill_scope_open() {
 }
 
 #[test]
+fn executable_agent_loop_boundary_keeps_content_contract_scope_open() {
+    let mut route = base_route_result();
+    route.route_reason = "current_workspace_generic_contract_deferred_to_agent_loop; executable_contract_preserved_for_agent_loop".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "configs/config.toml".to_string();
+
+    assert_eq!(
+        contract_scoped_planner_skill_scope(Some(&route)),
+        None,
+        "executable agent-loop boundaries without explicit capability_ref should not be narrowed to generic read-only local-data skills"
+    );
+    assert_eq!(
+        contract_scoped_lightweight_planner_skill_scope(Some(&route)),
+        None
+    );
+}
+
+#[test]
 fn sqlite_locator_generic_scalar_scope_prefers_db_basic_only() {
     let mut route = base_route_result();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;

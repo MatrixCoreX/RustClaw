@@ -24,6 +24,55 @@ pub(super) fn visible_answer_is_machine_payload(text: &str) -> bool {
         })
 }
 
+pub(super) fn visible_answer_is_observed_machine_projection(
+    loop_state: &LoopState,
+    text: &str,
+) -> bool {
+    let marker = text.trim();
+    if !looks_like_single_machine_projection_marker(marker) {
+        return false;
+    }
+    loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.is_ok())
+        .filter_map(|step| step.output.as_deref())
+        .filter_map(|output| serde_json::from_str::<serde_json::Value>(output.trim()).ok())
+        .any(|value| json_value_contains_machine_projection_marker(&value, marker))
+}
+
+fn looks_like_single_machine_projection_marker(marker: &str) -> bool {
+    !marker.is_empty()
+        && !marker.contains('=')
+        && marker
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count()
+            == 1
+        && marker
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+        && marker.chars().any(|ch| matches!(ch, '_' | '.'))
+}
+
+fn json_value_contains_machine_projection_marker(value: &serde_json::Value, marker: &str) -> bool {
+    match value {
+        serde_json::Value::String(text) => text == marker,
+        serde_json::Value::Array(items) => items
+            .iter()
+            .any(|item| json_value_contains_machine_projection_marker(item, marker)),
+        serde_json::Value::Object(object) => {
+            object.keys().any(|key| key == marker)
+                || object
+                    .values()
+                    .any(|item| json_value_contains_machine_projection_marker(item, marker))
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {
+            false
+        }
+    }
+}
+
 pub(super) fn visible_machine_payload_should_remain_structured(text: &str) -> bool {
     let Ok(serde_json::Value::Object(object)) =
         serde_json::from_str::<serde_json::Value>(text.trim())
@@ -59,13 +108,16 @@ pub(super) fn visible_machine_payload_should_remain_structured(text: &str) -> bo
 
 fn route_allows_machine_payload_visible_render(
     agent_run_context: Option<&AgentRunContext>,
+    is_observed_projection: bool,
 ) -> bool {
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
-        return false;
+        return is_observed_projection;
     };
-    !route.output_contract.delivery_required
-        && !route.wants_file_delivery
-        && matches!(
+    if route.output_contract.delivery_required || route.wants_file_delivery {
+        return false;
+    }
+    is_observed_projection
+        || matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
         )
@@ -80,14 +132,16 @@ pub(super) async fn render_machine_payload_delivery_if_needed(
     finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary>,
     delivery_messages: &mut Vec<String>,
 ) {
-    if !route_allows_machine_payload_visible_render(agent_run_context) {
-        return;
-    }
     let current = final_answer_text_from_delivery(delivery_messages);
-    if !visible_answer_is_machine_payload(&current) {
+    let is_observed_projection =
+        visible_answer_is_observed_machine_projection(loop_state, &current);
+    if !visible_answer_is_machine_payload(&current) && !is_observed_projection {
         return;
     }
-    if visible_machine_payload_should_remain_structured(&current) {
+    if !route_allows_machine_payload_visible_render(agent_run_context, is_observed_projection) {
+        return;
+    }
+    if !is_observed_projection && visible_machine_payload_should_remain_structured(&current) {
         log_deterministic_delivery_record(
             &task.task_id,
             "render_machine_payload_delivery",
@@ -112,7 +166,12 @@ pub(super) async fn render_machine_payload_delivery_if_needed(
     let verifier = crate::answer_verifier::AnswerVerifierOut {
         pass: false,
         missing_evidence_fields: vec!["output_format".to_string()],
-        answer_incomplete_reason: "machine_payload_visible".to_string(),
+        answer_incomplete_reason: if is_observed_projection {
+            "machine_projection_visible"
+        } else {
+            "machine_payload_visible"
+        }
+        .to_string(),
         should_retry: true,
         retry_instruction: "output_format".to_string(),
         confidence: 0.9,

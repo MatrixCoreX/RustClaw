@@ -229,7 +229,13 @@ fn direct_config_edit_observed_answer_combines_read_field_and_guard_config() {
         payload
             .pointer("/message_key")
             .and_then(serde_json::Value::as_str),
-        Some("clawd.msg.config_edit.preview_read_guard")
+        Some("clawd.msg.config_edit.read_guard")
+    );
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("config_edit_read_guard")
     );
     assert_eq!(
         payload
@@ -243,12 +249,8 @@ fn direct_config_edit_observed_answer_combines_read_field_and_guard_config() {
             .and_then(serde_json::Value::as_str),
         Some("minimax")
     );
-    assert_eq!(
-        payload
-            .pointer("/would_write")
-            .and_then(serde_json::Value::as_bool),
-        Some(false)
-    );
+    assert!(payload.pointer("/would_write").is_none());
+    assert!(payload.pointer("/applied").is_none());
     assert_eq!(
         payload
             .pointer("/risk_count")
@@ -541,4 +543,42 @@ async fn finalize_loop_reply_uses_config_edit_observed_answer_after_synthesis_fa
         Some(true)
     );
     assert!(!reply.text.contains("没能整理成可靠结论"));
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_replaces_config_preview_marker_with_structured_payload() {
+    let state = test_state();
+    let task = claimed_task("task-config-preview-marker-finalize");
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.delivery_messages = vec!["llm.selected_vendor".to_string()];
+    loop_state.last_user_visible_respond = Some("llm.selected_vendor".to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_basic",
+        r#"{"extra":{"action":"extract_field","exists":true,"field_path":"llm.selected_vendor","format":"toml","match_count":1,"match_strategy":"exact_path","path":"configs/config.toml","resolved_field_path":"llm.selected_vendor","resolved_path":"/home/guagua/rustclaw/configs/config.toml","value":"minimax","value_text":"minimax","value_type":"string"},"text":"{\"action\":\"extract_field\",\"exists\":true,\"field_path\":\"llm.selected_vendor\",\"format\":\"toml\",\"match_count\":1,\"match_strategy\":\"exact_path\",\"path\":\"configs/config.toml\",\"resolved_field_path\":\"llm.selected_vendor\",\"resolved_path\":\"/home/guagua/rustclaw/configs/config.toml\",\"value\":\"minimax\",\"value_text\":\"minimax\",\"value_type\":\"string\"}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "config_basic",
+        r#"{"extra":{"action":"guard_config","candidates":["tools.allow_sudo=true","tools.allow_path_outside_workspace=true"],"count":2,"format":"toml","path":"configs/config.toml","resolved_path":"/home/guagua/rustclaw/configs/config.toml","risk_count":2,"risks":["tools.allow_sudo=true","tools.allow_path_outside_workspace=true"],"valid":false},"text":"{\"action\":\"guard_config\",\"candidates\":[\"tools.allow_sudo=true\",\"tools.allow_path_outside_workspace=true\"],\"count\":2,\"format\":\"toml\",\"path\":\"configs/config.toml\",\"resolved_path\":\"/home/guagua/rustclaw/configs/config.toml\",\"risk_count\":2,\"risks\":[\"tools.allow_sudo=true\",\"tools.allow_path_outside_workspace=true\"],\"valid\":false}"}"#,
+    ));
+    let payload = r#"{"candidates":["tools.allow_sudo=true","tools.allow_path_outside_workspace=true"],"count":2,"current_value":"minimax","field_path":"llm.selected_vendor","message_key":"clawd.msg.config_edit.read_guard","path":"configs/config.toml","reason_code":"config_edit_read_guard","risk_count":2,"risks":["tools.allow_sudo=true","tools.allow_path_outside_workspace=true"]}"#;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "synthesize_answer", payload));
+    loop_state.last_publishable_synthesis_output = Some(payload.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "只预览配置变更，不写入；读取当前值并检查风险。",
+        loop_state,
+        None,
+    )
+    .await
+    .expect("finalize should succeed");
+
+    assert_eq!(reply.text, payload);
+    assert_eq!(reply.messages, vec![payload.to_string()]);
 }

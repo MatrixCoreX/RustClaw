@@ -49,6 +49,7 @@ use super::{
     path_batch_size_comparison_answer, prefer_latest_synthesis_for_compound_observation_delivery,
     prefer_observed_answer_for_exact_contract, preferred_route_clarify_question,
     priority_last_respond_for_final_delivery, promote_observed_language_delivery_summary,
+    replace_config_edit_machine_marker_delivery, replace_config_edit_machine_marker_final_answer,
     replace_delivery_with_deterministic_current_workspace_dirs_overview_answer,
     replace_delivery_with_deterministic_directory_purpose_answer,
     replace_delivery_with_deterministic_execution_failed_step_answer,
@@ -67,7 +68,8 @@ use super::{
     should_return_missing_file_delivery_reply, should_try_observed_output_language_fallback,
     structured_compound_synthesis_can_replace_current_delivery, structured_json_values_from_output,
     successful_delivery_final_status, verify_summary_requires_resume_confirmation,
-    visible_answer_is_machine_payload, visible_machine_payload_should_remain_structured,
+    visible_answer_is_machine_payload, visible_answer_is_observed_machine_projection,
+    visible_machine_payload_should_remain_structured,
 };
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{
@@ -91,6 +93,29 @@ fn visible_answer_machine_payload_detection_is_structural() {
     ));
     assert!(!visible_answer_is_machine_payload(
         "configs/config.toml has one observed risk."
+    ));
+}
+
+#[test]
+fn visible_answer_machine_projection_detection_uses_observed_json() {
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "config_basic",
+        r#"{"extra":{"field_path":"llm.selected_vendor","value":"minimax"}}"#,
+    ));
+
+    assert!(visible_answer_is_observed_machine_projection(
+        &loop_state,
+        "llm.selected_vendor"
+    ));
+    assert!(!visible_answer_is_observed_machine_projection(
+        &loop_state,
+        "minimax"
+    ));
+    assert!(!visible_answer_is_observed_machine_projection(
+        &loop_state,
+        "configs/config.toml"
     ));
 }
 
@@ -1381,15 +1406,13 @@ fn requested_machine_kv_summary_restores_structured_payload_over_marker_only_del
         r#"{"extra":{"action":"extract_field","exists":true,"field_path":"llm.selected_vendor","path":"configs/config.toml","value":"minimax","value_text":"minimax","value_type":"string"}}"#,
     ));
     let structured_answer = serde_json::json!({
-        "applied": false,
         "current_value": "minimax",
         "field_path": "llm.selected_vendor",
-        "message_key": "clawd.msg.config_edit.preview_read_guard",
+        "message_key": "clawd.msg.config_edit.read_guard",
         "path": "configs/config.toml",
-        "reason_code": "config_edit_preview_read_guard",
+        "reason_code": "config_edit_read_guard",
         "risk_count": 0,
-        "risks": [],
-        "would_write": false
+        "risks": []
     })
     .to_string();
     loop_state.executed_step_results.push(ok_step_result(

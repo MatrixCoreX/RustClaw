@@ -19,7 +19,8 @@ use compatibility_renderers::run_compatibility_fallback_renderer_registry;
 #[path = "loop_reply_capability_result_renderers.rs"]
 mod capability_result_renderers;
 use capability_result_renderers::{
-    attach_config_edit_observed_answer_from_registry, run_service_status_observed_fields_renderer,
+    attach_config_edit_observed_answer_from_registry, replace_config_edit_machine_marker_delivery,
+    replace_config_edit_machine_marker_final_answer, run_service_status_observed_fields_renderer,
 };
 
 #[path = "loop_reply_artifact_renderers.rs"]
@@ -246,7 +247,8 @@ mod machine_payload;
 use machine_payload::render_machine_payload_delivery_if_needed;
 #[cfg(test)]
 use machine_payload::{
-    visible_answer_is_machine_payload, visible_machine_payload_should_remain_structured,
+    visible_answer_is_machine_payload, visible_answer_is_observed_machine_projection,
+    visible_machine_payload_should_remain_structured,
 };
 
 #[path = "loop_reply_weather.rs"]
@@ -543,6 +545,15 @@ pub(crate) async fn finalize_loop_reply(
             return Ok(reply);
         }
     }
+    attach_config_edit_observed_answer_from_registry(
+        state,
+        task,
+        user_text,
+        &mut loop_state,
+        agent_run_context,
+        &mut finalizer_summary,
+    );
+
     let should_try_observed_scalar_fallback = crate::finalize::should_attempt_observed_fallback(
         loop_state.has_tool_or_skill_output,
         loop_state.has_recoverable_failure_context,
@@ -563,15 +574,6 @@ pub(crate) async fn finalize_loop_reply(
             );
         }
     }
-
-    attach_config_edit_observed_answer_from_registry(
-        state,
-        task,
-        user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-    );
 
     if loop_state.delivery_messages.is_empty() {
         if let Some((answer, summary)) =
@@ -1512,6 +1514,15 @@ pub(crate) async fn finalize_loop_reply(
         &mut delivery_deduped,
         &mut finalizer_summary,
     );
+    replace_config_edit_machine_marker_delivery(
+        state,
+        task,
+        user_text,
+        &mut loop_state,
+        agent_run_context,
+        &mut finalizer_summary,
+        &mut delivery_deduped,
+    );
     mark_machine_envelope_delivery_complete(
         task,
         &mut loop_state,
@@ -1565,6 +1576,14 @@ pub(crate) async fn finalize_loop_reply(
         &mut delivery_deduped,
         &mut finalizer_summary,
     );
+    replace_delivery_with_requested_machine_kv_summary(
+        task,
+        user_text,
+        &mut loop_state,
+        agent_run_context,
+        &mut finalizer_summary,
+        &mut delivery_deduped,
+    );
     render_machine_payload_delivery_if_needed(
         state,
         task,
@@ -1575,14 +1594,6 @@ pub(crate) async fn finalize_loop_reply(
         &mut delivery_deduped,
     )
     .await;
-    replace_delivery_with_requested_machine_kv_summary(
-        task,
-        user_text,
-        &mut loop_state,
-        agent_run_context,
-        &mut finalizer_summary,
-        &mut delivery_deduped,
-    );
     prefer_content_evidence_synthesis_for_final_delivery(
         task,
         &mut loop_state,
@@ -1646,6 +1657,34 @@ pub(crate) async fn finalize_loop_reply(
             loop_state.executed_step_results.len(),
         );
     }
+    replace_config_edit_machine_marker_delivery(
+        state,
+        task,
+        user_text,
+        &mut loop_state,
+        agent_run_context,
+        &mut finalizer_summary,
+        &mut delivery_deduped,
+    );
+    replace_config_edit_machine_marker_final_answer(
+        state,
+        task,
+        user_text,
+        &mut loop_state,
+        agent_run_context,
+        &mut finalizer_summary,
+        &mut delivery_deduped,
+    );
+    render_machine_payload_delivery_if_needed(
+        state,
+        task,
+        user_text,
+        &mut loop_state,
+        agent_run_context,
+        finalizer_summary.clone(),
+        &mut delivery_deduped,
+    )
+    .await;
 
     let final_text = final_answer_text_from_delivery(&delivery_deduped);
 

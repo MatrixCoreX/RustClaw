@@ -116,6 +116,12 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         journal.record_final_answer(answer_text.as_str());
         return false;
     }
+    if !force_structured
+        && answer_verifier_passed_publishable_summary(journal, answer_text, answer_messages)
+    {
+        journal.record_final_answer(answer_text.as_str());
+        return false;
+    }
     let request_surfaces = task_machine_kv_request_surfaces(prompt, route_result, journal);
     let requested_summary = requested_machine_kv_summary_from_task_final_answer_with_surfaces(
         &request_surfaces,
@@ -835,6 +841,26 @@ fn final_answer_preserves_publishable_evidence_summary(
     std::iter::once(answer_text)
         .chain(answer_messages.iter().map(String::as_str))
         .any(|candidate| candidate_is_publishable_evidence_summary(candidate, requested_summary))
+}
+
+fn answer_verifier_passed_publishable_summary(
+    journal: &crate::task_journal::TaskJournal,
+    answer_text: &str,
+    answer_messages: &[String],
+) -> bool {
+    let Some(verifier) = journal.answer_verifier_summary.as_ref() else {
+        return false;
+    };
+    if !verifier.pass
+        || verifier.should_retry
+        || !verifier.missing_evidence_fields.is_empty()
+        || !journal_has_observed_tool_evidence(journal)
+    {
+        return false;
+    }
+    std::iter::once(answer_text)
+        .chain(answer_messages.iter().map(String::as_str))
+        .any(|candidate| candidate_is_publishable_evidence_summary(candidate, ""))
 }
 
 fn journal_has_observed_tool_evidence(journal: &crate::task_journal::TaskJournal) -> bool {
