@@ -743,10 +743,7 @@ pub(super) fn rewrite_args_with_auto_locator_path(
     }
 }
 
-fn replace_double_brace_placeholders(
-    input: &str,
-    vars: &std::collections::HashMap<String, String>,
-) -> String {
+fn replace_double_brace_placeholders(input: &str, loop_state: &LoopState) -> String {
     static PLACEHOLDER_RE: OnceLock<Regex> = OnceLock::new();
     let re = PLACEHOLDER_RE.get_or_init(|| {
         Regex::new(r"\{\{\s*([^{}]+?)\s*\}\}").expect("double brace placeholder regex")
@@ -754,7 +751,12 @@ fn replace_double_brace_placeholders(
     re.replace_all(input, |caps: &regex::Captures<'_>| {
         let whole = caps.get(0).map(|m| m.as_str()).unwrap_or_default();
         let key = caps.get(1).map(|m| m.as_str().trim()).unwrap_or_default();
-        vars.get(key).cloned().unwrap_or_else(|| whole.to_string())
+        loop_state
+            .output_vars
+            .get(key)
+            .cloned()
+            .or_else(|| resolve_structured_listing_reference(key, loop_state))
+            .unwrap_or_else(|| whole.to_string())
     })
     .into_owned()
 }
@@ -782,7 +784,7 @@ fn angle_bracket_key(input: &str) -> Option<&str> {
 }
 
 pub(super) fn resolve_arg_string(input: &str, loop_state: &LoopState) -> String {
-    let replaced = replace_double_brace_placeholders(input, &loop_state.output_vars);
+    let replaced = replace_double_brace_placeholders(input, loop_state);
     if let Some(key) = single_brace_key(replaced.trim()) {
         if let Some(v) = loop_state.output_vars.get(key) {
             return v.clone();
@@ -798,6 +800,44 @@ pub(super) fn resolve_arg_string(input: &str, loop_state: &LoopState) -> String 
         }
     }
     replaced
+}
+
+fn resolve_structured_listing_reference(key: &str, loop_state: &LoopState) -> Option<String> {
+    let index = listing_entry_reference_index(key)?;
+    if let Some(step_index) = listing_reference_step_index(key) {
+        return loop_state
+            .executed_step_results
+            .get(step_index)
+            .filter(|step| step.is_ok())
+            .and_then(|step| step.output.as_deref())
+            .and_then(structured_listing_paths_from_output)
+            .and_then(|paths| paths.get(index).cloned());
+    }
+    latest_structured_listing_paths(loop_state)
+        .get(index)
+        .cloned()
+}
+
+fn listing_entry_reference_index(key: &str) -> Option<usize> {
+    static ENTRY_INDEX_RE: OnceLock<Regex> = OnceLock::new();
+    let re = ENTRY_INDEX_RE.get_or_init(|| {
+        Regex::new(r"(?i)(?:^|\.)(?:extra\.)?(?:entries|files|items)(?:\[(\d+)\]|\.(\d+))(?:\.(?:path|resolved_path|relative_path|name))?$")
+            .expect("regex")
+    });
+    let caps = re.captures(key.trim())?;
+    caps.get(1)
+        .or_else(|| caps.get(2))
+        .and_then(|matched| matched.as_str().parse::<usize>().ok())
+}
+
+fn listing_reference_step_index(key: &str) -> Option<usize> {
+    static STEPS_RE: OnceLock<Regex> = OnceLock::new();
+    let re = STEPS_RE.get_or_init(|| {
+        Regex::new(r"(?i)^(?:steps?|actions?)\.(\d+)\.(?:outputs?|result)\.").expect("regex")
+    });
+    re.captures(key.trim())
+        .and_then(|caps| caps.get(1))
+        .and_then(|matched| matched.as_str().parse::<usize>().ok())
 }
 
 fn path_arg_key_allows_listing_placeholder(key: Option<&str>) -> bool {
@@ -822,15 +862,41 @@ fn listing_placeholder_index(input: &str) -> Option<usize> {
         angle_bracket_key(tail)?
     };
     let normalized = key.trim().to_ascii_lowercase();
-    let digits = normalized
-        .strip_prefix("file")
-        .or_else(|| normalized.strip_prefix("path"))
-        .or_else(|| normalized.strip_prefix("entry"))?;
-    if digits.is_empty() || !digits.chars().all(|ch| ch.is_ascii_digit()) {
-        return None;
+    listing_placeholder_index_from_key(&normalized)
+}
+
+fn listing_placeholder_index_from_key(normalized: &str) -> Option<usize> {
+    let compact: String = normalized
+        .chars()
+        .filter(|ch| !matches!(ch, '_' | '-' | '.'))
+        .collect();
+    for prefix in [
+        "file",
+        "path",
+        "entry",
+        "recent",
+        "latest",
+        "recentfile",
+        "latestfile",
+        "recentpath",
+        "latestpath",
+        "recententry",
+        "latestentry",
+    ] {
+        if compact == prefix && matches!(prefix, "recent" | "latest" | "recentfile" | "latestfile")
+        {
+            return Some(0);
+        }
+        let Some(digits) = compact.strip_prefix(prefix) else {
+            continue;
+        };
+        if digits.is_empty() || !digits.chars().all(|ch| ch.is_ascii_digit()) {
+            continue;
+        }
+        let parsed = digits.parse::<usize>().ok()?;
+        return Some(parsed.saturating_sub(1));
     }
-    let parsed = digits.parse::<usize>().ok()?;
-    Some(parsed.saturating_sub(1))
+    None
 }
 
 fn resolve_listing_placeholder_path(input: &str, loop_state: &LoopState) -> Option<String> {

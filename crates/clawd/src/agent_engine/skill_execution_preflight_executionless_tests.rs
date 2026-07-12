@@ -52,7 +52,7 @@ fn evidence_policy_preflight_rejects_tools_for_executionless_terminal_boundary()
 }
 
 #[test]
-fn evidence_policy_preflight_keeps_legacy_tool_blocked_in_verified_window() {
+fn evidence_policy_preflight_allows_verified_observe_tool_for_executionless_boundary() {
     let state = test_state();
     let mut route = crate::RouteResult {
         ask_mode: crate::AskMode::act_with_chat_finalizer(),
@@ -75,20 +75,16 @@ fn evidence_policy_preflight_keeps_legacy_tool_blocked_in_verified_window() {
     let mut loop_state = LoopState::new(2);
     loop_state.route_policy_context = Some(route);
     loop_state.verified_action_window_active = true;
-    let args = serde_json::json!({"action": "list_dir", "path": "/home/guagua/rustclaw"});
+    let args = serde_json::json!({
+        "action": "inventory_dir",
+        "path": "/home/guagua/rustclaw",
+        "names_only": true
+    });
 
-    let err =
-        evidence_policy_action_policy_error(&state, &loop_state, "fs_basic", &args, "call_skill")
-            .expect("legacy tool calls should still be blocked by the executionless guard");
-    let parsed = crate::skills::parse_structured_skill_error(&err)
-        .expect("executionless preflight error should be structured");
-    assert_eq!(
-        parsed
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("reason_code"))
-            .and_then(|value| value.as_str()),
-        Some("executionless_boundary_tool_call_blocked")
+    assert!(
+        evidence_policy_action_policy_error(&state, &loop_state, "system_basic", &args, "call_skill")
+            .is_none(),
+        "verifier-approved read-only observations should not be denied by the legacy executionless guard"
     );
 }
 

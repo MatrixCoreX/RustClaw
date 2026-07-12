@@ -69,6 +69,45 @@ fn resolve_arg_string_replaces_trimmed_double_brace_placeholders() {
 }
 
 #[test]
+fn resolve_arg_string_replaces_last_output_listing_entry_path_reference() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","path":"/workspace/logs","entries":[{"name":"model_io.log","path":"logs/model_io.log"},{"name":"act_plan.log","path":"logs/act_plan.log"}]}}"#,
+    ));
+
+    assert_eq!(
+        resolve_arg_string("{{ last_output.entries.1.path }}", &loop_state),
+        "logs/act_plan.log"
+    );
+}
+
+#[test]
+fn resolve_arg_string_replaces_steps_output_listing_entry_path_reference() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","path":"/workspace/logs","entries":[{"name":"model_io.log","path":"logs/model_io.log"}]}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","path":"/workspace/document","entries":[{"name":"note.md","path":"document/note.md"}]}}"#,
+    ));
+
+    assert_eq!(
+        resolve_arg_string("{{steps.0.outputs.entries[0].path}}", &loop_state),
+        "logs/model_io.log"
+    );
+    assert_eq!(
+        resolve_arg_string("{{steps.1.outputs.entries[0].path}}", &loop_state),
+        "document/note.md"
+    );
+}
+
+#[test]
 fn resolve_arg_value_maps_file_placeholder_path_segment_from_latest_listing() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
@@ -117,6 +156,52 @@ fn resolve_arg_value_maps_file_placeholder_array_items_from_latest_listing_names
         ]))
     );
     assert_eq!(resolved.get("labels"), Some(&json!(["<file1>", "<file2>"])));
+}
+
+#[test]
+fn resolve_arg_value_maps_recent_placeholder_path_segment_from_latest_listing() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","path":"/home/guagua/rustclaw/logs","resolved_path":"/home/guagua/rustclaw/logs","entries":[{"name":"model_io.log","path":"logs/model_io.log"},{"name":"act_plan.log","path":"logs/act_plan.log"}],"files_only":true}}"#,
+    ));
+    let args = json!({
+        "action": "read_text_range",
+        "path": "/home/guagua/rustclaw/logs/<recent2>"
+    });
+
+    let resolved = resolve_arg_value(&args, &loop_state);
+
+    assert_eq!(
+        resolved.get("path").and_then(|value| value.as_str()),
+        Some("logs/act_plan.log")
+    );
+}
+
+#[test]
+fn resolve_arg_value_maps_recent_file_placeholder_to_first_listing_entry() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"list_dir","path":"/workspace/logs","entries":[{"name":"model_io.log"},{"name":"act_plan.log"}]}"#,
+    ));
+    let args = json!({
+        "path": "<recent_file>",
+        "label": "<recent_file>"
+    });
+
+    let resolved = resolve_arg_value(&args, &loop_state);
+
+    assert_eq!(
+        resolved.get("path").and_then(|value| value.as_str()),
+        Some("/workspace/logs/model_io.log")
+    );
+    assert_eq!(
+        resolved.get("label").and_then(|value| value.as_str()),
+        Some("<recent_file>")
+    );
 }
 
 #[test]
