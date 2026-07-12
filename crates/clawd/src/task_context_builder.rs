@@ -39,6 +39,7 @@ pub(crate) struct ExecutionContextView {
     pub(crate) budget_tier: ExecutionContextBudgetTier,
     pub(crate) memory_ctx: PromptMemoryContext,
     pub(crate) runtime_context: String,
+    pub(crate) active_task_context: String,
     pub(crate) active_execution_anchor_context: String,
     pub(crate) session_alias_context: String,
     pub(crate) recent_turns_full: String,
@@ -1093,6 +1094,7 @@ pub(crate) fn build_execution_task_context_bundle(
         budget_tier,
         memory_ctx,
         runtime_context: build_runtime_context(state),
+        active_task_context: build_active_task_context(&session_snapshot),
         active_execution_anchor_context: build_active_execution_anchor_context(&session_snapshot),
         session_alias_context: build_session_alias_context(&session_snapshot),
         recent_turns_full: if matches!(budget_tier, ExecutionContextBudgetTier::Full)
@@ -1289,6 +1291,11 @@ pub(crate) fn apply_execution_context_to_prompts(
         );
         resolved_prompt_for_execution.push_str(&alias_context_block);
         prompt_with_memory_for_execution.push_str(&alias_context_block);
+    }
+    if execution_view.active_task_context != "<none>" {
+        let active_task_context_block = format!("\n\n{}", execution_view.active_task_context);
+        resolved_prompt_for_execution.push_str(&active_task_context_block);
+        prompt_with_memory_for_execution.push_str(&active_task_context_block);
     }
     if execution_view.active_execution_anchor_context != "<none>" {
         let anchor_context_block = format!(

@@ -208,15 +208,22 @@ pub(crate) fn derive_observed_facts_from_ask_outcome(
     delivery_targets.sort();
     delivery_targets.dedup();
 
-    let bound_target = crate::followup_frame::derive_bound_target_from_journal(journal)
-        .or_else(|| {
-            crate::followup_frame::derive_bound_target_from_answer(answer_text, answer_messages)
+    let bound_target = route_allows_observed_bound_target(route_result)
+        .then(|| {
+            crate::followup_frame::derive_bound_target_from_journal(journal)
+                .or_else(|| {
+                    crate::followup_frame::derive_bound_target_from_answer(
+                        answer_text,
+                        answer_messages,
+                    )
+                })
+                .or_else(|| scalar_path_answer_bound_target(&combined, route_result))
+                .or_else(|| {
+                    let hint = route_result.output_contract.locator_hint.trim();
+                    (!hint.is_empty()).then(|| hint.to_string())
+                })
         })
-        .or_else(|| scalar_path_answer_bound_target(&combined, route_result))
-        .or_else(|| {
-            let hint = route_result.output_contract.locator_hint.trim();
-            (!hint.is_empty()).then(|| hint.to_string())
-        });
+        .flatten();
     let selected_entry_index = bound_target.as_deref().and_then(|target| {
         crate::followup_frame::selected_entry_index_for_target(
             &crate::followup_frame::FollowupFrame {
@@ -249,6 +256,15 @@ pub(crate) fn derive_observed_facts_from_ask_outcome(
         }),
         delivery_targets,
     }
+}
+
+pub(crate) fn route_allows_observed_bound_target(route_result: &crate::RouteResult) -> bool {
+    !route_uses_non_binding_workspace_evidence(route_result)
+}
+
+fn route_uses_non_binding_workspace_evidence(route_result: &crate::RouteResult) -> bool {
+    route_result.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary)
+        || route_result.has_route_reason_machine_marker("workspace_project_summary")
 }
 
 fn route_contract_can_publish_ordered_entries(route_result: &crate::RouteResult) -> bool {

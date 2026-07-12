@@ -904,6 +904,7 @@ fn execution_context_adds_recent_turns_to_chat_prompt_before_last_turn_fallback(
                 recent_related_events: Vec::new(),
             },
             runtime_context: "<none>".to_string(),
+            active_task_context: "<none>".to_string(),
             active_execution_anchor_context: "<none>".to_string(),
             session_alias_context: "<none>".to_string(),
             recent_turns_full: "### RECENT_TURNS_FULL\n[TURN -2]\nUser: 请记住测试编号 client-like-continuous-1\nAssistant: 已记住\n[/TURN]".to_string(),
@@ -942,6 +943,7 @@ fn execution_context_adds_runtime_context_to_chat_and_planner_prompts() {
                 recent_related_events: Vec::new(),
             },
             runtime_context: "### RUNTIME_CONTEXT\ncurrent_process_cwd: /tmp/workspace\nworkspace_root: /tmp/workspace".to_string(),
+            active_task_context: "<none>".to_string(),
             active_execution_anchor_context: "<none>".to_string(),
             session_alias_context: "<none>".to_string(),
             recent_turns_full: "<none>".to_string(),
@@ -959,6 +961,49 @@ fn execution_context_adds_runtime_context_to_chat_and_planner_prompts() {
     assert!(chat_context.contains("current_process_cwd: /tmp/workspace"));
     assert!(execution.contains("### RUNTIME_CONTEXT"));
     assert!(execution.contains("workspace_root: /tmp/workspace"));
+}
+
+#[test]
+fn execution_context_adds_active_task_text_to_planner_prompts() {
+    let bundle = TaskContextBundle {
+        raw_sources: TaskContextRawSources::default(),
+        planner_view: PlannerContextView::default(),
+        route_view: None,
+        execution_view: Some(ExecutionContextView {
+            budget_tier: crate::task_context_builder::ExecutionContextBudgetTier::Light,
+            memory_ctx: crate::memory::service::PromptMemoryContext {
+                prompt_with_memory: String::new(),
+                chat_prompt_context: String::new(),
+                memory_trace: None,
+                long_term_summary: None,
+                preferences: Vec::new(),
+                recalled: Vec::new(),
+                similar_triggers: Vec::new(),
+                relevant_facts: Vec::new(),
+                recent_related_events: Vec::new(),
+            },
+            runtime_context: "<none>".to_string(),
+            active_task_context: "### ACTIVE_TASK_CONTEXT\nlast_primary_task_prompt:\nWrite a short release note for RustClaw.\nlast_primary_task_output:\nRustClaw is easier to use for non-technical users.".to_string(),
+            active_execution_anchor_context: "<none>".to_string(),
+            session_alias_context: "<none>".to_string(),
+            recent_turns_full: "<none>".to_string(),
+            last_turn_full: "<none>".to_string(),
+            recent_execution_anchor: "<none>".to_string(),
+            recent_execution_context: "<none>".to_string(),
+            image_context: None,
+        }),
+    };
+    let mut chat_context = "### MEMORY_CONTEXT\n<none>".to_string();
+    let mut resolved = "Actually switch it to a three-step checklist.".to_string();
+    let mut execution = resolved.clone();
+
+    apply_execution_context_to_prompts(&bundle, &mut chat_context, &mut resolved, &mut execution);
+
+    assert!(resolved.contains("### ACTIVE_TASK_CONTEXT"));
+    assert!(resolved.contains("last_primary_task_output:"));
+    assert!(resolved.contains("RustClaw is easier to use"));
+    assert!(execution.contains("### ACTIVE_TASK_CONTEXT"));
+    assert!(!chat_context.contains("### ACTIVE_TASK_CONTEXT"));
 }
 
 #[test]
@@ -981,6 +1026,7 @@ fn execution_context_uses_recent_execution_context_fallback_for_planner_prompt()
                 recent_related_events: Vec::new(),
             },
             runtime_context: "<none>".to_string(),
+            active_task_context: "<none>".to_string(),
             active_execution_anchor_context: "<none>".to_string(),
             session_alias_context: "<none>".to_string(),
             recent_turns_full: "<none>".to_string(),
@@ -1022,6 +1068,7 @@ fn execution_context_adds_active_ordered_anchor_to_planner_prompts() {
                 recent_related_events: Vec::new(),
             },
             runtime_context: "<none>".to_string(),
+            active_task_context: "<none>".to_string(),
             active_execution_anchor_context:
                 "### ACTIVE_EXECUTION_ANCHOR\nfollowup_bound_target: /tmp/rustclaw/crates\nfollowup_ordered_entries: 1:claw-core | 2:clawcli | 3:clawd | 4:feishud | 5:larkd"
                     .to_string(),
@@ -1067,6 +1114,7 @@ fn execution_context_adds_session_alias_bindings_to_planner_prompts() {
                 recent_related_events: Vec::new(),
             },
             runtime_context: "<none>".to_string(),
+            active_task_context: "<none>".to_string(),
             active_execution_anchor_context: "<none>".to_string(),
             session_alias_context:
                 "### SESSION_ALIAS_BINDINGS\n- alias: 甲目录\n  target: /tmp/docs/archive\n- alias: 乙文件\n  target: /tmp/docs/release_checklist.md"

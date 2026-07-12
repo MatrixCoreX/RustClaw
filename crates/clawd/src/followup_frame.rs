@@ -543,6 +543,9 @@ fn op_kind_from_route(
     {
         return FollowupOpKind::List;
     }
+    if !crate::observed_facts::route_allows_observed_bound_target(route_result) {
+        return FollowupOpKind::Generic;
+    }
     if route_result.output_contract.requires_content_evidence
         && (matches!(
             route_result.output_contract.locator_kind,
@@ -1346,11 +1349,15 @@ fn derive_frame_for_ask_outcome(
         op_kind,
         bound_target: (!unresolved_locator)
             .then(|| {
-                code_workspace_bound_target.clone().or_else(|| {
-                    observed_facts.bound_target.clone().or_else(|| {
-                        let hint = route_result.output_contract.locator_hint.trim();
-                        (!hint.is_empty()).then(|| hint.to_string())
-                    })
+                if code_workspace_bound_target.is_some() {
+                    return code_workspace_bound_target.clone();
+                }
+                if !crate::observed_facts::route_allows_observed_bound_target(route_result) {
+                    return None;
+                }
+                observed_facts.bound_target.clone().or_else(|| {
+                    let hint = route_result.output_contract.locator_hint.trim();
+                    (!hint.is_empty()).then(|| hint.to_string())
                 })
             })
             .flatten(),
