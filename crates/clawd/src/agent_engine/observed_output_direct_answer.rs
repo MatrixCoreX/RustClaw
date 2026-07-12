@@ -585,6 +585,17 @@ pub(super) fn extract_answer_from_observed_output_impl(
                             auto_locator_path,
                             prefers_english_presence_answer,
                         )
+                    } else if action == Some("path_batch_facts")
+                        && !matches!(response_shape, Some(crate::OutputResponseShape::FileToken))
+                        && route.is_none_or(|route| !route.output_contract.delivery_required)
+                    {
+                        system_basic_existence_with_path_candidate(
+                            state,
+                            &value,
+                            locator_hint,
+                            auto_locator_path,
+                            prefers_english_presence_answer,
+                        )
                     } else {
                         None
                     }

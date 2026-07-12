@@ -409,6 +409,16 @@ fn agent_loop_boundary_observations_block(
     let route_reason_codes = boundary_observation_route_reason_codes(route);
     let session_alias_bindings = session_alias_binding_observations(session_snapshot);
     let active_bound_targets = active_bound_target_observations(session_snapshot);
+    let has_auto_locator = post_route
+        .auto_locator_path
+        .as_deref()
+        .is_some_and(|path| !path.trim().is_empty() || post_route.auto_locator_resolved_direct);
+    let has_fuzzy_locator = !post_route.fuzzy_locator_suggestions.is_empty();
+    let auto_locator_boundary_ready = has_auto_locator
+        && matches!(
+            post_route.gate_record.outcome,
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady
+        );
     let missing_referent =
         missing_referent_observation(route, &active_bound_targets).or_else(|| {
             unbound_contextual_locator_missing_referent_observation(
@@ -418,6 +428,11 @@ fn agent_loop_boundary_observations_block(
                 &active_bound_targets,
             )
         });
+    let missing_referent = if auto_locator_boundary_ready {
+        None
+    } else {
+        missing_referent
+    };
     let file_delivery_target_candidates =
         file_delivery_target_candidate_observations(route, session_snapshot);
     let current_workspace_scope = current_workspace_scope_observation(state, route);
@@ -446,11 +461,6 @@ fn agent_loop_boundary_observations_block(
     let contract_repair_candidates =
         contract_repair_candidate_observations(state, prompt, resolved_prompt, route);
     let runtime_session_state = runtime_session_state_observation(session_snapshot, turn_analysis);
-    let has_auto_locator = post_route
-        .auto_locator_path
-        .as_deref()
-        .is_some_and(|path| !path.trim().is_empty() || post_route.auto_locator_resolved_direct);
-    let has_fuzzy_locator = !post_route.fuzzy_locator_suggestions.is_empty();
     let has_boundary_gate = post_route.gate_record.outcome
         != crate::post_route_policy::PostRoutePolicyOutcome::NoChange
         || route.needs_clarify

@@ -1037,6 +1037,42 @@ fn direct_answer_formats_existence_with_path_from_system_basic_path_batch_facts(
 }
 
 #[test]
+fn direct_answer_prefers_path_batch_facts_over_prior_find_entries_without_semantic_marker() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"find_name","count":1,"exact":true,"patterns":["rustclaw.service"],"results":["rustclaw.service"],"root":""}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/home/guagua/rustclaw/rustclaw.service","size_bytes":769},"path":"/home/guagua/rustclaw/rustclaw.service"}],"include_missing":true}"#,
+    ));
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route_result.route_reason =
+        "executable_contract_preserved_for_agent_loop; current_turn_locator_overrides_contextual_path"
+            .to_string();
+    route_result.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route_result.output_contract.locator_hint.clear();
+    route_result.output_contract.semantic_kind = OutputSemanticKind::None;
+    route_result.output_contract.requires_content_evidence = false;
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
+
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("path facts should win over weaker basename search result");
+
+    assert!(answer.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer.contains("reason_code=path_fact_observed"));
+    assert!(answer.contains("exists=true"));
+    assert!(answer.contains("path=/home/guagua/rustclaw/rustclaw.service"));
+    assert_ne!(answer.trim(), "rustclaw.service");
+}
+
+#[test]
 fn direct_answer_formats_strict_path_kind_from_fs_basic_path_batch_facts() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(

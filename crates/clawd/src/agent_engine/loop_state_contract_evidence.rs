@@ -38,35 +38,73 @@ fn boundary_observation_needs_clarify_from_summary(summary: &str) -> bool {
         let Ok(value) = serde_json::from_str::<Value>(block) else {
             continue;
         };
-        if value
-            .get("needs_clarify")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            return true;
-        }
-        if value
-            .get("post_route_boundary_record")
-            .and_then(Value::as_object)
-            .and_then(|record| record.get("outcome"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            == Some("boundary_clarify")
-        {
-            return true;
-        }
-        if value
-            .get("missing_referent")
-            .and_then(Value::as_object)
-            .and_then(|record| record.get("status_code"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            == Some("missing_referent")
-        {
+        if boundary_observation_value_needs_clarify(&value) {
             return true;
         }
     }
     false
+}
+
+fn boundary_observation_value_needs_clarify(value: &Value) -> bool {
+    if value
+        .get("needs_clarify")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    if value
+        .get("post_route_boundary_record")
+        .and_then(Value::as_object)
+        .and_then(|record| record.get("outcome"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        == Some("boundary_clarify")
+    {
+        return true;
+    }
+    boundary_observation_has_blocking_missing_referent(value)
+}
+
+fn boundary_observation_has_blocking_missing_referent(value: &Value) -> bool {
+    let missing_referent = value
+        .get("missing_referent")
+        .and_then(Value::as_object)
+        .and_then(|record| record.get("status_code"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        == Some("missing_referent");
+    if !missing_referent {
+        return false;
+    }
+    if value
+        .get("post_route_boundary_record")
+        .and_then(Value::as_object)
+        .and_then(|record| record.get("outcome"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        == Some("boundary_ready")
+    {
+        return false;
+    }
+    if value
+        .get("auto_locator")
+        .and_then(Value::as_object)
+        .is_some_and(|locator| {
+            locator
+                .get("resolved_direct")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || locator
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .is_some_and(|path| !path.is_empty())
+        })
+    {
+        return false;
+    }
+    true
 }
 
 fn active_plan_file_targets_from_boundary_observation_blocks(summary: &str) -> Vec<String> {

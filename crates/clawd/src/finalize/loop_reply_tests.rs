@@ -83,6 +83,9 @@ use claw_core::skill_registry::SkillsRegistry;
 #[path = "loop_reply_tests/machine_kv_json_guard.rs"]
 mod machine_kv_json_guard;
 
+#[path = "loop_reply_tests/machine_kv_path_fact.rs"]
+mod machine_kv_path_fact;
+
 #[test]
 fn visible_answer_machine_payload_detection_is_structural() {
     assert!(visible_answer_is_machine_payload(

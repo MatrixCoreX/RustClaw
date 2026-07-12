@@ -451,6 +451,51 @@ fn boundary_observation_marks_deictic_filename_followup_without_active_target() 
 }
 
 #[test]
+fn boundary_observation_suppresses_missing_referent_after_auto_locator_ready() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut route = base_route();
+    route.route_reason = "execution_recipe_target_locator_preserved_for_agent_loop; executable_contract_preserved_for_agent_loop; current_turn_locator_overrides_contextual_path"
+        .to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
+    route.output_contract.requires_content_evidence = true;
+    let post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: Some("/workspace/rustclaw.service".to_string()),
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: true,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::with_owner(
+            "boundary_locator_gate",
+            "post_route_auto_locator_satisfied_path_scoped_content",
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
+        ),
+    };
+
+    let block = agent_loop_boundary_observations_block(
+        &state,
+        &post_route,
+        &crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        },
+        None,
+        "rustclaw.service",
+        "rustclaw.service",
+        &[],
+    )
+    .expect("auto locator boundary should export boundary state");
+
+    assert!(block.contains("\"auto_locator\""));
+    assert!(block.contains("\"resolved_direct\":true"));
+    assert!(block.contains("\"outcome\":\"boundary_ready\""));
+    assert!(block.contains("\"missing_referent\":null"));
+}
+
+#[test]
 fn boundary_observation_does_not_export_active_plan_files_for_plain_answer_boundary() {
     let root = temp_workspace_root("plain_answer_hides_plan_files");
     let plan_dir = root.join("plan");

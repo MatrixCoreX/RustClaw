@@ -663,7 +663,7 @@ fn generic_local_content_contract_skill_scope(route: &RouteResult) -> Option<BTr
         return Some(BTreeSet::from(["db_basic".to_string()]));
     }
     let skills = skills_from_action_refs_capped(
-        crate::contract_matrix::allowed_action_refs_for_output_contract(&contract),
+        crate::evidence_policy::allowed_action_refs_for_output_contract(&contract),
         8,
     );
     (!skills.is_empty()).then_some(skills)

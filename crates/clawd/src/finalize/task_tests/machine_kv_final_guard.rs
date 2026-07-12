@@ -587,3 +587,42 @@ fn requested_machine_kv_summary_force_patches_archive_db_json_instead_of_scalar_
     assert_eq!(answer_messages, vec![answer_text.clone()]);
     assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
 }
+
+#[test]
+fn requested_machine_kv_summary_final_guard_restores_path_fact_over_filename_marker() {
+    let prompt = "rustclaw.service";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.output_contract.locator_hint = "rustclaw.service".to_string();
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-machine-kv-path-fact-final",
+        "ask",
+        prompt,
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/home/guagua/rustclaw/rustclaw.service","size_bytes":769},"path":"/home/guagua/rustclaw/rustclaw.service"}],"include_missing":true}}"#,
+        ));
+    let mut answer_text = "rustclaw.service".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert!(answer_text.contains("message_key=clawd.msg.path_fact.observed"));
+    assert!(answer_text.contains("reason_code=path_fact_observed"));
+    assert!(answer_text.contains("exists=true"));
+    assert!(answer_text.contains("path=/home/guagua/rustclaw/rustclaw.service"));
+    assert!(answer_text.contains("kind=file"));
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
+    assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
+}
