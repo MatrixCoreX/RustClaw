@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import {
   audioExtensionForMime,
@@ -22,6 +22,38 @@ import type {
 
 type Translate = (zh: string, en: string) => string;
 type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
+
+export interface ChatThreadSummary {
+  id: string;
+  title: string;
+  preview: string;
+  updatedAt: number;
+  messageCount: number;
+  agentMode: boolean;
+  teachingMode: boolean;
+}
+
+interface ChatThreadRecord {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  input: string;
+  createdAt: number;
+  updatedAt: number;
+  agentMode: boolean;
+  teachingMode: boolean;
+  externalChatId: string;
+  lastTaskId?: string | null;
+}
+
+interface ChatThreadState {
+  activeThreadId: string;
+  threads: ChatThreadRecord[];
+}
+
+const CHAT_THREAD_STORAGE_KEY = "rustclaw.ui.chatThreads.v1";
+const MAX_CHAT_THREADS = 30;
+const MAX_PERSISTED_MESSAGES_PER_THREAD = 120;
 
 export interface UseChatRuntimeParams {
   apiFetch: ApiFetch;
@@ -52,21 +84,19 @@ export function useChatRuntime({
   onTaskSubmitted,
   onTaskResult,
 }: UseChatRuntimeParams) {
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: "chat-system-welcome",
-      role: "system",
-      text: t(
-        "会话窗口已连接 clawd。发送消息后会自动提交 ask 任务并轮询结果。",
-        "The chat window is connected to clawd. Messages submit ask tasks and poll for results automatically.",
-      ),
-      ts: Date.now(),
-    },
-  ]);
-  const [chatInput, setChatInput] = useState("");
+  const [chatThreadState, setChatThreadState] = useState<ChatThreadState>(() =>
+    loadChatThreadState(t),
+  );
+  const activeChatThread =
+    chatThreadState.threads.find((thread) => thread.id === chatThreadState.activeThreadId) ??
+    chatThreadState.threads[0] ??
+    createChatThread(t);
+  const chatMessages = activeChatThread.messages;
+  const chatInput = activeChatThread.input;
+  const chatAgentMode = activeChatThread.agentMode;
+  const chatTeachingMode = activeChatThread.teachingMode;
+  const chatThreadSummaries = buildChatThreadSummaries(chatThreadState.threads, t);
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
-  const [chatAgentMode, setChatAgentMode] = useState(true);
-  const [chatTeachingMode, setChatTeachingMode] = useState(false);
   const [chatTeachingTaskResult, setChatTeachingTaskResult] = useState<TaskQueryResponse | null>(null);
   const [chatTeachingLlmDebug, setChatTeachingLlmDebug] = useState<TaskLlmDebugResponse | null>(null);
   const [chatTeachingLlmDebugLoading, setChatTeachingLlmDebugLoading] = useState(false);
@@ -83,6 +113,7 @@ export function useChatRuntime({
   const chatSendingValueRef = useRef(false);
   const chatRecordingValueRef = useRef(false);
   const chatTeachingModeValueRef = useRef(false);
+  const activeChatThreadRef = useRef(activeChatThread);
   const voiceSendOnStopRef = useRef(false);
   const voiceStopRequestedRef = useRef(false);
 
@@ -91,16 +122,111 @@ export function useChatRuntime({
   chatSendingValueRef.current = chatSending;
   chatRecordingValueRef.current = chatRecording;
   chatTeachingModeValueRef.current = chatTeachingMode;
+  activeChatThreadRef.current = activeChatThread;
+
+  useEffect(() => {
+    persistChatThreadState(chatThreadState);
+  }, [chatThreadState]);
+
+  const updateChatThreadById = (
+    threadId: string,
+    updater: (thread: ChatThreadRecord) => ChatThreadRecord,
+  ) => {
+    setChatThreadState((prev) => ({
+      ...prev,
+      threads: prev.threads
+        .map((thread) => (thread.id === threadId ? updater(thread) : thread))
+        .slice(0, MAX_CHAT_THREADS),
+    }));
+  };
+
+  const updateActiveChatThread = (updater: (thread: ChatThreadRecord) => ChatThreadRecord) => {
+    const threadId = activeChatThreadRef.current.id;
+    updateChatThreadById(threadId, updater);
+  };
+
+  const setChatInput = (value: string) => {
+    chatInputValueRef.current = value;
+    updateActiveChatThread((thread) => ({ ...thread, input: value, updatedAt: Date.now() }));
+  };
+
+  const setChatAgentMode = (value: boolean) => {
+    updateActiveChatThread((thread) => ({
+      ...thread,
+      agentMode: value,
+      updatedAt: Date.now(),
+    }));
+  };
+
+  const setChatTeachingMode = (value: boolean) => {
+    chatTeachingModeValueRef.current = value;
+    updateActiveChatThread((thread) => ({
+      ...thread,
+      teachingMode: value,
+      updatedAt: Date.now(),
+    }));
+    if (!value) {
+      setChatTeachingTaskResult(null);
+      setChatTeachingLlmDebug(null);
+      setChatTeachingLlmDebugError(null);
+    }
+  };
+
+  const selectChatThread = (threadId: string) => {
+    if (!chatThreadState.threads.some((thread) => thread.id === threadId)) return;
+    setChatThreadState((prev) => ({ ...prev, activeThreadId: threadId }));
+    chatAttachmentsValueRef.current = [];
+    setChatAttachments([]);
+    setChatTeachingTaskResult(null);
+    setChatTeachingLlmDebug(null);
+    setChatTeachingLlmDebugError(null);
+  };
+
+  const createNewChatThread = () => {
+    const nextThread = createChatThread(t);
+    setChatThreadState((prev) => ({
+      activeThreadId: nextThread.id,
+      threads: [nextThread, ...prev.threads].slice(0, MAX_CHAT_THREADS),
+    }));
+    chatInputValueRef.current = "";
+    chatAttachmentsValueRef.current = [];
+    setChatAttachments([]);
+    setChatTeachingTaskResult(null);
+    setChatTeachingLlmDebug(null);
+    setChatTeachingLlmDebugError(null);
+    setChatError(null);
+  };
+
+  const deleteChatThread = (threadId: string) => {
+    setChatThreadState((prev) => {
+      if (prev.threads.length <= 1) {
+        const replacement = createChatThread(t);
+        return { activeThreadId: replacement.id, threads: [replacement] };
+      }
+      const remaining = prev.threads.filter((thread) => thread.id !== threadId);
+      const activeThreadId =
+        prev.activeThreadId === threadId
+          ? remaining[0]?.id ?? createChatThread(t).id
+          : prev.activeThreadId;
+      return { activeThreadId, threads: remaining };
+    });
+    chatInputValueRef.current = "";
+    chatAttachmentsValueRef.current = [];
+    setChatAttachments([]);
+    setChatTeachingTaskResult(null);
+    setChatTeachingLlmDebug(null);
+    setChatTeachingLlmDebugError(null);
+  };
 
   const clearChatMessages = () => {
-    setChatMessages([
-      {
-        id: `chat-clear-${Date.now()}`,
-        role: "system",
-        text: t("聊天记录已清空。", "Chat history cleared."),
-        ts: Date.now(),
-      },
-    ]);
+    updateActiveChatThread((thread) => ({
+      ...thread,
+      messages: [clearedChatMessage(t)],
+      input: "",
+      updatedAt: Date.now(),
+      lastTaskId: null,
+    }));
+    chatInputValueRef.current = "";
     setChatTeachingTaskResult(null);
     setChatTeachingLlmDebug(null);
     setChatTeachingLlmDebugError(null);
@@ -304,6 +430,9 @@ export function useChatRuntime({
             attachedAudios.length,
             attachedFiles.length,
           ));
+    const threadAtSubmit = activeChatThreadRef.current;
+    const submitThreadId = threadAtSubmit.id;
+    const teachingModeAtSubmit = threadAtSubmit.teachingMode;
     chatSendingValueRef.current = true;
     setChatSending(true);
     setChatError(null);
@@ -322,10 +451,15 @@ export function useChatRuntime({
       attachments: attached,
       images: attachedImages,
     };
-    setChatMessages((prev) => [...prev, userMsg]);
+    updateChatThreadById(submitThreadId, (thread) => ({
+      ...thread,
+      title: titleForThreadAfterUserMessage(thread, userMsg, t),
+      messages: appendThreadMessages(thread.messages, userMsg),
+      input: options.clearInput ? "" : thread.input,
+      updatedAt: Date.now(),
+    }));
     if (options.clearInput) {
       chatInputValueRef.current = "";
-      setChatInput("");
     }
     if (options.clearAttachments) {
       chatAttachmentsValueRef.current = [];
@@ -337,6 +471,10 @@ export function useChatRuntime({
 
     try {
       const adapterName = interactionAdapter.trim();
+      const explicitExternalChatId = interactionExternalChatId.trim();
+      const effectiveExternalChatId = explicitExternalChatId
+        ? `${explicitExternalChatId}--${threadAtSubmit.externalChatId}`
+        : threadAtSubmit.externalChatId;
       const attachmentPayload = attached.map((attachment) => ({
         name: attachment.name,
         mime_type: attachment.mimeType,
@@ -350,10 +488,10 @@ export function useChatRuntime({
         ...(activeUserKey ? { user_key: activeUserKey } : {}),
         ...activeIdentityIds,
         ...(interactionExternalUserId.trim() ? { external_user_id: interactionExternalUserId.trim() } : {}),
-        ...(interactionExternalChatId.trim() ? { external_chat_id: interactionExternalChatId.trim() } : {}),
+        ...(effectiveExternalChatId ? { external_chat_id: effectiveExternalChatId } : {}),
         payload: {
           text: requestText,
-          agent_mode: chatAgentMode,
+          agent_mode: threadAtSubmit.agentMode,
           ...(audioOnly ? { source: "voice" } : {}),
           ...(adapterName ? { adapter: adapterName } : {}),
           ...(attached.length > 0
@@ -392,7 +530,12 @@ export function useChatRuntime({
 
       const submittedTaskId = submitData.data.task_id;
       onTaskSubmitted(submittedTaskId);
-      if (chatTeachingModeValueRef.current) {
+      updateChatThreadById(submitThreadId, (thread) => ({
+        ...thread,
+        lastTaskId: submittedTaskId,
+        updatedAt: Date.now(),
+      }));
+      if (teachingModeAtSubmit && activeChatThreadRef.current.id === submitThreadId) {
         setChatTeachingTaskResult({
           task_id: submittedTaskId,
           status: "running",
@@ -416,7 +559,7 @@ export function useChatRuntime({
         throw new Error(t("轮询超时：任务仍在运行，请稍后在任务查询区查看。", "Polling timed out: the task is still running. Check it later in the task query area."));
       }
       onTaskResult(submittedTaskId, finalResult);
-      if (chatTeachingModeValueRef.current) {
+      if (teachingModeAtSubmit && activeChatThreadRef.current.id === submitThreadId) {
         setChatTeachingTaskResult(finalResult);
         void queryChatTeachingLlmDebug(submittedTaskId);
       }
@@ -427,7 +570,11 @@ export function useChatRuntime({
         text: attachedImages.length > 0 ? formatVisionResultText(extractTaskText(finalResult)) : extractTaskText(finalResult),
         ts: Date.now(),
       };
-      setChatMessages((prev) => [...prev, assistantMsg]);
+      updateChatThreadById(submitThreadId, (thread) => ({
+        ...thread,
+        messages: appendThreadMessages(thread.messages, assistantMsg),
+        updatedAt: Date.now(),
+      }));
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
       setChatError(message);
@@ -437,7 +584,11 @@ export function useChatRuntime({
         text: `${t("发送失败", "Send failed")}: ${message}`,
         ts: Date.now(),
       };
-      setChatMessages((prev) => [...prev, systemErrMsg]);
+      updateChatThreadById(submitThreadId, (thread) => ({
+        ...thread,
+        messages: appendThreadMessages(thread.messages, systemErrMsg),
+        updatedAt: Date.now(),
+      }));
     } finally {
       chatSendingValueRef.current = false;
       setChatSending(false);
@@ -485,7 +636,206 @@ export function useChatRuntime({
     stopChatVoiceRecording,
     sendChatMessage,
     queryChatTeachingLlmDebug,
+    chatThreads: chatThreadSummaries,
+    activeChatThreadId: chatThreadState.activeThreadId,
+    createNewChatThread,
+    selectChatThread,
+    deleteChatThread,
   };
+}
+
+function loadChatThreadState(t: Translate): ChatThreadState {
+  const fallback = createChatThread(t);
+  if (typeof window === "undefined") {
+    return { activeThreadId: fallback.id, threads: [fallback] };
+  }
+  try {
+    const raw = window.localStorage.getItem(CHAT_THREAD_STORAGE_KEY);
+    if (!raw) {
+      return { activeThreadId: fallback.id, threads: [fallback] };
+    }
+    const parsed = JSON.parse(raw) as Partial<ChatThreadState>;
+    const threads = Array.isArray(parsed.threads)
+      ? parsed.threads
+          .map((thread) => normalizeStoredChatThread(thread, t))
+          .filter((thread): thread is ChatThreadRecord => Boolean(thread))
+          .slice(0, MAX_CHAT_THREADS)
+      : [];
+    if (threads.length === 0) {
+      return { activeThreadId: fallback.id, threads: [fallback] };
+    }
+    const activeThreadId =
+      typeof parsed.activeThreadId === "string" &&
+      threads.some((thread) => thread.id === parsed.activeThreadId)
+        ? parsed.activeThreadId
+        : threads[0].id;
+    return { activeThreadId, threads };
+  } catch {
+    return { activeThreadId: fallback.id, threads: [fallback] };
+  }
+}
+
+function persistChatThreadState(state: ChatThreadState) {
+  if (typeof window === "undefined") return;
+  try {
+    const payload: ChatThreadState = {
+      activeThreadId: state.activeThreadId,
+      threads: state.threads.slice(0, MAX_CHAT_THREADS).map((thread) => ({
+        ...thread,
+        messages: thread.messages
+          .slice(-MAX_PERSISTED_MESSAGES_PER_THREAD)
+          .map(stripAttachmentPayloadsFromMessage),
+      })),
+    };
+    window.localStorage.setItem(CHAT_THREAD_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Local history is a convenience cache; quota/private-mode failures must not block chat.
+  }
+}
+
+function normalizeStoredChatThread(raw: unknown, t: Translate): ChatThreadRecord | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Partial<ChatThreadRecord>;
+  if (typeof record.id !== "string" || !record.id.trim()) return null;
+  const now = Date.now();
+  const messages = Array.isArray(record.messages)
+    ? record.messages
+        .map(normalizeStoredChatMessage)
+        .filter((message): message is ChatMessage => Boolean(message))
+        .slice(-MAX_PERSISTED_MESSAGES_PER_THREAD)
+    : [];
+  return {
+    id: record.id,
+    title:
+      typeof record.title === "string" && record.title.trim()
+        ? record.title.trim()
+        : t("未命名任务", "Untitled task"),
+    messages: messages.length > 0 ? messages : [welcomeChatMessage(t)],
+    input: typeof record.input === "string" ? record.input : "",
+    createdAt: typeof record.createdAt === "number" ? record.createdAt : now,
+    updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : now,
+    agentMode: typeof record.agentMode === "boolean" ? record.agentMode : true,
+    teachingMode: typeof record.teachingMode === "boolean" ? record.teachingMode : false,
+    externalChatId:
+      typeof record.externalChatId === "string" && record.externalChatId.trim()
+        ? record.externalChatId.trim()
+        : createThreadExternalChatId(),
+    lastTaskId: typeof record.lastTaskId === "string" ? record.lastTaskId : null,
+  };
+}
+
+function normalizeStoredChatMessage(raw: unknown): ChatMessage | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Partial<ChatMessage>;
+  if (
+    typeof record.id !== "string" ||
+    typeof record.text !== "string" ||
+    typeof record.ts !== "number" ||
+    !["user", "assistant", "system"].includes(String(record.role))
+  ) {
+    return null;
+  }
+  return {
+    id: record.id,
+    role: record.role as ChatMessage["role"],
+    text: record.text,
+    ts: record.ts,
+  };
+}
+
+function stripAttachmentPayloadsFromMessage(message: ChatMessage): ChatMessage {
+  return {
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    ts: message.ts,
+  };
+}
+
+function createChatThread(t: Translate): ChatThreadRecord {
+  const now = Date.now();
+  return {
+    id: `chat-thread-${now}-${Math.random().toString(36).slice(2, 8)}`,
+    title: t("新任务", "New task"),
+    messages: [welcomeChatMessage(t)],
+    input: "",
+    createdAt: now,
+    updatedAt: now,
+    agentMode: true,
+    teachingMode: false,
+    externalChatId: createThreadExternalChatId(),
+    lastTaskId: null,
+  };
+}
+
+function createThreadExternalChatId(): string {
+  return `ui-chat-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function welcomeChatMessage(t: Translate): ChatMessage {
+  return {
+    id: `chat-system-welcome-${Date.now()}`,
+    role: "system",
+    text: t(
+      "会话窗口已连接 clawd。发送消息后会自动提交 ask 任务并轮询结果。",
+      "The chat window is connected to clawd. Messages submit ask tasks and poll for results automatically.",
+    ),
+    ts: Date.now(),
+  };
+}
+
+function clearedChatMessage(t: Translate): ChatMessage {
+  return {
+    id: `chat-clear-${Date.now()}`,
+    role: "system",
+    text: t("当前任务的聊天记录已清空。", "This task's chat history was cleared."),
+    ts: Date.now(),
+  };
+}
+
+function buildChatThreadSummaries(
+  threads: ChatThreadRecord[],
+  t: Translate,
+): ChatThreadSummary[] {
+  return [...threads]
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .map((thread) => ({
+      id: thread.id,
+      title: thread.title,
+      preview: threadPreview(thread, t),
+      updatedAt: thread.updatedAt,
+      messageCount: thread.messages.filter((message) => message.role !== "system").length,
+      agentMode: thread.agentMode,
+      teachingMode: thread.teachingMode,
+    }));
+}
+
+function threadPreview(thread: ChatThreadRecord, t: Translate): string {
+  const latest = [...thread.messages]
+    .reverse()
+    .find((message) => message.role === "user" || message.role === "assistant");
+  return latest?.text.trim() || t("还没有消息", "No messages yet");
+}
+
+function titleForThreadAfterUserMessage(
+  thread: ChatThreadRecord,
+  message: ChatMessage,
+  t: Translate,
+): string {
+  const hasPriorUserMessage = thread.messages.some((item) => item.role === "user");
+  const defaultTitles = new Set([t("新任务", "New task"), t("未命名任务", "Untitled task")]);
+  if (hasPriorUserMessage || !defaultTitles.has(thread.title)) {
+    return thread.title;
+  }
+  const cleaned = message.text.replace(/\s+/g, " ").trim();
+  if (!cleaned) {
+    return t("附件任务", "Attachment task");
+  }
+  return cleaned.length > 28 ? `${cleaned.slice(0, 28)}...` : cleaned;
+}
+
+function appendThreadMessages(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
+  return [...messages, message].slice(-MAX_PERSISTED_MESSAGES_PER_THREAD);
 }
 
 function canUseDirectVoiceRecording(): boolean {

@@ -1,5 +1,16 @@
 import type { KeyboardEvent, RefObject } from "react";
-import { FileText, Loader2, Mic, Paperclip, RefreshCw, Square, X } from "lucide-react";
+import {
+  FileText,
+  Loader2,
+  MessageSquare,
+  Mic,
+  Paperclip,
+  Plus,
+  RefreshCw,
+  Square,
+  Trash2,
+  X,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 import {
@@ -13,10 +24,22 @@ import { TaskLlmTracePanel } from "./TaskLlmTracePanel";
 type Translate = (zh: string, en: string) => string;
 type TranslateSlash = (text: string) => string;
 
+interface ChatThreadSummary {
+  id: string;
+  title: string;
+  preview: string;
+  updatedAt: number;
+  messageCount: number;
+  agentMode: boolean;
+  teachingMode: boolean;
+}
+
 export interface ChatPageProps {
   t: Translate;
   tSlash: TranslateSlash;
   chatMessages: ChatMessage[];
+  chatThreads: ChatThreadSummary[];
+  activeChatThreadId: string;
   chatInput: string;
   chatAttachments: ChatAttachment[];
   chatAgentMode: boolean;
@@ -33,6 +56,9 @@ export interface ChatPageProps {
   toLocalTime: (value: number | null | undefined) => string;
   onChatAgentModeChange: (value: boolean) => void;
   onChatTeachingModeChange: (value: boolean) => void;
+  onCreateNewChatThread: () => void;
+  onSelectChatThread: (threadId: string) => void;
+  onDeleteChatThread: (threadId: string) => void;
   onClearMessages: () => void;
   onChatInputChange: (value: string) => void;
   onChatInputKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -48,6 +74,8 @@ export function ChatPage({
   t,
   tSlash,
   chatMessages,
+  chatThreads,
+  activeChatThreadId,
   chatInput,
   chatAttachments,
   chatAgentMode,
@@ -64,6 +92,9 @@ export function ChatPage({
   toLocalTime,
   onChatAgentModeChange,
   onChatTeachingModeChange,
+  onCreateNewChatThread,
+  onSelectChatThread,
+  onDeleteChatThread,
   onClearMessages,
   onChatInputChange,
   onChatInputKeyDown,
@@ -75,9 +106,77 @@ export function ChatPage({
   onQueryChatTeachingLlmDebug,
 }: ChatPageProps) {
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-base font-semibold">{t("和 RustClaw 对话", "Chat with RustClaw")}</h3>
+    <section className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
+      <aside className="rounded-2xl border border-white/10 bg-white/5 p-3">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold">{t("任务历史", "Task history")}</h3>
+          <button
+            type="button"
+            onClick={onCreateNewChatThread}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs hover:bg-white/10"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t("新任务", "New")}
+          </button>
+        </div>
+        <div className="max-h-[34rem] space-y-2 overflow-auto pr-1">
+          {chatThreads.map((thread) => {
+            const active = thread.id === activeChatThreadId;
+            return (
+              <div
+                key={thread.id}
+                className={
+                  active
+                    ? "grid grid-cols-[minmax(0,1fr)_auto] gap-1 rounded-xl border border-emerald-400/35 bg-emerald-500/15 p-2"
+                    : "grid grid-cols-[minmax(0,1fr)_auto] gap-1 rounded-xl border border-white/10 bg-black/20 p-2 hover:bg-white/5"
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() => onSelectChatThread(thread.id)}
+                  className="min-w-0 text-left"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <MessageSquare className="h-3.5 w-3.5 shrink-0 text-white/55" />
+                    <span className="min-w-0 truncate text-sm font-medium text-white/90" title={thread.title}>
+                      {thread.title}
+                    </span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 min-h-8 break-words text-xs text-white/50">
+                    {thread.preview}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-white/45">
+                    <span>{toLocalTime(thread.updatedAt)}</span>
+                    <span>{thread.messageCount}</span>
+                    {thread.agentMode ? (
+                      <span className="rounded-full border border-white/10 px-1.5 py-0.5">
+                        agent
+                      </span>
+                    ) : null}
+                    {thread.teachingMode ? (
+                      <span className="rounded-full border border-white/10 px-1.5 py-0.5">
+                        {t("教学", "Teach")}
+                      </span>
+                    ) : null}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeleteChatThread(thread.id)}
+                  className="h-7 w-7 rounded-lg border border-white/10 bg-white/5 p-1.5 text-white/55 hover:bg-white/10 hover:text-white/80"
+                  title={t("删除任务", "Delete task")}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </aside>
+
+      <div className="min-w-0 rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-base font-semibold">{t("和 RustClaw 对话", "Chat with RustClaw")}</h3>
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <label className="inline-flex items-center gap-2 text-white/80">
             <input type="checkbox" checked={chatAgentMode} onChange={(event) => onChatAgentModeChange(event.target.checked)} />
@@ -281,6 +380,7 @@ export function ChatPage({
           {t("聊天错误", "Chat error")}: {chatError}
         </p>
       ) : null}
+      </div>
     </section>
   );
 }

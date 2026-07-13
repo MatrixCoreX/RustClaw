@@ -569,6 +569,8 @@ export default function App() {
   });
   const {
     chatMessages,
+    chatThreads,
+    activeChatThreadId,
     chatInput,
     chatAttachments,
     chatAgentMode,
@@ -584,6 +586,9 @@ export default function App() {
     chatAttachmentInputRef,
     setChatAgentMode,
     setChatTeachingMode,
+    createNewChatThread,
+    selectChatThread,
+    deleteChatThread,
     clearChatMessages,
     setChatInput,
     handleChatInputKeyDown,
@@ -1333,6 +1338,8 @@ export default function App() {
               t={t}
               tSlash={tSlash}
               chatMessages={chatMessages}
+              chatThreads={chatThreads}
+              activeChatThreadId={activeChatThreadId}
               chatInput={chatInput}
               chatAttachments={chatAttachments}
               chatAgentMode={chatAgentMode}
@@ -1349,6 +1356,9 @@ export default function App() {
               toLocalTime={toLocalTime}
               onChatAgentModeChange={setChatAgentMode}
               onChatTeachingModeChange={setChatTeachingMode}
+              onCreateNewChatThread={createNewChatThread}
+              onSelectChatThread={selectChatThread}
+              onDeleteChatThread={deleteChatThread}
               onClearMessages={clearChatMessages}
               onChatInputChange={setChatInput}
               onChatInputKeyDown={handleChatInputKeyDown}
