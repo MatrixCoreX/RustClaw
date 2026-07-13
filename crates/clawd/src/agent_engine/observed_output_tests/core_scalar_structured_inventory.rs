@@ -387,7 +387,7 @@ fn observed_entries_project_wrapped_inventory_names_by_kind_files() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
-        r#"{"extra":{"action":"inventory_dir","counts":{"dirs":0,"files":5,"hidden":0,"total":5},"dirs_only":false,"files_only":true,"include_hidden":false,"names_by_kind":{"dirs":[],"files":["act_plan.log","clawd-codex-current.log","clawd-codex-style-live.log","clawd-dev-live.log","clawd-dev.log"],"other":[]},"path":"logs","resolved_path":"/home/guagua/rustclaw/logs","sort_by":"name"}}"#,
+        r#"{"extra":{"action":"inventory_dir","counts":{"dirs":0,"files":5,"hidden":0,"total":5},"dirs_only":false,"entries":[],"files_only":true,"include_hidden":false,"names_by_kind":{"dirs":[],"files":["act_plan.log","clawd-codex-current.log","clawd-codex-style-live.log","clawd-dev-live.log","clawd-dev.log"],"other":[]},"path":"logs","resolved_path":"/home/guagua/rustclaw/logs","size_summary":{"largest_file":{"kind":"file","name":"model_io.log.2026-07-09","path":"logs/model_io.log.2026-07-09","size_bytes":532246887},"matched_file_count":49,"smallest_file":{"kind":"file","name":"nl_delayed_minimax_retry_20260616_121155.log","path":"logs/nl_delayed_minimax_retry_20260616_121155.log","size_bytes":60},"total_file_size_bytes":2290871096},"sort_by":"name"}}"#,
     ));
 
     let entries = observed_output_entries(&loop_state);
@@ -402,7 +402,7 @@ fn observed_entries_project_wrapped_inventory_names_by_kind_files() {
         "entries: {joined}"
     );
     assert!(
-        !joined.contains("size_summary.largest_file"),
+        joined.contains("size_summary.largest_file name=model_io.log.2026-07-09"),
         "entries: {joined}"
     );
 }
