@@ -443,8 +443,32 @@ fn normalize_capability_invocation(capability: &str, args: Value) -> (String, Va
     ) {
         return (normalized, normalize_run_command_args(args));
     }
+    let args = normalize_filesystem_listing_capability_args(&normalized, args);
     let args = normalize_config_basic_capability_args(&normalized, args);
     (normalized, args)
+}
+
+fn normalize_filesystem_listing_capability_args(normalized_capability: &str, args: Value) -> Value {
+    let mut obj = match args {
+        Value::Object(obj) => obj,
+        other => return other,
+    };
+    match normalized_capability {
+        "filesystem.list_file_names" | "fs.list_file_names" | "fs_basic.list_file_names" => {
+            obj.insert("names_only".to_string(), Value::Bool(true));
+            obj.insert("files_only".to_string(), Value::Bool(true));
+            obj.insert("dirs_only".to_string(), Value::Bool(false));
+        }
+        "filesystem.list_directory_names"
+        | "fs.list_directory_names"
+        | "fs_basic.list_directory_names" => {
+            obj.insert("names_only".to_string(), Value::Bool(true));
+            obj.insert("dirs_only".to_string(), Value::Bool(true));
+            obj.insert("files_only".to_string(), Value::Bool(false));
+        }
+        _ => {}
+    }
+    Value::Object(obj)
 }
 
 fn normalize_config_basic_capability_args(normalized_capability: &str, args: Value) -> Value {

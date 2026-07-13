@@ -583,6 +583,8 @@ mod contract_hint_agent_loop;
 mod contract_hints_and_selectors;
 #[path = "planning_tests/delivery_archive_config_edit.rs"]
 mod delivery_archive_config_edit;
+#[path = "planning_tests/directory_listing_capability_scope.rs"]
+mod directory_listing_capability_scope;
 #[path = "planning_tests/directory_locator_and_workspace_summary.rs"]
 mod directory_locator_and_workspace_summary;
 #[path = "planning_tests/dry_run_contracts.rs"]
