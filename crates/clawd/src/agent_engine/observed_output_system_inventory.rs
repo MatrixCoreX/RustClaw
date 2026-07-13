@@ -129,11 +129,18 @@ pub(super) fn system_basic_structured_doc_observed_body(skill: &str, body: &str)
     }
 }
 
-pub(super) fn inventory_dir_names(value: &serde_json::Value) -> Option<Vec<String>> {
-    let action = value.get("action").and_then(|v| v.as_str())?;
-    if action != "inventory_dir" {
-        return None;
+fn inventory_dir_payload(value: &serde_json::Value) -> Option<&serde_json::Value> {
+    if value.get("action").and_then(|v| v.as_str()) == Some("inventory_dir") {
+        return Some(value);
     }
+    ["extra", "result", "result_json"]
+        .into_iter()
+        .filter_map(|key| value.get(key))
+        .find(|candidate| candidate.get("action").and_then(|v| v.as_str()) == Some("inventory_dir"))
+}
+
+pub(super) fn inventory_dir_names(value: &serde_json::Value) -> Option<Vec<String>> {
+    let value = inventory_dir_payload(value)?;
     if let Some(names) = inventory_dir_string_array(value.get("names")) {
         return Some(names);
     }
@@ -189,6 +196,9 @@ fn inventory_dir_string_array(value: Option<&serde_json::Value>) -> Option<Vec<S
 }
 
 fn inventory_dir_names_by_kind(value: &serde_json::Value, kind: &str) -> Vec<String> {
+    let Some(value) = inventory_dir_payload(value) else {
+        return Vec::new();
+    };
     value
         .get("names_by_kind")
         .and_then(|v| v.get(kind))
@@ -236,6 +246,7 @@ pub(super) fn inventory_dir_direct_answer_candidate(
     value: &serde_json::Value,
     prefer_english: bool,
 ) -> Option<String> {
+    let value = inventory_dir_payload(value)?;
     if route.is_some_and(|route| {
         super::output_route_policy::route_contract_marker_is(
             route,
@@ -582,6 +593,7 @@ fn inventory_dir_names_by_kind_lines(value: &serde_json::Value) -> Vec<String> {
 }
 
 pub(super) fn inventory_dir_observed_candidate(value: &serde_json::Value) -> Option<String> {
+    let value = inventory_dir_payload(value)?;
     let path = value
         .get("resolved_path")
         .or_else(|| value.get("path"))
