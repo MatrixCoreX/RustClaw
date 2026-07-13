@@ -171,6 +171,53 @@ fn registry_resolves_bare_skill_capability_by_machine_action() {
 }
 
 #[test]
+fn config_read_fields_capability_normalizes_machine_field_aliases() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "config_basic.read_fields",
+        json!({
+            "config_path": "configs/agent_guard.toml",
+            "fields": [
+                "agent.hooks.blocked_action_refs",
+                "agent.hooks.blocked_tools",
+                "agent.hooks.require_confirmation_action_refs",
+                "agent.hooks.background_wait_action_refs"
+            ]
+        }),
+    );
+    let action = action.expect("config_basic.read_fields capability should resolve");
+    let AgentAction::CallTool { tool, args } = action else {
+        panic!("expected config_basic tool action, got {action:?}");
+    };
+    assert_eq!(tool, "config_basic");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("read_fields")
+    );
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("configs/agent_guard.toml")
+    );
+    assert!(args.get("fields").is_none());
+    assert!(args.get("config_path").is_none());
+    let field_paths = args
+        .get("field_paths")
+        .and_then(Value::as_array)
+        .expect("field_paths array");
+    assert_eq!(field_paths.len(), 4);
+    assert!(field_paths
+        .iter()
+        .any(|value| value.as_str() == Some("agent.hooks.background_wait_action_refs")));
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    assert_eq!(record.source, "registry");
+    assert_eq!(record.capability_ref, "config_basic.read_fields");
+}
+
+#[test]
 fn registry_resolves_fully_qualified_skill_action_capability() {
     let state = state_with_workspace_registry();
     let (action, record) = resolve_capability_action_with_record_for_state(

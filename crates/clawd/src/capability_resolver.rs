@@ -382,7 +382,79 @@ fn normalize_capability_invocation(capability: &str, args: Value) -> (String, Va
     ) {
         return (normalized, normalize_run_command_args(args));
     }
+    let args = normalize_config_basic_capability_args(&normalized, args);
     (normalized, args)
+}
+
+fn normalize_config_basic_capability_args(normalized_capability: &str, args: Value) -> Value {
+    let mut obj = match args {
+        Value::Object(obj) => obj,
+        other => return other,
+    };
+    if !is_config_basic_capability(normalized_capability) {
+        return Value::Object(obj);
+    }
+    let action = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(normalize_capability_name)
+        .or_else(|| {
+            normalized_capability
+                .rsplit_once('.')
+                .map(|(_, action)| normalize_capability_name(action))
+        });
+    match action.as_deref() {
+        Some("read_field") => {
+            move_arg_alias_if_missing(&mut obj, "path", &["file", "file_path", "config_path"]);
+            move_arg_alias_if_missing(&mut obj, "field_path", &["field", "key", "field_name"]);
+        }
+        Some("read_fields") => {
+            move_arg_alias_if_missing(&mut obj, "path", &["file", "file_path", "config_path"]);
+            move_arg_alias_if_missing(&mut obj, "field_paths", &["fields", "keys", "field_names"]);
+        }
+        Some("list_keys" | "validate" | "guard_rustclaw_config") => {
+            move_arg_alias_if_missing(&mut obj, "path", &["file", "file_path", "config_path"]);
+        }
+        _ => {}
+    }
+    Value::Object(obj)
+}
+
+fn is_config_basic_capability(normalized_capability: &str) -> bool {
+    normalized_capability == "config_basic"
+        || normalized_capability == "config"
+        || normalized_capability.starts_with("config_basic.")
+        || normalized_capability.starts_with("config.")
+}
+
+fn move_arg_alias_if_missing(
+    obj: &mut serde_json::Map<String, Value>,
+    target: &str,
+    aliases: &[&str],
+) {
+    if obj.get(target).is_some_and(value_is_present) {
+        return;
+    }
+    for alias in aliases {
+        let Some(value) = obj.remove(*alias) else {
+            continue;
+        };
+        if value_is_present(&value) {
+            obj.insert(target.to_string(), value);
+            return;
+        }
+        obj.insert((*alias).to_string(), value);
+    }
+}
+
+fn value_is_present(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::String(value) => !value.trim().is_empty(),
+        Value::Array(values) => values.iter().any(value_is_present),
+        Value::Object(values) => !values.is_empty(),
+        Value::Bool(_) | Value::Number(_) => true,
+    }
 }
 
 fn args_has_command_field(args: &Value) -> bool {
