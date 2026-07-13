@@ -615,6 +615,7 @@ fn machine_slot_is_nonblocking_freeform_slot(slot: Option<&str>) -> bool {
                     | "details"
                     | "section"
                     | "sections"
+                    | "content"
                     | "context"
                     | "goal"
                     | "goals"
@@ -638,10 +639,10 @@ fn route_allows_side_effect_free_freeform_clarify_replan(
     if route.risk_ceiling == crate::RiskCeiling::High {
         return false;
     }
-    if route.risk_ceiling != crate::RiskCeiling::Low
-        && !(route.risk_ceiling == crate::RiskCeiling::Medium
-            && loop_state.pending_user_boundary_present)
-    {
+    if !matches!(
+        route.risk_ceiling,
+        crate::RiskCeiling::Low | crate::RiskCeiling::Medium
+    ) {
         return false;
     }
     let contract = &route.output_contract;
@@ -657,10 +658,8 @@ fn route_allows_side_effect_free_freeform_clarify_replan(
     {
         return false;
     }
-    if contract.locator_kind == crate::OutputLocatorKind::None
-        && !contract.requires_content_evidence
-    {
-        return true;
+    if contract.locator_kind == crate::OutputLocatorKind::None {
+        return !contract.requires_content_evidence || loop_state.pending_user_boundary_present;
     }
     loop_state.pending_user_boundary_present
         && route.has_route_reason_machine_marker("structured_observation_clarify_repair")

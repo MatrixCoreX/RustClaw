@@ -419,6 +419,54 @@ fn active_user_boundary_freeform_clarify_replans_despite_stale_content_contract(
 }
 
 #[test]
+fn active_user_boundary_freeform_clarify_replans_with_locatorless_content_contract() {
+    let plan = plan_result_with_raw_and_steps(
+        r#"{"steps":[{"type":"respond","terminal_intent":"clarify","clarify_reason_code":"missing_input","missing_slot":"user_input","content":"Need topic"}]}"#,
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "Need topic",
+                "terminal_intent": "clarify",
+                "clarify_reason_code": "missing_input",
+                "missing_slot": "user_input"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.needs_clarify = false;
+    route.risk_ceiling = RiskCeiling::Low;
+    route.route_reason =
+        "boundary_only; inline_structured_payload_context_execute; executable_contract_preserved_for_agent_loop".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.delivery_required = false;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let mut loop_state = LoopState::new(3);
+    loop_state.pending_user_boundary_present = true;
+
+    let outcome = try_replan_avoidable_side_effect_free_freeform_clarify(
+        &mut loop_state,
+        Some(&route),
+        &intent,
+    )
+    .expect("active user-input boundary should recover locatorless stale content contract");
+
+    assert_eq!(
+        outcome.stop_signal.as_deref(),
+        Some("recoverable_failure_continue_round")
+    );
+    assert!(!loop_state.pending_user_input_required);
+    assert!(loop_state.delivery_messages.is_empty());
+    assert!(loop_state.has_recoverable_failure_context);
+}
+
+#[test]
 fn active_user_boundary_medium_risk_side_effect_free_freeform_clarify_replans() {
     let plan = plan_result_with_raw_and_steps(
         "{}",
@@ -453,6 +501,50 @@ fn active_user_boundary_medium_risk_side_effect_free_freeform_clarify_replans() 
         &intent,
     )
     .expect("active respond-only follow-up should allow best-effort replan");
+
+    assert_eq!(
+        outcome.stop_signal.as_deref(),
+        Some("recoverable_failure_continue_round")
+    );
+    assert!(!loop_state.pending_user_input_required);
+    assert!(loop_state.delivery_messages.is_empty());
+    assert_eq!(loop_state.attempt_ledger_entries.len(), 1);
+}
+
+#[test]
+fn medium_risk_side_effect_free_content_clarify_replans_without_active_boundary() {
+    let plan = plan_result_with_raw_and_steps(
+        r#"{"steps":[{"type":"respond","terminal_intent":"clarify","missing_slot":"topic_or_content","content":"Need topic"}]}"#,
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "Need topic",
+                "terminal_intent": "clarify",
+                "missing_slot": "topic_or_content"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
+    let mut route = route_result(OutputResponseShape::Free);
+    route.needs_clarify = false;
+    route.risk_ceiling = RiskCeiling::Medium;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.delivery_required = false;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let mut loop_state = LoopState::new(2);
+
+    let outcome = try_replan_avoidable_side_effect_free_freeform_clarify(
+        &mut loop_state,
+        Some(&route),
+        &intent,
+    )
+    .expect("side-effect-free medium-risk freeform clarify should be recoverable");
 
     assert_eq!(
         outcome.stop_signal.as_deref(),
