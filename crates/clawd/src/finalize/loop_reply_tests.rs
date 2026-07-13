@@ -1551,6 +1551,37 @@ fn requested_machine_kv_summary_ignores_context_summary_machine_tokens() {
 }
 
 #[test]
+fn requested_machine_kv_summary_ignores_internal_user_request_machine_tokens() {
+    let task = claimed_task("task-machine-kv-internal-user-request-token");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","counts":{"dirs":0,"files":2,"total":2},"files_only":true,"names_by_kind":{"dirs":[],"files":["release_checklist.md","service_notes.md"],"other":[]},"path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs","resolved_path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs","sort_by":"name"}}"#,
+    ));
+    let answer = "release_checklist.md\nservice_notes.md";
+    loop_state.last_user_visible_respond = Some(answer.to_string());
+    let mut delivery_messages = vec![answer.to_string()];
+    let mut finalizer_summary = None;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        user_request: Some(
+            "list workspace=/home/guagua/rustclaw child file names from docs".to_string(),
+        ),
+        ..Default::default()
+    };
+
+    assert!(!replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "List the docs directory file names only.",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+    assert_eq!(delivery_messages, vec![answer]);
+}
+
+#[test]
 fn requested_machine_kv_summary_preserves_full_structured_contract_json() {
     let task = claimed_task("task-machine-kv-structured-contract");
     let mut loop_state = crate::agent_engine::LoopState::new(1);

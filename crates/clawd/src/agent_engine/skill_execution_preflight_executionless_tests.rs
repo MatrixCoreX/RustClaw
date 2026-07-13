@@ -6,7 +6,7 @@ use super::{
 fn evidence_policy_preflight_rejects_tools_for_executionless_terminal_boundary() {
     let state = test_state();
     let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
+        ask_mode: crate::AskMode::respond_trace(),
         resolved_intent: "executionless terminal boundary".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -48,6 +48,48 @@ fn evidence_policy_preflight_rejects_tools_for_executionless_terminal_boundary()
             .and_then(|extra| extra.pointer("/permission_decision/owner_layer"))
             .and_then(|value| value.as_str()),
         Some("executionless_boundary_preflight")
+    );
+}
+
+#[test]
+fn evidence_policy_preflight_allows_execute_gate_capability_despite_executionless_marker() {
+    let state = test_state();
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::act_with_chat_finalizer(),
+        resolved_intent: "execute gate with stale executionless trace marker".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "executionless_finalize_trace_plain".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Medium,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract::default(),
+    };
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    let mut loop_state = LoopState::new(2);
+    loop_state.route_policy_context = Some(route);
+    let args = serde_json::json!({
+        "action": "make_dir",
+        "path": "document/nl_skill_tmp",
+        "parents": true
+    });
+
+    assert!(
+        evidence_policy_action_policy_error(
+            &state,
+            &loop_state,
+            "fs_basic",
+            &args,
+            "call_capability"
+        )
+        .is_none(),
+        "execute gate should let planner-selected capabilities reach normal policy/verifier even when a trace-only executionless marker is present"
     );
 }
 

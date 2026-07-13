@@ -907,6 +907,47 @@ fn evidence_policy_preflight_rejects_missing_bound_target_arg() {
 }
 
 #[test]
+fn evidence_policy_preflight_allows_virtual_make_dir_for_filesystem_capability_ref() {
+    let state = test_state();
+    let mut loop_state = LoopState::new(2);
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: "capability_ref=filesystem.make_dir".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "capability_ref=filesystem.make_dir".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::High,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::None,
+            requires_content_evidence: true,
+            locator_kind: crate::OutputLocatorKind::Path,
+            locator_hint: "document/nl_skill_tmp".to_string(),
+            ..crate::IntentOutputContract::default()
+        },
+    };
+    loop_state.route_policy_context = Some(route);
+    let args = serde_json::json!({"path": "document/nl_skill_tmp"});
+
+    assert!(
+        evidence_policy_action_policy_error(&state, &loop_state, "make_dir", &args, "call_skill")
+            .is_none(),
+        "standalone make_dir runtime tool should classify as fs_basic.make_dir for capability-ref policy"
+    );
+    assert!(
+        evidence_policy_arg_policy_error(&loop_state, "make_dir", &args).is_none(),
+        "standalone make_dir runtime args should satisfy fs_basic.make_dir path binding"
+    );
+}
+
+#[test]
 fn evidence_policy_preflight_defers_template_target_to_runtime_placeholder_check() {
     let mut loop_state = LoopState::new(2);
     loop_state.output_contract = Some(crate::IntentOutputContract {

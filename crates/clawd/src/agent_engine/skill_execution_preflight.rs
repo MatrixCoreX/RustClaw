@@ -188,11 +188,13 @@ pub(super) fn evidence_policy_action_policy_error(
     ) {
         return Some(err);
     }
+    let (policy_skill, policy_args) =
+        evidence_policy_contract_view(normalized_skill, classification_args);
     let policy = loop_state.route_policy_context.as_ref().and_then(|route| {
         crate::evidence_policy::capability_ref_action_policy_for_route(
             Some(route),
-            normalized_skill,
-            classification_args,
+            policy_skill.as_str(),
+            &policy_args,
         )
     })?;
     if policy.is_allowed() {
@@ -238,20 +240,20 @@ pub(super) fn evidence_policy_action_policy_error(
     }
     if registry_action_can_extend_summary_contract(
         state,
-        normalized_skill,
-        classification_args,
+        policy_skill.as_str(),
+        &policy_args,
         &policy.contract_match,
     ) {
         info!(
             "preflight_keep_registry_non_mutating_action skill={} action={} contract={}",
-            normalized_skill, policy.action_key, policy.contract_match
+            policy_skill, policy.action_key, policy.contract_match
         );
         return None;
     }
-    let canonical_skill = state.resolve_canonical_skill_name(normalized_skill);
+    let canonical_skill = state.resolve_canonical_skill_name(policy_skill.as_str());
     if task_control_lifecycle_dry_run_can_extend_contract(
         &canonical_skill,
-        classification_args,
+        &policy_args,
         &policy.contract_match,
     ) {
         info!(
@@ -312,6 +314,12 @@ pub(super) fn evidence_policy_action_policy_error(
             ),
         })),
     ))
+}
+
+fn evidence_policy_contract_view(normalized_skill: &str, args: &Value) -> (String, Value) {
+    crate::virtual_tools::canonicalize_legacy_tool_call(normalized_skill, args.clone())
+        .map(|call| (call.tool, call.args))
+        .unwrap_or_else(|| (normalized_skill.to_string(), args.clone()))
 }
 
 fn literal_run_cmd_allows_contract_override(
@@ -411,7 +419,7 @@ fn executionless_boundary_allows_literal_run_cmd(normalized_skill: &str, args: &
 }
 
 fn route_is_executionless_terminal_boundary(route: &crate::RouteResult) -> bool {
-    if !route.ask_mode.finalize_chat_wrapped() {
+    if route.is_execute_gate() {
         return false;
     }
     if route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop") {
@@ -1023,11 +1031,12 @@ pub(super) fn evidence_policy_arg_policy_error(
     normalized_skill: &str,
     exec_args: &Value,
 ) -> Option<String> {
+    let (policy_skill, policy_args) = evidence_policy_contract_view(normalized_skill, exec_args);
     let policy = loop_state.route_policy_context.as_ref().and_then(|route| {
         crate::evidence_policy::arg_policy_decision_for_route(
             Some(route),
-            normalized_skill,
-            exec_args,
+            policy_skill.as_str(),
+            &policy_args,
         )
     })?;
     if policy.is_allowed()

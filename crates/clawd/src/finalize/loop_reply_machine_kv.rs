@@ -1960,7 +1960,6 @@ fn requested_machine_kv_request_surfaces(
     };
     for value in [
         ctx.original_user_request.as_deref(),
-        ctx.user_request.as_deref(),
         ctx.route_result
             .as_ref()
             .map(|route| route.resolved_intent.as_str()),
