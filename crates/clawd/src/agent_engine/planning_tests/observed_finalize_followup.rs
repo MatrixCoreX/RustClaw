@@ -129,6 +129,46 @@ fn executable_contract_observe_prefix_strips_terminal_discussion_for_next_planne
 }
 
 #[test]
+fn executable_contract_call_capability_observe_prefix_strips_terminal_discussion() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 1;
+    let actions = vec![
+        AgentAction::CallCapability {
+            capability: "filesystem.list_file_names".to_string(),
+            args: serde_json::json!({
+                "path": "/workspace/project/document",
+                "names_only": true,
+                "files_only": true,
+                "max_entries": 5
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    let mut route = route_result(
+        crate::AskMode::act_with_chat_finalizer(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+
+    let stripped =
+        strip_terminal_discussion_for_observed_finalize(Some(&route), &loop_state, actions);
+
+    assert_eq!(stripped.len(), 1);
+    assert!(matches!(
+        &stripped[0],
+        AgentAction::CallCapability { capability, args }
+            if capability == "filesystem.list_file_names"
+                && args.get("files_only").and_then(Value::as_bool) == Some(true)
+    ));
+}
+
+#[test]
 fn content_evidence_route_keeps_multi_evidence_synthesize_followup() {
     let loop_state = LoopState::new(2);
     let actions = vec![

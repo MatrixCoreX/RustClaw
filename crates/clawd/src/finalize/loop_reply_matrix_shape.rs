@@ -630,6 +630,27 @@ fn observed_directory_listing_names(value: &serde_json::Value) -> Vec<String> {
             return items;
         }
     }
+    if let Some(names_by_kind) = value
+        .get("names_by_kind")
+        .and_then(serde_json::Value::as_object)
+    {
+        let mut items = Vec::new();
+        for key in ["files", "dirs", "other"] {
+            if let Some(array) = names_by_kind.get(key).and_then(serde_json::Value::as_array) {
+                items.extend(
+                    array
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
+                        .map(ToString::to_string),
+                );
+            }
+        }
+        if !items.is_empty() {
+            return items;
+        }
+    }
     value
         .get("entries")
         .and_then(serde_json::Value::as_array)
@@ -654,6 +675,77 @@ fn observed_directory_listing_names(value: &serde_json::Value) -> Vec<String> {
                 })
         })
         .collect()
+}
+
+pub(super) fn generic_observed_machine_projection_answer(
+    loop_state: &LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok()
+            || matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+        {
+            continue;
+        }
+        let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            continue;
+        };
+        let output =
+            crate::agent_engine::observed_output::normalized_success_body_for_observed_output(
+                output,
+            );
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&output) else {
+            continue;
+        };
+        let Some(answer) = generic_machine_projection_from_value(&value) else {
+            continue;
+        };
+        let answer = answer.trim().to_string();
+        if !answer.is_empty() {
+            return Some((answer, matrix_observed_shape_summary(loop_state)));
+        }
+    }
+    None
+}
+
+fn generic_machine_projection_from_value(value: &serde_json::Value) -> Option<String> {
+    if let Some(extra) = value.get("extra").filter(|extra| extra.is_object()) {
+        if let Some(answer) = generic_machine_projection_from_value(extra) {
+            return Some(answer);
+        }
+    }
+    match value.get("action").and_then(serde_json::Value::as_str) {
+        Some("inventory_dir" | "list_dir") => directory_listing_answer_from_value(value),
+        Some("grep_text") => grep_text_matches_answer_from_value(value),
+        _ => None,
+    }
+}
+
+fn grep_text_matches_answer_from_value(value: &serde_json::Value) -> Option<String> {
+    let matches = value.get("matches").and_then(serde_json::Value::as_array)?;
+    let mut lines = Vec::new();
+    for item in matches {
+        let text = item
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())?;
+        let line = item.get("line").and_then(serde_json::Value::as_u64);
+        let projected = line
+            .map(|line| format!("{line}:{text}"))
+            .unwrap_or_else(|| text.to_string());
+        if !lines.iter().any(|existing| existing == &projected) {
+            lines.push(projected);
+        }
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 fn route_supports_matrix_strict_list_observed_answer(route: &crate::RouteResult) -> bool {
