@@ -44,6 +44,9 @@ interface ChatThreadRecord {
   teachingMode: boolean;
   externalChatId: string;
   lastTaskId?: string | null;
+  teachingTaskResult?: TaskQueryResponse | null;
+  teachingLlmDebug?: TaskLlmDebugResponse | null;
+  teachingLlmDebugError?: string | null;
 }
 
 interface ChatThreadState {
@@ -95,12 +98,12 @@ export function useChatRuntime({
   const chatInput = activeChatThread.input;
   const chatAgentMode = activeChatThread.agentMode;
   const chatTeachingMode = activeChatThread.teachingMode;
+  const chatTeachingTaskResult = activeChatThread.teachingTaskResult ?? null;
+  const chatTeachingLlmDebug = activeChatThread.teachingLlmDebug ?? null;
+  const chatTeachingLlmDebugError = activeChatThread.teachingLlmDebugError ?? null;
   const chatThreadSummaries = buildChatThreadSummaries(chatThreadState.threads, t);
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
-  const [chatTeachingTaskResult, setChatTeachingTaskResult] = useState<TaskQueryResponse | null>(null);
-  const [chatTeachingLlmDebug, setChatTeachingLlmDebug] = useState<TaskLlmDebugResponse | null>(null);
   const [chatTeachingLlmDebugLoading, setChatTeachingLlmDebugLoading] = useState(false);
-  const [chatTeachingLlmDebugError, setChatTeachingLlmDebugError] = useState<string | null>(null);
   const [chatSending, setChatSending] = useState(false);
   const [chatRecording, setChatRecording] = useState(false);
   const [chatVoiceRecordingSupported] = useState(canUseDirectVoiceRecording);
@@ -163,13 +166,15 @@ export function useChatRuntime({
     updateActiveChatThread((thread) => ({
       ...thread,
       teachingMode: value,
+      ...(value
+        ? {}
+        : {
+            teachingTaskResult: null,
+            teachingLlmDebug: null,
+            teachingLlmDebugError: null,
+          }),
       updatedAt: Date.now(),
     }));
-    if (!value) {
-      setChatTeachingTaskResult(null);
-      setChatTeachingLlmDebug(null);
-      setChatTeachingLlmDebugError(null);
-    }
   };
 
   const selectChatThread = (threadId: string) => {
@@ -177,9 +182,7 @@ export function useChatRuntime({
     setChatThreadState((prev) => ({ ...prev, activeThreadId: threadId }));
     chatAttachmentsValueRef.current = [];
     setChatAttachments([]);
-    setChatTeachingTaskResult(null);
-    setChatTeachingLlmDebug(null);
-    setChatTeachingLlmDebugError(null);
+    setChatTeachingLlmDebugLoading(false);
   };
 
   const createNewChatThread = () => {
@@ -191,9 +194,7 @@ export function useChatRuntime({
     chatInputValueRef.current = "";
     chatAttachmentsValueRef.current = [];
     setChatAttachments([]);
-    setChatTeachingTaskResult(null);
-    setChatTeachingLlmDebug(null);
-    setChatTeachingLlmDebugError(null);
+    setChatTeachingLlmDebugLoading(false);
     setChatError(null);
   };
 
@@ -213,9 +214,7 @@ export function useChatRuntime({
     chatInputValueRef.current = "";
     chatAttachmentsValueRef.current = [];
     setChatAttachments([]);
-    setChatTeachingTaskResult(null);
-    setChatTeachingLlmDebug(null);
-    setChatTeachingLlmDebugError(null);
+    setChatTeachingLlmDebugLoading(false);
   };
 
   const clearChatMessages = () => {
@@ -225,11 +224,12 @@ export function useChatRuntime({
       input: "",
       updatedAt: Date.now(),
       lastTaskId: null,
+      teachingTaskResult: null,
+      teachingLlmDebug: null,
+      teachingLlmDebugError: null,
     }));
     chatInputValueRef.current = "";
-    setChatTeachingTaskResult(null);
-    setChatTeachingLlmDebug(null);
-    setChatTeachingLlmDebugError(null);
+    setChatTeachingLlmDebugLoading(false);
   };
 
   const fetchChatTeachingLlmDebugById = async (id: string): Promise<TaskLlmDebugResponse> => {
@@ -243,18 +243,38 @@ export function useChatRuntime({
   };
 
   const queryChatTeachingLlmDebug = async (taskId?: string) => {
-    const targetTaskId = (taskId ?? chatTeachingTaskResult?.task_id ?? "").trim();
+    const threadAtQuery = activeChatThreadRef.current;
+    const targetTaskId = (
+      taskId ??
+      threadAtQuery.teachingTaskResult?.task_id ??
+      threadAtQuery.lastTaskId ??
+      ""
+    ).trim();
     if (!targetTaskId) return null;
     setChatTeachingLlmDebugLoading(true);
-    setChatTeachingLlmDebugError(null);
+    updateChatThreadById(threadAtQuery.id, (thread) => ({
+      ...thread,
+      teachingLlmDebugError: null,
+    }));
     try {
       const result = await fetchChatTeachingLlmDebugById(targetTaskId);
-      setChatTeachingLlmDebug(result);
+      updateChatThreadById(threadAtQuery.id, (thread) => ({
+        ...thread,
+        lastTaskId: targetTaskId,
+        teachingLlmDebug: result,
+        teachingLlmDebugError: null,
+        updatedAt: Date.now(),
+      }));
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
-      setChatTeachingLlmDebugError(message);
-      setChatTeachingLlmDebug(null);
+      updateChatThreadById(threadAtQuery.id, (thread) => ({
+        ...thread,
+        lastTaskId: targetTaskId,
+        teachingLlmDebug: null,
+        teachingLlmDebugError: message,
+        updatedAt: Date.now(),
+      }));
       return null;
     } finally {
       setChatTeachingLlmDebugLoading(false);
@@ -533,18 +553,18 @@ export function useChatRuntime({
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
         lastTaskId: submittedTaskId,
+        teachingTaskResult: teachingModeAtSubmit
+          ? {
+              task_id: submittedTaskId,
+              status: "running",
+              result_json: null,
+              error_text: null,
+            }
+          : thread.teachingTaskResult,
+        teachingLlmDebug: teachingModeAtSubmit ? null : thread.teachingLlmDebug,
+        teachingLlmDebugError: teachingModeAtSubmit ? null : thread.teachingLlmDebugError,
         updatedAt: Date.now(),
       }));
-      if (teachingModeAtSubmit && activeChatThreadRef.current.id === submitThreadId) {
-        setChatTeachingTaskResult({
-          task_id: submittedTaskId,
-          status: "running",
-          result_json: null,
-          error_text: null,
-        });
-        setChatTeachingLlmDebug(null);
-        setChatTeachingLlmDebugError(null);
-      }
 
       let finalResult: TaskQueryResponse | null = null;
       for (let i = 0; i < 90; i += 1) {
@@ -559,8 +579,13 @@ export function useChatRuntime({
         throw new Error(t("轮询超时：任务仍在运行，请稍后在任务查询区查看。", "Polling timed out: the task is still running. Check it later in the task query area."));
       }
       onTaskResult(submittedTaskId, finalResult);
+      updateChatThreadById(submitThreadId, (thread) => ({
+        ...thread,
+        lastTaskId: submittedTaskId,
+        teachingTaskResult: teachingModeAtSubmit ? finalResult : thread.teachingTaskResult,
+        updatedAt: Date.now(),
+      }));
       if (teachingModeAtSubmit && activeChatThreadRef.current.id === submitThreadId) {
-        setChatTeachingTaskResult(finalResult);
         void queryChatTeachingLlmDebug(submittedTaskId);
       }
 
@@ -682,6 +707,10 @@ function persistChatThreadState(state: ChatThreadState) {
       activeThreadId: state.activeThreadId,
       threads: state.threads.slice(0, MAX_CHAT_THREADS).map((thread) => ({
         ...thread,
+        teachingTaskResult: thread.teachingTaskResult
+          ? compactTaskResultForChatStorage(thread.teachingTaskResult)
+          : null,
+        teachingLlmDebug: null,
         messages: thread.messages
           .slice(-MAX_PERSISTED_MESSAGES_PER_THREAD)
           .map(stripAttachmentPayloadsFromMessage),
@@ -721,6 +750,31 @@ function normalizeStoredChatThread(raw: unknown, t: Translate): ChatThreadRecord
         ? record.externalChatId.trim()
         : createThreadExternalChatId(),
     lastTaskId: typeof record.lastTaskId === "string" ? record.lastTaskId : null,
+    teachingTaskResult: normalizeStoredTaskResult(record.teachingTaskResult),
+    teachingLlmDebug: null,
+    teachingLlmDebugError:
+      typeof record.teachingLlmDebugError === "string" ? record.teachingLlmDebugError : null,
+  };
+}
+
+function compactTaskResultForChatStorage(result: TaskQueryResponse): TaskQueryResponse {
+  return {
+    task_id: result.task_id,
+    status: result.status,
+    result_json: null,
+    error_text: result.error_text ?? null,
+  };
+}
+
+function normalizeStoredTaskResult(raw: unknown): TaskQueryResponse | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Partial<TaskQueryResponse>;
+  if (typeof record.task_id !== "string" || !record.task_id.trim()) return null;
+  return {
+    task_id: record.task_id,
+    status: typeof record.status === "string" ? record.status : "succeeded",
+    result_json: null,
+    error_text: typeof record.error_text === "string" ? record.error_text : null,
   };
 }
 
@@ -765,6 +819,9 @@ function createChatThread(t: Translate): ChatThreadRecord {
     teachingMode: false,
     externalChatId: createThreadExternalChatId(),
     lastTaskId: null,
+    teachingTaskResult: null,
+    teachingLlmDebug: null,
+    teachingLlmDebugError: null,
   };
 }
 
