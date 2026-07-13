@@ -468,6 +468,31 @@ fn should_force_plan_repair(
     should_force_actionable_plan_repair(&test_state(), route_result, loop_state, actions)
 }
 
+#[test]
+fn pre_loop_locator_candidate_plain_respond_does_not_force_plan_repair() {
+    let mut route = base_route_result();
+    route.route_reason =
+        "resolved_directory_observation_clarify_repair; executable_contract_preserved_for_agent_loop"
+            .to_string();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.requires_content_evidence = false;
+    let mut loop_state = LoopState::new(1);
+    loop_state.output_vars.insert(
+        "pre_loop_clarify_candidates".to_string(),
+        json!(["background_only_locator"]).to_string(),
+    );
+    let actions = vec![AgentAction::Respond {
+        content: "Please provide the target file path.".to_string(),
+    }];
+
+    assert!(!should_force_plan_repair(
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+}
+
 fn repair_reason(
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,

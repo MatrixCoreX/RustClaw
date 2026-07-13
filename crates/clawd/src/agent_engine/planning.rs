@@ -5,7 +5,8 @@ use super::planning_actions::{
 use super::planning_followup::{
     has_authoritative_delivery, has_discussion_followup_action, is_delivery_failure_terminal_reply,
     is_discussion_followup_action, is_plain_respond_only_plan, last_executable_action,
-    route_expects_terminal_user_answer, route_explicitly_requests_raw_command_output,
+    loop_state_has_pre_loop_locator_clarify_candidate, route_expects_terminal_user_answer,
+    route_explicitly_requests_raw_command_output,
     should_preserve_terminal_followup_for_observed_finalize,
     terminal_reply_mentions_observed_missing_target,
 };

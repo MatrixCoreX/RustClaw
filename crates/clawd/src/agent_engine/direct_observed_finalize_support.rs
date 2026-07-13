@@ -1074,6 +1074,13 @@ pub(super) fn should_force_actionable_plan_repair(
     {
         return false;
     }
+    if loop_state_has_pre_loop_locator_clarify_candidate(loop_state)
+        && is_plain_respond_only_plan(actions)
+            .map(str::trim)
+            .is_some_and(|content| !content.is_empty())
+    {
+        return false;
+    }
     if route_result.output_contract.delivery_required
         && !loop_state.has_tool_or_skill_output
         && is_delivery_failure_terminal_reply(actions)

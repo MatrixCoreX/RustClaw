@@ -27,6 +27,8 @@ mod loop_control_finalization_gate;
 mod loop_control_local_health_recovery;
 #[path = "loop_control_post_write_evidence_guard.rs"]
 mod loop_control_post_write_evidence_guard;
+#[path = "loop_control_pre_loop_clarify.rs"]
+mod loop_control_pre_loop_clarify;
 #[path = "loop_control_recent_artifacts_recovery.rs"]
 mod loop_control_recent_artifacts_recovery;
 #[path = "loop_control_verifier_retry_commit.rs"]
@@ -43,6 +45,7 @@ use loop_control_filesystem_mutation_recovery::*;
 use loop_control_finalization_gate::*;
 use loop_control_local_health_recovery::*;
 use loop_control_post_write_evidence_guard::*;
+use loop_control_pre_loop_clarify::*;
 use loop_control_recent_artifacts_recovery::*;
 use loop_control_verifier_retry_commit::verifier_retry_answer_has_required_machine_evidence;
 
@@ -1439,6 +1442,12 @@ async fn run_agent_round(
         })
         .or_else(|| {
             structured_respond_terminal_intent_from_boundary_observation_clarify(
+                loop_state,
+                &prepared_round.actions,
+            )
+        })
+        .or_else(|| {
+            structured_respond_terminal_intent_from_pre_loop_clarify_candidate(
                 loop_state,
                 &prepared_round.actions,
             )
