@@ -629,6 +629,9 @@ fn route_allows_side_effect_free_freeform_clarify_replan(
     if route.wants_file_delivery {
         return false;
     }
+    if route.schedule_kind != crate::ScheduleKind::None || route.should_refresh_long_term_memory {
+        return false;
+    }
     if route.needs_clarify && !loop_state.pending_user_boundary_present {
         return false;
     }
@@ -642,17 +645,25 @@ fn route_allows_side_effect_free_freeform_clarify_replan(
         return false;
     }
     let contract = &route.output_contract;
-    !contract.delivery_required
-        && contract.delivery_intent == crate::OutputDeliveryIntent::None
-        && contract.locator_kind == crate::OutputLocatorKind::None
-        && !contract.requires_content_evidence
-        && contract.semantic_kind == crate::OutputSemanticKind::None
-        && matches!(
+    if contract.delivery_required
+        || contract.delivery_intent != crate::OutputDeliveryIntent::None
+        || contract.semantic_kind != crate::OutputSemanticKind::None
+        || !matches!(
             contract.response_shape,
             crate::OutputResponseShape::Free
                 | crate::OutputResponseShape::Strict
                 | crate::OutputResponseShape::OneSentence
         )
+    {
+        return false;
+    }
+    if contract.locator_kind == crate::OutputLocatorKind::None
+        && !contract.requires_content_evidence
+    {
+        return true;
+    }
+    loop_state.pending_user_boundary_present
+        && route.has_route_reason_machine_marker("structured_observation_clarify_repair")
 }
 
 fn try_replan_avoidable_side_effect_free_freeform_clarify(
@@ -661,17 +672,19 @@ fn try_replan_avoidable_side_effect_free_freeform_clarify(
     intent: &StructuredRespondTerminalIntent,
 ) -> Option<RoundOutcome> {
     let route = route?;
-    if loop_state
-        .output_vars
-        .contains_key("agent_loop.avoidable_clarify_replan_used")
-    {
-        return None;
-    }
     if !route_allows_side_effect_free_freeform_clarify_replan(loop_state, route) {
         return None;
     }
     if !machine_slot_is_nonblocking_freeform_slot(intent.missing_slot.as_deref()) {
         return None;
+    }
+    if loop_state
+        .output_vars
+        .contains_key("agent_loop.avoidable_clarify_replan_used")
+    {
+        return Some(apply_nonblocking_structured_clarify_as_answer(
+            loop_state, intent,
+        ));
     }
 
     loop_state.has_recoverable_failure_context = true;

@@ -253,6 +253,72 @@ fn side_effect_free_freeform_topic_clarify_replans_without_publishing_question()
 }
 
 #[test]
+fn repeated_side_effect_free_freeform_clarify_after_replan_is_treated_as_answer() {
+    let plan = plan_result_with_raw_and_steps(
+        "{}",
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "Draft with neutral assumptions.",
+                "terminal_intent": "clarify",
+                "clarify_reason_code": "missing_topic",
+                "missing_slot": "proposal_topic"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
+    let mut route = route_result(OutputResponseShape::Free);
+    route.needs_clarify = true;
+    route.risk_ceiling = RiskCeiling::Low;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.delivery_required = false;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let mut loop_state = LoopState::new(3);
+    loop_state.pending_user_boundary_present = true;
+    loop_state.output_vars.insert(
+        "agent_loop.avoidable_clarify_replan_used".to_string(),
+        "true".to_string(),
+    );
+
+    let outcome = try_replan_avoidable_side_effect_free_freeform_clarify(
+        &mut loop_state,
+        Some(&route),
+        &intent,
+    )
+    .expect("second optional freeform clarify should be accepted as answer");
+
+    assert_eq!(
+        outcome.stop_signal.as_deref(),
+        Some("structured_respond_nonblocking_clarify_answer")
+    );
+    assert!(!loop_state.pending_user_input_required);
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.terminal_intent")
+            .map(String::as_str),
+        Some("answer")
+    );
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("Draft with neutral assumptions.")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.recovered_terminal_intent")
+            .map(String::as_str),
+        Some("clarify")
+    );
+}
+
+#[test]
 fn active_user_boundary_side_effect_free_freeform_clarify_replans_even_when_route_needs_clarify() {
     let plan = plan_result_with_raw_and_steps(
         "{}",
@@ -296,6 +362,60 @@ fn active_user_boundary_side_effect_free_freeform_clarify_replans_even_when_rout
     assert!(!loop_state.pending_user_input_required);
     assert!(loop_state.delivery_messages.is_empty());
     assert_eq!(loop_state.attempt_ledger_entries.len(), 1);
+}
+
+#[test]
+fn active_user_boundary_freeform_clarify_replans_despite_stale_content_contract() {
+    let plan = plan_result_with_raw_and_steps(
+        r#"{"steps":[{"type":"respond","terminal_intent":"clarify","clarify_reason_code":"missing_input","missing_slot":"proposal_topic_scenario","content":"Need topic"}]}"#,
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "Need topic",
+                "terminal_intent": "clarify",
+                "clarify_reason_code": "missing_input",
+                "missing_slot": "proposal_topic_scenario"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
+    let mut route = route_result(OutputResponseShape::Free);
+    route.needs_clarify = false;
+    route.risk_ceiling = RiskCeiling::Low;
+    route.route_reason = "structured_observation_clarify_repair".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.delivery_required = false;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let mut loop_state = LoopState::new(3);
+    loop_state.pending_user_boundary_present = true;
+
+    let outcome = try_replan_avoidable_side_effect_free_freeform_clarify(
+        &mut loop_state,
+        Some(&route),
+        &intent,
+    )
+    .expect("active user-input boundary should allow planner recovery from stale content contract");
+
+    assert_eq!(
+        outcome.stop_signal.as_deref(),
+        Some("recoverable_failure_continue_round")
+    );
+    assert!(!loop_state.pending_user_input_required);
+    assert!(loop_state.delivery_messages.is_empty());
+    assert!(loop_state.has_recoverable_failure_context);
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.avoidable_clarify_replan_used")
+            .map(String::as_str),
+        Some("true")
+    );
 }
 
 #[test]

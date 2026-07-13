@@ -39,38 +39,86 @@ pub(super) fn preserve_terminal_clarify_from_journal(
 fn latest_terminal_clarify_intent(
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<TerminalClarifyIntent> {
-    journal
+    for plan in journal
         .rounds
         .iter()
         .rev()
         .filter_map(|round| round.plan_result.as_ref())
-        .find_map(terminal_clarify_intent_from_plan)
-        .or_else(|| {
-            journal
-                .plan_result
-                .as_ref()
-                .and_then(terminal_clarify_intent_from_plan)
+    {
+        match terminal_respond_class_from_plan(plan) {
+            TerminalRespondClass::Clarify(intent) => return Some(intent),
+            TerminalRespondClass::Answer => return None,
+            TerminalRespondClass::None => {}
+        }
+    }
+    journal
+        .plan_result
+        .as_ref()
+        .and_then(|plan| match terminal_respond_class_from_plan(plan) {
+            TerminalRespondClass::Clarify(intent) => Some(intent),
+            TerminalRespondClass::Answer | TerminalRespondClass::None => None,
         })
 }
 
-fn terminal_clarify_intent_from_plan(plan: &crate::PlanResult) -> Option<TerminalClarifyIntent> {
-    plan.steps
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TerminalRespondClass {
+    Clarify(TerminalClarifyIntent),
+    Answer,
+    None,
+}
+
+fn terminal_respond_class_from_plan(plan: &crate::PlanResult) -> TerminalRespondClass {
+    let raw_steps = raw_plan_steps(&plan.raw_plan_text);
+    if let Some(intent) = plan
+        .steps
         .iter()
         .find_map(terminal_clarify_intent_from_plan_step)
         .or_else(|| {
-            raw_plan_steps(&plan.raw_plan_text)
+            raw_steps
                 .iter()
                 .find_map(terminal_clarify_intent_from_raw_step)
         })
+    {
+        return TerminalRespondClass::Clarify(intent);
+    }
+    if plan.steps.iter().any(plan_step_is_non_clarify_respond)
+        || raw_steps.iter().any(raw_step_is_non_clarify_respond)
+    {
+        return TerminalRespondClass::Answer;
+    }
+    TerminalRespondClass::None
 }
 
 fn terminal_clarify_intent_from_plan_step(step: &crate::PlanStep) -> Option<TerminalClarifyIntent> {
-    (step.action_type == "respond").then(|| terminal_clarify_intent_from_object(&step.args))?
+    if !plan_step_is_respond(step) {
+        return None;
+    }
+    terminal_clarify_intent_from_object(&step.args)
 }
 
 fn terminal_clarify_intent_from_raw_step(step: &Value) -> Option<TerminalClarifyIntent> {
     let raw_type = string_field(step, &["type", "action_type", "action"])?.to_ascii_lowercase();
     (raw_type == "respond").then(|| terminal_clarify_intent_from_object(step))?
+}
+
+fn plan_step_is_respond(step: &crate::PlanStep) -> bool {
+    step.action_type == "respond"
+}
+
+fn plan_step_is_non_clarify_respond(step: &crate::PlanStep) -> bool {
+    plan_step_is_respond(step) && !object_terminal_intent_is_clarify(&step.args)
+}
+
+fn raw_step_is_non_clarify_respond(step: &Value) -> bool {
+    let Some(raw_type) = string_field(step, &["type", "action_type", "action"]) else {
+        return false;
+    };
+    raw_type.eq_ignore_ascii_case("respond") && !object_terminal_intent_is_clarify(step)
+}
+
+fn object_terminal_intent_is_clarify(value: &Value) -> bool {
+    string_field(value, &["terminal_intent"])
+        .is_some_and(|terminal_intent| terminal_intent.eq_ignore_ascii_case("clarify"))
 }
 
 fn terminal_clarify_intent_from_object(value: &Value) -> Option<TerminalClarifyIntent> {
@@ -181,5 +229,39 @@ mod tests {
         assert!(!answer_text.contains("missing_slot=locator"));
         assert!(!answer_text.contains("locator_kind=path"));
         assert_eq!(answer_messages, vec![answer_text]);
+    }
+
+    #[test]
+    fn newer_non_clarify_answer_stops_old_clarify_recovery() {
+        let clarify_raw = r#"{"steps":[{"type":"respond","terminal_intent":"clarify","clarify_reason_code":"missing_topic","missing_slot":"topic","content":"Need topic"}]}"#;
+        let answer_raw = r#"{"steps":[{"type":"respond","content":"Draft answer"}]}"#;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-2", "ask", "draft request");
+        journal
+            .rounds
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "draft request".to_string(),
+                plan_result: Some(plan_with_raw(clarify_raw)),
+                ..Default::default()
+            });
+        journal
+            .rounds
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 2,
+                goal: "draft request".to_string(),
+                plan_result: Some(plan_with_raw(answer_raw)),
+                ..Default::default()
+            });
+        let mut answer_text = "Draft answer".to_string();
+        let mut answer_messages = vec![answer_text.clone()];
+
+        assert!(!preserve_terminal_clarify_from_journal(
+            &journal,
+            &mut answer_text,
+            &mut answer_messages
+        ));
+        assert_eq!(answer_text, "Draft answer");
+        assert_eq!(answer_messages, vec!["Draft answer".to_string()]);
     }
 }
