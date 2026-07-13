@@ -1834,6 +1834,13 @@ pub(super) async fn run_agent_with_loop_seeded(
             if try_recover_structured_listing_answer_verifier_gap(route_result, &mut reply) {
                 return Ok(reply);
             }
+            if try_recover_local_health_answer_verifier_gap_from_loop_state(
+                route_result,
+                &pre_finalize_loop_state,
+                &mut reply,
+            ) {
+                return Ok(reply);
+            }
             if answer_verifier_gap_requests_observed_content_rewrite(&verifier)
                 && try_rewrite_answer_verifier_gap_with_observed_evidence(
                     state,

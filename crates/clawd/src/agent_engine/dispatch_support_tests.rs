@@ -307,8 +307,13 @@ fn confirm_arg_is_kept_when_skill_schema_declares_it() {
 #[test]
 fn invalid_file_delivery_token_detects_embedded_runtime_observation() {
     let candidate = r#"FILE:/tmp/docs/{"action":"inventory_dir","counts":{"files":2},"names":["a.txt","b.txt"]}"#;
+    let compound_delivery = "FILE:/tmp/docs/a.txt\n\n[app]\nname = \"RustClaw NL Fixture\"";
 
     assert!(unresolved_file_token_delivery_artifact(candidate));
+    assert!(unresolved_file_token_delivery_artifact(
+        "FILE:{{last_output}}"
+    ));
+    assert!(!unresolved_file_token_delivery_artifact(compound_delivery));
     assert!(!unresolved_file_token_delivery_artifact(
         "FILE:/tmp/docs/a.txt"
     ));

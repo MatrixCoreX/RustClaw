@@ -261,6 +261,27 @@ fn sync_output_payload_collapses_file_token_to_single_exit() {
 }
 
 #[test]
+fn sync_output_payload_preserves_content_evidence_for_file_delivery_contract() {
+    let contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::FileToken,
+        delivery_required: true,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    };
+    let token = "FILE:/tmp/report.toml";
+    let content = "[app]\nname = \"RustClaw NL Fixture\"\nmode = \"test\"";
+    let mut text = token.to_string();
+    let mut messages = vec![token.to_string(), content.to_string()];
+
+    sync_output_payload(&contract, &mut text, &mut messages);
+
+    let expected = format!("{content}\n\n{token}");
+    assert_eq!(text, expected);
+    assert_eq!(messages, vec![expected]);
+}
+
+#[test]
 fn sync_output_payload_wraps_existing_file_path_for_file_token_contract() {
     let tmp = TempDirGuard::new("file_token_existing_path");
     let target = tmp.path().join("report.md");

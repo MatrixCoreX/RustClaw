@@ -279,11 +279,50 @@ fn response_has_any_delivery_token(text: &str, messages: &[String]) -> bool {
             .any(|m| !extract_delivery_file_tokens(m).is_empty())
 }
 
+fn content_evidence_file_delivery_contract(output_contract: &IntentOutputContract) -> bool {
+    output_contract.requires_content_evidence
+        && (output_contract.delivery_required
+            || matches!(
+                output_contract.response_shape,
+                OutputResponseShape::FileToken
+            ))
+}
+
+fn compound_content_delivery_text(messages: &[String]) -> Option<String> {
+    let mut content = Vec::new();
+    let mut tokens = Vec::new();
+    for message in messages {
+        let trimmed = message.trim();
+        if trimmed.is_empty()
+            || crate::finalize::is_execution_summary_message(trimmed)
+            || crate::finalize::is_non_answer_separator_message(trimmed)
+            || crate::finalize::looks_like_planner_artifact(trimmed)
+        {
+            continue;
+        }
+        if crate::finalize::parse_delivery_file_token(trimmed).is_some() {
+            tokens.push(trimmed.to_string());
+        } else {
+            content.push(trimmed.to_string());
+        }
+    }
+    if content.is_empty() || tokens.is_empty() {
+        return None;
+    }
+    content.extend(tokens);
+    Some(content.join("\n\n"))
+}
+
 fn canonical_output_text(
     output_contract: &IntentOutputContract,
     text: &str,
     messages: &[String],
 ) -> String {
+    if content_evidence_file_delivery_contract(output_contract) {
+        if let Some(compound) = compound_content_delivery_text(messages) {
+            return compound;
+        }
+    }
     let text = text.trim();
     if !extract_delivery_file_tokens(text).is_empty() {
         return text.to_string();

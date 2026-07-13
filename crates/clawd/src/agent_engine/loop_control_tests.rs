@@ -28,6 +28,7 @@ use super::{
     try_recover_generic_path_content_read_range_answer_verifier_gap,
     try_recover_http_health_answer_verifier_gap, try_recover_inconsistent_boundary_clarify,
     try_recover_latest_synthesis_answer_verifier_gap, try_recover_local_health_answer_verifier_gap,
+    try_recover_local_health_answer_verifier_gap_from_loop_state,
     try_recover_log_analyze_answer_verifier_gap,
     try_recover_machine_kv_summary_output_format_answer_verifier_gap,
     try_recover_recent_artifacts_answer_verifier_gap, try_recover_rss_news_answer_verifier_gap,

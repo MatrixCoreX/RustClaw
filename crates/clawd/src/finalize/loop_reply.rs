@@ -189,6 +189,7 @@ use file_delivery::{
 #[path = "loop_reply_file_missing.rs"]
 mod file_missing;
 pub(crate) use file_missing::output_excerpt_has_missing_file_evidence;
+pub(crate) use file_missing::preserve_compound_content_summary_with_file_token;
 use file_missing::{
     append_compound_file_delivery_token_from_route,
     generated_delivery_existing_file_content_synthesis_token,
@@ -1699,6 +1700,11 @@ pub(crate) async fn finalize_loop_reply(
     {
         delivery_deduped = loop_state.delivery_messages.clone();
     }
+    preserve_compound_content_summary_with_file_token(
+        &mut loop_state,
+        agent_run_context,
+        &mut delivery_deduped,
+    );
 
     let final_text = final_answer_text_from_delivery(&delivery_deduped);
 

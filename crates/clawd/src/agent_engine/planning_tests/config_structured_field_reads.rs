@@ -953,6 +953,68 @@ planner_kind = "tool"
 }
 
 #[test]
+fn full_structured_text_read_is_not_rewritten_to_scalar_field_read() {
+    let root = TempDirGuard::new("full_structured_text_read_no_scalar_rewrite");
+    let config = root.path.join("app_config.toml");
+    fs::write(
+        &config,
+        r#"[app]
+name = "rustclaw-fixture"
+version = "0.1.8"
+
+[paths]
+db_path = "data/test_contract.sqlite"
+"#,
+    )
+    .expect("write config");
+    let config_path = config.display().to_string();
+    let mut state = test_state_with_enabled_skills(&["config_basic", "fs_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = config_path.clone();
+    route.resolved_intent =
+        "Read the complete structured file and summarize from observed content.".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": config_path.clone(),
+                "mode": "full",
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "Read the full config and summarize it.",
+        Some(&config_path),
+        actions,
+    );
+
+    let args = expect_planned_call(&normalized[0], "fs_basic", "read_text_range");
+    assert_eq!(args.get("mode").and_then(Value::as_str), Some("full"));
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(config_path.as_str())
+    );
+    assert!(
+        normalized
+            .iter()
+            .all(|action| !planned_call_is(action, "config_basic", "read_field")),
+        "normalized actions: {normalized:?}"
+    );
+}
+
+#[test]
 fn rustclaw_config_validation_without_profile_keeps_validate_action() {
     let mut route = base_route_result();
     route.resolved_intent =
