@@ -5,7 +5,7 @@ use super::{
     apply_state_patch_structured_field_selector, execution_finalize_style_for_contract,
     route_has_structured_execution_signal, route_trace_record,
     state_patch_targets_task_lifecycle_fields, ExecutionRecipePlanHint, IntentNormalizerOutput,
-    RouteDecision, TurnAnalysis,
+    RouteDecision, TurnAnalysis, TurnType,
 };
 use crate::pipeline_types::OutputContractRef;
 use crate::{
@@ -183,6 +183,10 @@ fn alias_state_patch_ack_allowed_for_route_output(
 ) -> bool {
     !wants_file_delivery
         && !normalizer_out.needs_clarify
+        && normalizer_out
+            .turn_analysis
+            .as_ref()
+            .is_some_and(|analysis| analysis.turn_type == Some(TurnType::PreferenceOrMemory))
         && !output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && output_contract.delivery_intent == crate::OutputDeliveryIntent::None
