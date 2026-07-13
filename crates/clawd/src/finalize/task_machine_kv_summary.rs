@@ -199,6 +199,48 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         });
         return true;
     }
+    let search_path_listing = if let Some(summary) = requested_summary.as_deref() {
+        crate::finalize::search_path_projection::path_listing_from_marker_summary_outputs(
+            journal
+                .step_results
+                .iter()
+                .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+                .filter_map(|step| step.output_excerpt.as_deref()),
+            summary,
+        )
+    } else {
+        crate::finalize::search_path_projection::path_listing_from_marker_summary_outputs(
+            journal
+                .step_results
+                .iter()
+                .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+                .filter_map(|step| step.output_excerpt.as_deref()),
+            answer_text,
+        )
+    };
+    if let Some(restored) = search_path_listing {
+        if restored.trim() == answer_text.trim() {
+            journal.record_final_answer(answer_text.as_str());
+            return false;
+        }
+        answer_messages.clear();
+        answer_messages.push(restored.clone());
+        *answer_text = restored;
+        journal.record_final_answer(answer_text.as_str());
+        journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: journal.step_results.len(),
+            ..Default::default()
+        });
+        return true;
+    }
     if !requested_summary_overrides_scalar_delivery
         && final_answer_preserves_terminal_scalar_contract(route_result, journal, answer_text)
     {

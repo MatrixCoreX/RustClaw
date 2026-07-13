@@ -18,6 +18,7 @@ mod clarify;
 mod helpers;
 mod journal;
 mod loop_reply;
+mod search_path_projection;
 mod task;
 
 // === JOURNAL BUILDER（Stage 3.1）===
