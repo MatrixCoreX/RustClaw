@@ -354,6 +354,71 @@ fn active_bound_context_mismatched_locator_still_forces_terminal_respond_repair(
 }
 
 #[test]
+fn active_ordered_target_path_respond_only_is_terminal_without_repair() {
+    let mut route = route_result(
+        crate::AskMode::act_with_chat_finalizer(),
+        false,
+        OutputResponseShape::OneSentence,
+    );
+    route.route_reason =
+        "executable_contract_preserved_for_agent_loop; active_task_scope_refinement_detached_from_structured_anchor".to_string();
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "active_bound_targets".to_string(),
+        serde_json::to_string(&vec![
+            "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md",
+            "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt",
+            "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt",
+        ])
+        .unwrap(),
+    );
+    let actions = vec![AgentAction::Respond {
+        content: "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt".to_string(),
+    }];
+
+    assert!(!should_force_actionable_plan_repair(
+        &test_state(),
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+}
+
+#[test]
+fn active_ordered_target_non_member_respond_only_still_requires_repair() {
+    let mut route = route_result(
+        crate::AskMode::act_with_chat_finalizer(),
+        false,
+        OutputResponseShape::OneSentence,
+    );
+    route.route_reason =
+        "executable_contract_preserved_for_agent_loop; active_task_scope_refinement_detached_from_structured_anchor".to_string();
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "active_bound_targets".to_string(),
+        serde_json::to_string(&vec![
+            "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md",
+            "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt",
+        ])
+        .unwrap(),
+    );
+    let actions = vec![AgentAction::Respond {
+        content: "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/not_listed.txt".to_string(),
+    }];
+
+    assert!(should_force_actionable_plan_repair(
+        &test_state(),
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+}
+
+#[test]
 fn existing_observed_context_synthesis_still_requires_explicit_content_evidence() {
     let mut route = route_result(
         crate::AskMode::act_with_chat_finalizer(),

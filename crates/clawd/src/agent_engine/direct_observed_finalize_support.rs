@@ -1147,6 +1147,9 @@ pub(super) fn should_force_actionable_plan_repair(
     if route_allows_existing_observed_context_terminal_respond(route_result, actions) {
         return false;
     }
+    if route_allows_active_bound_target_terminal_respond(state, route_result, loop_state, actions) {
+        return false;
+    }
     if route_allows_active_bound_context_terminal_respond(route_result, loop_state, actions) {
         return false;
     }
@@ -1264,6 +1267,38 @@ fn route_allows_existing_observed_context_terminal_respond(
         .is_some_and(|content| !content.is_empty())
 }
 
+fn route_allows_active_bound_target_terminal_respond(
+    state: &AppState,
+    route_result: &RouteResult,
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> bool {
+    if route_result.needs_clarify
+        || route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || route_result.output_contract.delivery_intent != crate::OutputDeliveryIntent::None
+        || !matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Free
+                | crate::OutputResponseShape::OneSentence
+                | crate::OutputResponseShape::Strict
+                | crate::OutputResponseShape::Scalar
+        )
+    {
+        return false;
+    }
+    let Some(content) = is_plain_respond_only_plan(actions).map(str::trim) else {
+        return false;
+    };
+    if content.is_empty() {
+        return false;
+    }
+    active_context_targets_from_loop_state(loop_state)
+        .iter()
+        .any(|target| path_surface_matches_active_target(state, content, target))
+}
+
 fn route_allows_active_bound_context_terminal_respond(
     route_result: &RouteResult,
     loop_state: &LoopState,
@@ -1336,6 +1371,42 @@ fn locator_surfaces_match(target: &str, locator_hint: &str) -> bool {
         (Some(left), Some(right)) => left == right,
         _ => false,
     }
+}
+
+fn normalized_path_surface_for_active_match(path: &str) -> String {
+    path.trim()
+        .trim_matches('`')
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn path_surface_matches_active_target(state: &AppState, content: &str, target: &str) -> bool {
+    let content = normalized_path_surface_for_active_match(content);
+    let target = normalized_path_surface_for_active_match(target);
+    if content.is_empty() || target.is_empty() {
+        return false;
+    }
+    if content == target {
+        return true;
+    }
+    let root = normalized_path_surface_for_active_match(
+        &state.skill_rt.workspace_root.display().to_string(),
+    );
+    if root.is_empty() {
+        return false;
+    }
+    let absolute_content = content
+        .strip_prefix(&root)
+        .and_then(|rest| rest.strip_prefix('/'));
+    if absolute_content.is_some_and(|rest| rest == target) {
+        return true;
+    }
+    let absolute_target = target
+        .strip_prefix(&root)
+        .and_then(|rest| rest.strip_prefix('/'));
+    absolute_target.is_some_and(|rest| rest == content)
 }
 
 pub(super) fn required_session_alias_targets_from_loop_state(
