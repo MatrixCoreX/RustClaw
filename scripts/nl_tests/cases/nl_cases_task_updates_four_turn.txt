@@ -1,7 +1,10 @@
 # Four-turn task-update cases: each row is case_name|turn1|turn2|turn3|turn4.
 # These cases model users splitting one complete requirement across several messages.
 
-task_updates4_cn_split_plan|帮我写个方案|面向老板|不要太技术|控制在 80 字内，只输出正文
+continuous|task_updates4_cn_split_plan_turn1|turn_chain,allow_clarify|帮我写个方案
+continuous|task_updates4_cn_split_plan_turn2|turn_chain,allow_clarify|面向老板
+continuous|task_updates4_cn_split_plan_turn3|turn_chain|不要太技术
+continuous|task_updates4_cn_split_plan_turn4|turn_chain|控制在 80 字内，只输出正文
 task_updates4_cn_append_then_correct|帮我写一句部署说明，提到 Python 3.10|面向新手|不对，Python 改成 3.11|只输出最后一句
 task_updates4_cn_replace_then_scope|帮我写一篇 RustClaw 长文|算了，改成上线前检查清单|只看登录和渠道接入|只保留三条
 task_updates4_cn_scope_then_format|帮我总结这个仓库|先只看 UI 部分|面向非技术用户|用 markdown 表格输出两行

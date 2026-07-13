@@ -2,8 +2,12 @@
 # Focused multi-turn cases for task-state patch handling.
 # Format: case_name|turn1|turn2|turn3
 #
-task_append_split_sentence_cn|帮我写个方案|面向老板|不要太技术，控制在 80 字内，只输出正文
-task_append_split_sentence_en|Help me write a proposal|It is for executives|Keep it non-technical and under 40 words. Output only the body.
+continuous|task_append_split_sentence_cn_turn1|legacy_shape,turn_chain,allow_clarify|帮我写个方案
+continuous|task_append_split_sentence_cn_turn2|legacy_shape,turn_chain,allow_clarify|面向老板
+continuous|task_append_split_sentence_cn_turn3|legacy_shape,turn_chain|不要太技术，控制在 80 字内，只输出正文
+continuous|task_append_split_sentence_en_turn1|legacy_shape,turn_chain,allow_clarify|Help me write a proposal
+continuous|task_append_split_sentence_en_turn2|legacy_shape,turn_chain,allow_clarify|It is for executives
+continuous|task_append_split_sentence_en_turn3|legacy_shape,turn_chain|Keep it non-technical and under 40 words. Output only the body.
 task_correct_version_cn|帮我写一句部署说明，要求提到 Python 3.10|不对，不是 Python 3.10，是 Python 3.11|只输出那一句说明
 task_correct_version_en|Write one deployment note that mentions Python 3.10|Correction: not Python 3.10, use Python 3.11|Output only that sentence
 task_replace_goal_cn|帮我写一篇关于 RustClaw 的长文|算了，别写长文了，改成短帖串|只输出前三条，每条一行
