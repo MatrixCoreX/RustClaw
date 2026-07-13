@@ -1846,6 +1846,12 @@ pub(super) async fn run_agent_with_loop_seeded(
             ) {
                 return Ok(reply);
             }
+            if try_recover_machine_kv_summary_output_format_answer_verifier_gap(
+                route_result,
+                &mut reply,
+            ) {
+                return Ok(reply);
+            }
             if answer_verifier_gap_requests_observed_content_rewrite(&verifier)
                 && try_rewrite_answer_verifier_gap_with_observed_evidence(
                     state,
