@@ -133,6 +133,9 @@ struct ResolverCandidate {
     planner_kind: PlannerCapabilityKind,
     preferred: bool,
     risk_level: SkillRiskLevel,
+    required_args: Vec<String>,
+    optional_args: Vec<String>,
+    input_schema: Option<Value>,
 }
 
 fn resolve_registry_capability_action(
@@ -177,6 +180,11 @@ fn resolve_registry_capability_action(
                 .risk_level
                 .or_else(|| manifest.as_ref().and_then(|manifest| manifest.risk_level))
                 .unwrap_or(SkillRiskLevel::Unknown),
+            required_args: mapping.required.clone(),
+            optional_args: mapping.optional.clone(),
+            input_schema: manifest
+                .as_ref()
+                .and_then(|manifest| manifest.input_schema.clone()),
         });
     }
     candidates.sort_by_key(resolver_candidate_rank);
@@ -289,11 +297,64 @@ fn resolve_candidate_action(candidate: ResolverCandidate, args: Value) -> AgentA
             .entry("action".to_string())
             .or_insert_with(|| Value::String(action.to_string()));
     }
+    sanitize_optional_enum_args_for_schema(
+        &mut resolved_args,
+        candidate.input_schema.as_ref(),
+        &candidate.required_args,
+        &candidate.optional_args,
+    );
     action_for_skill(
         candidate.planner_kind,
         candidate.skill,
         Value::Object(resolved_args),
     )
+}
+
+fn sanitize_optional_enum_args_for_schema(
+    args: &mut serde_json::Map<String, Value>,
+    input_schema: Option<&Value>,
+    required_args: &[String],
+    optional_args: &[String],
+) {
+    let Some(properties) = input_schema
+        .and_then(|schema| schema.get("properties"))
+        .and_then(Value::as_object)
+    else {
+        return;
+    };
+    let required = required_args
+        .iter()
+        .map(|arg| arg.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    for arg in optional_args {
+        if required.contains(arg.as_str()) {
+            continue;
+        }
+        let Some(current) = args.get(arg) else {
+            continue;
+        };
+        let Some(current_string) = current.as_str().map(str::trim) else {
+            continue;
+        };
+        if current_string.is_empty() {
+            continue;
+        }
+        let Some(allowed) = properties
+            .get(arg)
+            .and_then(|property| property.get("enum"))
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        let current_token = normalize_capability_name(current_string);
+        let allowed_match = allowed
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|allowed| normalize_capability_name(allowed) == current_token);
+        if !allowed_match {
+            args.remove(arg);
+        }
+    }
 }
 
 fn action_for_skill(

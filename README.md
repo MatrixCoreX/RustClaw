@@ -286,6 +286,44 @@ The default provider is `local-hash-v1`, which runs offline. Unsupported or unav
 
 Retrieval combines several signals instead of trusting a single score: exact / lexical matches, vector similarity when compatible, salience, recency, source kind, success state, safety filter, and the current memory use policy. This makes the index useful for multilingual recall while keeping execution grounded in the route and output contracts.
 
+### Knowledge Base Design Flow
+
+The `kb` skill is the user-managed document knowledge-base path. It is selected like other ordinary capabilities: `ask` tasks let the agent loop plan `call_capability("kb.*")`, while direct API callers can use `kind=run_skill` with `skill_name=kb`. Runtime code does not special-case knowledge-base wording before the planner; it resolves and verifies registry capability metadata, then dispatches the same skill protocol as other runner skills.
+
+```mermaid
+flowchart TD
+    A[Natural-language ask<br/>or explicit run_skill] --> B{Task path}
+    B -->|ask| C[Agent loop planner<br/>call_capability kb.*]
+    B -->|run_skill| D[Explicit skill_name=kb<br/>with args]
+    C --> E[CapabilityResolver + PlanVerifier<br/>registry policy + required args + risk/effect]
+    D --> F[Shared skill dispatcher]
+    E --> F
+    F --> G[skill-runner<br/>kb skill single-line JSON]
+    G --> H{kb action}
+    H -->|ingest| I[Validate namespace + paths<br/>user_key scope + workspace root]
+    I --> J[Scan files with filters<br/>file_types + max_file_size]
+    J --> K[Chunk documents<br/>chunk_size + overlap]
+    K --> L[(data/kb/by_user/...<br/>namespace JSON snapshot)]
+    K --> M[(memory_retrieval_index<br/>source_kind=kb_doc<br/>memory_kind=knowledge_doc)]
+    H -->|search| N[Load namespace snapshot]
+    L --> N
+    N --> O[Chunk scoring + filters<br/>query + top_k + path/file/time filters]
+    O --> P[Structured hits<br/>chunk_id + path + score + metadata]
+    H -->|list_namespaces / stats| Q[Read namespace snapshots]
+    Q --> R[Structured namespace counts<br/>names + docs + chunks]
+    M --> S[Memory recall policy<br/>may include knowledge_docs]
+    S --> T[Planner / chat / skill memory context]
+    P --> U[Observation<br/>evidence coverage + finalizer]
+    R --> U
+```
+
+Key boundaries:
+
+- `kb.ingest` is a local mutation capability. Registry policy marks it medium risk, once per task, and async-preferred through the local process adapter.
+- `kb.search`, `kb.list_namespaces`, and `kb.stats` are observe-mode capabilities. They return structured machine fields such as `namespace`, `hits`, `names`, `document_count`, and `chunk_count`.
+- Namespace snapshots under `data/kb/by_user/...` keep the compatibility document index. Ingest also syncs chunks into the unified retrieval index as `kb_doc` / `knowledge_doc`, and startup reindex can rebuild those rows from snapshots.
+- KB rows are scoped by `user_key` and workspace files, not by one chat thread. They can be recalled later only through the same memory use-policy filters as other knowledge docs, and current user input remains the authority.
+
 ### User Control
 
 The browser console includes a Memory page. It shows counts, preferences, fact cards, and recent records for the current identity. Users can:

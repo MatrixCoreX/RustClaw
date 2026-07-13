@@ -800,7 +800,6 @@ fn requested_machine_kv_summary_preserves_web_search_listing_delivery() {
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.delivery_required = false;
     route.output_contract.requires_content_evidence = true;
-    route.resolved_intent = "capability_ref=web.search_results top_k=3".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         ..Default::default()
@@ -821,6 +820,48 @@ fn requested_machine_kv_summary_preserves_web_search_listing_delivery() {
         loop_state.last_user_visible_respond.as_deref(),
         Some(answer.as_str())
     );
+}
+
+#[test]
+fn requested_machine_kv_summary_restores_web_search_candidates_over_scalar_summary() {
+    let task = claimed_task("task-machine-kv-summary-web-search-candidates");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "web_search_extract",
+        r#"{"extra":{"action":"search_extract","top_k":3,"candidates":[{"title":"Introduction - Asynchronous Programming in Rust","source":"rust-lang.github.io","url":"https://rust-lang.github.io/async-book/"},{"title":"Fundamentals of Asynchronous Programming: Async, Await ... - Learn Rust","source":"doc.rust-lang.org","url":"https://doc.rust-lang.org/book/ch17-00-async-await.html"},{"title":"Introduction - Asynchronous Programming in Rust","source":"rust-lang.github.io","url":"https://rust-lang.github.io/async-book/part-guide/intro.html"}]},"text":"{\"candidates\":[{\"title\":\"must_not_parse_text\",\"source\":\"bad.example\"}]}"}"#,
+    ));
+    let mut delivery_messages = vec!["source=doc.rust-lang.org top_k=3".to_string()];
+    loop_state.last_user_visible_respond = delivery_messages.first().cloned();
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "Search the web for Rust async tutorial top_k=3 and return titles plus source domains.",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    let restored = delivery_messages.join("\n");
+    assert!(
+        restored.contains("Introduction - Asynchronous Programming in Rust - rust-lang.github.io"),
+        "{restored}"
+    );
+    assert!(restored.contains(
+        "Fundamentals of Asynchronous Programming: Async, Await ... - Learn Rust - doc.rust-lang.org"
+    ), "{restored}");
+    assert!(!restored.contains("must_not_parse_text"), "{restored}");
 }
 
 #[test]

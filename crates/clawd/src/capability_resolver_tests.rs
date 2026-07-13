@@ -66,6 +66,9 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
             planner_kind: PlannerCapabilityKind::Tool,
             preferred: true,
             risk_level: SkillRiskLevel::High,
+            required_args: Vec::new(),
+            optional_args: Vec::new(),
+            input_schema: None,
         },
         ResolverCandidate {
             skill: "fs_basic".to_string(),
@@ -73,10 +76,76 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
             planner_kind: PlannerCapabilityKind::Tool,
             preferred: true,
             risk_level: SkillRiskLevel::Low,
+            required_args: Vec::new(),
+            optional_args: Vec::new(),
+            input_schema: None,
         },
     ];
     candidates.sort_by_key(resolver_candidate_rank);
     assert_eq!(candidates[0].skill, "fs_basic");
+}
+
+#[test]
+fn optional_enum_arg_outside_registry_schema_is_dropped_before_skill_call() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "extension.assess_gap",
+        json!({
+            "request": "Add a reusable local CSV statistics capability",
+            "mode_hint": "read_only_csv_stats"
+        }),
+    );
+
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    assert_eq!(
+        record.resolved_ref.as_deref(),
+        Some("skill:extension_manager")
+    );
+    let Some(AgentAction::CallSkill { skill, args }) = action else {
+        panic!("expected extension_manager skill action, got {action:?}");
+    };
+    assert_eq!(skill, "extension_manager");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("assess_gap")
+    );
+    assert_eq!(
+        args.get("request").and_then(Value::as_str),
+        Some("Add a reusable local CSV statistics capability")
+    );
+    assert!(
+        args.get("mode_hint").is_none(),
+        "invalid optional enum value should be removed so the skill can use its default"
+    );
+}
+
+#[test]
+fn valid_optional_enum_arg_is_preserved_before_skill_call() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "extension.assess_gap",
+        json!({
+            "request": "Add a reusable local CSV statistics capability",
+            "mode_hint": "permanent_extension"
+        }),
+    );
+
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    let Some(AgentAction::CallSkill { args, .. }) = action else {
+        panic!("expected extension_manager skill action, got {action:?}");
+    };
+    assert_eq!(
+        args.get("mode_hint").and_then(Value::as_str),
+        Some("permanent_extension")
+    );
 }
 
 #[test]

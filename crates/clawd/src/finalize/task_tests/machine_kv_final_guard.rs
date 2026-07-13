@@ -219,6 +219,47 @@ fn requested_machine_kv_summary_final_guard_preserves_web_search_listing() {
 }
 
 #[test]
+fn requested_machine_kv_summary_final_guard_restores_web_search_candidates_over_scalar_summary() {
+    let prompt =
+        "Search the web for Rust async tutorial top_k=3 and return titles plus source domains.";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-machine-kv-web-search-candidate-restore",
+        "ask",
+        prompt,
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "web_search_extract",
+            r#"{"extra":{"action":"search_extract","top_k":3,"candidates":[{"title":"Introduction - Asynchronous Programming in Rust","source":"rust-lang.github.io","url":"https://rust-lang.github.io/async-book/"},{"title":"Fundamentals of Asynchronous Programming: Async, Await ... - Learn Rust","source":"doc.rust-lang.org","url":"https://doc.rust-lang.org/book/ch17-00-async-await.html"},{"title":"Introduction - Asynchronous Programming in Rust","source":"rust-lang.github.io","url":"https://rust-lang.github.io/async-book/part-guide/intro.html"}]},"text":"{\"candidates\":[{\"title\":\"must_not_parse_text\",\"source\":\"bad.example\"}]}"}"#,
+        ));
+    let mut answer_text = "source=doc.rust-lang.org top_k=3".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert!(answer_text
+        .contains("Introduction - Asynchronous Programming in Rust - rust-lang.github.io"));
+    assert!(answer_text.contains(
+        "Fundamentals of Asynchronous Programming: Async, Await ... - Learn Rust - doc.rust-lang.org"
+    ));
+    assert!(!answer_text.contains("must_not_parse_text"));
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
+    assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
+}
+
+#[test]
 fn requested_machine_kv_summary_final_guard_preserves_workspace_grounded_summary() {
     let prompt = "List clawd related log files, read clawd.run.log tail, then summarize status.";
     let mut route = route_result(crate::AskMode::act_plain());

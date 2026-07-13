@@ -299,6 +299,41 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         loop_state.last_user_visible_respond = Some(current);
         return false;
     }
+    if let Some(restored) = latest_web_search_candidate_listing_delivery(loop_state, &current) {
+        if restored.trim() == current.trim() {
+            loop_state.last_user_visible_respond = Some(current);
+            return false;
+        }
+        delivery_messages.clear();
+        delivery_messages.push(restored.clone());
+        loop_state.delivery_messages.clear();
+        append_delivery_message(
+            &task.task_id,
+            &mut loop_state.delivery_messages,
+            restored.clone(),
+        );
+        loop_state.last_user_visible_respond = Some(restored);
+        *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: loop_state.executed_step_results.len(),
+            ..Default::default()
+        });
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "requested_machine_kv_summary_web_search_candidate_listing",
+            "restored",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return true;
+    }
     if current_delivery_is_terminal_scalar_answer(agent_run_context, &current)
         && !requested_machine_summary_should_override_scalar(&current, &answer)
     {
@@ -975,36 +1010,69 @@ fn requested_machine_summary_value_matches_scalar(current: &str, requested_summa
 }
 
 fn current_delivery_preserves_web_search_listing(
-    agent_run_context: Option<&AgentRunContext>,
+    _agent_run_context: Option<&AgentRunContext>,
     loop_state: &LoopState,
     current: &str,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
-        return false;
-    };
-    if !route_is_web_search_listing(route) {
-        return false;
-    }
     let current = current.trim();
     if current.is_empty() {
         return false;
     }
-    loop_state
-        .executed_step_results
-        .iter()
-        .filter(|step| {
-            step.is_ok() && matches!(step.skill.as_str(), "web_search_extract" | "browser_web")
-        })
-        .filter_map(|step| step.output.as_deref())
-        .flat_map(web_search_candidate_title_sources_from_output)
-        .any(|(title, _source)| current.contains(&title))
+    let pairs = web_search_candidate_title_sources_from_loop_state(loop_state);
+    web_search_candidate_titles_are_covered(&pairs, current)
 }
 
-fn route_is_web_search_listing(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["web", "browser"],
-        &["search", "results"],
+fn latest_web_search_candidate_listing_delivery(
+    loop_state: &LoopState,
+    current: &str,
+) -> Option<String> {
+    if !current_delivery_is_machine_kv_only(current) {
+        return None;
+    }
+    let pairs = web_search_candidate_title_sources_from_loop_state(loop_state);
+    web_search_candidate_listing_from_pairs(pairs)
+}
+
+fn web_search_candidate_title_sources_from_loop_state(
+    loop_state: &LoopState,
+) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    for step in &loop_state.executed_step_results {
+        if !step.is_ok() || !matches!(step.skill.as_str(), "web_search_extract" | "browser_web") {
+            continue;
+        }
+        if let Some(output) = step.output.as_deref() {
+            for pair in web_search_candidate_title_sources_from_output(output) {
+                if !pairs.iter().any(|existing| existing == &pair) {
+                    pairs.push(pair);
+                }
+            }
+        }
+    }
+    pairs
+}
+
+fn web_search_candidate_titles_are_covered(pairs: &[(String, String)], visible: &str) -> bool {
+    let mut titles: Vec<&str> = Vec::new();
+    for (title, _source) in pairs {
+        let title = title.as_str();
+        if !titles.contains(&title) {
+            titles.push(title);
+        }
+    }
+    !titles.is_empty() && titles.into_iter().all(|title| visible.contains(title))
+}
+
+fn web_search_candidate_listing_from_pairs(pairs: Vec<(String, String)>) -> Option<String> {
+    if pairs.is_empty() {
+        return None;
+    }
+    Some(
+        pairs
+            .into_iter()
+            .map(|(title, source)| format!("{title} - {source}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
     )
 }
 
