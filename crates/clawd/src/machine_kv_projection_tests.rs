@@ -73,6 +73,43 @@ fn machine_summary_accepts_nested_machine_token_value() {
 }
 
 #[test]
+fn machine_summary_does_not_require_pair_value_as_standalone_marker() {
+    let observed = vec![
+        "22|| `semantic_rewrite` | Migration debt only | Ordinary intent/action/skill decision outside planner. |"
+            .to_string(),
+    ];
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Answer exactly as machine summary: owner=semantic_rewrite status=Migration.",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some("owner=semantic_rewrite status=Migration")
+    );
+}
+
+#[test]
+fn machine_summary_projects_pair_values_from_read_range_json_excerpt() {
+    let mut observed = Vec::new();
+    collect_machine_text_fragments_from_output(
+        r#"{"extra":{"action":"read_range","end_line":22,"excerpt":"22|| `semantic_rewrite` | Migration debt only | Ordinary intent/action/skill decision outside planner. |","mode":"range","path":"/repo/docs/runtime_semantic_rewrite_inventory.md","start_line":22}}"#,
+        &mut observed,
+    );
+
+    let summary = requested_machine_kv_summary_from_observations(
+        "Use read_range only for /repo/docs/runtime_semantic_rewrite_inventory.md line 22. Answer exactly as machine summary: owner=semantic_rewrite status=Migration.",
+        &observed,
+    );
+
+    assert_eq!(
+        summary.as_deref(),
+        Some("owner=semantic_rewrite status=Migration")
+    );
+}
+
+#[test]
 fn machine_summary_projects_status_from_status_code_alias() {
     let mut observed = Vec::new();
     collect_machine_text_fragments_from_output(

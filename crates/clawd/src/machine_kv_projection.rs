@@ -14,9 +14,15 @@ pub(crate) fn requested_machine_kv_summary_from_observations(
         .iter()
         .map(|(key, _)| key.as_str())
         .collect::<Vec<_>>();
+    let pair_values = pairs
+        .iter()
+        .map(|(_, value)| value.as_str())
+        .collect::<Vec<_>>();
     let mut markers = requested_machine_markers(input)
         .into_iter()
         .filter(|marker| !pair_keys.iter().any(|key| key == marker))
+        .filter(|marker| !pair_values.iter().any(|value| value == marker))
+        .filter(|marker| !marker_is_positional_argument(marker, input))
         .filter(|marker| !template_markers.iter().any(|key| key == marker))
         .filter(|marker| !machine_request_option_key(marker))
         .filter(|marker| !observed_only_as_machine_identity_value(marker, observed_texts))
@@ -256,6 +262,19 @@ fn requested_machine_markers(input: &str) -> Vec<String> {
         })
         .cloned()
         .collect()
+}
+
+fn marker_is_positional_argument(marker: &str, input: &str) -> bool {
+    if marker != "line" {
+        return false;
+    }
+    let tokens = input.split_whitespace().collect::<Vec<_>>();
+    tokens.windows(2).any(|window| {
+        trim_machine_marker_token(window[0]) == marker
+            && trim_machine_marker_token(window[1])
+                .chars()
+                .all(|ch| ch.is_ascii_digit())
+    })
 }
 
 fn requested_machine_value_template_markers(input: &str) -> Vec<String> {
