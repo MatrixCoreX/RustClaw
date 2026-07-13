@@ -382,6 +382,32 @@ fn dirs_only_inventory_names_by_kind_can_direct_answer_observation_only_plan() {
 }
 
 #[test]
+fn observed_entries_project_wrapped_inventory_names_by_kind_files() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","counts":{"dirs":0,"files":5,"hidden":0,"total":5},"dirs_only":false,"files_only":true,"include_hidden":false,"names_by_kind":{"dirs":[],"files":["act_plan.log","clawd-codex-current.log","clawd-codex-style-live.log","clawd-dev-live.log","clawd-dev.log"],"other":[]},"path":"logs","resolved_path":"/home/guagua/rustclaw/logs","sort_by":"name"}}"#,
+    ));
+
+    let entries = observed_output_entries(&loop_state);
+    let joined = entries.join("\n");
+
+    assert!(
+        joined.contains("inventory_dir path=/home/guagua/rustclaw/logs sort_by=name total=5 files=5 dirs=0 hidden=0"),
+        "entries: {joined}"
+    );
+    assert!(
+        joined.contains("file_entries=act_plan.log,clawd-codex-current.log,clawd-codex-style-live.log,clawd-dev-live.log,clawd-dev.log"),
+        "entries: {joined}"
+    );
+    assert!(
+        !joined.contains("size_summary.largest_file"),
+        "entries: {joined}"
+    );
+}
+
+#[test]
 fn observed_outputs_keep_latest_content_read_for_same_path() {
     let mut loop_state = LoopState::new(3);
     loop_state.executed_step_results.push(ok_step(
