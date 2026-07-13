@@ -19,7 +19,112 @@ pub(super) fn executable_contract_observe_only_round_should_continue(
     route_result.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
         && !super::has_discussion_followup_action(actions)
         && !super::has_authoritative_delivery(loop_state)
+        && !bounded_read_observe_only_round_can_finalize(route_result, loop_state, actions)
         && actions_are_observe_only_machine_steps(actions)
+}
+
+fn bounded_read_observe_only_round_can_finalize(
+    route_result: &RouteResult,
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> bool {
+    let contract = route_result.effective_output_contract();
+    if contract.delivery_required
+        || !route_result.output_contract_is_unclassified()
+        || !matches!(
+            contract.response_shape,
+            crate::OutputResponseShape::Free | crate::OutputResponseShape::Strict
+        )
+        || !matches!(
+            contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        || !actions.iter().any(action_is_bounded_read_observation)
+    {
+        return false;
+    }
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .any(step_output_is_bounded_read_range)
+}
+
+fn action_is_bounded_read_observation(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args } => {
+            let tool = tool.trim();
+            let action = args
+                .get("action")
+                .and_then(Value::as_str)
+                .map(normalize_machine_action_token)
+                .unwrap_or_default();
+            matches!(tool, "fs_basic" | "system_basic")
+                && matches!(action.as_str(), "read_range" | "read_text_range")
+        }
+        AgentAction::CallCapability { capability, .. } => matches!(
+            capability.trim().to_ascii_lowercase().as_str(),
+            "filesystem.read_range" | "filesystem.read_text_range"
+        ),
+        AgentAction::Think { .. }
+        | AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Respond { .. } => false,
+    }
+}
+
+fn step_output_is_bounded_read_range(step: &crate::executor::StepExecutionResult) -> bool {
+    if !step.is_ok() || !matches!(step.skill.as_str(), "fs_basic" | "system_basic") {
+        return false;
+    }
+    let Some(output) = step
+        .output
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(output) else {
+        return false;
+    };
+    value_is_bounded_read_range(&value)
+}
+
+fn value_is_bounded_read_range(value: &Value) -> bool {
+    if flat_value_is_bounded_read_range(value) {
+        return true;
+    }
+    value.get("extra").is_some_and(value_is_bounded_read_range)
+}
+
+fn flat_value_is_bounded_read_range(value: &Value) -> bool {
+    matches!(
+        value.get("action").and_then(Value::as_str),
+        Some("read_range" | "read_text_range")
+    ) && matches!(
+        value.get("mode").and_then(Value::as_str),
+        Some("head" | "tail" | "range")
+    ) && bounded_read_requested_lines(value)
+        .is_some_and(|requested_n| requested_n > 0 && requested_n <= 100)
+        && value
+            .get("excerpt")
+            .and_then(Value::as_str)
+            .is_some_and(|excerpt| !excerpt.trim().is_empty())
+}
+
+fn bounded_read_requested_lines(value: &Value) -> Option<u64> {
+    value
+        .get("requested_n")
+        .or_else(|| value.get("n"))
+        .or_else(|| value.get("count"))
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            let start = value.get("start_line")?.as_u64()?;
+            let end = value.get("end_line")?.as_u64()?;
+            (end >= start).then_some(end - start + 1)
+        })
 }
 
 fn actions_are_observe_only_machine_steps(actions: &[AgentAction]) -> bool {

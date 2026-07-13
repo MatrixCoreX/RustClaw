@@ -8,6 +8,7 @@ use super::{
     filesystem_mutation_lifecycle_structured_answer, kb_filesystem_mutation_structured_answer,
     package_docker_probe_structured_answer, strip_internal_execution_args,
     strip_unsupported_planner_metadata_args, synthesize_answer_allows_direct_fallback,
+    synthesize_bounded_read_range_direct_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer,
     synthesize_evidence_policy_direct_observed_fallback_answer, synthesize_failure_observed_facts,

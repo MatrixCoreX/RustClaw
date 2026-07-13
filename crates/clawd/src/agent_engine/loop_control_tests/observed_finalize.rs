@@ -107,6 +107,66 @@ fn observed_wrapped_empty_config_basic_scalar_output_can_stop_loop_without_secon
 }
 
 #[test]
+fn bounded_read_range_observe_only_round_does_not_force_incremental_planner() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r##"{"extra":{"action":"read_range","mode":"head","requested_n":4,"start_line":1,"end_line":4,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for RustClaw NL regression tests.\n4|","path":"/tmp/README.md"}}"##,
+    ));
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({"action":"read_text_range","path":"/tmp/README.md","mode":"head","n":4}),
+    }];
+    let mut route = route_result(OutputResponseShape::Free);
+    route.ask_mode = crate::AskMode::act_plain();
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+
+    assert!(!executable_contract_observe_only_round_should_continue(
+        &route,
+        &loop_state,
+        &actions,
+    ));
+    assert!(should_stop_for_observed_finalize(
+        Some(&AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        }),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
+fn summary_read_range_observe_only_round_still_uses_incremental_planner() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r##"{"extra":{"action":"read_range","mode":"head","requested_n":3,"excerpt":"1|# Service Notes\n2|\n3|Operators should check logs first.","path":"/tmp/service_notes.md"}}"##,
+    ));
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({"action":"read_text_range","path":"/tmp/service_notes.md","mode":"head","n":3}),
+    }];
+    let mut route = route_result(OutputResponseShape::Free);
+    route.ask_mode = crate::AskMode::act_plain();
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+
+    assert!(executable_contract_observe_only_round_should_continue(
+        &route,
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
 fn service_control_status_protocol_output_can_stop_strict_loop_without_synthesis_round() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
