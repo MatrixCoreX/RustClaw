@@ -19,6 +19,8 @@ mod dispatch_local_code_projection_gate;
 mod dispatch_synthesis;
 #[path = "dispatch_synthesis_bounded_read.rs"]
 mod dispatch_synthesis_bounded_read;
+#[path = "dispatch_support/respond_template_guard.rs"]
+mod respond_template_guard;
 #[path = "dispatch_support/status_answer.rs"]
 mod status_answer;
 
@@ -801,16 +803,6 @@ fn should_publish_respond_message(loop_state: &LoopState, text: &str) -> bool {
     true
 }
 
-fn bare_last_output_placeholder(content: &str) -> bool {
-    let trimmed = content.trim();
-    if !trimmed.starts_with("{{") || !trimmed.ends_with("}}") {
-        return false;
-    }
-    let inner = trimmed[2..trimmed.len().saturating_sub(2)].trim();
-    let lower = inner.to_ascii_lowercase();
-    lower == "last_output" || lower.starts_with("last_output.") || lower.starts_with("last_output[")
-}
-
 fn respond_machine_envelope_payload(text: &str) -> bool {
     let Ok(payload) = serde_json::from_str::<Value>(text.trim()) else {
         return false;
@@ -903,6 +895,18 @@ pub(super) fn handle_respond_action(
     .trim()
     .to_string();
 
+    if let Some(outcome) = respond_template_guard::unresolved_runtime_template_respond_outcome(
+        state,
+        task,
+        loop_state,
+        global_step,
+        step_in_round,
+        content,
+        &text,
+    ) {
+        return outcome;
+    }
+
     if active_recipe_terminal_discussion_should_replan(actions, loop_state, policy, idx) {
         record_active_recipe_terminal_discussion_replan(
             state,
@@ -985,8 +989,9 @@ pub(super) fn handle_respond_action(
         .delivery_messages
         .last()
         .is_some_and(|last| last.trim() == text.trim());
-    let terminal_last_output_passthrough =
-        !has_remaining_actions && !text.is_empty() && bare_last_output_placeholder(content);
+    let terminal_last_output_passthrough = !has_remaining_actions
+        && !text.is_empty()
+        && respond_template_guard::bare_last_output_placeholder(content);
     let publish_respond = should_publish_respond_message(loop_state, &text)
         || ((terminal_direct_answer || terminal_last_output_passthrough) && !duplicate_delivery);
     if !text.is_empty() && (publish_respond || !has_remaining_actions) {

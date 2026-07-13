@@ -38,6 +38,8 @@ struct LogAnalysis {
     recent_notable_lines: Vec<String>,
     recovery_counts: BTreeMap<String, usize>,
     recent_recovery_lines: Vec<String>,
+    tail_lines_requested: usize,
+    tail_lines: Vec<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -104,6 +106,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         .and_then(|v| v.as_u64())
         .unwrap_or(20)
         .min(200) as usize;
+    let tail_lines = requested_tail_lines(obj);
 
     let default_keywords = [
         "error",
@@ -132,7 +135,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         .filter(|v: &Vec<String>| !v.is_empty())
         .unwrap_or_else(|| default_keywords.iter().map(|s| s.to_string()).collect());
 
-    let analysis = analyze_log_target(&path, &keywords, max_matches)?;
+    let analysis = analyze_log_target(&path, &keywords, max_matches, tail_lines)?;
     let extra = log_analysis_extra(analysis);
     Ok((extra.to_string(), extra))
 }
@@ -148,8 +151,19 @@ fn log_analysis_extra(analysis: LogAnalysis) -> Value {
         "level_counts": analysis.level_counts,
         "recent_notable_lines": analysis.recent_notable_lines,
         "recovery_counts": analysis.recovery_counts,
-        "recent_recovery_lines": analysis.recent_recovery_lines
+        "recent_recovery_lines": analysis.recent_recovery_lines,
+        "tail_lines_requested": analysis.tail_lines_requested,
+        "tail_lines": analysis.tail_lines,
+        "tail_excerpt": analysis.tail_lines.join("\n")
     })
+}
+
+fn requested_tail_lines(obj: &serde_json::Map<String, Value>) -> usize {
+    ["tail_lines", "tail", "n"]
+        .iter()
+        .find_map(|key| obj.get(*key).and_then(|value| value.as_u64()))
+        .unwrap_or(0)
+        .min(200) as usize
 }
 
 fn resolve_log_path(path: &PathBuf) -> Result<PathBuf, String> {
@@ -198,18 +212,26 @@ fn analyze_log_target(
     path: &PathBuf,
     keywords: &[String],
     max_matches: usize,
+    tail_lines: usize,
 ) -> Result<LogAnalysis, String> {
     if path.is_dir() {
-        return analyze_log_directory(path, keywords, max_matches);
+        return analyze_log_directory(path, keywords, max_matches, tail_lines);
     }
     let resolved = resolve_log_path(path)?;
-    analyze_log_file(&resolved, path.display().to_string(), keywords, max_matches)
+    analyze_log_file(
+        &resolved,
+        path.display().to_string(),
+        keywords,
+        max_matches,
+        tail_lines,
+    )
 }
 
 fn analyze_log_directory(
     path: &PathBuf,
     keywords: &[String],
     max_matches: usize,
+    tail_lines: usize,
 ) -> Result<LogAnalysis, String> {
     let entries = fs::read_dir(path).map_err(|err| format!("read log dir failed: {err}"))?;
     let mut best: Option<(usize, u8, SystemTime, LogAnalysis)> = None;
@@ -228,6 +250,7 @@ fn analyze_log_directory(
             path.display().to_string(),
             keywords,
             max_matches,
+            tail_lines,
         ) {
             Ok(v) => v,
             Err(_) => continue,
@@ -257,6 +280,7 @@ fn analyze_log_file(
     requested_path: String,
     keywords: &[String],
     max_matches: usize,
+    tail_lines: usize,
 ) -> Result<LogAnalysis, String> {
     let text =
         std::fs::read_to_string(resolved_path).map_err(|err| format!("read log failed: {err}"))?;
@@ -327,7 +351,29 @@ fn analyze_log_file(
         recent_notable_lines: notable_lines,
         recovery_counts,
         recent_recovery_lines: recovery_lines,
+        tail_lines_requested: tail_lines,
+        tail_lines: tail_excerpt_lines(&text, tail_lines),
     })
+}
+
+fn tail_excerpt_lines(text: &str, requested: usize) -> Vec<String> {
+    if requested == 0 {
+        return Vec::new();
+    }
+    let lines = text.lines().collect::<Vec<_>>();
+    let start = lines.len().saturating_sub(requested);
+    lines
+        .iter()
+        .enumerate()
+        .skip(start)
+        .map(|(idx, line)| {
+            format!(
+                "{}: {}",
+                idx + 1,
+                sanitize_match_line(line, MATCH_LINE_MAX_CHARS)
+            )
+        })
+        .collect()
 }
 
 fn log_level_from_line(line: &str) -> Option<&'static str> {

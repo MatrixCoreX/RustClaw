@@ -339,3 +339,19 @@ fn observed_entries_compact_log_analyze_json_into_summary() {
     assert!(entries[0].contains("recent_matches:\n- 10: error one\n- 20: panic two"));
     assert!(!entries[0].contains(r#""keyword_counts""#));
 }
+
+#[test]
+fn observed_entries_keep_log_analyze_tail_evidence() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "log_analyze",
+        r#"{"path":"/tmp/test.log","total_lines":120,"keyword_counts":{},"tail_lines":["118|phase=loop_done no_progress_count=0","119|phase=loop_done tool_calls=1"],"tail_excerpt":"118|phase=loop_done no_progress_count=0\n119|phase=loop_done tool_calls=1"}"#,
+    ));
+    let entries = observed_output_entries(&loop_state);
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].contains("log_analyze path=/tmp/test.log total_lines=120"));
+    assert!(entries[0].contains("tail_lines:\n- 118|phase=loop_done no_progress_count=0"));
+    assert!(entries[0].contains("119|phase=loop_done tool_calls=1"));
+    assert!(!entries[0].contains(r#""tail_lines""#));
+}
