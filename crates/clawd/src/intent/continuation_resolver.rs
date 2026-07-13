@@ -184,6 +184,28 @@ fn synthesize_clarify_state_reply_resolution_with_surface(
             }
             None
         }
+        crate::clarify_state::ClarifyMissingSlot::UserInput => {
+            let current = prompt.trim();
+            if current.is_empty() {
+                return None;
+            }
+            let context = serde_json::json!({
+                "schema_version": 1,
+                "kind": "active_clarify_followup",
+                "missing_slot": clarify_state.missing_slot,
+                "source_task_id": clarify_state.source_task_id.as_str(),
+                "source_request": clarify_state.source_request.trim(),
+                "pending_question": clarify_state.pending_question.trim(),
+                "current_user_message": current,
+                "planner_authority": "semantic_decision",
+            });
+            let encoded = serde_json::to_string(&context).ok()?;
+            Some(ClarifyFollowupResolution::NormalizerRewrite {
+                rewritten_prompt: format!(
+                    "### ACTIVE_CLARIFY_FOLLOWUP\n{encoded}\n### END_ACTIVE_CLARIFY_FOLLOWUP"
+                ),
+            })
+        }
     }
 }
 

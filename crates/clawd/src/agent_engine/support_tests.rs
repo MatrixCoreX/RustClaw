@@ -893,6 +893,37 @@ fn seed_loop_state_extracts_boundary_observation_needs_clarify() {
 }
 
 #[test]
+fn seed_loop_state_extracts_pending_user_boundary() {
+    let observation = serde_json::json!({
+        "kind": "agent_loop_boundary_observations",
+        "schema_version": 1,
+        "runtime_session_state": {
+            "active_clarify_present": true,
+            "pending_user_boundary_present": true
+        }
+    });
+    let block = format!(
+        "### AGENT_LOOP_BOUNDARY_OBSERVATIONS\n{}\n### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS",
+        serde_json::to_string(&observation).expect("observation json")
+    );
+    let ctx = AgentRunContext {
+        user_request: Some(format!("followup\n{block}")),
+        ..AgentRunContext::default()
+    };
+    let mut loop_state = LoopState::new(4);
+
+    seed_loop_state_for_agent_run(&mut loop_state, Some(&ctx), None);
+
+    assert!(loop_state.pending_user_boundary_present);
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.pending_user_boundary_present"),
+        Some(&"true".to_string())
+    );
+}
+
+#[test]
 fn seed_loop_state_treats_missing_referent_as_boundary_clarify() {
     let observation = serde_json::json!({
         "kind": "agent_loop_boundary_observations",
