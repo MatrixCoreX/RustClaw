@@ -767,6 +767,13 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
     let Some(result_obj) = terminal_result.as_object_mut() else {
         return Ok(false);
     };
+    preserve_task_journal_for_terminal_projection(
+        result_obj,
+        &result_json,
+        projection_payload,
+        executor_action,
+        executor_result_status,
+    );
     result_obj.insert(
         "task_lifecycle".to_string(),
         serde_json::json!({
@@ -804,6 +811,163 @@ fn record_claimed_paused_checkpoint_resume_terminal_projection_internal(
         ],
     )?;
     Ok(changed > 0)
+}
+
+fn preserve_task_journal_for_terminal_projection(
+    terminal_result: &mut Map<String, Value>,
+    source_result_json: &Value,
+    projection_payload: &Value,
+    executor_action: &str,
+    executor_result_status: &str,
+) {
+    if terminal_result
+        .get("task_journal")
+        .is_some_and(Value::is_object)
+    {
+        return;
+    }
+    let Some(journal) = terminal_projection_task_journal(
+        source_result_json,
+        projection_payload,
+        executor_action,
+        executor_result_status,
+    ) else {
+        return;
+    };
+    terminal_result.insert("task_journal".to_string(), journal);
+}
+
+fn terminal_projection_task_journal(
+    source_result_json: &Value,
+    projection_payload: &Value,
+    executor_action: &str,
+    executor_result_status: &str,
+) -> Option<Value> {
+    let had_source_journal = source_result_json
+        .get("task_journal")
+        .is_some_and(Value::is_object);
+    let mut journal = source_result_json
+        .get("task_journal")
+        .filter(|value| value.is_object())
+        .cloned()
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "schema_version": 1,
+                "summary": {},
+                "trace": {}
+            })
+        });
+    let obj = journal.as_object_mut()?;
+    {
+        let summary = obj
+            .entry("summary".to_string())
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()?;
+        summary
+            .entry("final_status".to_string())
+            .or_insert_with(|| serde_json::json!(terminal_lifecycle_state(executor_result_status)));
+        summary
+            .entry("final_stop_signal".to_string())
+            .or_insert_with(|| serde_json::json!(executor_action));
+        if !summary
+            .get("task_metrics")
+            .is_some_and(|value| value.is_object())
+        {
+            if let Some(metrics) = terminal_projection_task_metrics(source_result_json) {
+                summary.insert("task_metrics".to_string(), metrics);
+            }
+        }
+    }
+    {
+        let trace = obj
+            .entry("trace".to_string())
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()?;
+        if !trace
+            .get("step_results")
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty())
+        {
+            if let Some(observations) = source_result_json
+                .pointer("/task_checkpoint/observations")
+                .and_then(Value::as_array)
+                .filter(|items| !items.is_empty())
+            {
+                trace.insert(
+                    "step_results".to_string(),
+                    Value::Array(observations.clone()),
+                );
+            }
+        }
+        if !trace
+            .get("step_results")
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty())
+        {
+            if let Some(step_result) = terminal_projection_step_result(projection_payload) {
+                trace.insert("step_results".to_string(), Value::Array(vec![step_result]));
+            }
+        }
+    }
+    let has_metrics = obj
+        .get("summary")
+        .and_then(|value| value.get("task_metrics"))
+        .is_some_and(|value| value.is_object());
+    let has_steps = obj
+        .get("trace")
+        .and_then(|value| value.get("step_results"))
+        .and_then(Value::as_array)
+        .is_some_and(|items| !items.is_empty());
+    if had_source_journal || has_metrics || has_steps {
+        Some(journal)
+    } else {
+        None
+    }
+}
+
+fn terminal_projection_task_metrics(source_result_json: &Value) -> Option<Value> {
+    let budget = source_result_json
+        .pointer("/task_checkpoint/budget")
+        .filter(|value| value.is_object())?;
+    let mut metrics = Map::new();
+    for (target, source) in [
+        ("llm_calls_per_task", "llm_calls"),
+        ("llm_elapsed_ms_per_task", "llm_elapsed_ms"),
+        ("tool_calls", "tool_calls"),
+        ("rounds", "round"),
+        ("steps", "step"),
+    ] {
+        if let Some(value) = budget.get(source).and_then(Value::as_u64) {
+            metrics.insert(target.to_string(), serde_json::json!(value));
+        }
+    }
+    metrics
+        .entry("prompt_truncation_count".to_string())
+        .or_insert_with(|| serde_json::json!(0));
+    (!metrics.is_empty()).then(|| Value::Object(metrics))
+}
+
+fn terminal_projection_step_result(projection_payload: &Value) -> Option<Value> {
+    let executor_action = projection_payload
+        .get("executor_action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let job_id = projection_payload
+        .get("job_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    Some(serde_json::json!({
+        "step_id": "terminal_projection",
+        "status": "ok",
+        "executed_skill": executor_action,
+        "skill": executor_action,
+        "requested_action_ref": executor_action,
+        "requested_capability": executor_action,
+        "owner_layer": "resume_executor_result_projection",
+        "job_id": job_id,
+    }))
 }
 
 fn preserved_visible_ask_result_for_terminal_projection(

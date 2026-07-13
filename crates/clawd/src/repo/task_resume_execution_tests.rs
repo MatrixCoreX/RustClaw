@@ -66,7 +66,29 @@ fn terminal_projection_seed(
                 "recorded_at": now
             }
         },
-        "task_checkpoint": checkpoint_json(checkpoint_id, vec!["write_file:tmp/report.txt"])
+        "task_checkpoint": checkpoint_json(checkpoint_id, vec!["write_file:tmp/report.txt"]),
+        "task_journal": {
+            "schema_version": 1,
+            "summary": {
+                "final_status": "waiting",
+                "task_metrics": {
+                    "llm_calls_per_task": 2,
+                    "llm_elapsed_ms_per_task": 100,
+                    "tool_calls": 1,
+                    "prompt_truncation_count": 0
+                }
+            },
+            "trace": {
+                "step_results": [{
+                    "step_id": "step_1",
+                    "status": "ok",
+                    "executed_skill": "run_cmd",
+                    "skill": "run_cmd",
+                    "requested_action_ref": "system.run_cmd",
+                    "requested_capability": "system.run_cmd"
+                }]
+            }
+        }
     })
 }
 
@@ -1926,6 +1948,14 @@ fn terminal_agent_loop_async_poll_projection_replaces_waiting_visible_ask_reply(
     assert_eq!(
         result["machine_reply"]["final_result_json"]["output"],
         "RUSTCLAW_ASYNC_SMOKE"
+    );
+    assert_eq!(
+        result["task_journal"]["trace"]["step_results"][0]["executed_skill"],
+        "run_cmd"
+    );
+    assert_eq!(
+        result["task_journal"]["summary"]["task_metrics"]["tool_calls"],
+        1
     );
     assert_eq!(result["task_lifecycle"]["state"], "succeeded");
 }
