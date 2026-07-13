@@ -1,4 +1,6 @@
-task_updates_cn_plan_for_boss|帮我写个方案|面向老板|不要太技术，控制在 80 字内，只输出正文
+continuous|task_updates_cn_plan_for_boss_turn1|turn_chain,allow_clarify|帮我写个方案
+continuous|task_updates_cn_plan_for_boss_turn2|turn_chain,allow_clarify|面向老板
+continuous|task_updates_cn_plan_for_boss_turn3|turn_chain|不要太技术，控制在 80 字内，只输出正文
 task_updates_cn_correct_version|帮我写一句部署说明，要求提到 Python 3.10|不对，不是 Python 3.10，是 Python 3.11|只输出那一句说明
 task_updates_cn_replace_goal|帮我写一篇关于 RustClaw 的长文|算了，别写长文了，改成三条短要点|只输出三行正文
 task_updates_cn_scope_shrink|帮我做一个测试计划|先只看登录模块|暂时不要管环境准备，只输出三个测试点

@@ -14,8 +14,8 @@
 
 continuous|cn_memory_marker_set|cn,memory,state,group:continuous_stress_cn|本轮连续测试里，请记住编号 RC-CONT-CN-0428-A。只用一句中文确认。|expect=RC-CONT-CN-0428-A
 continuous|cn_memory_marker_recall|cn,memory,state,group:continuous_stress_cn|刚才让你记住的连续测试编号是什么？只回答编号。|expect=RC-CONT-CN-0428-A
-continuous|cn_split_task_start|cn,task_append,drafting,group:continuous_stress_cn|帮我写个方案
-continuous|cn_split_task_audience|cn,task_append,drafting,group:continuous_stress_cn|面向老板
+continuous|cn_split_task_start|cn,task_append,drafting,group:continuous_stress_cn,allow_clarify|帮我写个方案
+continuous|cn_split_task_audience|cn,task_append,drafting,group:continuous_stress_cn,allow_clarify|面向老板
 continuous|cn_split_task_constraints|cn,task_append,drafting,group:continuous_stress_cn|不要太技术，控制在 80 字内，只输出正文
 continuous|cn_correction_replace_audience|cn,task_correct,drafting,group:continuous_stress_cn|不对，目标用户改成开发者，不是老板。只输出修正后的正文。|expect=开发者
 continuous|cn_scope_shrink_login|cn,scope_update,drafting,group:continuous_stress_cn|再缩小到登录模块，只保留三条要点。|expect=登录
