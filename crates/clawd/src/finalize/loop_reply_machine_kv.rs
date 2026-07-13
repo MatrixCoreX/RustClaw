@@ -258,6 +258,50 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
         loop_state.last_user_visible_respond = Some(current);
         return false;
     }
+    if let Some(restored) =
+        crate::finalize::search_path_projection::path_listing_from_marker_summary_outputs(
+            loop_state
+                .executed_step_results
+                .iter()
+                .filter(|step| step.is_ok())
+                .filter_map(|step| step.output.as_deref()),
+            &answer,
+        )
+    {
+        if restored.trim() == current.trim() {
+            loop_state.last_user_visible_respond = Some(current);
+            return false;
+        }
+        delivery_messages.clear();
+        delivery_messages.push(restored.clone());
+        loop_state.delivery_messages.clear();
+        append_delivery_message(
+            &task.task_id,
+            &mut loop_state.delivery_messages,
+            restored.clone(),
+        );
+        loop_state.last_user_visible_respond = Some(restored);
+        *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: loop_state.executed_step_results.len(),
+            ..Default::default()
+        });
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "requested_machine_kv_summary_search_path_listing",
+            "restored",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return true;
+    }
     if should_restore_config_guard_payload(agent_run_context, &answer) {
         if let Some(payload) = latest_config_guard_machine_payload(loop_state, delivery_messages) {
             delivery_messages.clear();

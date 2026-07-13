@@ -436,6 +436,53 @@ fn requested_machine_kv_summary_final_guard_preserves_weather_query_fields() {
 }
 
 #[test]
+fn requested_machine_kv_summary_restores_search_path_listing_over_query_marker() {
+    let prompt = "read missing plan file, then search plan for execution_intent md files and return only paths";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "plan/definitely_missing_20260511.md".to_string();
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-machine-kv-search-path-listing",
+        "ask",
+        prompt,
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"find_entries","name_patterns":["*execution_intent*"],"results":["plan/archived/execution_intent_routing_repair_plan_20260509_done.md","plan/archived/llm_first_agent_convergence_plan_20260511_done.md"],"root":"plan"}}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "fs_basic",
+            r#"{"extra":{"action":"grep_text","query":"execution_intent","matches":[{"line":3,"path":"plan/archived/execution_retry_terminal_cases_20260510.txt","text":"expect=execution_intent_routing_repair_plan"},{"line":142,"path":"plan/archived/execution_intent_routing_repair_plan_20260509_done.md","text":"conditional_missing_file_fallback"}],"root":"plan"}}"#,
+        ));
+    let mut answer_text = "execution_intent".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(apply_requested_machine_kv_summary_to_final_answer(
+        prompt,
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+
+    assert_eq!(
+        answer_text,
+        "plan/archived/execution_intent_routing_repair_plan_20260509_done.md\nplan/archived/llm_first_agent_convergence_plan_20260511_done.md"
+    );
+    assert!(!answer_text.contains(".txt"));
+    assert_eq!(answer_messages, vec![answer_text.clone()]);
+    assert_eq!(journal.final_answer.as_deref(), Some(answer_text.as_str()));
+}
+
+#[test]
 fn requested_machine_kv_summary_final_guard_preserves_publishable_command_summary() {
     let prompt = "Run pwd, inspect the local port, and answer with the working directory and whether a port is visible.";
     let mut route = route_result(crate::AskMode::act_plain());
