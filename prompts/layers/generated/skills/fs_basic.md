@@ -63,6 +63,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 - Unknown candidate discovery: use `find_entries`, not guessed reads.
 - Directories containing matching files: use `find_entries` to discover candidate files, then synthesize unique parent directories from returned paths.
 - Directory inventory: use `list_dir`, not `grep_text`.
+- File-name inventory is a file-only listing: prefer `filesystem.list_file_names` / `fs_basic.list_dir` with `files_only=true`, `dirs_only=false`, and `names_only=true`. Directory/folder-name inventory is directory-only with `dirs_only=true`, `files_only=false`. Use mixed file+directory inventory only for untyped entries/items/names.
 - Grouped file-vs-directory inventory: use `list_dir` and preserve kind metadata (`entries` or `names_by_kind`); do not answer from a flat untyped name list when the contract is grouped.
 - Directory counts: use `count_entries`, not `run_cmd` pipelines, unless shell behavior itself is the task.
 - Content search or matching-line requests: use `grep_text`, not `read_text_range`. For a known single file, set `root` to that file and `query` to the requested content token, then answer from returned `matches` lines rather than the full file excerpt.
