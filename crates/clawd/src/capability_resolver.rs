@@ -437,6 +437,12 @@ fn normalize_capability_invocation(capability: &str, args: Value) -> (String, Va
             normalize_run_command_args(args),
         );
     }
+    if normalized == "system.runtime_status" && args_targets_task_control_status(&args) {
+        return (
+            "task_control.list".to_string(),
+            normalize_task_control_list_args(args),
+        );
+    }
     if matches!(
         normalized.as_str(),
         "system.run_command" | "system.run_cmd" | "system.shell_run" | "run_cmd"
@@ -446,6 +452,28 @@ fn normalize_capability_invocation(capability: &str, args: Value) -> (String, Va
     let args = normalize_filesystem_listing_capability_args(&normalized, args);
     let args = normalize_config_basic_capability_args(&normalized, args);
     (normalized, args)
+}
+
+fn args_targets_task_control_status(args: &Value) -> bool {
+    args.get("kind")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(normalize_capability_name)
+        .is_some_and(|kind| {
+            matches!(
+                kind.as_str(),
+                "task_queue_status" | "task_status" | "runtime_tasks" | "task_lifecycle"
+            )
+        })
+}
+
+fn normalize_task_control_list_args(args: Value) -> Value {
+    let mut obj = match args {
+        Value::Object(obj) => obj,
+        other => return other,
+    };
+    obj.remove("kind");
+    Value::Object(obj)
 }
 
 fn normalize_filesystem_listing_capability_args(normalized_capability: &str, args: Value) -> Value {

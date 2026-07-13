@@ -540,6 +540,33 @@ fn command_like_runtime_status_rewrites_to_run_cmd_capability() {
 }
 
 #[test]
+fn task_queue_runtime_status_rewrites_to_task_control_list() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "system.runtime_status",
+        json!({
+            "kind": "task_queue_status",
+            "limit": 5
+        }),
+    );
+
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    assert_eq!(record.capability_ref, "task_control.list");
+    assert_eq!(record.resolved_ref.as_deref(), Some("tool:task_control"));
+    let Some(AgentAction::CallTool { tool, args }) = action else {
+        panic!("expected task_control tool action, got {action:?}");
+    };
+    assert_eq!(tool, "task_control");
+    assert_eq!(args.get("action").and_then(Value::as_str), Some("list"));
+    assert_eq!(args.get("limit").and_then(Value::as_i64), Some(5));
+    assert!(args.get("kind").is_none());
+}
+
+#[test]
 fn registry_resolves_legacy_machine_capability_aliases_without_static_fallback() {
     let state = state_with_workspace_registry();
     let cases = [
