@@ -148,6 +148,31 @@ fn apply_requested_machine_kv_summary_to_final_answer_inner(
         && requested_summary.as_deref().is_some_and(|summary| {
             request_surfaces_explicitly_request_kv_summary(&request_surfaces, summary)
         });
+    if let Some(restored) =
+        web_search_candidate_listing_final_answer_from_journal(journal, answer_text)
+    {
+        if restored.trim() == answer_text.trim() {
+            journal.record_final_answer(answer_text.as_str());
+            return false;
+        }
+        answer_messages.clear();
+        answer_messages.push(restored.clone());
+        *answer_text = restored;
+        journal.record_final_answer(answer_text.as_str());
+        journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: journal.step_results.len(),
+            ..Default::default()
+        });
+        return true;
+    }
     if let Some(restored) = requested_summary
         .as_deref()
         .and_then(|summary| latest_path_batch_fact_answer_for_requested_summary(journal, summary))
@@ -594,14 +619,11 @@ fn text_is_json_object_or_array(text: &str) -> bool {
 }
 
 fn final_answer_preserves_web_search_listing(
-    route_result: &crate::RouteResult,
+    _route_result: &crate::RouteResult,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &str,
     answer_messages: &[String],
 ) -> bool {
-    if !route_is_web_search_listing(route_result) {
-        return false;
-    }
     let visible = std::iter::once(answer_text)
         .chain(answer_messages.iter().map(String::as_str))
         .collect::<Vec<_>>()
@@ -609,16 +631,65 @@ fn final_answer_preserves_web_search_listing(
     if visible.trim().is_empty() {
         return false;
     }
-    journal
-        .step_results
-        .iter()
-        .filter(|step| {
-            step.status == crate::executor::StepExecutionStatus::Ok
-                && matches!(step.skill.as_str(), "web_search_extract" | "browser_web")
-        })
-        .filter_map(|step| step.output_excerpt.as_deref())
-        .flat_map(web_search_candidate_title_sources_from_output)
-        .any(|(title, _source)| visible.contains(&title))
+    let pairs = web_search_candidate_title_sources_from_journal(journal);
+    web_search_candidate_titles_are_covered(&pairs, &visible)
+}
+
+fn web_search_candidate_listing_final_answer_from_journal(
+    journal: &crate::task_journal::TaskJournal,
+    answer_text: &str,
+) -> Option<String> {
+    if !text_is_machine_kv_only(answer_text) {
+        return None;
+    }
+    let pairs = web_search_candidate_title_sources_from_journal(journal);
+    web_search_candidate_listing_from_pairs(pairs)
+}
+
+fn web_search_candidate_title_sources_from_journal(
+    journal: &crate::task_journal::TaskJournal,
+) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok
+            || !matches!(step.skill.as_str(), "web_search_extract" | "browser_web")
+        {
+            continue;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        for pair in web_search_candidate_title_sources_from_output(output) {
+            if !pairs.iter().any(|existing| existing == &pair) {
+                pairs.push(pair);
+            }
+        }
+    }
+    pairs
+}
+
+fn web_search_candidate_titles_are_covered(pairs: &[(String, String)], visible: &str) -> bool {
+    let mut titles: Vec<&str> = Vec::new();
+    for (title, _source) in pairs {
+        let title = title.as_str();
+        if !titles.contains(&title) {
+            titles.push(title);
+        }
+    }
+    !titles.is_empty() && titles.into_iter().all(|title| visible.contains(title))
+}
+
+fn web_search_candidate_listing_from_pairs(pairs: Vec<(String, String)>) -> Option<String> {
+    if pairs.is_empty() {
+        return None;
+    }
+    Some(
+        pairs
+            .into_iter()
+            .map(|(title, source)| format!("{title} - {source}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
 fn final_answer_preserves_service_control_status_summary(
@@ -754,14 +825,6 @@ fn candidate_has_observed_status_value(candidate: &str, observed: &str) -> bool 
 
 fn route_is_weather_query(route: &crate::RouteResult) -> bool {
     crate::machine_capability_ref::route_has_capability_namespace(route, &["weather"])
-}
-
-fn route_is_web_search_listing(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["web", "browser"],
-        &["search", "results"],
-    )
 }
 
 fn web_search_candidate_title_sources_from_output(output: &str) -> Vec<(String, String)> {
