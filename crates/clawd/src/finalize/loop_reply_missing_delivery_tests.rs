@@ -768,13 +768,25 @@ fn missing_publishable_delivery_can_finish_as_clarify() {
 fn successful_delivery_can_preserve_structured_user_input_clarify() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     assert_eq!(
-        successful_delivery_final_status(&loop_state, None),
+        successful_delivery_final_status(&loop_state, None, &[]),
         crate::task_journal::TaskJournalFinalStatus::Success
     );
 
     loop_state.pending_user_input_required = true;
     assert_eq!(
-        successful_delivery_final_status(&loop_state, None),
+        successful_delivery_final_status(&loop_state, None, &[]),
+        crate::task_journal::TaskJournalFinalStatus::Clarify
+    );
+    assert_eq!(
+        successful_delivery_final_status(&loop_state, None, &["Draft answer".to_string()]),
+        crate::task_journal::TaskJournalFinalStatus::Success
+    );
+    assert_eq!(
+        successful_delivery_final_status(
+            &loop_state,
+            None,
+            &[r#"{"terminal_intent":"clarify","missing_slot":"topic"}"#.to_string()],
+        ),
         crate::task_journal::TaskJournalFinalStatus::Clarify
     );
 }

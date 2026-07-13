@@ -200,7 +200,7 @@ fn pre_loop_locator_candidate_wraps_plain_respond_as_structured_clarify() {
 }
 
 #[test]
-fn low_risk_freeform_topic_clarify_replans_without_publishing_question() {
+fn side_effect_free_freeform_topic_clarify_replans_without_publishing_question() {
     let plan = plan_result_with_raw_and_steps(
         "{}",
         vec![crate::PlanStep {
@@ -227,9 +227,12 @@ fn low_risk_freeform_topic_clarify_replans_without_publishing_question() {
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     let mut loop_state = LoopState::new(2);
 
-    let outcome =
-        try_replan_avoidable_low_risk_freeform_clarify(&mut loop_state, Some(&route), &intent)
-            .expect("low-risk freeform clarify should be recoverable");
+    let outcome = try_replan_avoidable_side_effect_free_freeform_clarify(
+        &mut loop_state,
+        Some(&route),
+        &intent,
+    )
+    .expect("side-effect-free freeform clarify should be recoverable");
 
     assert_eq!(
         outcome.stop_signal.as_deref(),
@@ -250,7 +253,136 @@ fn low_risk_freeform_topic_clarify_replans_without_publishing_question() {
 }
 
 #[test]
-fn locator_clarify_does_not_low_risk_freeform_replan() {
+fn active_user_boundary_side_effect_free_freeform_clarify_replans_even_when_route_needs_clarify() {
+    let plan = plan_result_with_raw_and_steps(
+        "{}",
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "Need topic",
+                "terminal_intent": "clarify",
+                "clarify_reason_code": "missing_topic",
+                "missing_slot": "user_input"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
+    let mut route = route_result(OutputResponseShape::Free);
+    route.needs_clarify = true;
+    route.risk_ceiling = RiskCeiling::Low;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.delivery_required = false;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let mut loop_state = LoopState::new(2);
+    loop_state.pending_user_boundary_present = true;
+
+    let outcome = try_replan_avoidable_side_effect_free_freeform_clarify(
+        &mut loop_state,
+        Some(&route),
+        &intent,
+    )
+    .expect("active user-input boundary should allow best-effort replan");
+
+    assert_eq!(
+        outcome.stop_signal.as_deref(),
+        Some("recoverable_failure_continue_round")
+    );
+    assert!(!loop_state.pending_user_input_required);
+    assert!(loop_state.delivery_messages.is_empty());
+    assert_eq!(loop_state.attempt_ledger_entries.len(), 1);
+}
+
+#[test]
+fn active_user_boundary_medium_risk_side_effect_free_freeform_clarify_replans() {
+    let plan = plan_result_with_raw_and_steps(
+        "{}",
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "Need the missing input.",
+                "terminal_intent": "clarify",
+                "clarify_reason_code": "missing_input",
+                "missing_slot": "user_input"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
+    let mut route = route_result(OutputResponseShape::Free);
+    route.risk_ceiling = RiskCeiling::Medium;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.delivery_required = false;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let mut loop_state = LoopState::new(2);
+    loop_state.pending_user_boundary_present = true;
+
+    let outcome = try_replan_avoidable_side_effect_free_freeform_clarify(
+        &mut loop_state,
+        Some(&route),
+        &intent,
+    )
+    .expect("active respond-only follow-up should allow best-effort replan");
+
+    assert_eq!(
+        outcome.stop_signal.as_deref(),
+        Some("recoverable_failure_continue_round")
+    );
+    assert!(!loop_state.pending_user_input_required);
+    assert!(loop_state.delivery_messages.is_empty());
+    assert_eq!(loop_state.attempt_ledger_entries.len(), 1);
+}
+
+#[test]
+fn high_risk_side_effect_free_clarify_does_not_replan() {
+    let plan = plan_result_with_raw_and_steps(
+        "{}",
+        vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "respond".to_string(),
+            skill: "respond".to_string(),
+            args: json!({
+                "content": "Need approval.",
+                "terminal_intent": "clarify",
+                "clarify_reason_code": "missing_confirmation",
+                "missing_slot": "user_input"
+            }),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+    );
+    let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
+    let mut route = route_result(OutputResponseShape::Free);
+    route.risk_ceiling = RiskCeiling::High;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.delivery_required = false;
+    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    let mut loop_state = LoopState::new(2);
+    loop_state.pending_user_boundary_present = true;
+
+    assert!(try_replan_avoidable_side_effect_free_freeform_clarify(
+        &mut loop_state,
+        Some(&route),
+        &intent,
+    )
+    .is_none());
+    assert!(loop_state.attempt_ledger_entries.is_empty());
+}
+
+#[test]
+fn locator_clarify_does_not_side_effect_free_freeform_replan() {
     let plan = plan_result_with_raw_and_steps(
         "{}",
         vec![crate::PlanStep {
@@ -275,10 +407,12 @@ fn locator_clarify_does_not_low_risk_freeform_replan() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     let mut loop_state = LoopState::new(2);
 
-    assert!(
-        try_replan_avoidable_low_risk_freeform_clarify(&mut loop_state, Some(&route), &intent)
-            .is_none()
-    );
+    assert!(try_replan_avoidable_side_effect_free_freeform_clarify(
+        &mut loop_state,
+        Some(&route),
+        &intent,
+    )
+    .is_none());
     assert!(loop_state.attempt_ledger_entries.is_empty());
 }
 
@@ -524,6 +658,7 @@ fn decision_envelope_answer_clears_stale_clarify_machine_fields() {
     let mut loop_state = LoopState::new(2);
 
     record_agent_loop_decision_envelope_output_vars(&mut loop_state, Some(&route), &clarify_plan);
+    loop_state.pending_user_input_required = true;
     assert_eq!(
         loop_state
             .output_vars
@@ -537,6 +672,7 @@ fn decision_envelope_answer_clears_stale_clarify_machine_fields() {
 
     record_agent_loop_decision_envelope_output_vars(&mut loop_state, Some(&route), &answer_plan);
 
+    assert!(!loop_state.pending_user_input_required);
     assert_eq!(
         loop_state
             .output_vars

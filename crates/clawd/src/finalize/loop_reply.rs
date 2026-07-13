@@ -1726,7 +1726,11 @@ pub(crate) async fn finalize_loop_reply(
         finalizer_summary.clone(),
         delivery_consistent,
         &final_text,
-        successful_delivery_final_status(&loop_state, finalizer_summary.as_ref()),
+        successful_delivery_final_status(
+            &loop_state,
+            finalizer_summary.as_ref(),
+            &delivery_deduped,
+        ),
     );
     if let Some(route_result) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
         let defer_to_post_write_readback =
