@@ -6,8 +6,9 @@
 
 Planner selection guidance:
 - Use `doc_parse` when the request needs semantic evidence from a user/business document: extracting key points, summarizing sections, judging excerpt meaning, collecting paragraphs, reading document structure, parsing tables, or preparing grounded synthesis from a supported document file.
-- Prefer `doc_parse` for PDF/docx/html files, table/section-aware parsing, long documents, or document-format behavior that `fs_basic.read_text_range` does not model.
-- Use `fs_basic.read_text_range` first for ordinary repository text artifacts such as source files, prompt markdown, generated skill docs, README fragments, config-adjacent docs, exact bounded excerpts, raw previews, or small text files; synthesize the user-facing answer from that bounded text.
+- Prefer `doc_parse` for PDF/docx/html files, markdown or text documents that need key points or section-level synthesis, table/section-aware parsing, long documents, or document-format behavior that `fs_basic.read_text_range` does not model.
+- Repository documentation files such as README, release notes, checklists, runbooks, and service notes still belong to `doc_parse` when the request asks to parse, summarize, extract key points, explain sections, or prepare a grounded document synthesis.
+- Use `fs_basic.read_text_range` first for source files, prompt markdown, generated skill docs, config-adjacent docs, exact line ranges, raw bounded excerpts, previews, or small text files when the user asks for raw text rather than document understanding; synthesize the user-facing answer from that bounded text.
 - Use generic filesystem/text tools when the request is explicitly about raw bytes, exact line ranges, path facts, file listings, or structured JSON/TOML/YAML field extraction.
 - `doc_parse` only parses and exposes grounded document evidence. It does not have separate `summarize`, `extract`, `judge`, or rewrite actions; perform those user-facing transformations in the agent response or a later synthesis step using the parsed output.
 

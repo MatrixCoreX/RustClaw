@@ -1101,6 +1101,7 @@ capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
 optional_bins = ["pdftotext", "pdfinfo"]
 platform_notes = ["Markdown/text/html/docx parse in-process; PDF extraction uses poppler tools when available."]
+semantic_tags = ["document_parsing", "document_summary", "key_point_extraction", "section_summary", "markdown_document", "readme_document", "grounded_document_synthesis", "table_extraction"]
 input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, max_bytes = { type = "integer" }, section = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 planner_capabilities = [
