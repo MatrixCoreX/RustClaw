@@ -191,7 +191,7 @@ fn route_reason_has_machine_token(route_reason: &str, expected: &str) -> bool {
     crate::RouteReasonMarkers::new(route_reason).has_machine_marker(expected)
 }
 
-fn delivery_has_terminal_clarify_machine_fields(message: &str) -> bool {
+pub(super) fn delivery_has_terminal_clarify_machine_fields(message: &str) -> bool {
     if let Ok(payload) = serde_json::from_str::<serde_json::Value>(message.trim()) {
         if payload
             .get("owner_layer")

@@ -597,6 +597,9 @@ fn machine_slot_is_nonblocking_freeform_slot(slot: Option<&str>) -> bool {
     let Some(slot) = slot.map(str::trim).filter(|slot| !slot.is_empty()) else {
         return false;
     };
+    if slot == "user_input" {
+        return true;
+    }
     slot.split(|ch: char| !ch.is_ascii_alphanumeric())
         .filter(|part| !part.is_empty())
         .any(|part| {
@@ -618,11 +621,23 @@ fn machine_slot_is_nonblocking_freeform_slot(slot: Option<&str>) -> bool {
         })
 }
 
-fn route_allows_low_risk_freeform_clarify_replan(route: &RouteResult) -> bool {
-    if route.needs_clarify || route.wants_file_delivery {
+fn route_allows_side_effect_free_freeform_clarify_replan(
+    loop_state: &LoopState,
+    route: &RouteResult,
+) -> bool {
+    if route.wants_file_delivery {
         return false;
     }
-    if route.risk_ceiling != crate::RiskCeiling::Low {
+    if route.needs_clarify && !loop_state.pending_user_boundary_present {
+        return false;
+    }
+    if route.risk_ceiling == crate::RiskCeiling::High {
+        return false;
+    }
+    if route.risk_ceiling != crate::RiskCeiling::Low
+        && !(route.risk_ceiling == crate::RiskCeiling::Medium
+            && loop_state.pending_user_boundary_present)
+    {
         return false;
     }
     let contract = &route.output_contract;
@@ -639,7 +654,7 @@ fn route_allows_low_risk_freeform_clarify_replan(route: &RouteResult) -> bool {
         )
 }
 
-fn try_replan_avoidable_low_risk_freeform_clarify(
+fn try_replan_avoidable_side_effect_free_freeform_clarify(
     loop_state: &mut LoopState,
     route: Option<&RouteResult>,
     intent: &StructuredRespondTerminalIntent,
@@ -651,7 +666,7 @@ fn try_replan_avoidable_low_risk_freeform_clarify(
     {
         return None;
     }
-    if !route_allows_low_risk_freeform_clarify_replan(route) {
+    if !route_allows_side_effect_free_freeform_clarify_replan(loop_state, route) {
         return None;
     }
     if !machine_slot_is_nonblocking_freeform_slot(intent.missing_slot.as_deref()) {
@@ -664,7 +679,7 @@ fn try_replan_avoidable_low_risk_freeform_clarify(
         "true".to_string(),
     );
     loop_state.history_compact.push(format!(
-        "round={} recoverable_clarify=low_risk_freeform missing_slot={}",
+        "round={} recoverable_clarify=side_effect_free_freeform missing_slot={}",
         loop_state.round_no,
         intent.missing_slot.as_deref().unwrap_or("")
     ));
@@ -681,13 +696,13 @@ fn try_replan_avoidable_low_risk_freeform_clarify(
         crate::executor::StepExecutionStatus::Error,
         intent.clarify_reason_code.as_deref().unwrap_or(""),
         Some("avoidable_clarify"),
-        "recoverable_clarify_low_risk_freeform",
+        "recoverable_clarify_side_effect_free_freeform",
         Some(
-            "The previous planner step asked for optional drafting details, but the route is low-risk chat-only freeform with no required evidence, locator, delivery, credential, or confirmation boundary. Replan with a useful best-effort draft/outline using neutral assumptions unless a real boundary slot is missing.",
+            "The previous planner step asked for optional drafting details, but the current plan is respond-only and the output contract has no required evidence, locator, delivery, credential, confirmation, or side-effect boundary. Replan with a useful best-effort draft/outline using neutral assumptions unless a real boundary slot is missing.",
         ),
     );
     info!(
-        "low_risk_freeform_clarify_replan round={} missing_slot={}",
+        "side_effect_free_freeform_clarify_replan round={} missing_slot={}",
         loop_state.round_no,
         intent.missing_slot.as_deref().unwrap_or("")
     );
@@ -900,6 +915,7 @@ fn record_agent_loop_decision_envelope_output_vars(
         .and_then(Value::as_str)
         .is_some_and(|intent| intent != "clarify")
     {
+        loop_state.pending_user_input_required = false;
         loop_state
             .output_vars
             .remove("agent_loop.recovered_terminal_intent");
@@ -1453,9 +1469,11 @@ async fn run_agent_round(
             )
         })
     {
-        if let Some(outcome) =
-            try_replan_avoidable_low_risk_freeform_clarify(loop_state, route_result, &intent)
-        {
+        if let Some(outcome) = try_replan_avoidable_side_effect_free_freeform_clarify(
+            loop_state,
+            route_result,
+            &intent,
+        ) {
             info!(
                 "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
                 task.task_id,

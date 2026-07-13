@@ -36,7 +36,7 @@ use super::{
     try_recover_structured_listing_answer_verifier_gap,
     try_recover_structured_scalar_output_format_answer_verifier_gap,
     try_recover_structured_search_answer_verifier_gap,
-    try_replan_avoidable_low_risk_freeform_clarify, AgentLoopGuardPolicy, RoundOutcome,
+    try_replan_avoidable_side_effect_free_freeform_clarify, AgentLoopGuardPolicy, RoundOutcome,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,

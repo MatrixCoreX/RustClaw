@@ -161,7 +161,7 @@ pub(super) async fn render_machine_payload_delivery_if_needed(
         finalizer_summary,
         delivery_consistent,
         &current,
-        successful_delivery_final_status(loop_state, None),
+        successful_delivery_final_status(loop_state, None, delivery_messages),
     );
     let verifier = crate::answer_verifier::AnswerVerifierOut {
         pass: false,

@@ -758,12 +758,23 @@ pub(super) fn observed_execution_without_publishable_delivery_outcome(
 pub(super) fn successful_delivery_final_status(
     loop_state: &crate::agent_engine::LoopState,
     finalizer_summary: Option<&crate::task_journal::TaskJournalFinalizerSummary>,
+    delivery_messages: &[String],
 ) -> crate::task_journal::TaskJournalFinalStatus {
-    if loop_state.pending_user_input_required
-        || finalizer_summary
-            .and_then(|summary| summary.needs_clarify)
-            .unwrap_or(false)
+    if finalizer_summary
+        .and_then(|summary| summary.needs_clarify)
+        .unwrap_or(false)
     {
+        return crate::task_journal::TaskJournalFinalStatus::Clarify;
+    }
+    let has_non_clarify_delivery = delivery_messages
+        .iter()
+        .map(String::as_str)
+        .map(str::trim)
+        .any(|message| {
+            !message.is_empty()
+                && !super::clarify_envelope::delivery_has_terminal_clarify_machine_fields(message)
+        });
+    if loop_state.pending_user_input_required && !has_non_clarify_delivery {
         crate::task_journal::TaskJournalFinalStatus::Clarify
     } else {
         crate::task_journal::TaskJournalFinalStatus::Success
