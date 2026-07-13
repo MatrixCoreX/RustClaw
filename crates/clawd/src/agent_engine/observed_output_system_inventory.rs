@@ -627,40 +627,39 @@ pub(super) fn inventory_dir_observed_candidate(value: &serde_json::Value) -> Opt
                 return Some(format!("{header}\n{}", lines.join("\n")));
             }
         }
-        let mut lines = size_summary_lines.clone();
-        lines.extend(
-            entries
-                .iter()
-                .filter_map(|entry| {
-                    let entry = entry.as_object()?;
-                    let name = entry
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .map(str::trim)
-                        .filter(|v| !v.is_empty())?;
-                    let kind = entry
-                        .get("kind")
-                        .and_then(|v| v.as_str())
-                        .map(str::trim)
-                        .filter(|v| !v.is_empty())
-                        .unwrap_or("-");
-                    let size = entry
-                        .get("size_bytes")
-                        .and_then(|v| v.as_u64())
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "-".to_string());
-                    let modified = entry
-                        .get("modified_ts")
-                        .and_then(|v| v.as_i64())
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "-".to_string());
-                    Some(format!(
-                        "entry name={name} kind={kind} size_bytes={size} modified_ts={modified}"
-                    ))
-                })
-                .collect::<Vec<_>>(),
-        );
-        if !lines.is_empty() {
+        let entry_lines = entries
+            .iter()
+            .filter_map(|entry| {
+                let entry = entry.as_object()?;
+                let name = entry
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())?;
+                let kind = entry
+                    .get("kind")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or("-");
+                let size = entry
+                    .get("size_bytes")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                let modified = entry
+                    .get("modified_ts")
+                    .and_then(|v| v.as_i64())
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                Some(format!(
+                    "entry name={name} kind={kind} size_bytes={size} modified_ts={modified}"
+                ))
+            })
+            .collect::<Vec<_>>();
+        if !entry_lines.is_empty() {
+            let mut lines = size_summary_lines.clone();
+            lines.extend(entry_lines);
             return Some(format!("{header}\n{}", lines.join("\n")));
         }
     }
