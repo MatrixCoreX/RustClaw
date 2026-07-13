@@ -15,9 +15,9 @@ use super::{
     direct_scalar_observed_answer, direct_scalar_path_candidate_list_from_observed_outputs,
     direct_structured_observed_answer_allowing_implicit_metadata_path_facts,
     directory_entry_groups_prefers_observed_groups, final_answer_text_from_delivery,
-    inventory_ranked_size_list_answer, latest_grounded_synthesis_for_mixed_listing_contract,
-    latest_plan_requested_synthesis, log_deterministic_delivery_record,
-    looks_like_structured_machine_output,
+    inventory_ranked_size_list_answer, latest_bounded_read_range_answer_from_loop,
+    latest_grounded_synthesis_for_mixed_listing_contract, latest_plan_requested_synthesis,
+    log_deterministic_delivery_record, looks_like_structured_machine_output,
     successful_content_observation_should_precede_status_summary,
 };
 
@@ -467,9 +467,29 @@ fn stale_file_token_delivery_listing_answer(
         .map(|answer| (answer, matrix_observed_shape_summary(loop_state)))
 }
 
-fn route_has_unresolved_file_token_delivery_contract(route: &crate::RouteResult) -> bool {
+fn stale_file_token_delivery_bounded_read_answer(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    delivery_messages: &[String],
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let contract = route.effective_output_contract();
-    (route.wants_file_delivery
+    if !route_has_file_token_delivery_signal(route)
+        || !contract.requires_content_evidence
+        || !current_delivery_is_file_token(delivery_messages)
+        || super::file_delivery::planned_file_delivery_uses_runtime_selection_template(loop_state)
+        || latest_plan_has_direct_file_delivery_respond(loop_state)
+    {
+        return None;
+    }
+    latest_bounded_read_range_answer_from_loop(loop_state, false)
+        .map(|answer| answer.trim().to_string())
+        .filter(|answer| !answer.is_empty())
+        .map(|answer| (answer, matrix_observed_shape_summary(loop_state)))
+}
+
+fn route_has_file_token_delivery_signal(route: &crate::RouteResult) -> bool {
+    let contract = route.effective_output_contract();
+    route.wants_file_delivery
         || contract.delivery_required
         || matches!(
             contract.response_shape,
@@ -478,7 +498,12 @@ fn route_has_unresolved_file_token_delivery_contract(route: &crate::RouteResult)
         || matches!(
             contract.delivery_intent,
             crate::OutputDeliveryIntent::FileSingle
-        ))
+        )
+}
+
+fn route_has_unresolved_file_token_delivery_contract(route: &crate::RouteResult) -> bool {
+    let contract = route.effective_output_contract();
+    route_has_file_token_delivery_signal(route)
         && matches!(contract.locator_kind, crate::OutputLocatorKind::None)
         && contract.locator_hint.trim().is_empty()
 }
@@ -487,6 +512,32 @@ fn current_delivery_is_file_token(delivery_messages: &[String]) -> bool {
     let answer = final_answer_text_from_delivery(delivery_messages);
     let first_line = answer.trim().lines().next().unwrap_or_default().trim();
     crate::finalize::parse_delivery_file_token(first_line).is_some()
+}
+
+fn latest_plan_has_direct_file_delivery_respond(loop_state: &LoopState) -> bool {
+    loop_state
+        .round_traces
+        .iter()
+        .rev()
+        .filter_map(|round| round.plan_result.as_ref())
+        .any(|plan| {
+            plan.steps.iter().any(|step| {
+                if step.action_type != "respond" && step.skill != "respond" {
+                    return false;
+                }
+                let Some(content) = step
+                    .args
+                    .get("content")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|content| !content.is_empty())
+                else {
+                    return false;
+                };
+                content.lines().count() == 1
+                    && crate::finalize::parse_delivery_file_token(content).is_some()
+            })
+        })
 }
 
 fn latest_plan_requested_directory_inventory(loop_state: &LoopState) -> bool {
@@ -1662,6 +1713,26 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
         log_deterministic_delivery_record(
             &task.task_id,
             "matrix_replace_stale_file_token_with_listing",
+            "replaced",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+        return true;
+    }
+    if let Some((candidate, summary)) =
+        stale_file_token_delivery_bounded_read_answer(route, loop_state, delivery_messages)
+    {
+        let answer = candidate.trim().to_string();
+        if answer.is_empty() {
+            return false;
+        }
+        delivery_messages.clear();
+        delivery_messages.push(answer.clone());
+        loop_state.last_user_visible_respond = Some(answer);
+        *finalizer_summary = Some(summary);
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "matrix_replace_stale_file_token_with_bounded_read",
             "replaced",
             agent_run_context,
             loop_state.executed_step_results.len(),
