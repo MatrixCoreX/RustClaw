@@ -5,6 +5,8 @@ use crate::ClaimedTask;
 
 #[path = "loop_reply_machine_kv/path_fact_delivery.rs"]
 mod path_fact_delivery;
+#[path = "loop_reply_machine_kv/structured_scalar_delivery.rs"]
+mod structured_scalar_delivery;
 
 use super::{
     final_answer_text_from_delivery, log_deterministic_delivery_record,
@@ -36,6 +38,15 @@ pub(super) fn replace_delivery_with_requested_machine_kv_summary(
     {
         loop_state.last_user_visible_respond = Some(current);
         return false;
+    }
+    if structured_scalar_delivery::replace_current_field_selector_with_value(
+        &task.task_id,
+        loop_state,
+        delivery_messages,
+        finalizer_summary,
+        &current,
+    ) {
+        return true;
     }
     let mut observed_texts = Vec::new();
     for step in &loop_state.executed_step_results {

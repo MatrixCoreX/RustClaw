@@ -8,6 +8,8 @@ use crate::{repo, AppState};
 mod task_answer_verifier_failure;
 #[path = "task_config_guard_recovery.rs"]
 mod task_config_guard_recovery;
+#[path = "task_content_evidence_delivery.rs"]
+mod task_content_evidence_delivery;
 #[path = "task_failure_lifecycle.rs"]
 mod task_failure_lifecycle;
 #[path = "task_machine_kv_summary.rs"]
@@ -36,6 +38,10 @@ use task_answer_verifier_failure::{
     machine_payload_observed_facts,
 };
 use task_config_guard_recovery::deterministic_config_guard_candidates_recovery;
+use task_content_evidence_delivery::{
+    backfill_file_delivery_contract_from_journal, has_any_delivery_file_token,
+    route_has_file_delivery_contract,
+};
 use task_failure_lifecycle::failed_task_lifecycle_payload;
 #[cfg(test)]
 use task_machine_kv_summary::apply_requested_machine_kv_summary_to_final_answer;
@@ -526,13 +532,6 @@ fn journal_has_missing_file_search_evidence(
         })
 }
 
-fn has_any_delivery_file_token(text: &str, messages: &[String]) -> bool {
-    !crate::extract_delivery_file_tokens(text).is_empty()
-        || messages
-            .iter()
-            .any(|message| !crate::extract_delivery_file_tokens(message).is_empty())
-}
-
 fn journal_has_non_control_step(journal: &crate::task_journal::TaskJournal) -> bool {
     journal.step_results.iter().any(|step| {
         !matches!(
@@ -540,15 +539,6 @@ fn journal_has_non_control_step(journal: &crate::task_journal::TaskJournal) -> b
             "respond" | "synthesize_answer" | "think" | "answer_verifier"
         )
     })
-}
-
-fn route_has_file_delivery_contract(route_result: &crate::RouteResult) -> bool {
-    route_result.wants_file_delivery
-        || route_result.output_contract.delivery_required
-        || matches!(
-            route_result.output_contract.response_shape,
-            crate::OutputResponseShape::FileToken
-        )
 }
 
 fn delivery_path_gap_should_finalize_as_clarify(
@@ -1306,6 +1296,12 @@ pub(crate) async fn finalize_ask_result(
                 }
                 (answer_text, answer_messages)
             };
+            backfill_file_delivery_contract_from_journal(
+                route_result,
+                &journal,
+                &mut answer_text,
+                &mut answer_messages,
+            );
             journal.record_final_answer(&answer_text);
             if task_terminal_clarify::preserve_terminal_clarify_from_journal(
                 &journal,
@@ -1579,6 +1575,13 @@ pub(crate) async fn finalize_ask_result(
                     crate::truncate_for_log(&answer_text)
                 );
             }
+            backfill_file_delivery_contract_from_journal(
+                route_result,
+                &journal,
+                &mut answer_text,
+                &mut answer_messages,
+            );
+            journal.record_final_answer(&answer_text);
             journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
             journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
             journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));

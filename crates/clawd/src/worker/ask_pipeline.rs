@@ -685,7 +685,7 @@ fn active_clarify_observation(
         "candidate_targets": &clarify_state.candidate_targets,
         "delivery_required": clarify_state.delivery_required,
         "output_shape": clarify_state.output_shape.as_deref(),
-        "semantic_kind": clarify_state.semantic_kind.as_deref(),
+        "contract_marker": clarify_state.semantic_kind.as_deref(),
     }))
 }
 

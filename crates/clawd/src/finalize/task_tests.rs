@@ -31,6 +31,8 @@ mod checkpoint_finalization;
 mod config_guard_recovery;
 #[path = "task_tests/config_validation_delivery.rs"]
 mod config_validation_delivery;
+#[path = "task_tests/content_evidence_delivery.rs"]
+mod content_evidence_delivery;
 #[path = "task_tests/final_status.rs"]
 mod final_status;
 #[path = "task_tests/git_machine_kv_recovery.rs"]

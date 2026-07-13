@@ -869,10 +869,10 @@ fn file_token_payload_contains_runtime_artifact(payload: &str) -> bool {
 }
 
 fn unresolved_file_token_delivery_artifact(text: &str) -> bool {
-    let Some((_kind, payload)) = crate::finalize::parse_delivery_file_token(text.trim()) else {
-        return false;
-    };
-    file_token_payload_contains_runtime_artifact(payload)
+    crate::extract_delivery_file_tokens(text)
+        .iter()
+        .filter_map(|token| crate::finalize::parse_delivery_file_token(token.trim()))
+        .any(|(_kind, payload)| file_token_payload_contains_runtime_artifact(payload))
 }
 
 pub(super) fn handle_respond_action(

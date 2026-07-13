@@ -5,7 +5,7 @@ use crate::{AppState, AskReply, ClaimedTask};
 
 use super::{
     build_loop_journal, delivery_messages_include_delivery_token, final_reply_language_hint,
-    latest_publishable_synthesis_step_matches,
+    latest_bounded_read_range_answer_from_loop, latest_publishable_synthesis_step_matches,
     planned_delivery_is_publishable_model_language_answer, step_output_is_read_range,
     structured_json_values_from_output,
 };
@@ -29,19 +29,123 @@ pub(super) fn route_requires_compound_content_file_delivery(
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(|route| {
-            route.output_contract.delivery_required
-                && route.output_contract.delivery_intent == crate::OutputDeliveryIntent::FileSingle
-                && route
+            let contract = route.effective_output_contract();
+            contract.delivery_required
+                && contract.delivery_intent == crate::OutputDeliveryIntent::FileSingle
+                && contract.requires_content_evidence
+                && !matches!(
+                    contract.response_shape,
+                    crate::OutputResponseShape::FileToken
+                )
+                && (route
                     .output_contract
                     .semantic_kind
                     .is_content_excerpt_summary()
+                    || route.output_contract_is_unclassified())
         })
 }
 
 pub(super) fn route_allows_file_token_only_fallback(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    !route_requires_compound_content_file_delivery(agent_run_context)
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return true;
+    };
+    let contract = route.effective_output_contract();
+    !(contract.delivery_required && contract.requires_content_evidence)
+}
+
+fn route_allows_compound_content_summary_with_file_token(
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .is_some_and(|route| {
+            let contract = route.effective_output_contract();
+            contract.delivery_required && contract.requires_content_evidence
+        })
+}
+
+fn latest_publishable_respond_or_synthesis_output(loop_state: &LoopState) -> Option<&str> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| {
+            step.is_ok() && matches!(step.skill.as_str(), "respond" | "synthesize_answer")
+        })
+        .filter_map(|step| step.output.as_deref())
+        .map(str::trim)
+        .find(|output| planned_delivery_is_publishable_model_language_answer(output))
+}
+
+fn delivery_contains_message(delivery_messages: &[String], candidate: &str) -> bool {
+    let candidate = candidate.trim();
+    !candidate.is_empty()
+        && delivery_messages
+            .iter()
+            .any(|message| message.trim() == candidate)
+}
+
+fn prepend_delivery_message_if_missing(
+    loop_state: &mut LoopState,
+    delivery_messages: &mut Vec<String>,
+    message: &str,
+) -> bool {
+    let message = message.trim();
+    if message.is_empty() || delivery_contains_message(delivery_messages, message) {
+        return false;
+    }
+    let message = message.to_string();
+    delivery_messages.insert(0, message.clone());
+    if !delivery_contains_message(&loop_state.delivery_messages, &message) {
+        loop_state.delivery_messages.insert(0, message);
+    }
+    true
+}
+
+pub(crate) fn preserve_compound_content_summary_with_file_token(
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    delivery_messages: &mut Vec<String>,
+) -> bool {
+    let route_ok = route_allows_compound_content_summary_with_file_token(agent_run_context);
+    let has_token = delivery_messages_include_delivery_token(delivery_messages);
+    if !route_ok || !has_token {
+        return false;
+    }
+
+    let mut changed = false;
+    if let Some(observed_content) = latest_bounded_read_range_answer_from_loop(loop_state, false) {
+        changed |= prepend_delivery_message_if_missing(
+            loop_state,
+            delivery_messages,
+            observed_content.as_str(),
+        );
+    }
+
+    let has_existing_summary = delivery_messages
+        .iter()
+        .any(|message| planned_delivery_is_publishable_model_language_answer(message));
+    if has_existing_summary {
+        return changed;
+    }
+    let Some(summary) = latest_publishable_respond_or_synthesis_output(loop_state)
+        .map(str::trim)
+        .filter(|summary| !summary.is_empty())
+    else {
+        return changed;
+    };
+    if delivery_contains_message(delivery_messages, summary) {
+        return changed;
+    }
+    let summary = summary.to_string();
+    delivery_messages.push(summary.clone());
+    if !delivery_contains_message(&loop_state.delivery_messages, &summary) {
+        loop_state.delivery_messages.push(summary.clone());
+    }
+    loop_state.last_user_visible_respond = Some(summary);
+    true
 }
 
 fn route_locator_file_token(

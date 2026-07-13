@@ -52,18 +52,58 @@ pub(super) fn try_recover_local_health_answer_verifier_gap(
     else {
         return false;
     };
-    if !verifier.high_confidence_retry_gap()
-        || !verifier
-            .missing_evidence_fields
-            .iter()
-            .any(|field| matches!(field.as_str(), "command_output" | "field_value"))
-    {
+    if !local_health_verifier_gap_is_recoverable(verifier) {
         return false;
     }
     let Some(finding) = observed_local_health_finding(reply) else {
         return false;
     };
-    let answer = deterministic_local_health_status_line(&finding);
+    apply_local_health_recovery(reply, &finding);
+    true
+}
+
+pub(super) fn try_recover_local_health_answer_verifier_gap_from_loop_state(
+    route_result: Option<&crate::RouteResult>,
+    loop_state: &LoopState,
+    reply: &mut AskReply,
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if !route_allows_local_health_recovery(route) {
+        return false;
+    }
+    let Some(verifier) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+    else {
+        return false;
+    };
+    if !local_health_verifier_gap_is_recoverable(verifier) {
+        return false;
+    }
+    let Some(finding) = observed_local_health_finding_from_loop_state(loop_state) else {
+        return false;
+    };
+    apply_local_health_recovery(reply, &finding);
+    true
+}
+
+fn local_health_verifier_gap_is_recoverable(
+    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
+) -> bool {
+    verifier.high_confidence_retry_gap()
+        && verifier.missing_evidence_fields.iter().any(|field| {
+            matches!(
+                field.as_str(),
+                "command_output" | "field_value" | "output_format" | "unsupported_claims"
+            )
+        })
+}
+
+fn apply_local_health_recovery(reply: &mut AskReply, finding: &LocalHealthFinding) {
+    let answer = deterministic_local_health_status_line(finding);
     if let Some(journal) = reply.task_journal.as_mut() {
         journal.answer_verifier_summary = None;
         journal.record_final_answer(&answer);
@@ -78,16 +118,14 @@ pub(super) fn try_recover_local_health_answer_verifier_gap(
     reply.error_text = None;
     reply.is_llm_reply = false;
     info!("answer_verifier_retry_exhausted_recovered_with_local_health_fields");
-    true
 }
 
 fn route_allows_local_health_recovery(route: &crate::RouteResult) -> bool {
     route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
-        && matches!(
-            route.effective_output_contract_semantic_kind(),
-            crate::OutputSemanticKind::CommandOutputSummary
-                | crate::OutputSemanticKind::ServiceStatus
+        && !matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
         )
 }
 
@@ -99,6 +137,22 @@ fn observed_local_health_finding(reply: &AskReply) -> Option<LocalHealthFinding>
             continue;
         }
         let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        collect_local_health_fields_from_output(output, &mut finding);
+    }
+    finding.has_health_signal().then_some(finding)
+}
+
+fn observed_local_health_finding_from_loop_state(
+    loop_state: &LoopState,
+) -> Option<LocalHealthFinding> {
+    let mut finding = LocalHealthFinding::new();
+    for step in &loop_state.executed_step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            continue;
+        }
+        let Some(output) = step.output.as_deref() else {
             continue;
         };
         collect_local_health_fields_from_output(output, &mut finding);
@@ -118,6 +172,8 @@ fn collect_local_health_fields_from_json(value: &Value, finding: &mut LocalHealt
     let payload = value.get("extra").unwrap_or(value);
     collect_health_check_payload_fields(payload, finding);
     collect_process_basic_payload_fields(payload, finding);
+    collect_service_control_payload_fields(payload, finding);
+    collect_task_control_payload_fields(payload, finding);
 }
 
 fn collect_health_check_payload_fields(payload: &Value, finding: &mut LocalHealthFinding) {
@@ -230,6 +286,50 @@ fn collect_process_basic_payload_fields(payload: &Value, finding: &mut LocalHeal
     }
     if let Some(running) = payload.get("running").and_then(Value::as_bool) {
         finding.insert(&format!("{filter}_running"), running);
+    }
+}
+
+fn collect_service_control_payload_fields(payload: &Value, finding: &mut LocalHealthFinding) {
+    if payload.get("manager_type").and_then(Value::as_str) != Some("rustclaw") {
+        return;
+    }
+    for key in [
+        "target",
+        "manager_type",
+        "pre_state",
+        "post_state",
+        "status",
+        "summary",
+        "verified",
+    ] {
+        if let Some(token) = scalar_value_as_token(payload.get(key)) {
+            finding.insert(&format!("service_{key}"), token);
+        }
+    }
+}
+
+fn collect_task_control_payload_fields(payload: &Value, finding: &mut LocalHealthFinding) {
+    if payload.get("action").and_then(Value::as_str) != Some("list") {
+        return;
+    }
+    for key in [
+        "count",
+        "task_count",
+        "has_unfinished",
+        "status",
+        "can_poll",
+        "can_cancel",
+    ] {
+        if let Some(token) = scalar_value_as_token(payload.get(key)) {
+            finding.insert(&format!("task_{key}"), token);
+        }
+    }
+    if let Some(field_value) = payload.get("field_value") {
+        for key in ["count", "task_count", "has_unfinished", "status"] {
+            if let Some(token) = scalar_value_as_token(field_value.get(key)) {
+                finding.insert(&format!("task_{key}"), token);
+            }
+        }
     }
 }
 
@@ -376,8 +476,15 @@ fn deterministic_local_health_status_line(finding: &LocalHealthFinding) -> Strin
         "load_avg_5m",
         "load_avg_15m",
         "clawd_status",
+        "service_post_state",
+        "service_verified",
+        "service_summary",
         "clawd_process_count",
         "clawd_health_port_open",
+        "task_count",
+        "task_task_count",
+        "task_has_unfinished",
+        "task_status",
         "telegramd_process_count",
         "system_warnings",
     ];

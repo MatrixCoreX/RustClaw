@@ -11,6 +11,37 @@ pub(super) fn is_read_range_action(skill: &str, obj: &serde_json::Map<String, Va
         || (skill.eq_ignore_ascii_case("system_basic") && action.eq_ignore_ascii_case("read_range"))
 }
 
+pub(super) fn action_is_explicit_full_structured_text_read(action: &AgentAction) -> bool {
+    let (skill, args) = match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            (skill.as_str(), args)
+        }
+        AgentAction::CallCapability { .. }
+        | AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::Think { .. } => return false,
+    };
+    let Some(obj) = args.as_object() else {
+        return false;
+    };
+    if !is_read_range_action(skill, obj) {
+        return false;
+    }
+    if obj
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| path_has_structured_text_extension(path))
+        .is_none()
+    {
+        return false;
+    }
+    obj.get("mode")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|mode| mode.eq_ignore_ascii_case("full") || mode.eq_ignore_ascii_case("all"))
+}
+
 pub(super) fn read_range_has_explicit_bounds(obj: &serde_json::Map<String, Value>) -> bool {
     if obj.get("n").is_some()
         || obj.get("start_line").is_some()
@@ -1171,6 +1202,9 @@ pub(super) fn rewrite_structured_scalar_field_read_plan_to_read_field(
         || (!identifier_presence_contract
             && actions.iter().any(action_is_structured_config_validation))
         || actions.iter().any(action_is_structured_scalar_field_read)
+        || actions
+            .iter()
+            .any(action_is_explicit_full_structured_text_read)
         || (!actions.iter().any(action_observes_structured_source)
             && !(identifier_presence_contract
                 && actions.iter().any(

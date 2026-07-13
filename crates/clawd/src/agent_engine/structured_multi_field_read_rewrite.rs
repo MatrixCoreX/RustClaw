@@ -17,6 +17,9 @@ pub(super) fn rewrite_structured_multi_field_read_plan_to_read_fields(
         || !route.output_contract.requires_content_evidence
         || actions.iter().any(action_is_structured_config_validation)
         || actions.iter().any(action_is_structured_scalar_field_read)
+        || actions
+            .iter()
+            .any(action_is_explicit_full_structured_text_read)
         || !actions.iter().any(action_observes_structured_source)
         || actions.iter().any(|action| {
             !action_observes_structured_source(action)

@@ -167,6 +167,176 @@ fn compound_content_file_delivery_appends_token_after_summary() {
     );
 }
 
+#[test]
+fn unclassified_content_evidence_file_delivery_appends_token_after_summary() {
+    let dir = TempDirGuard::new("unclassified_content_file_delivery");
+    let file = dir.path().join("config.toml");
+    fs::write(&file, "answer = true\n").expect("write config");
+    let mut state = test_state();
+    state.skill_rt.workspace_root = dir.path().to_path_buf();
+
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state
+        .delivery_messages
+        .push("observed summary".to_string());
+    loop_state.last_user_visible_respond = Some("observed summary".to_string());
+    let mut route = scalar_route_result();
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = file.display().to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    assert!(append_compound_file_delivery_token_from_route(
+        &state,
+        &claimed_task("unclassified-compound-content-delivery"),
+        &mut loop_state,
+        Some(&ctx),
+    ));
+
+    assert_eq!(loop_state.delivery_messages.len(), 2);
+    assert_eq!(loop_state.delivery_messages[0], "observed summary");
+    assert_eq!(
+        loop_state.delivery_messages[1],
+        format!("FILE:{}", file.canonicalize().unwrap_or(file).display())
+    );
+}
+
+#[test]
+fn compound_content_file_delivery_preserves_summary_after_existing_token() {
+    let file_token = "FILE:/tmp/rustclaw-config.toml";
+    let summary = "observed summary";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.delivery_messages.push(file_token.to_string());
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "respond", file_token));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", summary));
+    let mut route = scalar_route_result();
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.response_shape = OutputResponseShape::FileToken;
+    route.output_contract.requires_content_evidence = true;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut delivery = loop_state.delivery_messages.clone();
+
+    assert!(preserve_compound_content_summary_with_file_token(
+        &mut loop_state,
+        Some(&ctx),
+        &mut delivery,
+    ));
+
+    assert_eq!(delivery, vec![file_token.to_string(), summary.to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(summary)
+    );
+}
+
+#[test]
+fn compound_content_file_delivery_preserves_summary_without_delivery_intent() {
+    let file_token = "FILE:/tmp/rustclaw-config.toml";
+    let summary = "observed summary";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.delivery_messages.push(file_token.to_string());
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "respond", file_token));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", summary));
+    let mut route = scalar_route_result();
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = true;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut delivery = loop_state.delivery_messages.clone();
+
+    assert!(preserve_compound_content_summary_with_file_token(
+        &mut loop_state,
+        Some(&ctx),
+        &mut delivery,
+    ));
+
+    assert_eq!(delivery, vec![file_token.to_string(), summary.to_string()]);
+}
+
+#[test]
+fn compound_content_file_delivery_backfills_bounded_read_content_before_token() {
+    let file_token = "FILE:/tmp/rustclaw-config.toml";
+    let summary = "observed summary";
+    let observed_content = "[app]\nname = \"RustClaw NL Fixture\"\nmode = \"test\"\nport = 8787";
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.delivery_messages.push(summary.to_string());
+    loop_state.delivery_messages.push(file_token.to_string());
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","mode":"head","requested_n":80,"start_line":1,"end_line":4,"excerpt":"1|[app]\n2|name = \"RustClaw NL Fixture\"\n3|mode = \"test\"\n4|port = 8787","path":"/tmp/rustclaw-config.toml"}}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "respond", summary));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "respond", file_token));
+    let mut route = scalar_route_result();
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.response_shape = OutputResponseShape::FileToken;
+    route.output_contract.requires_content_evidence = true;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut delivery = loop_state.delivery_messages.clone();
+
+    assert!(preserve_compound_content_summary_with_file_token(
+        &mut loop_state,
+        Some(&ctx),
+        &mut delivery,
+    ));
+
+    assert_eq!(
+        delivery,
+        vec![
+            observed_content.to_string(),
+            summary.to_string(),
+            file_token.to_string()
+        ]
+    );
+}
+
+#[test]
+fn file_token_only_fallback_rejects_content_evidence_file_delivery() {
+    let mut route = scalar_route_result();
+    route.output_contract.delivery_required = true;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.response_shape = OutputResponseShape::FileToken;
+    route.output_contract.requires_content_evidence = true;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    assert!(!route_allows_file_token_only_fallback(Some(&ctx)));
+}
+
 #[tokio::test]
 async fn compound_content_file_delivery_enforce_preserves_synthesis_before_token_append() {
     let dir = TempDirGuard::new("compound_content_delivery_enforce");

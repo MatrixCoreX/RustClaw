@@ -115,3 +115,40 @@ fn machine_kv_renderer_restores_http_status_output_path_over_file_token() {
         delivery_messages.first().cloned()
     );
 }
+
+#[test]
+fn machine_kv_renderer_replaces_field_selector_with_structured_value() {
+    let task = claimed_task("task-config-field-selector-value");
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state
+        .executed_step_results
+        .push(crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "config_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"extra":{"action":"extract_field","exists":true,"field_path":"package.name","resolved_field_path":"package.name","value":"clawd","value_text":"clawd","value_type":"string"}}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    let mut finalizer_summary = None;
+    let mut delivery_messages = vec!["package.name".to_string()];
+
+    assert!(replace_delivery_with_requested_machine_kv_summary(
+        &task,
+        "read one structured field",
+        &mut loop_state,
+        None,
+        &mut finalizer_summary,
+        &mut delivery_messages,
+    ));
+
+    assert_eq!(delivery_messages, vec!["clawd".to_string()]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("clawd")
+    );
+}
