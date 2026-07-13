@@ -64,6 +64,40 @@ pub(super) fn is_plain_respond_only_plan(actions: &[AgentAction]) -> Option<&str
     }
 }
 
+pub(super) fn loop_state_has_pre_loop_locator_clarify_candidate(loop_state: &LoopState) -> bool {
+    let Some(encoded) = loop_state.output_vars.get("pre_loop_clarify_candidates") else {
+        return false;
+    };
+    let Ok(Value::Array(candidates)) = serde_json::from_str::<Value>(encoded) else {
+        return false;
+    };
+    candidates
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .any(pre_loop_candidate_is_locator_boundary)
+}
+
+fn pre_loop_candidate_is_locator_boundary(candidate: &str) -> bool {
+    matches!(
+        candidate,
+        "background_only_locator"
+            | "inferred_missing_workspace_locator"
+            | "implicit_workspace_file_locator"
+            | "model_completed_workspace_file_locator"
+            | "bare_topic_model_supplied_locator"
+            | "active_anchor_file_delivery_without_structured_reference"
+            | "locatorless_observation"
+            | "post_route_missing_path_scoped_locator"
+            | "post_route_fuzzy_locator_candidates"
+            | "post_route_file_delivery_current_request_locator"
+            | "post_route_unresolved_file_delivery_requires_locator"
+            | "auto_locator_scalar_file_without_current_locator"
+            | "auto_locator_unbound_workspace_child_without_current_locator"
+            | "directory_file_delivery_requires_structured_selection"
+    )
+}
+
 pub(super) fn is_delivery_failure_terminal_reply(actions: &[AgentAction]) -> bool {
     let Some(content) = is_plain_respond_only_plan(actions) else {
         return false;

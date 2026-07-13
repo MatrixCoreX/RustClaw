@@ -14,6 +14,7 @@ use super::{
     record_agent_loop_decision_envelope_output_vars, retry_verifier_accepts_rewritten_answer,
     selected_contract_structured_evidence_gap, should_stop_for_observed_finalize,
     structured_respond_terminal_intent_from_plan,
+    structured_respond_terminal_intent_from_pre_loop_clarify_candidate,
     structured_respond_terminal_intent_from_route_owned_clarify,
     suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
     suppress_answer_verifier_retry_if_structurally_satisfied,
