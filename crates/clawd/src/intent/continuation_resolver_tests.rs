@@ -242,6 +242,58 @@ fn clarify_followup_uses_active_clarify_state_for_locator_reply_rewrite() {
 }
 
 #[test]
+fn active_user_input_clarify_state_rewrites_to_generic_waiting_context() {
+    let clarify_state = crate::clarify_state::ClarifyState {
+        missing_slot: crate::clarify_state::ClarifyMissingSlot::UserInput,
+        pending_question: "QUESTION".to_string(),
+        candidate_targets: Vec::new(),
+        delivery_required: false,
+        output_shape: None,
+        semantic_kind: None,
+        source_request: "Help me draft a proposal".to_string(),
+        source_task_id: "task-1".to_string(),
+        updated_at_ts: 1,
+        expires_at_ts: 2,
+    };
+    let out = resolve_clarify_followup(
+        "for executives",
+        Some("<none>"),
+        None,
+        Some(&clarify_state),
+        None,
+    );
+    match out {
+        ClarifyFollowupResolution::NormalizerRewrite { rewritten_prompt } => {
+            assert!(rewritten_prompt.contains("### ACTIVE_CLARIFY_FOLLOWUP"));
+            assert!(rewritten_prompt.contains("\"kind\":\"active_clarify_followup\""));
+            assert!(rewritten_prompt.contains("\"missing_slot\":\"user_input\""));
+            assert!(rewritten_prompt.contains("Help me draft a proposal"));
+            assert!(rewritten_prompt.contains("QUESTION"));
+            assert!(rewritten_prompt.contains("for executives"));
+        }
+        other => panic!("expected generic waiting-context rewrite, got {other:?}"),
+    }
+}
+
+#[test]
+fn active_user_input_clarify_state_ignores_empty_reply() {
+    let clarify_state = crate::clarify_state::ClarifyState {
+        missing_slot: crate::clarify_state::ClarifyMissingSlot::UserInput,
+        pending_question: "QUESTION".to_string(),
+        candidate_targets: Vec::new(),
+        delivery_required: false,
+        output_shape: None,
+        semantic_kind: None,
+        source_request: "Help me draft a proposal".to_string(),
+        source_task_id: "task-1".to_string(),
+        updated_at_ts: 1,
+        expires_at_ts: 2,
+    };
+    let out = resolve_clarify_followup("   ", Some("<none>"), None, Some(&clarify_state), None);
+    assert!(matches!(out, ClarifyFollowupResolution::None));
+}
+
+#[test]
 fn active_clarify_state_does_not_treat_deictic_new_request_as_target_fill() {
     let clarify_state = crate::clarify_state::ClarifyState {
         missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,

@@ -30,6 +30,39 @@ pub(super) fn boundary_observation_needs_clarify_for_loop_seed(ctx: &AgentRunCon
     .any(boundary_observation_needs_clarify_from_summary)
 }
 
+pub(super) fn pending_user_boundary_present_for_loop_seed(ctx: &AgentRunContext) -> bool {
+    [
+        ctx.user_request.as_deref(),
+        ctx.context_bundle_summary.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(pending_user_boundary_present_from_summary)
+}
+
+fn pending_user_boundary_present_from_summary(summary: &str) -> bool {
+    const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";
+    for tail in summary.split(START).skip(1) {
+        let block = tail.split(END).next().unwrap_or(tail).trim();
+        let Ok(value) = serde_json::from_str::<Value>(block) else {
+            continue;
+        };
+        if value
+            .pointer("/runtime_session_state/pending_user_boundary_present")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || value
+                .pointer("/runtime_session_state/active_clarify_present")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn boundary_observation_needs_clarify_from_summary(summary: &str) -> bool {
     const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
     const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";

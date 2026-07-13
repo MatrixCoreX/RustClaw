@@ -53,6 +53,42 @@ fn derive_locator_clarify_state_from_semantic_clarify() {
 }
 
 #[test]
+fn derive_user_input_clarify_state_for_freeform_waiting_request() {
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::clarify_trace(),
+        resolved_intent: "draft a proposal after the user provides enough details".to_string(),
+        needs_clarify: true,
+        clarify_question: "QUESTION".to_string(),
+        route_reason: "clarify".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract::default(),
+    };
+    let clarify_state = derive_clarify_state_for_ask_outcome(
+        "task-freeform",
+        "Help me draft a proposal",
+        &route,
+        "QUESTION",
+        &[],
+        true,
+        &[],
+        None,
+    )
+    .expect("clarify state should be derived");
+    assert_eq!(clarify_state.missing_slot, ClarifyMissingSlot::UserInput);
+    assert!(!clarify_state.delivery_required);
+    assert_eq!(clarify_state.output_shape, None);
+    assert_eq!(clarify_state.semantic_kind, None);
+}
+
+#[test]
 fn derive_locator_clarify_state_preserves_non_free_output_shape() {
     let route = crate::RouteResult {
         ask_mode: crate::AskMode::clarify_trace(),

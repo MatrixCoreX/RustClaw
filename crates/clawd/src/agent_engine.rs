@@ -98,8 +98,8 @@ use self::loop_state_contract_evidence::{
     active_plan_file_targets_for_loop_seed, boundary_observation_needs_clarify_for_loop_seed,
     contract_repair_candidate_evidence_for_loop_seed,
     default_main_config_contract_evidence_for_loop_seed, first_string_field,
-    pre_loop_clarify_candidates_for_loop_seed, registry_capability_contract_evidence_for_loop_seed,
-    registry_capability_contract_refs,
+    pending_user_boundary_present_for_loop_seed, pre_loop_clarify_candidates_for_loop_seed,
+    registry_capability_contract_evidence_for_loop_seed, registry_capability_contract_refs,
 };
 use self::prepare_round::{prepare_round_actions, push_round_trace};
 use self::skill_quick_index::{
@@ -479,6 +479,10 @@ pub(crate) struct LoopState {
     /// the loop accept a terminal clarification even when legacy RouteResult
     /// fields were normalized back to an execution gate for planner entry.
     pub(crate) boundary_observation_needs_clarify: bool,
+    /// Machine boundary fact for an active waiting user-input turn. Respond-only
+    /// planner outputs may be terminal clarify/update turns instead of broken
+    /// execution plans.
+    pub(crate) pending_user_boundary_present: bool,
 }
 
 impl LoopState {
@@ -707,6 +711,13 @@ fn seed_loop_state_from_agent_context(
         loop_state.boundary_observation_needs_clarify = true;
         loop_state.output_vars.insert(
             "agent_loop.boundary_observation_needs_clarify".to_string(),
+            "true".to_string(),
+        );
+    }
+    if pending_user_boundary_present_for_loop_seed(ctx) {
+        loop_state.pending_user_boundary_present = true;
+        loop_state.output_vars.insert(
+            "agent_loop.pending_user_boundary_present".to_string(),
             "true".to_string(),
         );
     }

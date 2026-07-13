@@ -666,9 +666,26 @@ fn runtime_session_state_observation(
         "runtime_status_query_requested": runtime_status_query_requested,
         "active_followup_present": active_followup_present,
         "active_clarify_present": active_clarify_present,
+        "active_clarify": active_clarify_observation(session_snapshot),
         "active_observed_facts_present": active_observed_facts_present,
         "active_task_present": active_followup_present || active_clarify_present || active_observed_facts_present,
         "pending_user_boundary_present": active_clarify_present,
+    }))
+}
+
+fn active_clarify_observation(
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> Option<serde_json::Value> {
+    let clarify_state = session_snapshot.active_clarify_state.as_ref()?;
+    Some(serde_json::json!({
+        "missing_slot": clarify_state.missing_slot,
+        "source_task_id": clarify_state.source_task_id.as_str(),
+        "source_request": clarify_state.source_request.as_str(),
+        "pending_question": clarify_state.pending_question.as_str(),
+        "candidate_targets": &clarify_state.candidate_targets,
+        "delivery_required": clarify_state.delivery_required,
+        "output_shape": clarify_state.output_shape.as_deref(),
+        "semantic_kind": clarify_state.semantic_kind.as_deref(),
     }))
 }
 

@@ -12,6 +12,7 @@ const STRUCTURED_FIELD_SELECTOR_TOKEN_PREFIX: &str = "structured_field_selector=
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ClarifyMissingSlot {
     Locator,
+    UserInput,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,8 +152,9 @@ fn derive_clarify_state_for_ask_outcome(
         derive_clarify_candidate_targets(fuzzy_locator_suggestions, prior_session_snapshot);
     let now_ts = crate::now_ts_u64();
     let semantic_kind = clarify_state_semantic_kind(route_result);
+    let missing_slot = clarify_state_missing_slot(route_result);
     Some(ClarifyState {
-        missing_slot: ClarifyMissingSlot::Locator,
+        missing_slot,
         pending_question,
         candidate_targets,
         delivery_required: route_result.wants_file_delivery
@@ -178,6 +180,22 @@ fn derive_clarify_state_for_ask_outcome(
         updated_at_ts: now_ts,
         expires_at_ts: now_ts + CLARIFY_STATE_TTL_SECS,
     })
+}
+
+fn clarify_state_missing_slot(route_result: &crate::RouteResult) -> ClarifyMissingSlot {
+    if route_result.wants_file_delivery
+        || route_result.output_contract.delivery_required
+        || route_result.output_contract.requires_content_evidence
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        )
+        || !route_result.output_contract.locator_hint.trim().is_empty()
+    {
+        ClarifyMissingSlot::Locator
+    } else {
+        ClarifyMissingSlot::UserInput
+    }
 }
 
 fn clarify_state_source_request(prompt: &str, route_result: &crate::RouteResult) -> String {
