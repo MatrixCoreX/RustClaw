@@ -254,3 +254,102 @@ fn deterministic_scalar_markdown_heading_keeps_free_route_without_title_selector
 
     assert!(deterministic_scalar_markdown_heading_answer(&loop_state, Some(&ctx)).is_none());
 }
+
+#[test]
+fn bounded_read_range_direct_answer_allows_unclassified_free_path_route() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r##"{"extra":{"action":"read_range","mode":"head","requested_n":4,"start_line":1,"end_line":4,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for RustClaw NL regression tests.\n4|","path":"/tmp/README.md"}}"##,
+    ));
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "executable_contract_preserved_for_agent_loop".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Free,
+            requires_content_evidence: false,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: "/tmp/README.md".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let ctx = AgentRunContext {
+        route_result: Some(route),
+        ..AgentRunContext::default()
+    };
+
+    assert_eq!(
+        synthesize_bounded_read_range_direct_answer(&loop_state, Some(&ctx)).as_deref(),
+        Some(
+            "# Device Local Fixture\n\nThis directory contains stable local files for RustClaw NL regression tests."
+        )
+    );
+}
+
+#[test]
+fn bounded_read_range_direct_answer_blocks_summary_and_scalar_routes() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r##"{"extra":{"action":"read_range","mode":"head","requested_n":3,"excerpt":"1|# Service Notes\n2|\n3|Operators should check logs first.","path":"/tmp/service_notes.md"}}"##,
+    ));
+    let base_route = crate::RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "agent_loop_execution".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+            locator_hint: "/tmp/service_notes.md".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let summary_ctx = AgentRunContext {
+        route_result: Some(base_route.clone()),
+        ..AgentRunContext::default()
+    };
+    assert!(synthesize_bounded_read_range_direct_answer(&loop_state, Some(&summary_ctx)).is_none());
+
+    let mut scalar_route = base_route;
+    scalar_route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    scalar_route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    let scalar_ctx = AgentRunContext {
+        route_result: Some(scalar_route),
+        ..AgentRunContext::default()
+    };
+    assert!(synthesize_bounded_read_range_direct_answer(&loop_state, Some(&scalar_ctx)).is_none());
+}
