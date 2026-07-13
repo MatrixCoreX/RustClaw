@@ -779,6 +779,20 @@ fn structured_observed_body_unwraps_extra_inventory_dir_for_synthesis() {
 }
 
 #[test]
+fn structured_observed_body_includes_inventory_dir_names_by_kind_for_synthesis() {
+    let body = r#"{"extra":{"action":"inventory_dir","counts":{"dirs":4,"files":1,"hidden":0,"total":5},"names_by_kind":{"dirs":["agent_rollout_metrics","base_skill_contracts_20260516_100540","base_skill_contracts_20260516_112927","base_skill_contracts_20260527_042323"],"files":["act_plan.log"],"other":[]},"path":"logs","resolved_path":"/tmp/repo/logs","sort_by":"name"},"text":"{}"}"#;
+    let observed = structured_observed_body("fs_basic", body).expect("observed body");
+    assert!(observed.starts_with(
+        "inventory_dir path=/tmp/repo/logs sort_by=name total=5 files=1 dirs=4 hidden=0"
+    ));
+    assert!(observed.contains(
+        "dir_entries=agent_rollout_metrics,base_skill_contracts_20260516_100540"
+    ));
+    assert!(observed.contains("file_entries=act_plan.log"));
+    assert!(!observed.contains("raw wrapper fallback text"));
+}
+
+#[test]
 fn structured_observed_body_compacts_large_inventory_dir_by_kind() {
     let entries = (0..9)
         .map(|idx| {

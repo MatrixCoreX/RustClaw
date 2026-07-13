@@ -12,6 +12,7 @@
 - It can target a specific log file, or a directory path whose newest log-like file will be analyzed automatically.
 - It can narrow results with keyword filters.
 - When a task asks for recent/tail log lines together with an anomaly or health judgment, it can return a bounded tail excerpt through `tail_lines` / `tail` / `n`.
+- For log anomaly/health judgment where no explicit line count is provided, planners should request a small bounded tail sample such as `tail_lines=20` together with normal keyword/level analysis, so the final answer has concrete recent evidence rather than only file-level counts.
 - Even without explicit `keywords`, it returns structured severity evidence (`level_counts`, `recent_notable_lines`) and recovery evidence (`recovery_counts`, `recent_recovery_lines`) so warning/error and retry/recovery lines remain observable.
 - Planner selection: prefer `log_analyze` over generic file reading when the task asks for log health, notable anomalies, errors, warnings, failures, timeouts, retries, or recovery signals in a log file or log directory.
 
@@ -28,7 +29,7 @@
 | analyze | `path` | no | string(path) | impl default | Log file path, or a directory path whose newest log-like file will be analyzed. |
 | analyze | `keywords` | no | array/string | - | Keyword filters for matching lines. |
 | analyze | `max_matches` | no | number | impl default | Cap for returned evidence rows. |
-| analyze | `tail_lines` | no | number | 0 | Return the last N log lines as bounded `tail_lines` / `tail_excerpt` evidence. |
+| analyze | `tail_lines` | no | number | 0 | Return the last N log lines as bounded `tail_lines` / `tail_excerpt` evidence; use a small bounded value for log health/anomaly judgment when recent evidence is needed. |
 | analyze | `tail` | no | number | 0 | Alias for `tail_lines`. |
 | analyze | `n` | no | number | 0 | Alias for `tail_lines` when planner has a generic count. |
 

@@ -91,4 +91,13 @@ fn assert_replan_outcome(outcome: &super::super::RespondActionOutcome, loop_stat
                 .as_deref()
                 .is_some_and(|err| err.contains("runtime_template"))
     }));
+    assert!(loop_state.task_observations.iter().any(|observation| {
+        observation.get("kind").and_then(|value| value.as_str()) == Some("planner_quality_signal")
+            && observation.get("signal").and_then(|value| value.as_str())
+                == Some("unresolved_runtime_template_respond")
+            && observation
+                .get("recoverable")
+                .and_then(|value| value.as_bool())
+                == Some(true)
+    }));
 }

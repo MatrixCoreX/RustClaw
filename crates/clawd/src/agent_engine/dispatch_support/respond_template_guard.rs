@@ -1,3 +1,4 @@
+use serde_json::json;
 use tracing::info;
 
 use super::{
@@ -58,6 +59,17 @@ pub(super) fn unresolved_runtime_template_respond_outcome(
         "round={} step={} respond unresolved_runtime_template",
         loop_state.round_no, step_in_round
     ));
+    loop_state.task_observations.push(json!({
+        "schema_version": 1,
+        "kind": "planner_quality_signal",
+        "owner_layer": "agent_loop",
+        "signal": "unresolved_runtime_template_respond",
+        "action_ref": "respond",
+        "round_no": loop_state.round_no,
+        "step_in_round": step_in_round,
+        "recoverable": true,
+        "status_code": "recoverable_failure_continue_round"
+    }));
     info!(
         "respond_unresolved_runtime_template_replan task_id={} round={} step={} content={}",
         task.task_id,

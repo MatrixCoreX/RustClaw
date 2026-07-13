@@ -566,6 +566,21 @@ fn inventory_dir_size_summary_lines(value: &serde_json::Value) -> Vec<String> {
     lines
 }
 
+fn inventory_dir_names_by_kind_lines(value: &serde_json::Value) -> Vec<String> {
+    let mut lines = Vec::new();
+    for (kind, label) in [
+        ("dirs", "dir_entries"),
+        ("files", "file_entries"),
+        ("other", "other_entries"),
+    ] {
+        let names = inventory_dir_names_by_kind(value, kind);
+        if !names.is_empty() {
+            lines.push(format!("{label}={}", names.join(",")));
+        }
+    }
+    lines
+}
+
 pub(super) fn inventory_dir_observed_candidate(value: &serde_json::Value) -> Option<String> {
     let path = value
         .get("resolved_path")
@@ -637,9 +652,14 @@ pub(super) fn inventory_dir_observed_candidate(value: &serde_json::Value) -> Opt
             return Some(format!("{header}\n{}", lines.join("\n")));
         }
     }
-    let names = inventory_dir_names(value)?;
     let mut lines = size_summary_lines;
-    lines.extend(names.into_iter().map(|name| format!("entry name={name}")));
+    let kind_lines = inventory_dir_names_by_kind_lines(value);
+    if kind_lines.is_empty() {
+        let names = inventory_dir_names(value)?;
+        lines.extend(names.into_iter().map(|name| format!("entry name={name}")));
+    } else {
+        lines.extend(kind_lines);
+    }
     Some(format!("{header}\n{}", lines.join("\n")))
 }
 
