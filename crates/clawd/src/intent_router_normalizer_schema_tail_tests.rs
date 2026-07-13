@@ -141,6 +141,107 @@ fn normalizer_schema_normalization_preserves_list_selector_when_neighbor_field_i
 }
 
 #[test]
+fn normalizer_schema_normalization_recovers_machine_list_selector_token() {
+    let raw = r#"{
+          "resolved_user_intent":"列出 fixtures 目录前 5 个文件名",
+          "answer_candidate":"",
+          "resume_behavior":"none",
+          "schedule_kind":"",
+          "schedule_intent":"",
+          "wants_file_delivery":false,
+          "should_refresh_long_term_memory":false,
+          "agent_display_name_hint":"",
+          "needs_clarify":false,
+          "clarify_question":"",
+          "reason":"directory listing with file selector",
+          "confidence":0.95,
+          "decision":"planner_execute",
+          "output_contract":{
+            "response_shape":"strict",
+            "exact_sentence_count":0,
+            "requires_content_evidence":false,
+            "delivery_required":false,
+            "locator_kind":"path",
+            "delivery_intent":"none",
+            "contract_marker":"none",
+            "locator_hint":"fixtures",
+            "scalar_count_filter":5,
+            "list_selector":"first_5_file_names",
+            "self_extension":{"mode":"none","trigger":"none","execute_now":false}
+          },
+          "execution_recipe":{"kind":"none"},
+          "turn_type":"task_request",
+          "target_task_policy":"",
+          "should_interrupt_active_run":false,
+          "state_patch":null,
+          "attachment_processing_required":false
+        }"#;
+    let normalized =
+        super::normalize_intent_normalizer_raw_for_schema(raw, "列出 fixtures 目录前 5 个文件名");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+    assert_eq!(
+        value
+            .pointer("/output_contract/list_selector/target_kind")
+            .and_then(|v| v.as_str()),
+        Some("file")
+    );
+    assert_eq!(
+        value
+            .pointer("/output_contract/list_selector/limit")
+            .and_then(|v| v.as_u64()),
+        Some(5)
+    );
+    let validated = crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation")
+    .value;
+    let contract = super::parse_output_contract(validated.output_contract, false);
+
+    assert_eq!(contract.semantic_kind, crate::OutputSemanticKind::FileNames);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(
+        contract.self_extension.list_selector.target_kind,
+        crate::OutputScalarCountTargetKind::File
+    );
+    assert!(contract.self_extension.list_selector.target_kind_specified);
+    assert_eq!(contract.self_extension.list_selector.limit, Some(5));
+}
+
+#[test]
+fn parse_output_contract_infers_file_names_from_machine_list_selector_token() {
+    let contract = super::parse_output_contract(
+        Some(super::IntentOutputContractOut {
+            response_shape: "strict".to_string(),
+            exact_sentence_count: None,
+            requires_content_evidence: false,
+            delivery_required: false,
+            locator_kind: "path".to_string(),
+            delivery_intent: "none".to_string(),
+            contract_marker: "none".to_string(),
+            locator_hint: "fixtures".to_string(),
+            scalar_count_filter: Some(serde_json::json!(5)),
+            list_selector: Some(serde_json::json!("first_5_file_names")),
+            self_extension: None,
+        }),
+        false,
+    );
+
+    assert_eq!(contract.semantic_kind, crate::OutputSemanticKind::FileNames);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, crate::OutputLocatorKind::Path);
+    let selector = contract.self_extension.list_selector;
+    assert_eq!(
+        selector.target_kind,
+        crate::OutputScalarCountTargetKind::File
+    );
+    assert!(selector.target_kind_specified);
+    assert_eq!(selector.limit, Some(5));
+    assert_eq!(selector.sort_by, None);
+}
+
+#[test]
 fn normalizer_schema_preserves_name_desc_list_selector() {
     let raw = r#"{
           "resolved_user_intent":"list scripts entries by reverse name order",
