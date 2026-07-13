@@ -340,6 +340,7 @@ fn has_executable_observation_or_action(actions: &[AgentAction]) -> bool {
             action,
             AgentAction::CallSkill { .. }
                 | AgentAction::CallTool { .. }
+                | AgentAction::CallCapability { .. }
                 | AgentAction::SynthesizeAnswer { .. }
         )
     })
@@ -1093,9 +1094,6 @@ fn should_stop_for_observed_finalize(
     let Some(route_result) = route_result else {
         return false;
     };
-    if executable_contract_observation_round_needs_planner(route_result, loop_state, actions) {
-        return false;
-    }
     if route_result.needs_clarify
         || !loop_state.has_tool_or_skill_output
         || has_authoritative_delivery(loop_state)
@@ -1112,6 +1110,17 @@ fn should_stop_for_observed_finalize(
     let has_direct_observed_answer =
         super::observed_output::extract_answer_from_observed_output(loop_state, agent_run_context)
             .is_some();
+    let has_observed_stop_candidate =
+        if route_requires_direct_candidate_for_observed_stop(route_result) {
+            has_direct_observed_answer
+        } else {
+            super::observed_output::has_observed_answer_candidates(loop_state)
+        };
+    if executable_contract_observation_round_needs_planner(route_result, loop_state, actions)
+        && !has_observed_stop_candidate
+    {
+        return false;
+    }
     if structured_scalar_equality_observation_can_finalize(route_result, loop_state, actions) {
         return required_success_marker.is_none_or(|marker| {
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
@@ -1197,11 +1206,7 @@ fn should_stop_for_observed_finalize(
     let can_stop = has_executable_observation_or_action(actions)
         && !has_discussion_followup_action(actions)
         && route_expects_terminal_user_answer(route_result)
-        && if route_requires_direct_candidate_for_observed_stop(route_result) {
-            has_direct_observed_answer
-        } else {
-            super::observed_output::has_observed_answer_candidates(loop_state)
-        };
+        && has_observed_stop_candidate;
     can_stop
         && required_success_marker.is_none_or(|marker| {
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
@@ -1546,6 +1551,11 @@ async fn run_agent_round(
         }
     }
     if outcome.stop_signal.is_none()
+        && should_stop_for_observed_finalize(agent_run_context, loop_state, &actions)
+    {
+        outcome.stop_signal = Some("observed_output_ready".to_string());
+    }
+    if outcome.stop_signal.is_none()
         && route_result.is_some_and(|route| {
             executable_contract_observe_only_round_should_continue(route, loop_state, &actions)
         })
@@ -1556,11 +1566,6 @@ async fn run_agent_round(
             "true".to_string(),
         );
         outcome.stop_signal = Some("recoverable_failure_continue_round".to_string());
-    }
-    if outcome.stop_signal.is_none()
-        && should_stop_for_observed_finalize(agent_run_context, loop_state, &actions)
-    {
-        outcome.stop_signal = Some("observed_output_ready".to_string());
     }
     info!(
         "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",

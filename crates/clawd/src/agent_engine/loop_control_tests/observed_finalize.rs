@@ -47,6 +47,57 @@ fn observed_config_basic_scalar_output_can_stop_loop_without_second_round() {
 }
 
 #[test]
+fn observed_call_capability_inventory_names_can_stop_loop_without_second_round() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","names_by_kind":{"dirs":[],"files":["full_suite_trace_note.txt","gen-1778122040.png","hello.sh"],"other":[]},"path":"document","sort_by":"name"}}"#,
+    ));
+    let actions = vec![AgentAction::CallCapability {
+        capability: "filesystem.list_file_names".to_string(),
+        args: json!({"path":"/workspace/document","files_only":true,"names_only":true,"max_entries":5}),
+    }];
+
+    assert!(should_stop_for_observed_finalize(
+        Some(&AgentRunContext {
+            route_result: Some(route_result(OutputResponseShape::Strict)),
+            ..Default::default()
+        }),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
+fn executable_contract_call_capability_inventory_names_can_stop_without_incremental_planner() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 1;
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","names_by_kind":{"dirs":[],"files":["full_suite_trace_note.txt","gen-1778122040.png","hello.sh"],"other":[]},"path":"document","sort_by":"name"}}"#,
+    ));
+    let actions = vec![AgentAction::CallCapability {
+        capability: "filesystem.list_file_names".to_string(),
+        args: json!({"path":"/workspace/document","files_only":true,"names_only":true,"max_entries":5}),
+    }];
+    let mut route = route_result(OutputResponseShape::Strict);
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+
+    assert!(should_stop_for_observed_finalize(
+        Some(&AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        }),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
 fn observed_wrapped_empty_config_basic_scalar_output_can_stop_loop_without_second_round() {
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;

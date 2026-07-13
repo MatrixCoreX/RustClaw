@@ -229,8 +229,8 @@ use matrix_shape::{
     current_synthesis_satisfies_evidence_policy_shape,
     evidence_policy_candidate_satisfies_final_shape,
     finalizer_summary_requires_matrix_observed_replacement,
-    matrix_grouped_name_list_observed_answer, matrix_observed_shape_summary,
-    route_requires_evidence_policy_deterministic_final_answer,
+    generic_observed_machine_projection_answer, matrix_grouped_name_list_observed_answer,
+    matrix_observed_shape_summary, route_requires_evidence_policy_deterministic_final_answer,
     route_requires_observed_output_projection, should_try_observed_output_language_fallback,
     synthetic_task_for_evidence_policy_shape_check,
 };
@@ -833,6 +833,21 @@ pub(crate) async fn finalize_loop_reply(
             agent_run_context,
             loop_state.executed_step_results.len(),
         );
+    }
+
+    if loop_state.delivery_messages.is_empty() {
+        if let Some((answer, summary)) = generic_observed_machine_projection_answer(&loop_state) {
+            finalizer_summary = Some(summary);
+            loop_state.last_user_visible_respond = Some(answer.clone());
+            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+            log_deterministic_delivery_record(
+                &task.task_id,
+                "generic_observed_machine_projection",
+                "attached",
+                agent_run_context,
+                loop_state.executed_step_results.len(),
+            );
+        }
     }
 
     if loop_state.delivery_messages.is_empty()

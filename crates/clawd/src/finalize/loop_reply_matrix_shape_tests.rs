@@ -707,6 +707,43 @@ fn matrix_file_name_list_prefers_wrapped_names_over_size_summary_synthesis() {
 }
 
 #[test]
+fn generic_observed_machine_projection_uses_inventory_names_by_kind() {
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","names_by_kind":{"dirs":[],"files":["full_suite_trace_note.txt","gen-1778122040.png","hello.sh"],"other":[]},"path":"document","sort_by":"name"}}"#,
+    ));
+
+    let (answer, summary) = super::super::generic_observed_machine_projection_answer(&loop_state)
+        .expect("inventory names should project");
+
+    assert_eq!(
+        answer,
+        "full_suite_trace_note.txt\ngen-1778122040.png\nhello.sh"
+    );
+    assert_eq!(summary.grounded_ok, Some(true));
+    assert_eq!(summary.format_ok, Some(true));
+}
+
+#[test]
+fn generic_observed_machine_projection_uses_grep_matches() {
+    let mut loop_state = crate::agent_engine::LoopState::new(1);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"grep_text","matches":[{"line":16,"path":"logs/app.log","text":"2026-04-01 10:08:44 ERROR provider timeout"}],"query":"ERROR"}}"#,
+    ));
+
+    let (answer, summary) = super::super::generic_observed_machine_projection_answer(&loop_state)
+        .expect("grep matches should project");
+
+    assert_eq!(answer, "16:2026-04-01 10:08:44 ERROR provider timeout");
+    assert_eq!(summary.grounded_ok, Some(true));
+    assert_eq!(summary.format_ok, Some(true));
+}
+
+#[test]
 fn matrix_strict_list_shape_builds_directory_names_from_inventory_dirs() {
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;

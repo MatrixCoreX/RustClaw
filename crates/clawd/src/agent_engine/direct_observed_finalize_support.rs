@@ -54,7 +54,17 @@ pub(super) fn action_supports_direct_observed_finalize(
             }
         }
         AgentAction::SynthesizeAnswer { .. } => false,
-        AgentAction::CallCapability { .. } => false,
+        AgentAction::CallCapability { capability, args } => {
+            crate::capability_resolver::resolve_capability_action_for_state(
+                state,
+                capability,
+                args.clone(),
+            )
+            .is_some_and(|resolved| {
+                !matches!(resolved, AgentAction::CallCapability { .. })
+                    && action_supports_direct_observed_finalize(state, route_result, &resolved)
+            })
+        }
         AgentAction::Respond { .. } | AgentAction::Think { .. } => false,
     }
 }
@@ -600,12 +610,39 @@ fn executable_contract_actions_are_observe_only_machine_steps(actions: &[AgentAc
                 }
                 saw_observe = true;
             }
-            AgentAction::CallCapability { .. }
-            | AgentAction::SynthesizeAnswer { .. }
-            | AgentAction::Respond { .. } => return false,
+            AgentAction::CallCapability { capability, .. } => {
+                if !executable_contract_capability_is_observe_only(capability) {
+                    return false;
+                }
+                saw_observe = true;
+            }
+            AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. } => return false,
         }
     }
     saw_observe
+}
+
+fn executable_contract_capability_is_observe_only(capability: &str) -> bool {
+    matches!(
+        capability.trim().to_ascii_lowercase().as_str(),
+        "filesystem.stat_paths"
+            | "filesystem.stat_path"
+            | "filesystem.list_entries"
+            | "filesystem.list_dir"
+            | "filesystem.list_names"
+            | "filesystem.list_file_names"
+            | "filesystem.list_directory_names"
+            | "filesystem.count_entries"
+            | "filesystem.read_text_range"
+            | "filesystem.read_text"
+            | "filesystem.read_file"
+            | "filesystem.find_entries"
+            | "filesystem.find_files"
+            | "filesystem.find_paths"
+            | "filesystem.grep_text"
+            | "filesystem.search_text"
+            | "filesystem.compare_paths"
+    )
 }
 
 fn executable_contract_tool_action_is_observe_only(tool: &str, args: &Value) -> bool {
