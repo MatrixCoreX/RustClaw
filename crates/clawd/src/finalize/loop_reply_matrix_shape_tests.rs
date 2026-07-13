@@ -90,6 +90,157 @@ fn matrix_shape_replaces_stale_file_token_delivery_with_observed_directory_listi
 }
 
 #[test]
+fn matrix_shape_replaces_stale_file_token_delivery_with_bounded_read_excerpt() {
+    let state = test_state();
+    let task = claimed_task("task-stale-file-token-read-range");
+    let mut route = free_route_result();
+    route.wants_file_delivery = false;
+    route.output_contract.delivery_required = true;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/tmp/README.md".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: "bounded file excerpt".to_string(),
+            execution_recipe_summary: None,
+            plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                step_id: "step_1".to_string(),
+                action_type: "call_capability".to_string(),
+                skill: "filesystem.read_text_range".to_string(),
+                args: serde_json::json!({
+                    "path": "/tmp/README.md",
+                    "mode": "head",
+                    "n": 5
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }])),
+            verify_result: None,
+        });
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        &serde_json::json!({
+            "extra": {
+                "action": "read_range",
+                "mode": "head",
+                "path": "/tmp/README.md",
+                "resolved_path": "/tmp/README.md",
+                "requested_n": 5,
+                "start_line": 1,
+                "end_line": 5,
+                "total_lines": 9,
+                "excerpt": "1|# Device Local Fixture\n2|\n3|This directory contains stable local files for RustClaw NL regression tests.\n4|\n5|- `configs/app_config.toml`: sample runtime config"
+            }
+        })
+        .to_string(),
+    ));
+    let mut delivery = vec!["FILE:/tmp/README.md".to_string()];
+    let mut finalizer_summary = None;
+
+    assert!(
+        super::super::replace_delivery_with_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "bounded file excerpt",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        )
+    );
+
+    assert_eq!(
+        delivery,
+        vec![
+            "# Device Local Fixture\n\nThis directory contains stable local files for RustClaw NL regression tests.\n\n- `configs/app_config.toml`: sample runtime config"
+                .to_string()
+        ]
+    );
+    assert_eq!(
+        loop_state.last_user_visible_respond,
+        delivery.first().cloned()
+    );
+    assert!(finalizer_summary.is_some());
+}
+
+#[test]
+fn matrix_shape_keeps_direct_file_delivery_respond_over_bounded_read_excerpt() {
+    let state = test_state();
+    let task = claimed_task("task-direct-file-token-read-range-kept");
+    let mut route = free_route_result();
+    route.wants_file_delivery = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/tmp/README.md".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: "deliver file token".to_string(),
+            execution_recipe_summary: None,
+            plan_result: Some(plan_result_with_steps(vec![
+                crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_capability".to_string(),
+                    skill: "filesystem.read_text_range".to_string(),
+                    args: serde_json::json!({"path": "/tmp/README.md", "mode": "head", "n": 5}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                crate::PlanStep {
+                    step_id: "step_2".to_string(),
+                    action_type: "respond".to_string(),
+                    skill: "respond".to_string(),
+                    args: serde_json::json!({"content": "FILE:/tmp/README.md"}),
+                    depends_on: vec!["step_1".to_string()],
+                    why: String::new(),
+                },
+            ])),
+            verify_result: None,
+        });
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","mode":"head","path":"/tmp/README.md","requested_n":5,"excerpt":"1|# Device Local Fixture"}}"#,
+    ));
+    let mut delivery = vec!["FILE:/tmp/README.md".to_string()];
+    let original = delivery.clone();
+    let mut finalizer_summary = None;
+
+    assert!(
+        !super::super::replace_delivery_with_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "deliver file token",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        )
+    );
+    assert_eq!(delivery, original);
+    assert!(finalizer_summary.is_none());
+}
+
+#[test]
 fn matrix_shape_keeps_file_token_when_plan_uses_runtime_file_selection_template() {
     let state = test_state();
     let task = claimed_task("task-file-token-template-kept");
