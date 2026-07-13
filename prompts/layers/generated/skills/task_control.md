@@ -11,6 +11,7 @@
 - `task_control` lets the current user inspect unfinished tasks in the current chat, query a task detail by `task_id`, cancel unfinished tasks safely, and resume or pause checkpointed long-running tasks.
 - Scope is limited to the caller's own `queued` and `running` tasks in the current chat.
 - Planner-facing selection should use structured capability/action fields from the registry. Do not add phrase-specific routing rules for any user language.
+- Task cancel/resume/pause dry-run or lifecycle-field preview requests must call the skill with `dry_run=true` and return observed machine fields. Do not answer those flows from static prose alone, even when the user has not supplied a concrete `task_id` or index.
 - When a `user_key` is present in the runner request/context, it is forwarded to `clawd` for authenticated task queries, cancellations, resume, and pause actions.
 
 ## Config Entry Points (from interface)

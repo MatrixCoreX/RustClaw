@@ -614,9 +614,7 @@ fn bounded_local_machine_boundary_skill_scope(route: &RouteResult) -> Option<BTr
     if route.has_route_reason_machine_marker("inline_structured_payload_context_execute")
         || route.has_route_reason_machine_marker("executionless_finalize_trace_plain")
     {
-        if !executable_agent_loop_boundary {
-            return Some(BTreeSet::new());
-        }
+        return None;
     }
     if route.has_route_reason_machine_marker("auto_locator_suppressed_multiple_explicit_paths")
         && !executable_agent_loop_boundary

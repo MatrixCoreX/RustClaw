@@ -160,7 +160,7 @@ fn sqlite_locator_generic_scalar_scope_prefers_db_basic_only() {
 }
 
 #[test]
-fn lightweight_scope_omits_skill_playbooks_for_executionless_or_inline_payload_boundary() {
+fn lightweight_scope_keeps_skill_choice_open_for_executionless_or_inline_payload_boundary() {
     for marker in [
         "executionless_finalize_trace_plain",
         "inline_structured_payload_context_execute",
@@ -172,8 +172,8 @@ fn lightweight_scope_omits_skill_playbooks_for_executionless_or_inline_payload_b
 
         assert_eq!(
             contract_scoped_lightweight_planner_skill_scope(Some(&route)),
-            Some(BTreeSet::new()),
-            "{marker} should not load unrelated skill playbooks"
+            None,
+            "{marker} should leave capability choice in the planner loop instead of suppressing skill playbooks"
         );
     }
 }
