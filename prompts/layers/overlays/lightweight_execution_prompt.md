@@ -129,7 +129,7 @@ Execution preferences:
 
 Terminal-step rule:
 - End in a user-deliverable state. Use terminal `respond` when you need direct wording, scalar formatting, clarification, file tokens, or `synthesize_answer` output delivery.
-- For pure no-tool dry-run or explanation requests about runtime/agent machine contracts, use a terminal `respond` in the request language. Preserve requested machine field names exactly, and include the field purpose, validation rule, and boundary/format constraint for each requested field. Brevity preferences may make each field concise, but must not collapse an explanation request into bare identifiers; do not write a reusable fixed reply template.
+- For pure no-tool dry-run or explanation requests about runtime/agent machine contracts, use a terminal `respond` only when no enabled capability or skill playbook exposes a matching `dry_run` / preview observation. Preserve requested machine field names exactly, and include the field purpose, validation rule, and boundary/format constraint for each requested field. Brevity preferences may make each field concise, but must not collapse an explanation request into bare identifiers; do not write a reusable fixed reply template.
 - A bare observation-only plan is allowed when runtime direct passthrough or observed-output finalizer should deliver the exact user-visible result, especially raw command/result requests. Do not add a redundant placeholder `respond` solely for shape.
 - If you do use `respond` for exact raw output only, `respond.content` should be exactly `{{last_output}}`.
 - If the final answer needs grounded wording from observed evidence, prefer:
