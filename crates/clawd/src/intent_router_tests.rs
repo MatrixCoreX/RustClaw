@@ -774,6 +774,70 @@ fn route_result_alias_state_patch_does_not_clear_content_evidence_contract() {
 }
 
 #[test]
+fn route_result_alias_state_patch_without_memory_turn_does_not_ack() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        task_id: "task-alias-state-patch-followup".to_string(),
+        user_id: 91,
+        chat_id: 202,
+        user_key: None,
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text":"summarize the resolved alias target"}).to_string(),
+    };
+    let decision = super::RouteDecision {
+        resolved_user_intent: "summarize the resolved alias target".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "alias_resolved_for_followup".to_string(),
+        confidence: Some(0.95),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: OutputResponseShape::OneSentence,
+            requires_content_evidence: false,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: OutputDeliveryIntent::None,
+            ..IntentOutputContract::default()
+        },
+    };
+    let mut out = super::normalizer_output_from_fallback(
+        "summarize the resolved alias target",
+        "test_fallback",
+        decision,
+        None,
+    );
+    out.turn_analysis = Some(super::TurnAnalysis {
+        turn_type: None,
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: Some(serde_json::json!({
+            "alias_bindings": [{
+                "alias": "the note file",
+                "target": "scripts/nl_tests/fixtures/device_local/README.md",
+                "scope": "session"
+            }]
+        })),
+        attachment_processing_required: false,
+    });
+
+    let route = super::route_result_from_normalizer(&state, &task, &out);
+
+    assert!(!route.route_reason.contains("alias_state_patch_ack"));
+    assert_eq!(
+        route.output_contract.response_shape,
+        OutputResponseShape::OneSentence
+    );
+    assert!(route.ask_mode.is_execute_gate());
+}
+
+#[test]
 fn route_result_does_not_bind_task_control_from_async_contract_field_names() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = crate::ClaimedTask {
