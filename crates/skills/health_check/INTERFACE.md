@@ -8,6 +8,9 @@
 - It now returns both RustClaw runtime fields and a structured `system_health` block for the host OS.
 - `system_health.os_family` explicitly distinguishes `linux` and `macos` so downstream logic can branch cleanly.
 - It is read-only and should not perform mutating operations.
+- For RustClaw or `clawd` runtime self-checks, prefer this capability as the first observation. It exposes `clawd_process_count` and `clawd_health_port_open` without requiring planners to infer daemon state from generic HTTP or process text.
+- If an HTTP endpoint observation is also requested, the RustClaw API health endpoint is `/v1/health` and may require `X-RustClaw-Key`; a plain `/health` response is not sufficient RustClaw daemon health evidence by itself.
+- Combine this with `task_control.list` only when the user also asks for task queue or task history status.
 
 ## Actions
 - No explicit action is required for baseline diagnostics.

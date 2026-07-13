@@ -8,6 +8,7 @@
 - **Managers implemented**: `rustclaw` (HTTP to clawd), `systemd`, `service`, `brew_services`, `launchd`.
 - **Behavior**: Read-only first; high-risk (stop/restart) blocked for ambiguous targets; auto-verify after start/restart/reload; auto logs on failure.
 - **Status questions**: Runtime status must come from `status` / `verify` (or another real runtime check), not from binary-file existence.
+- For RustClaw daemon status, use `target: "clawd"` and `manager_type: "rustclaw"` when checking the running RustClaw API service. Do not replace that with a generic service/unit name unless the user explicitly asks for host service-manager state.
 - **Security**: Target validation; no arbitrary shell; RustClaw whitelist for HTTP path; safe unit names for systemd/service/brew services/launchd.
 
 ## Actions
