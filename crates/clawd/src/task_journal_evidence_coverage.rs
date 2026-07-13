@@ -805,6 +805,8 @@ pub(super) fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<S
                 "text_excerpt",
                 "recent_matches",
                 "recent_notable_lines",
+                "tail_lines",
+                "tail_excerpt",
             ][..],
         ),
         (

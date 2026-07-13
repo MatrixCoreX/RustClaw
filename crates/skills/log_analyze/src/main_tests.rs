@@ -75,7 +75,7 @@ fn default_analysis_keeps_warn_latency_visible() {
     .collect::<Vec<_>>();
 
     let analysis =
-        analyze_log_file(&path, path.display().to_string(), &keywords, 20).expect("analysis");
+        analyze_log_file(&path, path.display().to_string(), &keywords, 20, 0).expect("analysis");
 
     assert_eq!(analysis.level_counts.get("warn"), Some(&1));
     assert_eq!(analysis.keyword_counts.get("warn"), Some(&1));
@@ -107,7 +107,7 @@ fn analysis_keeps_recovery_lines_visible_even_when_info_level() {
         .collect::<Vec<_>>();
 
     let analysis =
-        analyze_log_file(&path, path.display().to_string(), &keywords, 20).expect("analysis");
+        analyze_log_file(&path, path.display().to_string(), &keywords, 20, 0).expect("analysis");
 
     assert_eq!(analysis.keyword_counts.get("retry"), Some(&1));
     assert_eq!(analysis.recovery_counts.get("retry"), Some(&1));
@@ -157,6 +157,50 @@ fn execute_returns_structured_extra_alongside_legacy_text_json() {
             .and_then(|value| value.as_u64()),
         Some(1)
     );
+
+    let _ = std::fs::remove_file(path);
+    let _ = std::fs::remove_dir(dir);
+}
+
+#[test]
+fn execute_returns_tail_lines_when_requested() {
+    let dir = std::env::temp_dir().join(format!(
+        "rustclaw-log-analyze-tail-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let path = dir.join("app.log");
+    std::fs::write(
+        &path,
+        "2026-04-01 INFO first\n2026-04-01 WARN second\n2026-04-01 INFO third\n",
+    )
+    .expect("write log");
+
+    let (_text, extra) = execute(json!({
+        "path": path.to_string_lossy(),
+        "tail_lines": 2,
+        "keywords": ["warn"],
+    }))
+    .expect("execute log analyze");
+
+    assert_eq!(
+        extra
+            .get("tail_lines_requested")
+            .and_then(|value| value.as_u64()),
+        Some(2)
+    );
+    let tail_lines = extra
+        .get("tail_lines")
+        .and_then(|value| value.as_array())
+        .expect("tail lines");
+    assert_eq!(tail_lines.len(), 2);
+    assert!(tail_lines[0]
+        .as_str()
+        .is_some_and(|line| line.contains("WARN second")));
+    assert!(extra
+        .get("tail_excerpt")
+        .and_then(|value| value.as_str())
+        .is_some_and(|text| text.contains("INFO third")));
 
     let _ = std::fs::remove_file(path);
     let _ = std::fs::remove_dir(dir);

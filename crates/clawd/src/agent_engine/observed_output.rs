@@ -503,6 +503,20 @@ fn compact_log_analyze_excerpt(value: &serde_json::Value) -> Option<String> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let tail_lines = value
+        .get("tail_lines")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .take(12)
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let total_lines = value
         .get("total_lines")
         .and_then(|v| v.as_u64())
@@ -526,6 +540,9 @@ fn compact_log_analyze_excerpt(value: &serde_json::Value) -> Option<String> {
             "recent_matches:\n- {}",
             recent_matches.join("\n- ")
         ));
+    }
+    if !tail_lines.is_empty() {
+        sections.push(format!("tail_lines:\n- {}", tail_lines.join("\n- ")));
     }
     Some(sections.join("\n"))
 }
