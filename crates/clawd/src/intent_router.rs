@@ -91,6 +91,9 @@ use schema_parse::{
 #[cfg(test)]
 use schema_parse::{parse_self_extension_mode, parse_self_extension_trigger};
 
+#[path = "intent_router_list_selector_token.rs"]
+mod list_selector_token;
+
 #[path = "intent_router_schema_tokens.rs"]
 mod schema_tokens;
 use schema_tokens::{

@@ -1,13 +1,15 @@
 use super::{
+    list_selector_token::parse_list_selector_machine_token,
     normalize_schema_token, normalize_structured_field_selector,
     scalar_count_filter::{parse_scalar_count_filter, parse_scalar_count_target_kind},
     turn_analysis::{TargetTaskPolicy, TurnType},
     ExecutionRecipePlanHint,
 };
+use crate::pipeline_types::OutputContractRef;
 use crate::{
     IntentOutputContract, OutputDeliveryIntent, OutputListSelector, OutputLocatorKind,
-    OutputResponseShape, OutputSemanticKind, ResumeBehavior, ScheduleKind, SelfExtensionContract,
-    SelfExtensionMode, SelfExtensionTrigger,
+    OutputResponseShape, OutputScalarCountTargetKind, OutputSemanticKind, ResumeBehavior,
+    ScheduleKind, SelfExtensionContract, SelfExtensionMode, SelfExtensionTrigger,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -538,8 +540,14 @@ fn parse_list_selector_limit(raw: Option<&Value>) -> Option<u64> {
 }
 
 pub(super) fn parse_list_selector(raw: Option<Value>) -> OutputListSelector {
-    let Some(raw @ Value::Object(_)) = raw else {
+    let Some(raw) = raw else {
         return OutputListSelector::default();
+    };
+    let Value::Object(_) = &raw else {
+        return raw
+            .as_str()
+            .and_then(parse_list_selector_machine_token)
+            .unwrap_or_default();
     };
     let target_kind_specified = raw.get("target_kind").is_some();
     let Ok(raw) = serde_json::from_value::<ListSelectorOut>(raw) else {
@@ -607,6 +615,7 @@ pub(super) fn parse_output_contract(
                 structured_field_selector,
             };
         }
+        infer_contract_from_list_selector(&mut contract);
     }
     if contract.exact_sentence_count.is_some_and(|count| count > 1)
         && matches!(contract.response_shape, OutputResponseShape::OneSentence)
@@ -636,6 +645,21 @@ pub(super) fn parse_output_contract(
         }
     }
     contract
+}
+
+fn infer_contract_from_list_selector(contract: &mut IntentOutputContract) {
+    if !contract.semantic_kind_is_unclassified()
+        || !contract.self_extension.list_selector.target_kind_specified
+    {
+        return;
+    }
+    let semantic_kind = match contract.self_extension.list_selector.target_kind {
+        OutputScalarCountTargetKind::File => OutputSemanticKind::FileNames,
+        OutputScalarCountTargetKind::Dir => OutputSemanticKind::DirectoryNames,
+        OutputScalarCountTargetKind::Any => return,
+    };
+    contract.apply_output_contract_ref(OutputContractRef::new(semantic_kind));
+    contract.requires_content_evidence = true;
 }
 
 pub(super) fn parse_self_extension_mode(s: &str) -> SelfExtensionMode {

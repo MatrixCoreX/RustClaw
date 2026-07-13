@@ -2,6 +2,7 @@ use serde_json::Value;
 
 use super::{
     contract_value_token, execution_recipe_value_declares_command_payload,
+    list_selector_token::list_selector_machine_token_value,
     looks_like_current_workspace_path_alias, normalize_bool_field_with_default,
     normalize_optional_string_field, normalize_output_delivery_intent_for_schema,
     normalize_output_locator_kind_for_schema, normalize_output_response_shape_for_schema,
@@ -494,6 +495,10 @@ fn normalize_list_selector_contract_field(contract: &mut serde_json::Map<String,
     let Some(value) = contract.get_mut("list_selector") else {
         return;
     };
+    if let Some(raw) = value.as_str() {
+        *value = list_selector_machine_token_value(raw).unwrap_or(Value::Null);
+        return;
+    }
     let Some(selector) = value.as_object_mut() else {
         *value = Value::Null;
         return;

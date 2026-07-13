@@ -143,7 +143,7 @@ fn route_contract_summary(route_result: Option<&RouteResult>) -> String {
             "delivery_required": contract.delivery_required,
             "locator_kind": contract.locator_kind.as_str(),
             "delivery_intent": contract.delivery_intent.as_str(),
-            "semantic_kind": contract.semantic_kind.as_str(),
+            "contract_marker": contract.semantic_kind.as_str(),
             "locator_hint": contract.locator_hint,
         }
     });
