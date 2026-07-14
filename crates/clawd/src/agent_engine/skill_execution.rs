@@ -114,8 +114,56 @@ fn record_post_tool_use_observation(
         obj.insert("step_in_round".to_string(), json!(step_in_round));
         obj.insert("round_no".to_string(), json!(loop_state.round_no));
         obj.insert("step_status".to_string(), json!(step_status.as_str()));
+        obj.insert("status".to_string(), json!(step_status.as_str()));
+        if let Some(args) = safe_post_tool_observation_args(normalized_skill, action_args) {
+            obj.insert("args".to_string(), args);
+        }
     }
     loop_state.task_observations.push(payload);
+}
+
+fn safe_post_tool_observation_args(normalized_skill: &str, action_args: &Value) -> Option<Value> {
+    if normalized_skill != "run_cmd" {
+        return None;
+    }
+    let obj = action_args.as_object()?;
+    let mut safe = serde_json::Map::new();
+    if let Some(command) = obj
+        .get("command")
+        .and_then(Value::as_str)
+        .and_then(safe_single_line_machine_text)
+    {
+        safe.insert("command".to_string(), json!(command));
+    }
+    if let Some(cwd) = obj
+        .get("cwd")
+        .and_then(Value::as_str)
+        .and_then(safe_single_line_machine_text)
+    {
+        safe.insert("cwd".to_string(), json!(cwd));
+    }
+    if let Some(async_start) = obj
+        .get("async_start")
+        .or_else(|| obj.get(crate::agent_engine::CLAWD_RUNTIME_ASYNC_JOB_START_ARG))
+        .and_then(Value::as_bool)
+    {
+        safe.insert("async_start".to_string(), json!(async_start));
+    }
+    if let Some(timeout_seconds) = obj.get("timeout_seconds").and_then(Value::as_u64) {
+        safe.insert("timeout_seconds".to_string(), json!(timeout_seconds));
+    }
+    (!safe.is_empty()).then_some(Value::Object(safe))
+}
+
+fn safe_single_line_machine_text(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() || value.len() > 500 || value.chars().any(|ch| matches!(ch, '\n' | '\r')) {
+        return None;
+    }
+    let sanitized = crate::visible_text::sanitize_user_visible_text(value)
+        .trim()
+        .to_string();
+    (!sanitized.is_empty()).then_some(sanitized)
 }
 
 fn matrix_admitted_external_evidence_output(
