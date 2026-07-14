@@ -86,6 +86,8 @@ impl TaskStatusView {
             "reason_code",
             "next_action_kind",
             "next_action_ref",
+            "last_successful_evidence_ref",
+            "evidence_ref_count",
             "poll_ref",
             "cancel_ref",
             "next_poll_after",

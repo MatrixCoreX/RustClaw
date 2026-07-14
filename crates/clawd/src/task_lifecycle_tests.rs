@@ -769,6 +769,7 @@ fn task_query_lifecycle_preserves_checkpoint_waiting_fields() {
 fn task_query_lifecycle_projects_checkpoint_product_contract_fields() {
     let mut checkpoint = checkpoint_value("ckpt-product", vec!["write_file:tmp/a.txt"]);
     checkpoint["last_successful_step"] = json!("step_2");
+    checkpoint["evidence_refs"] = json!(["step_2:evidence:1"]);
     checkpoint["resume_entrypoint"] = json!("poll_async_job");
     checkpoint["pending_async_job"] = json!({
         "job_id": "job-product",
@@ -799,6 +800,11 @@ fn task_query_lifecycle_projects_checkpoint_product_contract_fields() {
     assert_eq!(lifecycle["resume_owner"], "worker_recovery_resume_executor");
     assert_eq!(lifecycle["resume_entrypoint"], "poll_async_job");
     assert_eq!(lifecycle["last_safe_step_id"], "step_2");
+    assert_eq!(lifecycle["evidence_ref_count"], 1);
+    assert_eq!(
+        lifecycle["last_successful_evidence_ref"],
+        "step_2:evidence:1"
+    );
     assert_eq!(lifecycle["poll_ref"], "job-product");
     assert_eq!(lifecycle["cancel_ref"], "cancel:job-product");
     assert_eq!(lifecycle["next_action_kind"], "poll_async_job");

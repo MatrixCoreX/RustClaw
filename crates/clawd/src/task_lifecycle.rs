@@ -792,6 +792,18 @@ fn append_lifecycle_product_contract_fields(
         obj.entry("last_safe_step_id".to_string())
             .or_insert(json!(last_safe_step_id));
     }
+    obj.entry("evidence_ref_count".to_string())
+        .or_insert(json!(checkpoint.evidence_refs.len()));
+    if let Some(last_evidence_ref) = checkpoint
+        .evidence_refs
+        .iter()
+        .rev()
+        .map(|value| value.trim())
+        .find(|value| !value.is_empty())
+    {
+        obj.entry("last_successful_evidence_ref".to_string())
+            .or_insert(json!(last_evidence_ref));
+    }
     if let Some(job) = checkpoint.pending_async_job.as_ref() {
         obj.entry("poll_ref".to_string())
             .or_insert(json!(job.job_id.as_str()));
