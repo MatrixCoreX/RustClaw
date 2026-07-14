@@ -264,6 +264,86 @@ fn task_report_json_exposes_stable_machine_fields() {
 }
 
 #[test]
+fn task_report_json_prefers_journal_coding_workflow_contract() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-coding-workflow-report".to_string(),
+        status: "succeeded".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "completed",
+            "task_lifecycle": {
+                "state": "completed"
+            },
+            "result_json": {
+                "task_journal": {
+                    "summary": {
+                        "coding_workflow": {
+                            "schema_version": 1,
+                            "current_phase_hint": "summarize",
+                            "next_step": "summarize",
+                            "changed_file_count": 1,
+                            "changed_files": ["src/lib.rs"],
+                            "verification_command_count": 1,
+                            "verification_commands": ["cargo test -p clawd"],
+                            "verification_status": "verified",
+                            "failure_kind_count": 0,
+                            "failure_kinds": [],
+                            "repair_attempt_count": 0,
+                            "repair_attempt_refs": [],
+                            "checkpoint_ref_count": 1,
+                            "checkpoint_refs": ["coding_checkpoint:verification_command:step_2"],
+                            "completed_side_effect_count": 1,
+                            "completed_side_effect_refs": ["write_file:src/lib.rs"],
+                            "remaining_risks": [],
+                            "done_condition_coverage": [
+                                {"condition": "changes", "status": "observed"},
+                                {"condition": "verification", "status": "verified"}
+                            ]
+                        }
+                    }
+                },
+                "changed_files": ["legacy/path.rs"],
+                "final_diff_summary": {
+                    "summary_code": "legacy_diff"
+                },
+                "step_results": [
+                    {
+                        "step_id": "step_2",
+                        "status": "ok",
+                        "skill": "run_cmd",
+                        "command": "cargo test -p clawd"
+                    }
+                ]
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let report = task_report_json(&task, false);
+
+    assert_eq!(report["coding"]["source"], "task_journal_coding_workflow");
+    assert_eq!(report["coding"]["changed_file_count"], 1);
+    assert_eq!(report["coding"]["changed_files"][0], "src/lib.rs");
+    assert_eq!(report["coding"]["verification_command_count"], 1);
+    assert_eq!(
+        report["coding"]["verification_commands"][0],
+        "cargo test -p clawd"
+    );
+    assert_eq!(report["coding"]["state"]["verification_status"], "verified");
+    assert_eq!(report["coding"]["state"]["checkpoint_ref_count"], 1);
+    assert_eq!(report["coding"]["diff_summary_count"], 1);
+    assert_eq!(
+        report["coding"]["diff_summaries"][0]["value"]["summary_code"],
+        "legacy_diff"
+    );
+    assert_eq!(
+        report["coding"]["done_condition_coverage"][1]["status"],
+        "verified"
+    );
+}
+
+#[test]
 fn task_report_json_marks_exceeded_llm_budget_health() {
     let task = crate::task::TaskStatusView {
         task_id: "task-budget-exceeded".to_string(),
