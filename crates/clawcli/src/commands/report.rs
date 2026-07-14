@@ -192,6 +192,77 @@ pub(super) fn coding_review_text_lines(task: &task::TaskStatusView, review: &Val
     lines
 }
 
+pub(super) fn coding_exec_summary_json(task: &task::TaskStatusView) -> Value {
+    coding_report_json(&task.raw_data)
+}
+
+pub(super) fn coding_exec_has_signals(coding: &Value) -> bool {
+    [
+        "/changed_file_count",
+        "/command_count",
+        "/verification_command_count",
+        "/test_count",
+        "/failure_count",
+        "/diff_summary_count",
+        "/retry_count",
+    ]
+    .iter()
+    .any(|pointer| report_u64(coding, pointer) > 0)
+}
+
+pub(super) fn coding_exec_text_lines(coding: &Value) -> Vec<String> {
+    let mut lines = vec![
+        format!(
+            "coding_changed_file_count: {}",
+            report_u64(coding, "/changed_file_count")
+        ),
+        format!(
+            "coding_verification_command_count: {}",
+            report_u64(coding, "/verification_command_count")
+        ),
+        format!("coding_test_count: {}", report_u64(coding, "/test_count")),
+        format!(
+            "coding_failure_count: {}",
+            report_u64(coding, "/failure_count")
+        ),
+        format!(
+            "coding_verification_status: {}",
+            coding_verification_status_for_coding(coding)
+        ),
+        format!(
+            "coding_verification_failure_kind_count: {}",
+            report_u64(coding, "/verification_failure_kind_count")
+        ),
+    ];
+    for path in report_string_array(coding, "/changed_files")
+        .into_iter()
+        .take(32)
+    {
+        lines.push(format!("changed_file: {path}"));
+    }
+    for command in report_string_array(coding, "/verification_commands")
+        .into_iter()
+        .take(32)
+    {
+        lines.push(format!("verification_command: {command}"));
+    }
+    for kind in report_string_array(coding, "/verification_failure_kinds")
+        .into_iter()
+        .take(16)
+    {
+        lines.push(format!("verification_failure_kind: {kind}"));
+    }
+    if let Some(unverified_risk) = coding
+        .pointer("/unverified_risk")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        lines.push(format!("coding_unverified_risk: {unverified_risk}"));
+    }
+    lines
+}
+
 pub(super) fn coding_verification_artifact_json(task: &task::TaskStatusView) -> Value {
     let report = task_report_json(task, false);
     json!({
@@ -324,6 +395,21 @@ fn coding_verification_status(report: &Value) -> &'static str {
     let failure_count = report_u64(report, "/coding/failure_count");
     let verification_count = report_u64(report, "/coding/verification_command_count");
     let changed_file_count = report_u64(report, "/coding/changed_file_count");
+    if failure_count > 0 {
+        "failed"
+    } else if verification_count > 0 {
+        "verified"
+    } else if changed_file_count > 0 {
+        "unverified"
+    } else {
+        "not_applicable"
+    }
+}
+
+fn coding_verification_status_for_coding(coding: &Value) -> &'static str {
+    let failure_count = report_u64(coding, "/failure_count");
+    let verification_count = report_u64(coding, "/verification_command_count");
+    let changed_file_count = report_u64(coding, "/changed_file_count");
     if failure_count > 0 {
         "failed"
     } else if verification_count > 0 {

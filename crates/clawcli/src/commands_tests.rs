@@ -16,7 +16,16 @@ fn exec_summary_json_exposes_stable_machine_fields() {
                 "state": "background",
                 "checkpoint_id": "ckpt-exec"
             },
+            "changed_files": ["crates/clawcli/src/commands/exec.rs"],
             "result_json": {
+                "step_results": [
+                    {
+                        "step_id": "step_1",
+                        "status": "ok",
+                        "skill": "run_cmd",
+                        "command": "cargo check -p clawcli"
+                    }
+                ],
                 "task_journal": {
                     "trace": {
                         "step_results": [
@@ -62,6 +71,16 @@ fn exec_summary_json_exposes_stable_machine_fields() {
     assert_eq!(summary["lifecycle"]["checkpoint_id"], "ckpt-exec");
     assert_eq!(summary["events"][0]["event_type"], "checkpoint_created");
     assert_eq!(summary["events"][0]["fields"]["checkpoint_id"], "ckpt-exec");
+    assert_eq!(summary["coding"]["changed_file_count"], 1);
+    assert_eq!(
+        summary["coding"]["changed_files"][0],
+        "crates/clawcli/src/commands/exec.rs"
+    );
+    assert_eq!(summary["coding"]["verification_command_count"], 1);
+    assert_eq!(
+        summary["coding"]["verification_commands"][0],
+        "cargo check -p clawcli"
+    );
     assert_eq!(summary["artifacts"]["ref_count"], 1);
     assert_eq!(summary["artifacts"]["refs"][0]["ref"], "artifact:summary");
 }
