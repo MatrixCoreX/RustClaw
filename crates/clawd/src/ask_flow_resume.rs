@@ -1,5 +1,23 @@
 use super::*;
 
+fn resume_context_with_compaction_trigger(resume_context: &Value) -> Value {
+    let trigger = json!({
+        "schema_version": 1,
+        "trigger_kind": "before_resume",
+        "source": "resume_prompt",
+    });
+    let mut context = resume_context.clone();
+    if let Some(obj) = context.as_object_mut() {
+        obj.insert("context_compaction_trigger".to_string(), trigger);
+        context
+    } else {
+        json!({
+            "resume_context": context,
+            "context_compaction_trigger": trigger,
+        })
+    }
+}
+
 pub(super) fn build_resume_continue_execute_prompt_from_parts(
     state: &AppState,
     task: &ClaimedTask,
@@ -23,8 +41,9 @@ pub(super) fn build_resume_continue_execute_prompt_from_parts(
                         .unwrap_or_else(|| json!([]))
                 })
         });
-    let resume_context_json =
-        serde_json::to_string_pretty(resume_context).unwrap_or_else(|_| resume_context.to_string());
+    let resume_context_with_trigger = resume_context_with_compaction_trigger(resume_context);
+    let resume_context_json = serde_json::to_string_pretty(&resume_context_with_trigger)
+        .unwrap_or_else(|_| resume_context_with_trigger.to_string());
     let resume_steps_json =
         serde_json::to_string_pretty(&resume_steps).unwrap_or_else(|_| resume_steps.to_string());
 
@@ -101,8 +120,9 @@ pub(super) fn build_resume_followup_discussion_prompt_from_parts(
     user_text: &str,
     resume_context: &Value,
 ) -> Result<String, crate::bootstrap::RequiredPromptLoadError> {
-    let resume_context_json =
-        serde_json::to_string_pretty(resume_context).unwrap_or_else(|_| resume_context.to_string());
+    let resume_context_with_trigger = resume_context_with_compaction_trigger(resume_context);
+    let resume_context_json = serde_json::to_string_pretty(&resume_context_with_trigger)
+        .unwrap_or_else(|_| resume_context_with_trigger.to_string());
     let (prompt_template, _) = crate::bootstrap::load_required_prompt_template_for_state(
         state,
         crate::RESUME_FOLLOWUP_DISCUSSION_PROMPT_LOGICAL_PATH,

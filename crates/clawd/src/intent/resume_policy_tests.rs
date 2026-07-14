@@ -295,6 +295,10 @@ fn active_checkpoint_resume_prompts_render_machine_context_without_failure_frami
     assert!(execute.runtime_prompt.contains("active_checkpoint_resume"));
     assert!(execute.runtime_prompt.contains("checkpoint-1"));
     assert!(execute.runtime_prompt.contains("ready_for_planner_resume"));
+    assert!(execute
+        .runtime_prompt
+        .contains("context_compaction_trigger"));
+    assert!(execute.runtime_prompt.contains("before_resume"));
     assert!(!execute.runtime_prompt.contains("prior failure"));
 
     let discuss_route = route_with_resume_behavior(crate::ResumeBehavior::ResumeDiscuss);
@@ -311,5 +315,9 @@ fn active_checkpoint_resume_prompts_render_machine_context_without_failure_frami
     assert!(discuss.runtime_prompt.contains("active_checkpoint_resume"));
     assert!(discuss.runtime_prompt.contains("checkpoint-1"));
     assert!(discuss.runtime_prompt.contains("ready_for_planner_resume"));
+    assert!(discuss
+        .runtime_prompt
+        .contains("context_compaction_trigger"));
+    assert!(discuss.runtime_prompt.contains("before_resume"));
     assert!(!discuss.runtime_prompt.contains("prior failure"));
 }
