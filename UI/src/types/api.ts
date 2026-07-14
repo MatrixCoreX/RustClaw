@@ -110,6 +110,7 @@ export interface TaskLlmDebugResponse {
   call_count?: number | null;
   calls?: TaskLlmDebugCall[] | null;
   entries?: TaskLlmDebugCall[] | null;
+  memory_trace?: unknown | null;
 }
 
 export interface ActiveTaskItem {

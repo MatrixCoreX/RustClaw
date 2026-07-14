@@ -1045,6 +1045,19 @@ async fn task_debug_detail(
             .cmp(&(b.ts.unwrap_or(0), b.call_id.as_deref().unwrap_or_default()))
     });
     let calls = numbered_task_debug_calls(&entries);
+    let memory_trace = match read_task_memory_trace_for_debug(&state, normalized_task_id) {
+        Ok(trace) => trace,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("debug_task_memory_trace_read_failed:{err}")),
+                }),
+            );
+        }
+    };
     (
         StatusCode::OK,
         Json(ApiResponse {
@@ -1054,15 +1067,59 @@ async fn task_debug_detail(
                 "call_count": calls.len(),
                 "calls": calls,
                 "entries": entries,
+                "memory_trace": memory_trace,
             })),
             error: None,
         }),
     )
 }
 
+fn read_task_memory_trace_for_debug(
+    state: &AppState,
+    task_id: &str,
+) -> anyhow::Result<Option<Value>> {
+    let db = state
+        .core
+        .db
+        .get()
+        .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
+    let raw_result_json = db
+        .query_row(
+            "SELECT result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            [task_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(raw_result_json) = raw_result_json else {
+        return Ok(None);
+    };
+    let Ok(result_json) = serde_json::from_str::<Value>(&raw_result_json) else {
+        return Ok(None);
+    };
+    Ok(extract_memory_trace_for_debug(&result_json))
+}
+
+fn extract_memory_trace_for_debug(result_json: &Value) -> Option<Value> {
+    [
+        "/task_journal/trace/memory_trace",
+        "/task_journal/summary/memory_trace",
+        "/memory_trace",
+    ]
+    .iter()
+    .find_map(|pointer| {
+        result_json
+            .pointer(pointer)
+            .filter(|value| !value.is_null())
+            .cloned()
+    })
+}
+
 #[cfg(test)]
 mod logs_usage_debug_tests {
-    use super::{normalize_log_file_name, numbered_task_debug_calls, TaskDebugEntry};
+    use super::{
+        extract_memory_trace_for_debug, normalize_log_file_name, numbered_task_debug_calls,
+        TaskDebugEntry,
+    };
     use serde_json::json;
 
     #[test]
@@ -1150,5 +1207,35 @@ mod logs_usage_debug_tests {
             calls[1].entry.raw_response.as_deref(),
             Some("{\"id\":\"resp-2\"}")
         );
+    }
+
+    #[test]
+    fn task_debug_extracts_memory_trace_from_task_journal_trace() {
+        let result_json = json!({
+            "text": "ok",
+            "task_journal": {
+                "summary": {
+                    "memory_trace": {
+                        "stage": "summary_only"
+                    }
+                },
+                "trace": {
+                    "memory_trace": {
+                        "trace_kind": "task_memory_context",
+                        "stage_count": 2,
+                        "stages": [
+                            {"stage": "route", "use_policy": "route_minimal"},
+                            {"stage": "execution", "use_policy": "planner_scoped"}
+                        ]
+                    }
+                }
+            }
+        });
+
+        let trace = extract_memory_trace_for_debug(&result_json).expect("memory trace");
+        assert_eq!(trace["trace_kind"], "task_memory_context");
+        assert_eq!(trace["stage_count"], 2);
+        assert_eq!(trace["stages"][0]["stage"], "route");
+        assert_eq!(trace["stages"][1]["stage"], "execution");
     }
 }
