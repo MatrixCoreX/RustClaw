@@ -579,6 +579,8 @@ export default function App() {
     chatTeachingLlmDebug,
     chatTeachingLlmDebugLoading,
     chatTeachingLlmDebugError,
+    chatTeachingRuns,
+    activeChatTeachingRunId,
     chatSending,
     chatRecording,
     chatVoiceRecordingSupported,
@@ -586,6 +588,7 @@ export default function App() {
     chatAttachmentInputRef,
     setChatAgentMode,
     setChatTeachingMode,
+    selectChatTeachingRun,
     createNewChatThread,
     selectChatThread,
     deleteChatThread,
@@ -1348,6 +1351,8 @@ export default function App() {
               chatTeachingLlmDebug={chatTeachingLlmDebug}
               chatTeachingLlmDebugLoading={chatTeachingLlmDebugLoading}
               chatTeachingLlmDebugError={chatTeachingLlmDebugError}
+              chatTeachingRuns={chatTeachingRuns}
+              activeChatTeachingRunId={activeChatTeachingRunId}
               chatSending={chatSending}
               chatRecording={chatRecording}
               chatVoiceRecordingSupported={chatVoiceRecordingSupported}
@@ -1356,6 +1361,7 @@ export default function App() {
               toLocalTime={toLocalTime}
               onChatAgentModeChange={setChatAgentMode}
               onChatTeachingModeChange={setChatTeachingMode}
+              onSelectChatTeachingRun={selectChatTeachingRun}
               onCreateNewChatThread={createNewChatThread}
               onSelectChatThread={selectChatThread}
               onDeleteChatThread={deleteChatThread}
