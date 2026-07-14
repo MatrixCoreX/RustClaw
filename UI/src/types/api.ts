@@ -70,8 +70,18 @@ export interface TaskLlmDebugUsage {
   cache_read_input_tokens?: number | null;
 }
 
+export interface TaskLlmDebugFlow {
+  prompt_label?: string | null;
+  flow_stage?: string | null;
+  flow_node?: string | null;
+  code_module?: string | null;
+  code_entrypoint?: string | null;
+  trigger_kind?: string | null;
+}
+
 export interface TaskLlmDebugCall {
   call_index?: number | null;
+  flow?: TaskLlmDebugFlow | null;
   ts?: number | null;
   task_id?: string | null;
   call_id?: string | null;

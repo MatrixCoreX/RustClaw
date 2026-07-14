@@ -1074,8 +1074,19 @@ struct UsageHistoryChainEntry {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct TaskDebugFlow {
+    prompt_label: String,
+    flow_stage: String,
+    flow_node: String,
+    code_module: String,
+    code_entrypoint: String,
+    trigger_kind: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct TaskDebugCall {
     call_index: usize,
+    flow: TaskDebugFlow,
     #[serde(flatten)]
     entry: TaskDebugEntry,
 }
