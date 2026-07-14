@@ -142,6 +142,21 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
         "prompts/observed_answer_fallback_prompt.md"
     );
 
+    let mut mutation_route = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
+    mutation_route.output_contract.semantic_kind = OutputSemanticKind::ConfigMutation;
+    mutation_route.output_contract.requires_content_evidence = true;
+    let mutation_context = AgentRunContext {
+        route_result: Some(mutation_route),
+        ..AgentRunContext::default()
+    };
+    assert_eq!(
+        observed_answer_fallback_prompt_logical_path(
+            Some(&mutation_context),
+            "status=ok\nchanged=true"
+        ),
+        "prompts/observed_answer_fallback_prompt.md"
+    );
+
     let mut delivery_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     delivery_route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     delivery_route.output_contract.delivery_required = true;
@@ -165,6 +180,39 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
         observed_answer_fallback_prompt_logical_path(Some(&terminal_context), &large_observed),
         "prompts/observed_answer_fallback_prompt.md"
     );
+}
+
+#[test]
+fn observed_fallback_prompt_uses_compact_template_for_short_listing_and_scalar_contracts() {
+    for semantic_kind in [
+        OutputSemanticKind::FileNames,
+        OutputSemanticKind::DirectoryEntryGroups,
+        OutputSemanticKind::ScalarCount,
+        OutputSemanticKind::ExistenceWithPath,
+        OutputSemanticKind::SqliteTableListing,
+    ] {
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route_result.output_contract.semantic_kind = semantic_kind;
+        route_result.output_contract.requires_content_evidence = true;
+        route_result.output_contract.delivery_required = false;
+        route_result.output_contract.delivery_intent = OutputDeliveryIntent::None;
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        let path = observed_answer_fallback_prompt_logical_path(
+            Some(&agent_run_context),
+            r#"status=ok
+entries=["README.md","Cargo.toml"]
+count=2"#,
+        );
+
+        assert_eq!(
+            path, "prompts/observed_answer_fallback_compact_prompt.md",
+            "{semantic_kind:?} should use compact finalizer"
+        );
+    }
 }
 
 #[test]

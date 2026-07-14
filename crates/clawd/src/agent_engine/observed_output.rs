@@ -1320,15 +1320,48 @@ fn observed_answer_fallback_can_use_compact_prompt(
     {
         return false;
     }
-    output_route_policy::route_contract_marker_is_any(
-        route,
-        &[
-            crate::OutputSemanticKind::RawCommandOutput,
-            crate::OutputSemanticKind::CommandOutputSummary,
-            crate::OutputSemanticKind::ServiceStatus,
-            crate::OutputSemanticKind::ExecutionFailedStep,
-        ],
+    observed_answer_fallback_semantic_kind_can_use_compact_prompt(
+        route.output_contract.semantic_kind,
     ) || crate::machine_capability_ref::route_has_capability_namespace(route, &["docker"])
+}
+
+fn observed_answer_fallback_semantic_kind_can_use_compact_prompt(
+    semantic_kind: crate::OutputSemanticKind,
+) -> bool {
+    matches!(
+        semantic_kind,
+        crate::OutputSemanticKind::RawCommandOutput
+            | crate::OutputSemanticKind::CommandOutputSummary
+            | crate::OutputSemanticKind::ServiceStatus
+            | crate::OutputSemanticKind::HiddenEntriesCheck
+            | crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::DirectoryEntryGroups
+            | crate::OutputSemanticKind::FilePaths
+            | crate::OutputSemanticKind::DocumentHeading
+            | crate::OutputSemanticKind::ScalarCount
+            | crate::OutputSemanticKind::QuantityComparison
+            | crate::OutputSemanticKind::ExecutionFailedStep
+            | crate::OutputSemanticKind::ScalarPathOnly
+            | crate::OutputSemanticKind::FileBasename
+            | crate::OutputSemanticKind::ExistenceWithPath
+            | crate::OutputSemanticKind::ExistenceWithPathSummary
+            | crate::OutputSemanticKind::RecentScalarEqualityCheck
+            | crate::OutputSemanticKind::GitCommitSubject
+            | crate::OutputSemanticKind::GitRepositoryState
+            | crate::OutputSemanticKind::StructuredKeys
+            | crate::OutputSemanticKind::SqliteTableListing
+            | crate::OutputSemanticKind::SqliteTableNamesOnly
+            | crate::OutputSemanticKind::SqliteDatabaseKindJudgment
+            | crate::OutputSemanticKind::SqliteSchemaVersion
+            | crate::OutputSemanticKind::PackageManagerDetection
+            | crate::OutputSemanticKind::ToolDiscovery
+            | crate::OutputSemanticKind::ArchiveList
+            | crate::OutputSemanticKind::DockerPs
+            | crate::OutputSemanticKind::DockerImages
+            | crate::OutputSemanticKind::DockerLogs
+            | crate::OutputSemanticKind::DockerContainerLifecycle
+    )
 }
 
 fn resolved_user_intent(agent_run_context: Option<&AgentRunContext>, user_text: &str) -> String {
