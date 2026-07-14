@@ -24,6 +24,7 @@ ALL_SUITES=(
   ops_closed_loop
   ops_http_repair
   long_tail_flows
+  agent_parity_gate
   clarify
   clarify_hard
   context_chain
@@ -57,6 +58,7 @@ Suites:
   ops_closed_loop
   ops_http_repair
   long_tail_flows
+  agent_parity_gate
   clarify
   clarify_hard
   context_chain
@@ -71,6 +73,7 @@ Categories:
   regression    -> evidence_policy_offline, trace, resume, runtime_capability_boundary
   guard         -> dynamic_guard, sensitive_flows
   ops           -> ops_closed_loop, long_tail_flows
+  agent_parity  -> agent_parity_gate
   core          -> evidence_policy_offline, client_like_continuous, manual, text_match, trace, resume, clarify, context_chain
   all           -> evidence_policy_offline, client_like_continuous, manual, text_match, full, trace, resume, clarify, clarify_hard, context_chain, dynamic_guard
 
@@ -85,9 +88,11 @@ Examples:
   bash scripts/nl_tests/run_suite.sh ops_closed_loop
   bash scripts/nl_tests/run_suite.sh ops_http_repair
   bash scripts/nl_tests/run_suite.sh long_tail_flows
+  bash scripts/nl_tests/run_suite.sh agent_parity_gate
   bash scripts/nl_tests/run_suite.sh --category multi_turn
   bash scripts/nl_tests/run_suite.sh --category regression --category guard --base-url http://127.0.0.1:8787
   bash scripts/nl_tests/run_suite.sh --category ops
+  bash scripts/nl_tests/run_suite.sh --category agent_parity
 
 Notes:
   - Shared options are passed through to the underlying suite runner.
@@ -116,6 +121,7 @@ Available suites:
   - ops_closed_loop
   - ops_http_repair
   - long_tail_flows
+  - agent_parity_gate
   - clarify
   - clarify_hard
   - context_chain
@@ -130,6 +136,7 @@ Available categories:
   - regression
   - guard
   - ops
+  - agent_parity
   - core
   - all
 EOF
@@ -283,6 +290,13 @@ run_mode_long_tail_flows() {
   run_wrapped_suite \
     "long_tail_flows" \
     bash "${ROOT_DIR}/scripts/regression_long_tail_nl_flows.sh" \
+    "$@"
+}
+
+run_mode_agent_parity_gate() {
+  run_wrapped_suite \
+    "agent_parity_gate" \
+    bash "${SCRIPT_DIR}/run_agent_parity_gate.sh" \
     "$@"
 }
 
@@ -504,6 +518,9 @@ run_one_suite() {
     long_tail_flows)
       run_mode_long_tail_flows "${FILTERED_SUITE_ARGS[@]}"
       ;;
+    agent_parity_gate)
+      run_mode_agent_parity_gate "${FILTERED_SUITE_ARGS[@]}"
+      ;;
     clarify)
       run_mode_clarify "${FILTERED_SUITE_ARGS[@]}"
       ;;
@@ -541,7 +558,7 @@ add_suite() {
 expand_selector() {
   local selector="$1"
   case "$selector" in
-    evidence_policy_offline|contract_matrix_offline|client_like_continuous|runtime_capability_boundary|manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_closed_loop|ops_http_repair|long_tail_flows|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
+    evidence_policy_offline|contract_matrix_offline|client_like_continuous|runtime_capability_boundary|manual|compound_single|task_updates|task_updates4|multistep_mixed|text_match|full|trace|resume|self_extension|sensitive_flows|ops_closed_loop|ops_http_repair|long_tail_flows|agent_parity_gate|clarify|clarify_hard|context_chain|dynamic_guard|clarify_context_prompt)
       add_suite "$selector"
       ;;
     smoke)
@@ -581,6 +598,9 @@ expand_selector() {
     ops)
       add_suite ops_closed_loop
       add_suite long_tail_flows
+      ;;
+    agent_parity)
+      add_suite agent_parity_gate
       ;;
     core)
       add_suite evidence_policy_offline
