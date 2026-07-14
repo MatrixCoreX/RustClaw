@@ -706,6 +706,7 @@ fn tui_command_parser_accepts_basic_key_tokens() {
     assert_eq!(tui_command_from_input("W"), Some(TuiCommand::Watch));
     assert_eq!(tui_command_from_input("c"), Some(TuiCommand::Cancel));
     assert_eq!(tui_command_from_input("u"), Some(TuiCommand::Resume));
+    assert_eq!(tui_command_from_input("n"), Some(TuiCommand::Continue));
     assert_eq!(tui_command_from_input("e"), Some(TuiCommand::Export));
     assert_eq!(tui_command_from_input("q"), Some(TuiCommand::Quit));
     assert_eq!(tui_command_from_input("watch"), None);
@@ -772,12 +773,24 @@ fn tui_selected_task_lines_expose_resume_llm_and_coding_tokens() {
                 "lease_owner": "worker-lines",
                 "heartbeat_at": 1781800000
             },
+            "task_goal": {
+                "goal_id": "goal-lines",
+                "goal_status": "in_progress"
+            },
             "result_json": {
                 "changed_files": ["src/lib.rs"],
                 "task_checkpoint": {
                     "completed_side_effect_refs": ["write_file:src/lib.rs"]
                 },
                 "task_journal": {
+                    "summary": {
+                        "task_outcome": {
+                            "state": "in_progress",
+                            "done_conditions": ["tests_pass"],
+                            "current_progress": ["edited_file"],
+                            "remaining_work": ["run_tests"]
+                        }
+                    },
                     "trace": {
                         "step_results": [
                             {
@@ -819,6 +832,12 @@ fn tui_selected_task_lines_expose_resume_llm_and_coding_tokens() {
     assert!(lines.contains(&"tui_selected_verification_status: verified".to_string()));
     assert!(lines.contains(&"tui_selected_completed_side_effect_count: 1".to_string()));
     assert!(lines.contains(&"tui_selected_unverified_risk: tests_not_observed".to_string()));
+    assert!(lines.contains(&"tui_selected_goal_id: goal-lines".to_string()));
+    assert!(lines.contains(&"tui_selected_goal_status: in_progress".to_string()));
+    assert!(lines.contains(&"tui_selected_outcome_state: in_progress".to_string()));
+    assert!(lines.contains(&"tui_selected_done_condition_count: 1".to_string()));
+    assert!(lines.contains(&"tui_selected_current_progress_count: 7".to_string()));
+    assert!(lines.contains(&"tui_selected_remaining_work_count: 2".to_string()));
 }
 
 #[test]
