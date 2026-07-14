@@ -46,6 +46,10 @@ COUNTER_FIELDS = (
     "execution_surface_owner_counts",
     "repair_signal_status_counts",
     "validation_status_counts",
+    "lifecycle_state_counts",
+    "event_type_counts",
+    "checkpoint_kind_counts",
+    "provider_blocker_counts",
     "agent_loop_eligibility_bucket_counts",
     "agent_loop_eligibility_blocked_reason_counts",
 )
@@ -424,6 +428,13 @@ def task_observations(trace: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in observations if isinstance(item, dict)]
 
 
+def trace_event_stream(trace: dict[str, Any]) -> list[dict[str, Any]]:
+    events = trace.get("event_stream")
+    if not isinstance(events, list):
+        return []
+    return [event for event in events if isinstance(event, dict)]
+
+
 def journal_rollout_items(summary: dict[str, Any], trace: dict[str, Any]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -512,6 +523,84 @@ def bool_token(value: Any) -> str:
     return str(value)
 
 
+BACKGROUND_LIFECYCLE_STATES = {
+    "background",
+    "waiting",
+    "needs_user",
+    "provider_wait",
+    "background_wait",
+}
+
+PROVIDER_BLOCKER_HINTS = {
+    "provider_error",
+    "provider_unavailable",
+    "provider_timeout",
+    "provider_rate_limited",
+    "provider_quota_exceeded",
+    "rate_limited",
+    "quota_exceeded",
+    "model_provider_error",
+    "model_timeout",
+}
+
+
+def lifecycle_state(data: dict[str, Any], result: dict[str, Any], summary: dict[str, Any]) -> str:
+    for source in (
+        data.get("task_lifecycle"),
+        result.get("task_lifecycle"),
+        summary.get("task_lifecycle"),
+        summary.get("lifecycle"),
+    ):
+        if isinstance(source, dict):
+            state = source.get("state") or source.get("lifecycle_state")
+            if isinstance(state, str) and state.strip():
+                return state.strip()
+    for key in ("lifecycle_state", "execution_state"):
+        value = data.get(key) or result.get(key) or summary.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "unknown"
+
+
+def checkpoint_kind_from_event(event: dict[str, Any]) -> str:
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    for source in (payload, event):
+        kind = source.get("checkpoint_kind")
+        if isinstance(kind, str) and kind.strip():
+            return kind.strip()
+    event_type = event.get("event_type")
+    if isinstance(event_type, str) and "checkpoint" in event_type:
+        return event_type.strip()
+    return ""
+
+
+def verifier_call_count(trace: dict[str, Any], summary: dict[str, Any]) -> int:
+    count = sum(
+        1
+        for round_item in trace_rounds(trace)
+        if isinstance(round_item.get("verify_result"), dict)
+    )
+    if isinstance(summary.get("answer_verifier_summary"), dict):
+        count += 1
+    return count
+
+
+def provider_blocker_token(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    token = value.strip()
+    if not token:
+        return ""
+    lowered = token.lower()
+    if lowered in PROVIDER_BLOCKER_HINTS:
+        return lowered
+    if "provider" in lowered or "rate_limit" in lowered or "quota" in lowered:
+        return lowered
+    return ""
+
+
 REPEAT_GUARD_SIGNALS = {
     "repeat_completed_action",
     "repeat_action_limit",
@@ -568,6 +657,11 @@ def update_by_prompt_totals(
         "provider_final_error_count",
         "prompt_truncation_count",
         "prompt_truncated_bytes_total",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
     )
     for label, bucket in by_prompt.items():
         if not isinstance(label, str) or not isinstance(bucket, dict):
@@ -705,6 +799,10 @@ def summarize_run(
     execution_surface_owner_counts: Counter[str] = Counter()
     repair_signal_status_counts: Counter[str] = Counter()
     validation_status_counts: Counter[str] = Counter()
+    lifecycle_state_counts: Counter[str] = Counter()
+    event_type_counts: Counter[str] = Counter()
+    checkpoint_kind_counts: Counter[str] = Counter()
+    provider_blocker_counts: Counter[str] = Counter()
     provider_counts: Counter[str] = Counter()
     vendor_counts: Counter[str] = Counter()
     budget_profile_counts: Counter[str] = Counter()
@@ -728,6 +826,10 @@ def summarize_run(
     total_steps = 0
     total_tool_calls = 0
     total_external_tool_calls = 0
+    total_verifier_calls = 0
+    total_background_states = 0
+    total_checkpoint_events = 0
+    total_provider_blockers = 0
 
     for path in paths:
         obj = load_json(path)
@@ -753,14 +855,22 @@ def summarize_run(
                 contract = {}
 
         status_counts[str(data.get("status") or "unknown")] += 1
+        state = lifecycle_state(data, result, summary)
+        lifecycle_state_counts[state] += 1
+        if state in BACKGROUND_LIFECYCLE_STATES:
+            total_background_states += 1
         final_status_counts[str(summary.get("final_status") or "unknown")] += 1
         first_layer_counts[route_legacy_first_layer(route) or "unknown"] += 1
         route_gate_counts[str(route.get("route_gate_kind") or "unknown")] += 1
         failure_attribution_counts[str(summary.get("final_failure_attribution") or "none")] += 1
+        if blocker := provider_blocker_token(summary.get("final_failure_attribution")):
+            provider_blocker_counts[blocker] += 1
+            total_provider_blockers += 1
         if verifier:
             verifier_pass_counts[str(verifier.get("pass"))] += 1
         else:
             verifier_pass_counts["missing"] += 1
+        total_verifier_calls += verifier_call_count(trace, summary)
         final_stop_signal = normalized_signal(summary.get("final_stop_signal")) or normalized_signal(
             trace.get("final_stop_signal")
         )
@@ -802,6 +912,9 @@ def summarize_run(
                 stop_signal_counts[stop_signal] += 1
                 if signal := guard_signal(stop_signal):
                     guard_signal_counts[signal] += 1
+                if blocker := provider_blocker_token(stop_signal):
+                    provider_blocker_counts[blocker] += 1
+                    total_provider_blockers += 1
             for signal in round_item.get("repair_signals") or []:
                 if isinstance(signal, dict):
                     repair_signal_status_counts[
@@ -824,6 +937,9 @@ def summarize_run(
                 rollout_reason_counts[reason.strip()] += 1
                 if signal := guard_signal(reason):
                     guard_signal_counts[signal] += 1
+                if blocker := provider_blocker_token(reason):
+                    provider_blocker_counts[blocker] += 1
+                    total_provider_blockers += 1
             boundary_context = dict_value(item.get("boundary_context"))
             boundary_budget = dict_value(boundary_context.get("budget"))
             agent_loop_eligibility_bucket_counts[
@@ -854,10 +970,20 @@ def summarize_run(
             for key in ("error_kind", "failure_attribution"):
                 if signal := guard_signal(step.get(key)):
                     guard_signal_counts[signal] += 1
+                if blocker := provider_blocker_token(step.get(key)):
+                    provider_blocker_counts[blocker] += 1
+                    total_provider_blockers += 1
         for observation in task_observations(trace):
             owner = observation.get("execution_surface_owner")
             if isinstance(owner, str) and owner.strip():
                 execution_surface_owner_counts[owner.strip()] += 1
+        for event in trace_event_stream(trace):
+            event_type = str(event.get("event_type") or "unknown")
+            event_type_counts[event_type] += 1
+            checkpoint_kind = checkpoint_kind_from_event(event)
+            if checkpoint_kind:
+                checkpoint_kind_counts[checkpoint_kind] += 1
+                total_checkpoint_events += 1
         tool_calls, external_tool_calls = count_tool_calls(steps)
         total_tool_calls += tool_calls
         total_external_tool_calls += external_tool_calls
@@ -872,6 +998,27 @@ def summarize_run(
     provider_retry_count = sum_by_prompt_field(by_prompt, "provider_retry_count")
     provider_retryable_error_count = sum_by_prompt_field(by_prompt, "provider_retryable_error_count")
     provider_final_error_count = sum_by_prompt_field(by_prompt, "provider_final_error_count")
+    prompt_truncated_bytes_total = sum_by_prompt_field(by_prompt, "prompt_truncated_bytes_total")
+    prompt_tokens = sum_by_prompt_field(by_prompt, "prompt_tokens")
+    completion_tokens = sum_by_prompt_field(by_prompt, "completion_tokens")
+    total_tokens = sum_by_prompt_field(by_prompt, "total_tokens")
+    input_tokens = sum_by_prompt_field(by_prompt, "input_tokens")
+    output_tokens = sum_by_prompt_field(by_prompt, "output_tokens")
+    prompt_bytes_before_values = [
+        safe_int(bucket.get("prompt_bytes_before_max"))
+        for bucket in by_prompt.values()
+        if isinstance(bucket, dict)
+    ]
+    prompt_bytes_after_values = [
+        safe_int(bucket.get("prompt_bytes_after_max"))
+        for bucket in by_prompt.values()
+        if isinstance(bucket, dict)
+    ]
+    prompt_bytes_budget_values = [
+        safe_int(bucket.get("prompt_bytes_budget_min"))
+        for bucket in by_prompt.values()
+        if isinstance(bucket, dict) and safe_int(bucket.get("prompt_bytes_budget_min")) > 0
+    ]
     return {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -907,6 +1054,10 @@ def summarize_run(
         ),
         "repair_signal_status_counts": dict(sorted(repair_signal_status_counts.items())),
         "validation_status_counts": dict(sorted(validation_status_counts.items())),
+        "lifecycle_state_counts": dict(sorted(lifecycle_state_counts.items())),
+        "event_type_counts": dict(sorted(event_type_counts.items())),
+        "checkpoint_kind_counts": dict(sorted(checkpoint_kind_counts.items())),
+        "provider_blocker_counts": dict(sorted(provider_blocker_counts.items())),
         "agent_loop_eligibility_bucket_counts": dict(
             sorted(agent_loop_eligibility_bucket_counts.items())
         ),
@@ -920,6 +1071,15 @@ def summarize_run(
             "provider_retry_count": provider_retry_count,
             "provider_retryable_error_count": provider_retryable_error_count,
             "provider_final_error_count": provider_final_error_count,
+            "prompt_bytes_before_max": max(prompt_bytes_before_values, default=0),
+            "prompt_bytes_after_max": max(prompt_bytes_after_values, default=0),
+            "prompt_bytes_budget_min": min(prompt_bytes_budget_values, default=0),
+            "prompt_truncated_bytes_total": prompt_truncated_bytes_total,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
             "avg_calls_per_turn": round(total_llm_calls / total_turns, 3) if total_turns else 0.0,
             "avg_elapsed_ms_per_turn": round(total_llm_elapsed_ms / total_turns, 3)
             if total_turns
@@ -933,6 +1093,10 @@ def summarize_run(
             "step_count": total_steps,
             "tool_call_count": total_tool_calls,
             "external_tool_call_count": total_external_tool_calls,
+            "verifier_call_count": total_verifier_calls,
+            "background_state_count": total_background_states,
+            "checkpoint_event_count": total_checkpoint_events,
+            "provider_blocker_count": total_provider_blockers,
             "repeat_action_guard_hit_count": repeat_action_guard_count(guard_signal_counts),
             "no_progress_stop_count": safe_int(guard_signal_counts.get("no_progress")),
         },
@@ -1007,6 +1171,38 @@ def summarize_run_dirs(
         safe_int(get_path(summary, "llm", "provider_final_error_count"))
         for summary in summaries
     )
+    prompt_truncated_bytes_total = sum(
+        safe_int(get_path(summary, "llm", "prompt_truncated_bytes_total"))
+        for summary in summaries
+    )
+    prompt_tokens = sum(
+        safe_int(get_path(summary, "llm", "prompt_tokens")) for summary in summaries
+    )
+    completion_tokens = sum(
+        safe_int(get_path(summary, "llm", "completion_tokens")) for summary in summaries
+    )
+    total_tokens = sum(
+        safe_int(get_path(summary, "llm", "total_tokens")) for summary in summaries
+    )
+    input_tokens = sum(
+        safe_int(get_path(summary, "llm", "input_tokens")) for summary in summaries
+    )
+    output_tokens = sum(
+        safe_int(get_path(summary, "llm", "output_tokens")) for summary in summaries
+    )
+    prompt_bytes_before_max = max(
+        (safe_int(get_path(summary, "llm", "prompt_bytes_before_max")) for summary in summaries),
+        default=0,
+    )
+    prompt_bytes_after_max = max(
+        (safe_int(get_path(summary, "llm", "prompt_bytes_after_max")) for summary in summaries),
+        default=0,
+    )
+    prompt_bytes_budget_values = [
+        safe_int(get_path(summary, "llm", "prompt_bytes_budget_min"))
+        for summary in summaries
+        if safe_int(get_path(summary, "llm", "prompt_bytes_budget_min")) > 0
+    ]
     total_rounds = sum(
         safe_int(get_path(summary, "execution", "round_count"))
         for summary in summaries
@@ -1021,6 +1217,22 @@ def summarize_run_dirs(
     )
     total_external_tool_calls = sum(
         safe_int(get_path(summary, "execution", "external_tool_call_count"))
+        for summary in summaries
+    )
+    total_verifier_calls = sum(
+        safe_int(get_path(summary, "execution", "verifier_call_count"))
+        for summary in summaries
+    )
+    total_background_states = sum(
+        safe_int(get_path(summary, "execution", "background_state_count"))
+        for summary in summaries
+    )
+    total_checkpoint_events = sum(
+        safe_int(get_path(summary, "execution", "checkpoint_event_count"))
+        for summary in summaries
+    )
+    total_provider_blockers = sum(
+        safe_int(get_path(summary, "execution", "provider_blocker_count"))
         for summary in summaries
     )
     repeat_action_guard_hit_count = sum(
@@ -1048,6 +1260,15 @@ def summarize_run_dirs(
             "provider_retry_count": provider_retry_count,
             "provider_retryable_error_count": provider_retryable_error_count,
             "provider_final_error_count": provider_final_error_count,
+            "prompt_bytes_before_max": prompt_bytes_before_max,
+            "prompt_bytes_after_max": prompt_bytes_after_max,
+            "prompt_bytes_budget_min": min(prompt_bytes_budget_values, default=0),
+            "prompt_truncated_bytes_total": prompt_truncated_bytes_total,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
             "avg_calls_per_turn": round(total_llm_calls / turns_total, 3)
             if turns_total
             else 0.0,
@@ -1063,6 +1284,10 @@ def summarize_run_dirs(
             "step_count": total_steps,
             "tool_call_count": total_tool_calls,
             "external_tool_call_count": total_external_tool_calls,
+            "verifier_call_count": total_verifier_calls,
+            "background_state_count": total_background_states,
+            "checkpoint_event_count": total_checkpoint_events,
+            "provider_blocker_count": total_provider_blockers,
             "repeat_action_guard_hit_count": repeat_action_guard_hit_count,
             "no_progress_stop_count": no_progress_stop_count,
         },
