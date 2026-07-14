@@ -65,6 +65,41 @@ pub(super) struct GoalByTaskIdRequest {
     goal: Option<Value>,
 }
 
+fn task_admin_sensitive_field_name(field: &str) -> bool {
+    let normalized = field.trim().to_ascii_lowercase().replace(['-', '.'], "_");
+    normalized == "key"
+        || normalized == "auth"
+        || normalized.ends_with("_key")
+        || normalized.contains("token")
+        || normalized.contains("secret")
+        || normalized.contains("password")
+        || normalized.contains("passwd")
+        || normalized.contains("cookie")
+        || normalized.contains("credential")
+        || normalized.contains("ticket")
+        || normalized.contains("signature")
+        || normalized.contains("authorization")
+}
+
+fn task_admin_public_json(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (key, child) in map {
+                let value = if task_admin_sensitive_field_name(key) {
+                    json!("[REDACTED]")
+                } else {
+                    task_admin_public_json(child)
+                };
+                out.insert(key.clone(), value);
+            }
+            Value::Object(out)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(task_admin_public_json).collect()),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => value.clone(),
+    }
+}
+
 fn authorize_task_admin_request(
     state: &AppState,
     headers: &HeaderMap,
@@ -373,13 +408,20 @@ pub(super) async fn goal_by_task_id(
         );
     };
     match crate::repo::update_task_goal_payload(&state, &target.task_id, operation, req.goal) {
-        Ok(Some(update)) => super::api_ok(json!({
-            "status": "task_goal_control_updated",
-            "task_id": update.task_id,
-            "operation": update.operation,
-            "goal": update.goal,
-            "payload_json": update.payload_json,
-        })),
+        Ok(Some(update)) => {
+            let goal = update
+                .goal
+                .as_ref()
+                .map(task_admin_public_json)
+                .unwrap_or(Value::Null);
+            super::api_ok(json!({
+                "status": "task_goal_control_updated",
+                "task_id": update.task_id,
+                "operation": update.operation,
+                "goal": goal,
+                "payload_json": task_admin_public_json(&update.payload_json),
+            }))
+        }
         Ok(None) => super::api_err::<serde_json::Value>(StatusCode::NOT_FOUND, "task_not_found"),
         Err(err) => {
             error!("task_goal_control_failed err={}", err);

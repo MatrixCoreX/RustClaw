@@ -1908,6 +1908,13 @@ fn goal_control_summary_json_extracts_resume_machine_fields() {
         "data": {
             "task_id": "task-goal-control",
             "status": "task_resume_requested",
+            "payload_json": {
+                "text": "task",
+                "user_key": "rk-secret-in-payload",
+                "nested": {
+                    "api_token": "tok-secret-in-payload"
+                }
+            },
             "task_lifecycle": {
                 "state": "background",
                 "execution_state": "background",
@@ -1937,6 +1944,12 @@ fn goal_control_summary_json_extracts_resume_machine_fields() {
     assert_eq!(summary["resume_directive"], "run_next_planner_round");
     assert_eq!(summary["resume_reason"], "goal_resume");
     assert_eq!(summary["next_action_kind"], "resume_checkpoint");
+    assert_eq!(summary["payload_json"]["user_key"], "[REDACTED]");
+    assert_eq!(summary["payload_json"]["nested"]["api_token"], "[REDACTED]");
+    assert_eq!(
+        summary["response"]["data"]["payload_json"]["user_key"],
+        "[REDACTED]"
+    );
 }
 
 fn unique_suffix() -> u128 {

@@ -12,6 +12,7 @@ const GOAL_STATUS_BLOCKED: &str = "blocked";
 const GOAL_STATUS_VERIFIED: &str = "verified";
 const GOAL_STATUS_COMPLETED: &str = "completed";
 const GOAL_STATUS_CANCELLED: &str = "cancelled";
+const GOAL_CLEARED_KEY: &str = "goal_cleared";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskGoalControlOperation {
@@ -96,12 +97,14 @@ pub(crate) fn update_task_goal_payload(
                 .or_insert_with(|| json!(1));
             payload_obj.remove("goal_spec");
             payload_obj.remove("task_goal");
+            payload_obj.remove(GOAL_CLEARED_KEY);
             payload_obj.insert("goal".to_string(), Value::Object(goal_obj));
         }
         TaskGoalControlOperation::Clear => {
             payload_obj.remove("goal");
             payload_obj.remove("goal_spec");
             payload_obj.remove("task_goal");
+            payload_obj.insert(GOAL_CLEARED_KEY.to_string(), json!(true));
         }
     }
 
@@ -132,6 +135,9 @@ pub(crate) fn task_goal_projection(
     lifecycle: &Value,
 ) -> Option<Value> {
     let payload = serde_json::from_str::<Value>(payload_json).ok();
+    if payload.as_ref().is_some_and(payload_goal_cleared) {
+        return None;
+    }
     let payload_goal = payload.as_ref().and_then(payload_goal_spec);
     let result_goal = result_json.and_then(result_goal_spec);
     if payload_goal.is_none() && result_goal.is_none() {
@@ -168,6 +174,13 @@ fn payload_goal_spec(payload: &Value) -> Option<&Value> {
         .or_else(|| payload.get("goal_spec"))
         .or_else(|| payload.get("task_goal"))
         .filter(|value| value.is_object())
+}
+
+fn payload_goal_cleared(payload: &Value) -> bool {
+    payload
+        .get(GOAL_CLEARED_KEY)
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn result_goal_spec(result: &Value) -> Option<&Value> {
