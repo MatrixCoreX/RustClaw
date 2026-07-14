@@ -18,6 +18,8 @@ fn exec_event_summary(task: &task::TaskStatusView) -> Vec<Value> {
 
 pub(super) fn task_report_json(task: &task::TaskStatusView, include_events: bool) -> Value {
     let artifact_refs = exec_artifact_refs(&task.raw_data);
+    let coding = coding_report_json(&task.raw_data);
+    let outcome = super::report_outcome::task_outcome_report_json(&task.raw_data, &coding);
     json!({
         "report_kind": "rustclaw_task_report",
         "task_id": task.task_id,
@@ -36,7 +38,8 @@ pub(super) fn task_report_json(task: &task::TaskStatusView, include_events: bool
             Value::Null
         },
         "llm": llm_report_json(task),
-        "coding": coding_report_json(&task.raw_data),
+        "coding": coding,
+        "outcome": outcome,
         "artifacts": {
             "ref_count": artifact_refs.len(),
             "refs": artifact_refs,
@@ -148,6 +151,27 @@ pub(super) fn task_report_text_lines(task: &task::TaskStatusView, report: &Value
         .and_then(Value::as_str)
     {
         lines.push(format!("coding_next_step: {next_step}"));
+    }
+    if let Some(state) = report.pointer("/outcome/state").and_then(Value::as_str) {
+        lines.push(format!("outcome_state: {state}"));
+    }
+    for item in report_string_array(report, "/outcome/done_conditions")
+        .into_iter()
+        .take(16)
+    {
+        lines.push(format!("done_condition: {item}"));
+    }
+    for item in report_string_array(report, "/outcome/current_progress")
+        .into_iter()
+        .take(16)
+    {
+        lines.push(format!("current_progress: {item}"));
+    }
+    for item in report_string_array(report, "/outcome/remaining_work")
+        .into_iter()
+        .take(16)
+    {
+        lines.push(format!("remaining_work: {item}"));
     }
     lines.push(format!(
         "coding_checkpoint_ref_count: {}",

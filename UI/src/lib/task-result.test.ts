@@ -36,12 +36,30 @@ test("builds completed task outcome from machine task_outcome fields", () => {
             state: "done",
             message_en: "Completed from machine state",
             next_step_en: "Review the result.",
+            done_conditions: ["tests_pass"],
+            constraints: [{ scope: "workspace", writes_allowed: true }],
+            verification: { command: "cargo test -p clawd" },
+            current_progress: ["changed_file_count=1"],
+            remaining_work: ["summarize"],
           },
         },
         trace: {
           contract_matrix: {
             final_answer_shape: "generated_file_path_report",
           },
+          event_stream: [
+            {
+              event_type: "coding_evidence",
+              payload: {
+                current_phase_hint: "summarize",
+                changed_file_count: 1,
+                command_count: 2,
+                test_count: 1,
+                verification_command_count: 1,
+                verification_status: "verified",
+              },
+            },
+          ],
         },
       },
     },
@@ -53,6 +71,13 @@ test("builds completed task outcome from machine task_outcome fields", () => {
   assert.equal(view.tone, "ok");
   assert.equal(view.nextStep, "Review the result.");
   assert.equal(view.finalShape, "generated_file_path_report");
+  assert.deepEqual(view.doneConditions, ["tests_pass"]);
+  assert.ok(view.constraints.includes("scope=workspace"));
+  assert.ok(view.constraints.includes("writes_allowed=true"));
+  assert.ok(view.verification.includes("command=cargo test -p clawd"));
+  assert.ok(view.verification.includes("verification_status=verified"));
+  assert.ok(view.currentProgress.includes("changed_file_count=1"));
+  assert.ok(view.remainingWork.includes("summarize"));
 });
 
 test("builds permission view from structured decision fields", () => {

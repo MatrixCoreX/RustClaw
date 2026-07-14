@@ -118,6 +118,27 @@ fn task_report_json_exposes_stable_machine_fields() {
                 "reason_code": "succeeded"
             },
             "result_json": {
+                "task_journal": {
+                    "summary": {
+                        "task_outcome": {
+                            "state": "done",
+                            "message_key": "clawd.task.done",
+                            "done_conditions": ["tests_pass"],
+                            "constraints": [{"scope": "workspace", "writes_allowed": true}],
+                            "verification": {"command": "cargo test -p clawd"},
+                            "current_progress": ["changed_file_count=1"],
+                            "remaining_work": ["summarize"]
+                        }
+                    },
+                    "trace": {
+                        "contract_matrix": {
+                            "final_answer_shape": "generated_file_path_report"
+                        },
+                        "evidence_coverage": {
+                            "missing_evidence": []
+                        }
+                    }
+                },
                 "artifact_refs": [
                     {
                         "ref": "artifact:report"
@@ -206,6 +227,28 @@ fn task_report_json_exposes_stable_machine_fields() {
         "update_lib_api"
     );
     assert_eq!(report["coding"]["unverified_risk"], serde_json::Value::Null);
+    assert_eq!(report["outcome"]["state"], "done");
+    assert_eq!(report["outcome"]["message_key"], "clawd.task.done");
+    assert_eq!(
+        report["outcome"]["final_answer_shape"],
+        "generated_file_path_report"
+    );
+    assert_eq!(report["outcome"]["done_conditions"][0], "tests_pass");
+    assert_eq!(report["outcome"]["constraints"][0], "scope=workspace");
+    assert_eq!(report["outcome"]["constraints"][1], "writes_allowed=true");
+    assert_eq!(
+        report["outcome"]["verification"][0],
+        "command=cargo test -p clawd"
+    );
+    assert_eq!(
+        report["outcome"]["verification"][1],
+        "verification_status=verified"
+    );
+    assert_eq!(
+        report["outcome"]["current_progress"][0],
+        "changed_file_count=1"
+    );
+    assert_eq!(report["outcome"]["remaining_work"][0], "summarize");
     assert_eq!(report["artifacts"]["ref_count"], 1);
     assert_eq!(report["artifacts"]["refs"][0]["ref"], "artifact:report");
 }
