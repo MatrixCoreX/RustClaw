@@ -465,8 +465,16 @@ pub(super) fn subagent_report_text_lines(report: &Value) -> Vec<String> {
             let status = item.get("status").and_then(Value::as_str).unwrap_or("");
             let finding_refs = report_string_array(item, "/finding_refs").join(",");
             let evidence_refs = report_string_array(item, "/evidence_refs").join(",");
+            let conflict_count = item
+                .get("conflict_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let decision_status = item
+                .get("decision_status")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             lines.push(format!(
-                "subagent: child_run_id={child_run_id} subagent_id={subagent_id} status={status} finding_refs={finding_refs} evidence_refs={evidence_refs}"
+                "subagent: child_run_id={child_run_id} subagent_id={subagent_id} status={status} conflict_count={conflict_count} decision_status={decision_status} finding_refs={finding_refs} evidence_refs={evidence_refs}"
             ));
         }
     }
@@ -1346,13 +1354,69 @@ fn push_subagent_item(map: &Map<String, Value>, signals: &mut SubagentReportSign
         "request_ref": request_ref,
         "role": machine_string_field(map, "role"),
         "status": machine_string_field(map, "status"),
+        "result_status": machine_string_field(map, "result_status"),
+        "outcome_code": machine_string_field(map, "outcome_code"),
         "error_code": machine_string_field(map, "error_code"),
         "failure_isolation": machine_string_field(map, "failure_isolation"),
+        "failure_isolated": map.get("failure_isolated").and_then(Value::as_bool),
         "required": map.get("required").and_then(Value::as_bool),
         "optional": map.get("optional").and_then(Value::as_bool),
+        "conflict_count": subagent_conflict_count(map),
+        "decision_status": subagent_decision_status(map),
+        "confidence_min": subagent_confidence_value(map, "min"),
+        "confidence_max": subagent_confidence_value(map, "max"),
         "finding_refs": machine_ref_array(map.get("finding_refs")),
         "evidence_refs": machine_ref_array(map.get("evidence_refs")),
     }));
+}
+
+fn subagent_conflict_count(map: &Map<String, Value>) -> Option<u64> {
+    map.get("conflict_count")
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            map.get("conflict_summary")
+                .and_then(|value| value.get("conflict_count"))
+                .and_then(Value::as_u64)
+        })
+        .or_else(|| {
+            map.get("aggregation")
+                .and_then(|value| value.get("conflict_count"))
+                .and_then(Value::as_u64)
+        })
+        .or_else(|| {
+            map.get("aggregation")
+                .and_then(|value| value.get("conflict_summary"))
+                .and_then(|value| value.get("conflict_count"))
+                .and_then(Value::as_u64)
+        })
+}
+
+fn subagent_decision_status(map: &Map<String, Value>) -> Option<String> {
+    map.get("main_thread_decision")
+        .and_then(|value| value.get("decision_status"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            map.get("aggregation")
+                .and_then(|value| value.get("main_thread_decision"))
+                .and_then(|value| value.get("decision_status"))
+                .and_then(Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|value| is_report_machine_token(value))
+        .map(ToString::to_string)
+}
+
+fn subagent_confidence_value(map: &Map<String, Value>, key: &str) -> Option<f64> {
+    map.get("confidence_summary")
+        .and_then(|value| value.get(key))
+        .and_then(Value::as_f64)
+        .or_else(|| {
+            map.get("aggregation")
+                .and_then(|value| value.get("confidence_summary"))
+                .and_then(|value| value.get(key))
+                .and_then(Value::as_f64)
+        })
+        .filter(|value| value.is_finite())
 }
 
 fn machine_string_field(map: &Map<String, Value>, key: &str) -> Option<String> {

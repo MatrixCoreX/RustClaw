@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet};
 
 const MAX_SUBAGENT_FINDINGS: usize = 16;
 const MAX_SUBAGENT_FINDING_KEYS: usize = 16;
@@ -44,6 +45,7 @@ fn record_subagent_batch_action_with_config(
     let mut optional_failed_count = 0usize;
     let mut aggregated_evidence_refs = Vec::new();
     let mut aggregated_finding_refs = Vec::new();
+    let mut finding_signals = AggregatedFindingSignals::default();
 
     for (child_index, child) in children.into_iter().enumerate() {
         let child_run_id = format!(
@@ -114,6 +116,7 @@ fn record_subagent_batch_action_with_config(
         let cancellation_policy = subagent_cancellation_policy(&timeout_policy);
         let findings = sanitized_findings(child.findings.as_ref());
         let finding_count = findings.len();
+        finding_signals.observe_child_findings(child_run_id.as_str(), &findings);
         let child_request = child_request_envelope(
             child_run_id.as_str(),
             role,
@@ -207,6 +210,17 @@ fn record_subagent_batch_action_with_config(
     } else {
         scheduler_status
     };
+    let conflict_summary = finding_signals.conflict_summary();
+    let conflict_count = conflict_summary
+        .get("conflict_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let confidence_summary = finding_signals.confidence_summary();
+    let main_thread_decision = aggregation_main_thread_decision(
+        required_failed_count,
+        conflict_count,
+        expected_failure_delivery,
+    );
     let child_result = json!({
         "schema_version": 1,
         "status": aggregate_status,
@@ -225,6 +239,7 @@ fn record_subagent_batch_action_with_config(
         "skipped_count": skipped_count,
         "required_failed_count": required_failed_count,
         "optional_failed_count": optional_failed_count,
+        "conflict_count": conflict_count,
         "write_enabled": false,
         "external_publish_enabled": false,
         "failure_isolated": required_failed_count == 0,
@@ -282,6 +297,11 @@ fn record_subagent_batch_action_with_config(
             "optional_failed_count": optional_failed_count,
             "evidence_refs": aggregated_evidence_refs,
             "finding_refs": aggregated_finding_refs,
+            "finding_count": finding_signals.finding_count,
+            "confidence_summary": confidence_summary,
+            "conflict_summary": conflict_summary,
+            "conflict_count": conflict_count,
+            "main_thread_decision": main_thread_decision,
             "expected_failure_delivery": expected_failure_delivery,
         },
         "child_requests": child_requests,
@@ -296,6 +316,7 @@ fn record_subagent_batch_action_with_config(
             "completed_count": completed_count,
             "rejected_count": rejected_count,
             "skipped_count": skipped_count,
+            "conflict_count": conflict_count,
         },
         "child_result": child_result,
         "write_enabled": false,
@@ -336,6 +357,155 @@ struct SubagentChildAction {
     options: SubagentActionOptions,
     findings: Option<Value>,
     required: bool,
+}
+
+#[derive(Default)]
+struct AggregatedFindingSignals {
+    finding_count: usize,
+    confidence_count: usize,
+    confidence_min: Option<f64>,
+    confidence_max: Option<f64>,
+    statuses_by_conflict_key: BTreeMap<String, BTreeSet<String>>,
+    child_refs_by_conflict_key: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl AggregatedFindingSignals {
+    fn observe_child_findings(&mut self, child_run_id: &str, findings: &[Value]) {
+        for finding in findings {
+            let Some(finding) = finding.as_object() else {
+                continue;
+            };
+            self.finding_count += 1;
+            if let Some(confidence) = finding
+                .get("confidence")
+                .and_then(Value::as_f64)
+                .filter(|value| value.is_finite())
+            {
+                self.confidence_count += 1;
+                self.confidence_min = Some(
+                    self.confidence_min
+                        .map(|current| current.min(confidence))
+                        .unwrap_or(confidence),
+                );
+                self.confidence_max = Some(
+                    self.confidence_max
+                        .map(|current| current.max(confidence))
+                        .unwrap_or(confidence),
+                );
+            }
+            let Some(conflict_key) = finding_conflict_key(finding) else {
+                continue;
+            };
+            if let Some(status) = finding.get("status").and_then(Value::as_str) {
+                let status = machine_ref_or_empty(status.trim());
+                if !status.is_empty() {
+                    self.statuses_by_conflict_key
+                        .entry(conflict_key.clone())
+                        .or_default()
+                        .insert(status.to_string());
+                }
+            }
+            self.child_refs_by_conflict_key
+                .entry(conflict_key)
+                .or_default()
+                .insert(machine_ref_or_empty(child_run_id).to_string());
+        }
+    }
+
+    fn conflict_summary(&self) -> Value {
+        let mut conflict_groups = Vec::new();
+        for (conflict_key, statuses) in &self.statuses_by_conflict_key {
+            if statuses.len() < 2 {
+                continue;
+            }
+            let child_run_ids = self
+                .child_refs_by_conflict_key
+                .get(conflict_key)
+                .into_iter()
+                .flat_map(|items| items.iter())
+                .map(|item| json!(item))
+                .collect::<Vec<_>>();
+            conflict_groups.push(json!({
+                "group_ref": conflict_key,
+                "status_count": statuses.len(),
+                "statuses": statuses.iter().map(|item| json!(item)).collect::<Vec<_>>(),
+                "child_run_ids": child_run_ids,
+            }));
+        }
+        json!({
+            "schema_version": 1,
+            "conflict_count": conflict_groups.len(),
+            "conflict_groups": conflict_groups,
+        })
+    }
+
+    fn confidence_summary(&self) -> Value {
+        json!({
+            "schema_version": 1,
+            "reported_count": self.confidence_count,
+            "missing_count": self.finding_count.saturating_sub(self.confidence_count),
+            "min": self.confidence_min,
+            "max": self.confidence_max,
+        })
+    }
+}
+
+fn finding_conflict_key(finding: &serde_json::Map<String, Value>) -> Option<String> {
+    if let Some(group) = finding
+        .get("conflict_group")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(machine_ref_or_empty)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(group.to_string());
+    }
+    let kind = finding
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(machine_ref_or_empty)
+        .filter(|value| !value.is_empty());
+    let code = finding
+        .get("code")
+        .and_then(Value::as_str)
+        .or_else(|| finding.get("error_code").and_then(Value::as_str))
+        .map(str::trim)
+        .map(machine_ref_or_empty)
+        .filter(|value| !value.is_empty());
+    match (kind, code) {
+        (Some(kind), Some(code)) => Some(format!("{kind}:{code}")),
+        (Some(kind), None) => Some(kind.to_string()),
+        (None, Some(code)) => Some(code.to_string()),
+        (None, None) => None,
+    }
+}
+
+fn aggregation_main_thread_decision(
+    required_failed_count: usize,
+    conflict_count: u64,
+    expected_failure_delivery: bool,
+) -> Value {
+    let decision_status = if expected_failure_delivery {
+        "expected_failure_delivered"
+    } else if required_failed_count > 0 {
+        "blocked_required_child_failure"
+    } else if conflict_count > 0 {
+        "needs_conflict_resolution"
+    } else {
+        "ready_to_synthesize"
+    };
+    json!({
+        "schema_version": 1,
+        "decision_owner": "parent_agent_loop",
+        "decision_required": required_failed_count > 0 || conflict_count > 0,
+        "decision_status": decision_status,
+        "input_refs": [
+            "child_results",
+            "aggregation.conflict_summary",
+            "aggregation.confidence_summary"
+        ],
+    })
 }
 
 fn subagent_child_actions_from_args(args: &Value) -> Option<Vec<SubagentChildAction>> {
@@ -441,6 +611,8 @@ fn sanitized_finding(finding: &Value) -> Option<Value> {
         "status": machine_token_field(map.get("status")),
         "code": machine_token_field(map.get("code").or_else(|| map.get("error_code"))),
         "message_key": machine_token_field(map.get("message_key")),
+        "conflict_group": machine_token_field(map.get("conflict_group")),
+        "confidence": normalized_confidence(map.get("confidence")),
         "evidence_refs": machine_token_array_field(map.get("evidence_refs")),
         "key_count": map.len(),
         "keys": keys,
@@ -469,4 +641,11 @@ fn machine_token_array_field(value: Option<&Value>) -> Vec<&str> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn normalized_confidence(value: Option<&Value>) -> Option<f64> {
+    value
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite())
+        .map(|value| value.clamp(0.0, 1.0))
 }
