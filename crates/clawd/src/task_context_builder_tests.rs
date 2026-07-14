@@ -1077,6 +1077,9 @@ fn context_bundle_summary_exposes_execution_light_profile() {
     assert!(summary.contains("execution_profile=execution_light_bounded"));
     assert!(summary.contains("context_profile=execution_light_bounded"));
     assert!(summary.contains("visible_skills=2"));
+    assert!(summary.contains("context_budget_report="));
+    assert!(summary.contains("\"budget_tier\":\"light\""));
+    assert!(summary.contains("\"excluded_ref_count\""));
 }
 
 #[test]
@@ -1247,6 +1250,9 @@ fn execution_context_adds_runtime_context_to_chat_and_planner_prompts() {
     assert!(chat_context.contains("current_process_cwd: /tmp/workspace"));
     assert!(execution.contains("### RUNTIME_CONTEXT"));
     assert!(execution.contains("workspace_root: /tmp/workspace"));
+    assert!(resolved.contains("### CONTEXT_BUDGET_REPORT"));
+    assert!(execution.contains("\"included_ref_count\""));
+    assert!(execution.contains("\"runtime_context\""));
 }
 
 #[test]

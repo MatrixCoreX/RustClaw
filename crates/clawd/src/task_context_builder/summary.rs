@@ -36,8 +36,14 @@ pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String 
         .execution_view
         .as_ref()
         .is_some_and(|view| value_present(&view.goal_context));
+    let context_budget_report = bundle
+        .execution_view
+        .as_ref()
+        .map(super::execution_context_budget_report_json)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "{}".to_string());
     format!(
-        "route_view={} route_budget={} route_profile={} execution_view={} execution_budget={} execution_profile={} context_profile={} visible_skills={} resume_context={} binding_context={} goal_context={}",
+        "route_view={} route_budget={} route_profile={} execution_view={} execution_budget={} execution_profile={} context_profile={} visible_skills={} resume_context={} binding_context={} goal_context={} context_budget_report={}",
         route_attached,
         route_budget,
         route_profile,
@@ -48,7 +54,8 @@ pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String 
         visible_skills,
         has_resume_context,
         has_binding_context,
-        has_goal_context
+        has_goal_context,
+        context_budget_report
     )
 }
 

@@ -119,6 +119,82 @@ impl ExecutionContextBudgetTier {
     }
 }
 
+fn context_slot_present(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty() && trimmed != "<none>"
+}
+
+fn context_budget_slots(view: &ExecutionContextView) -> [(&'static str, &str); 10] {
+    [
+        ("runtime_context", view.runtime_context.as_str()),
+        ("goal_context", view.goal_context.as_str()),
+        ("active_task_context", view.active_task_context.as_str()),
+        (
+            "active_execution_anchor_context",
+            view.active_execution_anchor_context.as_str(),
+        ),
+        ("session_alias_context", view.session_alias_context.as_str()),
+        ("recent_turns_full", view.recent_turns_full.as_str()),
+        ("last_turn_full", view.last_turn_full.as_str()),
+        (
+            "recent_execution_anchor",
+            view.recent_execution_anchor.as_str(),
+        ),
+        (
+            "recent_execution_context",
+            view.recent_execution_context.as_str(),
+        ),
+        (
+            "image_context",
+            view.image_context.as_deref().unwrap_or("<none>"),
+        ),
+    ]
+}
+
+pub(super) fn execution_context_budget_report_json(view: &ExecutionContextView) -> Value {
+    let slots = context_budget_slots(view);
+    let included_refs = slots
+        .iter()
+        .filter(|(_, value)| context_slot_present(value))
+        .map(|(slot, value)| json!({"ref": slot, "char_count": value.chars().count()}))
+        .collect::<Vec<_>>();
+    let excluded_refs = slots
+        .iter()
+        .filter(|(_, value)| !context_slot_present(value))
+        .map(|(slot, _)| json!({"ref": slot, "reason": "not_included"}))
+        .collect::<Vec<_>>();
+    let char_estimate = included_refs
+        .iter()
+        .filter_map(|item| item.get("char_count").and_then(Value::as_u64))
+        .sum::<u64>();
+    json!({
+        "schema_version": 1,
+        "budget_tier": view.budget_tier.as_str(),
+        "included_ref_count": included_refs.len(),
+        "included_refs": included_refs,
+        "excluded_ref_count": excluded_refs.len(),
+        "excluded_refs": excluded_refs,
+        "char_estimate": char_estimate,
+        "token_estimate": (char_estimate / 4).max(1),
+        "truncation_reason": if matches!(view.budget_tier, ExecutionContextBudgetTier::Light) {
+            "light_execution_budget"
+        } else {
+            "none"
+        },
+        "safety_reason": "context_budget_policy",
+        "compaction_source": "deterministic_context_builder",
+    })
+}
+
+fn execution_context_budget_report_block(view: &ExecutionContextView) -> String {
+    let report = execution_context_budget_report_json(view);
+    let body = serde_json::to_string_pretty(&report).unwrap_or_else(|_| report.to_string());
+    let mut block = String::from("### CONTEXT_BUDGET_REPORT");
+    block.push('\n');
+    block.push_str(&body);
+    block
+}
+
 fn serialize_context_value(value: Option<&Value>) -> String {
     value
         .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
@@ -1516,6 +1592,12 @@ Use this block only as supporting evidence for genuinely short follow-up request
         resolved_prompt_for_execution.push_str(&image_context_block);
         prompt_with_memory_for_execution.push_str(&image_context_block);
     }
+    let budget_report_block = format!(
+        "\n\n{}",
+        execution_context_budget_report_block(execution_view)
+    );
+    resolved_prompt_for_execution.push_str(&budget_report_block);
+    prompt_with_memory_for_execution.push_str(&budget_report_block);
 }
 
 #[cfg(test)]
