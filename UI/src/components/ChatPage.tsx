@@ -1,4 +1,4 @@
-import type { KeyboardEvent, RefObject } from "react";
+import { useMemo, useState, type KeyboardEvent, type RefObject } from "react";
 import {
   FileText,
   Loader2,
@@ -7,6 +7,7 @@ import {
   Paperclip,
   Plus,
   RefreshCw,
+  Search,
   Square,
   Trash2,
   X,
@@ -32,6 +33,9 @@ interface ChatThreadSummary {
   messageCount: number;
   agentMode: boolean;
   teachingMode: boolean;
+  taskId: string | null;
+  taskStatus: TaskQueryResponse["status"] | "running" | null;
+  llmCallCount: number | null;
 }
 
 interface ChatTeachingRunSummary {
@@ -125,6 +129,25 @@ export function ChatPage({
   onSendMessage,
   onQueryChatTeachingLlmDebug,
 }: ChatPageProps) {
+  const [threadSearch, setThreadSearch] = useState("");
+  const normalizedThreadSearch = threadSearch.trim().toLowerCase();
+  const visibleChatThreads = useMemo(() => {
+    if (!normalizedThreadSearch) return chatThreads;
+    return chatThreads.filter((thread) => {
+      const searchText = [
+        thread.title,
+        thread.preview,
+        thread.taskId ?? "",
+        thread.taskStatus ?? "",
+        thread.agentMode ? "agent" : "",
+        thread.teachingMode ? "teaching" : "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return searchText.includes(normalizedThreadSearch);
+    });
+  }, [chatThreads, normalizedThreadSearch]);
+
   return (
     <section className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
       <aside className="rounded-2xl border border-white/10 bg-white/5 p-3">
@@ -139,8 +162,18 @@ export function ChatPage({
             {t("新任务", "New")}
           </button>
         </div>
+        <label className="mb-3 flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-xs text-white/55">
+          <Search className="h-3.5 w-3.5 shrink-0" />
+          <input
+            type="search"
+            value={threadSearch}
+            onChange={(event) => setThreadSearch(event.target.value)}
+            placeholder={t("搜索标题、任务 ID、状态", "Search title, task ID, status")}
+            className="min-w-0 flex-1 bg-transparent text-white/80 outline-none placeholder:text-white/35"
+          />
+        </label>
         <div className="max-h-[34rem] space-y-2 overflow-auto pr-1">
-          {chatThreads.map((thread) => {
+          {visibleChatThreads.map((thread) => {
             const active = thread.id === activeChatThreadId;
             return (
               <div
@@ -168,14 +201,24 @@ export function ChatPage({
                   <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-white/45">
                     <span>{toLocalTime(thread.updatedAt)}</span>
                     <span>{thread.messageCount}</span>
+                    {thread.taskStatus ? (
+                      <span className={chatStatusBadgeClass(thread.taskStatus)}>
+                        {chatStatusLabel(thread.taskStatus, t)}
+                      </span>
+                    ) : null}
                     {thread.agentMode ? (
                       <span className="rounded-full border border-white/10 px-1.5 py-0.5">
-                        agent
+                        {t("自动执行", "Agent")}
                       </span>
                     ) : null}
                     {thread.teachingMode ? (
                       <span className="rounded-full border border-white/10 px-1.5 py-0.5">
                         {t("教学", "Teach")}
+                      </span>
+                    ) : null}
+                    {typeof thread.llmCallCount === "number" ? (
+                      <span className="rounded-full border border-white/10 px-1.5 py-0.5">
+                        LLM {thread.llmCallCount}
                       </span>
                     ) : null}
                   </div>
@@ -191,6 +234,11 @@ export function ChatPage({
               </div>
             );
           })}
+          {visibleChatThreads.length === 0 ? (
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/50">
+              {t("没有匹配的任务。", "No matching tasks.")}
+            </div>
+          ) : null}
         </div>
       </aside>
 
@@ -508,6 +556,36 @@ function TeachingRunHistory({
       </div>
     </div>
   );
+}
+
+function chatStatusLabel(
+  status: TaskQueryResponse["status"] | "running",
+  t: Translate,
+): string {
+  switch (status) {
+    case "queued":
+      return t("排队中", "Queued");
+    case "running":
+      return t("运行中", "Running");
+    case "succeeded":
+      return t("已完成", "Done");
+    case "failed":
+      return t("失败", "Failed");
+    case "canceled":
+      return t("已取消", "Canceled");
+    case "timeout":
+      return t("超时", "Timed out");
+    default:
+      return status;
+  }
+}
+
+function chatStatusBadgeClass(status: TaskQueryResponse["status"] | "running"): string {
+  const base = "rounded-full border px-1.5 py-0.5";
+  if (status === "succeeded") return `${base} border-emerald-300/30 text-emerald-100`;
+  if (status === "failed" || status === "timeout") return `${base} border-rose-300/30 text-rose-100`;
+  if (status === "canceled") return `${base} border-white/10 text-white/55`;
+  return `${base} border-sky-300/30 text-sky-100`;
 }
 
 function AttachmentPreview({

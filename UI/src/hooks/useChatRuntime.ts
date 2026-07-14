@@ -31,6 +31,9 @@ export interface ChatThreadSummary {
   messageCount: number;
   agentMode: boolean;
   teachingMode: boolean;
+  taskId: string | null;
+  taskStatus: TaskQueryResponse["status"] | "running" | null;
+  llmCallCount: number | null;
 }
 
 export interface ChatTeachingRunSummary {
@@ -1063,15 +1066,25 @@ function buildChatThreadSummaries(
 ): ChatThreadSummary[] {
   return [...threads]
     .sort((left, right) => right.updatedAt - left.updatedAt)
-    .map((thread) => ({
-      id: thread.id,
-      title: thread.title,
-      preview: threadPreview(thread, t),
-      updatedAt: thread.updatedAt,
-      messageCount: thread.messages.filter((message) => message.role !== "system").length,
-      agentMode: thread.agentMode,
-      teachingMode: thread.teachingMode,
-    }));
+    .map((thread) => {
+      const latestRun = latestTeachingRun(thread);
+      const taskResult = latestRun?.taskResult ?? thread.teachingTaskResult ?? null;
+      return {
+        id: thread.id,
+        title: thread.title,
+        preview: threadPreview(thread, t),
+        updatedAt: thread.updatedAt,
+        messageCount: thread.messages.filter((message) => message.role !== "system").length,
+        agentMode: thread.agentMode,
+        teachingMode: thread.teachingMode,
+        taskId: latestRun?.taskId ?? taskResult?.task_id ?? thread.lastTaskId ?? null,
+        taskStatus: latestRun?.status ?? taskResult?.status ?? null,
+        llmCallCount:
+          latestRun?.callCount ??
+          debugCallCount(latestRun?.llmDebug) ??
+          debugCallCount(thread.teachingLlmDebug),
+      };
+    });
 }
 
 function selectedTeachingRun(thread: ChatThreadRecord): ChatTeachingRunRecord | null {
@@ -1079,6 +1092,14 @@ function selectedTeachingRun(thread: ChatThreadRecord): ChatTeachingRunRecord | 
   if (runs.length === 0) return null;
   const activeId = thread.activeTeachingRunId;
   return runs.find((run) => run.id === activeId) ?? runs[runs.length - 1] ?? null;
+}
+
+function latestTeachingRun(thread: ChatThreadRecord): ChatTeachingRunRecord | null {
+  const runs = thread.teachingRuns ?? [];
+  return runs.reduce<ChatTeachingRunRecord | null>((latest, run) => {
+    if (!latest) return run;
+    return run.startedAt >= latest.startedAt ? run : latest;
+  }, null);
 }
 
 function buildChatTeachingRunSummaries(thread: ChatThreadRecord): ChatTeachingRunSummary[] {
