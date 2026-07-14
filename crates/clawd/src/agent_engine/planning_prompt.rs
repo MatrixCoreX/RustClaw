@@ -264,6 +264,9 @@ pub(super) fn build_lightweight_tool_spec(
 const LIGHTWEIGHT_SKILL_PLAYBOOK_MAX_CHARS: usize = 700;
 const LIGHTWEIGHT_SKILL_SUMMARY_MAX_CHARS: usize = 140;
 const LIGHTWEIGHT_OPEN_SCOPE_FULL_PLAYBOOK_LIMIT: usize = 12;
+const OPEN_SCOPE_MAX_SEMANTIC_TAGS: usize = 8;
+const OPEN_SCOPE_MAX_CAPABILITIES_PER_SKILL: usize = 10;
+const OPEN_SCOPE_MAX_CAPABILITY_FIELDS: usize = 6;
 
 fn fallback_generated_skill_prompt_path(skill: &str) -> String {
     format!("prompts/layers/generated/skills/{skill}.md")
@@ -489,20 +492,115 @@ fn build_open_scope_lightweight_skill_index(state: &AppState, visible: &[String]
     let mut lines = vec![
         "open_scope_lightweight_skill_index_v1".to_string(),
         "planner_scope=open; capability_choice=all_visible; preferred_action=call_capability; capability_name_source=planner_capabilities".to_string(),
-        "playbook_detail=registry_metadata_only; fields=summary,semantic_tags,planner_capabilities,required,optional,risk,effect,output_contract".to_string(),
+        "playbook_detail=registry_metadata_open_scope_compact; fields=skill,kind,tags,caps,action,required,optional,effect,risk,mode,shape".to_string(),
     ];
     for skill in visible {
-        let summary = load_skill_prompt_body_for_planner(state, skill)
-            .map(|body| lightweight_skill_summary_from_prompt(&body))
-            .unwrap_or_else(|| "generated prompt unavailable".to_string());
-        let metadata = registry_planner_metadata_hint(state, skill)
-            .and_then(|hint| hint.strip_prefix("Registry metadata: ").map(str::to_string));
-        match metadata {
-            Some(metadata) => lines.push(format!("- skill={skill}; summary={summary}; {metadata}")),
-            None => lines.push(format!("- skill={skill}; summary={summary}")),
-        }
+        lines.push(open_scope_lightweight_skill_line(state, skill));
     }
     lines.join("\n")
+}
+
+fn open_scope_lightweight_skill_line(state: &AppState, skill: &str) -> String {
+    let Some(manifest) = state.skill_manifest(skill) else {
+        return format!("- skill={skill}; manifest=unavailable");
+    };
+    let mut parts = vec![
+        format!("skill={skill}"),
+        format!("kind={}", manifest.planner_kind.as_token()),
+    ];
+    let tags = compact_string_tokens(&manifest.semantic_tags, OPEN_SCOPE_MAX_SEMANTIC_TAGS);
+    if !tags.is_empty() {
+        parts.push(format!("tags={tags}"));
+    }
+    if manifest.preferred_over_run_cmd {
+        parts.push("preferred=1".to_string());
+    }
+    let caps_total = manifest.planner_capabilities.len();
+    let mut caps = manifest
+        .planner_capabilities
+        .iter()
+        .take(OPEN_SCOPE_MAX_CAPABILITIES_PER_SKILL)
+        .map(|capability| {
+            let name = capability.name.trim();
+            let mut attrs = Vec::new();
+            if let Some(action) = capability.action.as_deref().map(str::trim) {
+                if !action.is_empty() {
+                    attrs.push(format!("a={action}"));
+                }
+            }
+            if !capability.required.is_empty() {
+                attrs.push(format!(
+                    "req={}",
+                    compact_string_tokens(&capability.required, OPEN_SCOPE_MAX_CAPABILITY_FIELDS)
+                ));
+            }
+            if !capability.optional.is_empty() {
+                attrs.push(format!(
+                    "opt={}",
+                    compact_string_tokens(&capability.optional, OPEN_SCOPE_MAX_CAPABILITY_FIELDS)
+                ));
+            }
+            if let Some(effect) = capability.effect {
+                attrs.push(format!("fx={}", effect.as_token()));
+            }
+            if let Some(risk_level) = capability.risk_level.or(manifest.risk_level) {
+                attrs.push(format!("risk={}", compact_risk_level_token(risk_level)));
+            }
+            if let Some(execution_mode) = capability.execution_mode {
+                let mode = execution_mode.as_token();
+                if mode != "sync_short" {
+                    attrs.push(format!("mode={mode}"));
+                }
+            }
+            if let Some(final_answer_shape) =
+                capability.final_answer_shape.as_deref().map(str::trim)
+            {
+                if !final_answer_shape.is_empty() {
+                    attrs.push(format!("shape={final_answer_shape}"));
+                }
+            }
+            if attrs.is_empty() {
+                name.to_string()
+            } else {
+                format!("{name}({})", attrs.join(","))
+            }
+        })
+        .collect::<Vec<_>>();
+    if caps_total > caps.len() {
+        caps.push(format!("+{}more", caps_total - caps.len()));
+    }
+    if !caps.is_empty() {
+        parts.push(format!("caps={}", caps.join(";")));
+    }
+    if manifest.requires_confirmation == Some(true) {
+        parts.push("confirm=1".to_string());
+    }
+    format!("- {}", parts.join("; "))
+}
+
+fn compact_risk_level_token(risk_level: claw_core::skill_registry::SkillRiskLevel) -> &'static str {
+    match risk_level {
+        claw_core::skill_registry::SkillRiskLevel::Unknown => "unknown",
+        claw_core::skill_registry::SkillRiskLevel::Low => "low",
+        claw_core::skill_registry::SkillRiskLevel::Medium => "medium",
+        claw_core::skill_registry::SkillRiskLevel::High => "high",
+    }
+}
+
+fn compact_string_tokens(values: &[String], limit: usize) -> String {
+    let mut unique = BTreeSet::new();
+    for value in values {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            unique.insert(trimmed.to_string());
+        }
+    }
+    let total = unique.len();
+    let mut kept = unique.into_iter().take(limit).collect::<Vec<_>>();
+    if total > kept.len() {
+        kept.push(format!("+{}more", total - kept.len()));
+    }
+    kept.join("|")
 }
 
 pub(super) fn build_lightweight_skill_quick_index_text(
@@ -516,6 +614,9 @@ pub(super) fn build_lightweight_skill_quick_index_text(
     }
     if visible.is_empty() {
         return "- (no enabled skills)".to_string();
+    }
+    if skill_scope.is_none() && visible.len() > LIGHTWEIGHT_OPEN_SCOPE_FULL_PLAYBOOK_LIMIT {
+        return build_open_scope_lightweight_quick_index_ref(visible.len());
     }
     visible
         .iter()
@@ -532,6 +633,16 @@ pub(super) fn build_lightweight_skill_quick_index_text(
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn build_open_scope_lightweight_quick_index_ref(visible_skill_count: usize) -> String {
+    [
+        "open_scope_lightweight_quick_index_ref_v1".to_string(),
+        format!(
+            "source=open_scope_lightweight_skill_index_v1; planner_scope=open; detail=omitted_duplicate_registry_metadata; visible_skill_count={visible_skill_count}"
+        ),
+    ]
+    .join("\n")
 }
 
 pub(super) fn round1_prompt_spec_for_class(

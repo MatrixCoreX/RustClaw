@@ -172,6 +172,7 @@ fn open_scope_lightweight_skill_notes_use_compact_registry_index() {
     let task = test_task();
 
     let playbooks = build_lightweight_skill_playbooks_text(&state, &task, None);
+    let quick_index = build_lightweight_skill_quick_index_text(&state, &task, None);
 
     assert!(
         playbooks.starts_with("open_scope_lightweight_skill_index_v1"),
@@ -181,13 +182,38 @@ fn open_scope_lightweight_skill_notes_use_compact_registry_index() {
     assert!(playbooks.contains("kb.ingest"), "{playbooks}");
     assert!(playbooks.contains("kb.search"), "{playbooks}");
     assert!(playbooks.contains("kb.stats"), "{playbooks}");
+    assert!(playbooks.contains("req=namespace"), "{playbooks}");
+    assert!(
+        !playbooks.contains("filesystem_write=false"),
+        "open-scope index should omit repeated policy booleans: {playbooks}"
+    );
+    assert!(
+        !playbooks.contains("runtime_availability:"),
+        "open-scope index should omit verbose availability metadata: {playbooks}"
+    );
     assert!(
         !playbooks.contains("Requests that semantically mean"),
         "{playbooks}"
     );
     assert!(
-        playbooks.chars().count() < 30_000,
+        playbooks.chars().count() < 24_000,
         "compact index should stay bounded, got {} chars",
         playbooks.chars().count()
+    );
+    assert!(
+        quick_index.starts_with("open_scope_lightweight_quick_index_ref_v1"),
+        "{quick_index}"
+    );
+    assert!(
+        quick_index.contains("visible_skill_count=16"),
+        "{quick_index}"
+    );
+    assert!(
+        !quick_index.contains("planner_capabilities:"),
+        "open scope quick index should not duplicate registry metadata: {quick_index}"
+    );
+    assert!(
+        playbooks.chars().count() + quick_index.chars().count() < 24_500,
+        "combined open-scope lightweight skill context should stay bounded"
     );
 }
