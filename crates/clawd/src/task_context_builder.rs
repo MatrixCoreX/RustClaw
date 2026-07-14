@@ -270,6 +270,11 @@ pub(super) fn execution_context_budget_report_json(view: &ExecutionContextView) 
         } else {
             "none"
         },
+        "compaction_triggers": if matches!(view.budget_tier, ExecutionContextBudgetTier::Light) {
+            vec!["over_budget"]
+        } else {
+            Vec::<&str>::new()
+        },
         "safety_reason": "context_budget_policy",
         "compaction_source": "deterministic_context_builder",
         "context_input_inventory": context_input_inventory_json(view),

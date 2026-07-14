@@ -212,6 +212,15 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
         payload["task_checkpoint"]["resume_entrypoint"],
         "next_planner_round"
     );
+    assert_eq!(
+        payload["task_lifecycle"]["context_compaction_trigger"]["trigger_kind"],
+        "before_background_checkpoint"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["boundary_context"]["context_compaction_trigger"]
+            ["resume_reason"],
+        "agent_loop_max_rounds"
+    );
     assert_eq!(payload["task_checkpoint"]["budget"]["round"], 2);
     assert_eq!(payload["task_checkpoint"]["budget"]["step"], 3);
     assert_eq!(payload["task_checkpoint"]["budget"]["tool_calls"], 2);
