@@ -1397,7 +1397,7 @@ fn summary_json_includes_validation_result_machine_shape() {
 }
 
 #[test]
-fn summary_json_counts_successful_validation_command_in_code_context() {
+fn summary_json_counts_unstructured_validation_command_as_observed() {
     let mut journal = TaskJournal::for_task("task-code-validation", "ask", "validate code");
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -1440,13 +1440,70 @@ fn summary_json_counts_successful_validation_command_in_code_context() {
         summary
             .pointer("/validation_result/latest_status")
             .and_then(Value::as_str),
-        Some("passed")
+        Some("observed")
     );
     assert_eq!(
         summary
             .pointer("/validation_result/signals/0/status_code")
             .and_then(Value::as_str),
-        Some("validation_command_ok")
+        Some("validation_command_observed")
+    );
+}
+
+#[test]
+fn summary_json_does_not_mark_masked_run_cmd_validation_as_passed() {
+    let mut journal = TaskJournal::for_task("task-masked-validation", "ask", "validate code");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "write_text",
+                    "path": "/workspace/calc_core.py",
+                    "resolved_path": "/workspace/calc_core.py",
+                    "content_bytes": 42
+                }
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "run_cmd".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            "VALIDATION_COMMAND_OUTPUT_UNSTRUCTURED\nmasked_shell_exit_after_tail_command\n"
+                .to_string(),
+        ),
+        error: None,
+        started_at: 3,
+        finished_at: 4,
+    });
+
+    let summary = journal.to_summary_json();
+
+    assert_eq!(
+        summary
+            .pointer("/validation_result/validation_step_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        summary
+            .pointer("/validation_result/latest_status")
+            .and_then(Value::as_str),
+        Some("observed")
+    );
+    assert_eq!(
+        summary
+            .pointer("/validation_result/signals/0/status_code")
+            .and_then(Value::as_str),
+        Some("validation_command_observed")
     );
 }
 
