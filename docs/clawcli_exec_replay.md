@@ -163,7 +163,7 @@ clawcli permission explain "$TASK_ID" --json
 clawcli permission capability --capability image.generate --json
 ```
 
-Open a read-only terminal console over the same task APIs:
+Open a terminal control console over the same task APIs:
 
 ```bash
 clawcli tui --user-id 1 --chat-id 1
@@ -174,9 +174,31 @@ When a task is selected, TUI snapshots keep the raw `selected_task` payload for
 compatibility and also expose `selected_progress` and `selected_summary`.
 These are derived from existing lifecycle/report machine fields: checkpoint id,
 resume due/wait state, next action, async poll refs, LLM call/budget counts,
-coding verification, changed files, completed side effects, artifact refs, and
-unverified-risk tokens. TUI observes and exports task state; it does not route
-natural language or choose capabilities.
+goal/outcome state, coding verification, changed files, completed side effects,
+artifact refs, and unverified-risk tokens. Interactive mode uses stable key
+tokens: `r` refresh, `w` watch, `p` pause, `c` cancel, `u` resume, `n`
+continue selected task, `e` export, `1` report, `2` review, `3` subagents, `4`
+permission, and `q` quit. These actions call existing task APIs or render
+recorded machine fields; they do not route natural language or choose
+capabilities.
+
+Navigate saved local session metadata:
+
+```bash
+clawcli session list --user-id 1 --chat-id 1 --json
+clawcli session show "$TASK_ID" --json
+clawcli session resume "$TASK_ID" "continue from the checkpoint" --json
+clawcli session archive "$TASK_ID" --json
+clawcli session fork "$TASK_ID" "$TASK_ID.fork" --json
+clawcli session delete "$TASK_ID" --json
+```
+
+`session list` and `session show` persist a compact local session store under
+`RUSTCLAW_CLAWCLI_SESSION_STORE`, `$XDG_STATE_HOME/rustclaw/`, or
+`~/.local/state/rustclaw/`. The store records `session_id`, `task_ids`,
+`active_goal_id`, `workspace_root`, `latest_checkpoint_id`, `latest_event_seq`,
+`archived`, and optional `forked_from` fields for CLI navigation. It is local
+operator metadata, not a server-side semantic route source.
 
 ## CI Examples
 
@@ -270,11 +292,14 @@ flowchart TD
     C --> D{lifecycle}
     D -->|terminal| E[report / review]
     D -->|background| F[resume_hint / resume.json]
-    F --> G[continue / resume-task]
+    F --> G[continue / resume-task / session resume]
     E --> H[artifact index / replay export]
     H --> I[replay run --coverage / --view]
     H --> J[replay diff + diff_classes]
     C --> K[permission inspect / subagents]
+    C --> L[tui selected task<br/>pause / resume / continue / panes]
+    B --> M[session list/show<br/>local metadata store]
+    M --> N[archive / delete / fork]
 ```
 
 ## Shell Completion
