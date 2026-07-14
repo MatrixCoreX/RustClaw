@@ -1522,6 +1522,35 @@ pub(super) async fn execute_prepared_skill_action(
     let classification_args = recovery_args.as_ref().unwrap_or(&exec_args);
     if normalized_skill == "subagent" {
         let subagent_config = super::subagent_runtime::load_subagent_runtime_config(state);
+        if super::subagent_runtime::persistent_child_task_requested(&exec_args) {
+            let persistent_outcome =
+                super::subagent_runtime::record_persistent_child_task_from_args(
+                    state,
+                    task,
+                    loop_state,
+                    global_step,
+                    step_in_round,
+                    &exec_args,
+                    &subagent_config,
+                );
+            let (stop_signal, step_error_signal) = match persistent_outcome {
+                Ok(signal) => (Some(signal), None),
+                Err(signal) => (Some(signal), Some(signal)),
+            };
+            record_subagent_step_execution(
+                task,
+                loop_state,
+                global_step,
+                step_in_round,
+                action_trace_kind,
+                step_error_signal,
+            );
+            return Ok(SkillActionOutcome {
+                ended_with_user_visible_output: false,
+                stop_signal: stop_signal.map(str::to_string),
+                continue_in_round: false,
+            });
+        }
         let stop_signal = super::subagent_runtime::record_subagent_action_from_args_with_config(
             loop_state,
             global_step,

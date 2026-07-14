@@ -28,6 +28,44 @@ impl Drop for TempDirGuard {
     }
 }
 
+fn insert_running_parent_task(state: &crate::AppState, task: &crate::ClaimedTask) {
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, chat_id, user_key, channel, external_user_id,
+            external_chat_id, kind, payload_json, status, result_json,
+            error_text, created_at, updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'ask', ?8, 'running', '{}', NULL, '1', '1')",
+        rusqlite::params![
+            task.task_id,
+            task.user_id,
+            task.chat_id,
+            task.user_key,
+            task.channel,
+            task.external_user_id,
+            task.external_chat_id,
+            task.payload_json
+        ],
+    )
+    .expect("insert running parent task");
+}
+
+fn child_task_row(state: &crate::AppState, task_id: &str) -> (String, serde_json::Value) {
+    let db = state.core.db.get().expect("get db");
+    let (status, payload_json): (String, String) = db
+        .query_row(
+            "SELECT status, payload_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            rusqlite::params![task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("select child task row");
+    (
+        status,
+        serde_json::from_str(&payload_json).expect("parse child payload"),
+    )
+}
+
 #[test]
 fn subagent_action_records_safe_machine_observation() {
     let mut loop_state = LoopState::new(2);
@@ -265,6 +303,99 @@ fn subagent_action_projects_workspace_context_evidence() {
         "head_tail"
     );
     assert_eq!(observation["child_result"]["content_excerpt_present"], true);
+}
+
+#[test]
+fn persistent_subagent_action_enqueues_child_task_and_sets_waiting_checkpoint() {
+    let state = crate::AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        task_id: "task-persistent-subagent-parent".to_string(),
+        user_id: 42,
+        chat_id: 7,
+        user_key: Some("test-key".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: Some("ui-user".to_string()),
+        external_chat_id: Some("ui-chat".to_string()),
+        kind: "ask".to_string(),
+        payload_json: serde_json::json!({"text": "parent task"}).to_string(),
+    };
+    insert_running_parent_task(&state, &task);
+    let mut loop_state = LoopState::new(3);
+    loop_state.round_no = 1;
+    let args = serde_json::json!({
+        "execution_mode": "persistent_child_task",
+        "role": "review",
+        "objective": "machine_child_objective:persistent-review",
+        "context_refs": ["AGENTS.md"],
+        "required": true,
+        "budget": {
+            "max_rounds": 3,
+            "max_tool_calls": 12,
+            "timeout_ms": 180000
+        },
+        "result_contract": {
+            "output_format": "machine_json",
+            "required_keys": ["findings", "evidence_refs"]
+        }
+    });
+
+    let stop_signal = record_persistent_child_task_from_args(
+        &state,
+        &task,
+        &mut loop_state,
+        4,
+        1,
+        &args,
+        &SubagentRuntimeConfig::default(),
+    )
+    .expect("schedule persistent child task");
+
+    assert_eq!(
+        stop_signal,
+        subagent_runtime_persistent::SUBAGENT_STOP_SIGNAL_CHILD_TASK_WAITING
+    );
+    let observation = loop_state
+        .task_observations
+        .last()
+        .expect("persistent observation");
+    assert_eq!(observation["owner_layer"], "subagent_runtime");
+    assert_eq!(observation["status"], "waiting");
+    assert_eq!(observation["execution_mode"], "persistent_child_task");
+    let child_task_id = observation["child_task_ids"][0]
+        .as_str()
+        .expect("child task id");
+    let (child_status, child_payload) = child_task_row(&state, child_task_id);
+    assert_eq!(child_status, "queued");
+    assert_eq!(child_payload["task_role"], "subagent_child");
+    assert_eq!(child_payload["parent_task_id"], task.task_id);
+    assert_eq!(
+        child_payload["child_task_contract"]["permission_profile"],
+        "read_only"
+    );
+    assert_eq!(
+        loop_state
+            .task_lifecycle
+            .as_ref()
+            .and_then(|value| value.get("state"))
+            .and_then(serde_json::Value::as_str),
+        Some("waiting")
+    );
+    assert_eq!(
+        loop_state
+            .task_lifecycle
+            .as_ref()
+            .and_then(|value| value.get("source"))
+            .and_then(serde_json::Value::as_str),
+        Some("subagent_child_task_enqueue")
+    );
+    assert_eq!(
+        loop_state
+            .task_checkpoint
+            .as_ref()
+            .and_then(|value| value.get("resume_entrypoint"))
+            .and_then(serde_json::Value::as_str),
+        Some("next_planner_round")
+    );
 }
 
 #[test]

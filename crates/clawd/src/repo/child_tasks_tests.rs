@@ -181,3 +181,63 @@ fn child_timeout_projection_blocks_required_parent_after_restart() {
         .find("visible child timeout error")
         .is_none());
 }
+
+#[test]
+fn parent_child_merge_recovers_child_ids_from_nested_journal_observations() {
+    let temp = TempDirGuard::new("nested_child_ids");
+    let db_path = temp.path.join("tasks.sqlite");
+    let state = file_backed_state_with_schema(&db_path);
+    insert_task(
+        &state,
+        "task-parent-nested-children",
+        "running",
+        &json!({"text": "visible parent request"}),
+        &json!({
+            "text": "checkpointed parent payload",
+            "task_journal": {
+                "summary": {
+                    "task_observations": [
+                        {
+                            "owner_layer": "subagent_runtime",
+                            "child_task_enqueue": {
+                                "child_task_ids": ["task-child-nested-ok"]
+                            }
+                        }
+                    ]
+                }
+            }
+        }),
+    );
+    insert_task(
+        &state,
+        "task-child-nested-ok",
+        "succeeded",
+        &json!({"text": "child payload"}),
+        &json!({
+            "child_task_result": {
+                "schema_version": 1,
+                "parent_task_id": "task-parent-nested-children",
+                "child_task_id": "task-child-nested-ok",
+                "role": "review",
+                "required": true,
+                "status": "succeeded",
+                "permission_profile": "read_only",
+                "merge_policy": "structured_findings",
+                "evidence_refs": ["task:task-child-nested-ok:result_json"],
+                "finding_refs": ["child_task:task-child-nested-ok:structured_result"]
+            }
+        }),
+    );
+
+    let merge = refresh_parent_child_task_merge(&state, "task-parent-nested-children")
+        .expect("refresh parent merge")
+        .expect("nested child merge");
+
+    assert_eq!(merge["parent_continuation"]["status"], "ready");
+    assert_eq!(merge["child_task_ids"][0], "task-child-nested-ok");
+    assert_eq!(merge["merge"]["required_failed_count"], 0);
+    assert_eq!(
+        merge["merge"]["finding_refs"][0],
+        "child_task:task-child-nested-ok:structured_result"
+    );
+}
