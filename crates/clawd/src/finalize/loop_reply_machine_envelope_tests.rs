@@ -227,3 +227,71 @@ async fn finalize_loop_reply_prefers_subagent_machine_envelope_over_later_prose(
     assert_eq!(reply.text.trim(), envelope);
     assert_eq!(reply.messages, vec![envelope.clone()]);
 }
+
+#[tokio::test]
+async fn finalize_loop_reply_projects_subagent_child_model_result_from_runtime_envelope() {
+    let state = test_state();
+    let task = claimed_task("task-subagent-child-model-result-projection");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let child_result = serde_json::json!({
+        "schema_version": 1,
+        "owner_layer": "subagent_model_child",
+        "output_format": "machine_json",
+        "status": "needs_more_evidence",
+        "role": "review",
+        "findings": [
+            {
+                "code": "boundary_partial",
+                "summary": "plan references available boundaries"
+            }
+        ],
+        "evidence_refs": ["AGENTS.md", "plan/current.md"],
+        "confidence": 0.74
+    });
+    let runtime_envelope = serde_json::json!({
+        "schema_version": 1,
+        "output_format": "machine_json",
+        "owner_layer": "subagent_runtime",
+        "status": "accepted",
+        "context_evidence": {
+            "items": [
+                {
+                    "path": "AGENTS.md",
+                    "content_excerpt": "large internal evidence block"
+                }
+            ]
+        },
+        "child_model_result": child_result.clone()
+    })
+    .to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "subagent", &runtime_envelope));
+    loop_state.last_user_visible_respond = Some(runtime_envelope.clone());
+    loop_state.delivery_messages.push(runtime_envelope);
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "subagent boundary review",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("child model result should be projected");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    let projected: serde_json::Value =
+        serde_json::from_str(&reply.text).expect("reply should remain machine json");
+    assert_eq!(projected, child_result);
+    assert_eq!(reply.messages, vec![child_result.to_string()]);
+    assert!(!reply.text.contains("context_evidence"));
+}

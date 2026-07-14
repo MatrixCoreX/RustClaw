@@ -771,71 +771,6 @@ fn is_read_only_skill_invocation(state: &AppState, normalized_skill: &str, args:
     }
 }
 
-fn should_publish_respond_message(loop_state: &LoopState, text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    if loop_state
-        .delivery_messages
-        .last()
-        .is_some_and(|last| last.trim() == trimmed)
-    {
-        return false;
-    }
-    if respond_machine_envelope_payload(trimmed) {
-        return true;
-    }
-    if respond_lifecycle_result_payload(trimmed) {
-        return true;
-    }
-    if !loop_state.has_tool_or_skill_output {
-        return true;
-    }
-    if loop_state
-        .last_output
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|last| last == trimmed)
-    {
-        return false;
-    }
-    true
-}
-
-fn respond_machine_envelope_payload(text: &str) -> bool {
-    let Ok(payload) = serde_json::from_str::<Value>(text.trim()) else {
-        return false;
-    };
-    payload.is_object()
-        && payload
-            .get("output_format")
-            .and_then(Value::as_str)
-            .is_some_and(|value| value == "machine_json")
-        && payload
-            .get("owner_layer")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .is_some_and(|owner| !owner.is_empty())
-}
-
-fn respond_lifecycle_result_payload(text: &str) -> bool {
-    let Ok(payload) = serde_json::from_str::<Value>(text.trim()) else {
-        return false;
-    };
-    payload.is_object()
-        && payload.get("final_answer_shape").and_then(Value::as_str) == Some("lifecycle_result")
-        && payload.get("status").and_then(Value::as_str) == Some("ok")
-        && payload
-            .get("steps")
-            .and_then(Value::as_array)
-            .is_some_and(|steps| !steps.is_empty())
-        && payload
-            .pointer("/final_state/cleanup_observed")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-}
-
 fn route_requires_file_token_delivery(agent_run_context: Option<&AgentRunContext>) -> bool {
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
@@ -888,12 +823,30 @@ pub(super) fn handle_respond_action(
     content: &str,
     agent_run_context: Option<&AgentRunContext>,
 ) -> RespondActionOutcome {
-    let text = rewrite_response_with_written_aliases(
+    let resolved_text = rewrite_response_with_written_aliases(
         &resolve_arg_string(content, loop_state).trim().to_string(),
         loop_state,
     )
     .trim()
     .to_string();
+    let has_remaining_actions = has_remaining_action_after(actions, idx, policy.max_steps);
+    let terminal_last_output_passthrough = !has_remaining_actions
+        && !resolved_text.is_empty()
+        && respond_template_guard::bare_last_output_placeholder(content);
+    let text = terminal_last_output_passthrough
+        .then(|| {
+            loop_state
+                .last_publishable_synthesis_output
+                .as_deref()
+                .map(str::trim)
+                .filter(|answer| !answer.is_empty())
+                .map(str::to_string)
+                .or_else(|| {
+                    respond_template_guard::terminal_last_output_machine_projection(loop_state)
+                })
+        })
+        .flatten()
+        .unwrap_or(resolved_text);
 
     if let Some(outcome) = respond_template_guard::unresolved_runtime_template_respond_outcome(
         state,
@@ -982,17 +935,13 @@ pub(super) fn handle_respond_action(
         };
     }
 
-    let has_remaining_actions = has_remaining_action_after(actions, idx, policy.max_steps);
     let terminal_direct_answer =
         !has_remaining_actions && !text.is_empty() && !loop_state.has_tool_or_skill_output;
     let duplicate_delivery = loop_state
         .delivery_messages
         .last()
         .is_some_and(|last| last.trim() == text.trim());
-    let terminal_last_output_passthrough = !has_remaining_actions
-        && !text.is_empty()
-        && respond_template_guard::bare_last_output_placeholder(content);
-    let publish_respond = should_publish_respond_message(loop_state, &text)
+    let publish_respond = respond_template_guard::should_publish_respond_message(loop_state, &text)
         || ((terminal_direct_answer || terminal_last_output_passthrough) && !duplicate_delivery);
     if !text.is_empty() && (publish_respond || !has_remaining_actions) {
         loop_state.last_user_visible_respond = Some(text.clone());

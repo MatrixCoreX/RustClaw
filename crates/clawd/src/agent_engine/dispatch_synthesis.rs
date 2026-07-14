@@ -910,6 +910,9 @@ fn requested_local_code_json_fields(
             }
         }
     }
+    if !fields.is_empty() {
+        return fields;
+    }
 
     let mut surfaces = vec![user_text.to_string()];
     if let Some(context) = agent_run_context {
