@@ -11,6 +11,7 @@ use super::report::{
     coding_exec_summary_json, coding_exec_text_lines, coding_verification_artifact_json,
     exec_artifact_refs, llm_report_json,
 };
+use super::report_budget_health::llm_budget_text_lines;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ExecWaitOutcome {
@@ -413,6 +414,10 @@ pub(crate) fn run_exec(
         output::print_json_pretty(&summary);
     } else {
         output::print_task_status(&task, false, &EventFilters::default());
+        let llm = llm_report_json(&task);
+        for line in llm_budget_text_lines(&llm) {
+            println!("{line}");
+        }
         let coding = coding_exec_summary_json(&task);
         if coding_exec_has_signals(&coding) {
             for line in coding_exec_text_lines(&coding) {

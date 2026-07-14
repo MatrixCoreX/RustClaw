@@ -86,6 +86,7 @@ fn exec_summary_json_exposes_stable_machine_fields() {
     assert_eq!(summary["events"][0]["fields"]["checkpoint_id"], "ckpt-exec");
     assert_eq!(summary["llm"]["llm_call_count"], 1);
     assert_eq!(summary["llm"]["prompt_bytes_before_max"], 4096);
+    assert_eq!(summary["llm"]["budget_health"]["status"], "ok");
     assert_eq!(summary["llm"]["by_prompt"][0]["prompt_label"], "planner");
     assert_eq!(summary["coding"]["changed_file_count"], 1);
     assert_eq!(
@@ -206,6 +207,11 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(report["llm"]["llm_call_count"], 1);
     assert_eq!(report["llm"]["prompt_truncation_count"], 1);
     assert_eq!(report["llm"]["prompt_bytes_before_max"], 157037);
+    assert_eq!(report["llm"]["budget_health"]["status"], "warning");
+    assert_eq!(
+        report["llm"]["budget_health"]["warnings"][0],
+        "prompt_truncation_count"
+    );
     assert_eq!(report["llm"]["by_prompt"][0]["prompt_label"], "normalizer");
     assert_eq!(report["coding"]["changed_file_count"], 1);
     assert_eq!(report["coding"]["changed_files"][0], "src/lib.rs");
@@ -251,6 +257,65 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(report["outcome"]["remaining_work"][0], "summarize");
     assert_eq!(report["artifacts"]["ref_count"], 1);
     assert_eq!(report["artifacts"]["refs"][0]["ref"], "artifact:report");
+}
+
+#[test]
+fn task_report_json_marks_exceeded_llm_budget_health() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-budget-exceeded".to_string(),
+        status: "failed".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "completed",
+            "task_lifecycle": {
+                "state": "completed",
+                "reason_code": "provider_final_error"
+            }
+        }),
+        result_text: None,
+        error_text: Some("provider_final_error".to_string()),
+        events: vec![crate::events::TaskEventLine {
+            event_type: "provider_call".to_string(),
+            line: "seq=1 type=provider_call prompt_label=planner".to_string(),
+            fields: std::collections::BTreeMap::from([
+                ("prompt_label".to_string(), "planner".to_string()),
+                ("llm_call_count".to_string(), "20".to_string()),
+                ("elapsed_ms".to_string(), "950000".to_string()),
+                ("provider_retry_count".to_string(), "7".to_string()),
+                ("provider_final_error_count".to_string(), "1".to_string()),
+                ("prompt_truncation_count".to_string(), "4".to_string()),
+                ("prompt_bytes_before_max".to_string(), "800000".to_string()),
+                (
+                    "prompt_truncated_bytes_total".to_string(),
+                    "120000".to_string(),
+                ),
+            ]),
+        }],
+    };
+
+    let report = task_report_json(&task, false);
+    let exceeded = report["llm"]["budget_health"]["exceeded"]
+        .as_array()
+        .expect("exceeded tokens");
+
+    assert_eq!(report["llm"]["budget_health"]["status"], "exceeded");
+    for token in [
+        "llm_call_count",
+        "prompt_bytes_before_max",
+        "prompt_truncation_count",
+        "provider_retry_count",
+        "provider_final_error_count",
+        "elapsed_ms",
+    ] {
+        assert!(
+            exceeded.iter().any(|value| value == token),
+            "missing exceeded token {token}: {exceeded:?}"
+        );
+    }
+
+    let lines = task_report_text_lines(&task, &report);
+    assert!(lines.contains(&"llm_budget_status: exceeded".to_string()));
+    assert!(lines.contains(&"llm_budget_exceeded: llm_call_count".to_string()));
+    assert!(lines.contains(&"llm_budget_exceeded: provider_final_error_count".to_string()));
 }
 
 #[test]

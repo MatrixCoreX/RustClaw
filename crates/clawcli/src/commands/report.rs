@@ -3,6 +3,10 @@ use std::collections::BTreeSet;
 
 use crate::task;
 
+use super::report_budget_health::{
+    llm_budget_health_json, llm_budget_text_lines, LlmBudgetMetrics,
+};
+
 fn exec_event_summary(task: &task::TaskStatusView) -> Vec<Value> {
     task.events
         .iter()
@@ -81,6 +85,13 @@ pub(super) fn task_report_text_lines(task: &task::TaskStatusView, report: &Value
         .and_then(Value::as_u64)
     {
         lines.push(format!("llm_prompt_bytes_before_max: {bytes}"));
+    }
+    for line in report
+        .get("llm")
+        .map(llm_budget_text_lines)
+        .unwrap_or_default()
+    {
+        lines.push(line);
     }
     for item in report
         .pointer("/llm/by_prompt")
@@ -625,6 +636,17 @@ pub(super) fn llm_report_json(task: &task::TaskStatusView) -> Value {
             })
         })
         .collect::<Vec<_>>();
+    let budget_health = llm_budget_health_json(&LlmBudgetMetrics {
+        prompt_bucket_count: by_prompt.len() as u64,
+        llm_call_count: total.llm_call_count,
+        elapsed_ms: total.elapsed_ms,
+        provider_retry_count: total.provider_retry_count,
+        provider_retryable_error_count: total.provider_retryable_error_count,
+        provider_final_error_count: total.provider_final_error_count,
+        prompt_truncation_count: total.prompt_truncation_count,
+        prompt_bytes_before_max: total.prompt_bytes_before_max,
+        prompt_truncated_bytes_total: total.prompt_truncated_bytes_total,
+    });
     json!({
         "schema_version": 1,
         "provider_call_event_count": task
@@ -644,6 +666,7 @@ pub(super) fn llm_report_json(task: &task::TaskStatusView) -> Value {
         "prompt_bytes_budget_min": total.prompt_bytes_budget_min,
         "prompt_bytes_after_max": total.prompt_bytes_after_max,
         "prompt_truncated_bytes_total": total.prompt_truncated_bytes_total,
+        "budget_health": budget_health,
         "by_prompt": by_prompt,
     })
 }
