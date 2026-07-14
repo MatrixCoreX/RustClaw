@@ -158,6 +158,11 @@ safe aggregate.
   covers agent-loop runtime boundaries in 8 cases: observed execution,
   checkpoint/background surfaces, task lifecycle, hooks, subagents, and CLI
   resume affordances.
+- Codex CLI continuous development smoke: `scripts/nl_tests/cases/nl_cases_codex_cli_continuous_dev_20260711.txt`
+  covers a compact create -> extend -> verify -> inspect coding sequence with
+  real local file edits and verification commands. It is included in the static
+  compact coverage gate so coding-agent regressions are not treated as optional
+  after CLI or loop changes.
 - Task execution async lifecycle: `scripts/nl_tests/cases/nl_cases_task_execution_async_lifecycle_20260626.txt`
   covers representative async start, local-process poll, cancel contract,
   timeout expiry, terminal projection, and media async dry-run handoff without
@@ -193,6 +198,11 @@ bash scripts/nl_tests/run_client_like_continuous_suite.sh \
 bash scripts/nl_tests/run_client_like_continuous_suite.sh \
   --skip-smoke \
   --case-file scripts/nl_tests/cases/nl_cases_codex_parity_runtime_smoke_20260623.txt \
+  --prompt-reply-only --quality-guard
+
+bash scripts/nl_tests/run_client_like_continuous_suite.sh \
+  --skip-smoke \
+  --case-file scripts/nl_tests/cases/nl_cases_codex_cli_continuous_dev_20260711.txt \
   --prompt-reply-only --quality-guard
 
 bash scripts/nl_tests/run_client_like_continuous_suite.sh \
