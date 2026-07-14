@@ -1530,6 +1530,17 @@ pub(super) async fn execute_prepared_skill_action(
             &subagent_config,
         )
         .map(str::to_string);
+        if stop_signal.is_none() {
+            super::subagent_runtime::maybe_run_model_assisted_subagent(
+                state,
+                task,
+                loop_state,
+                global_step,
+                step_in_round,
+                &exec_args,
+            )
+            .await;
+        }
         record_subagent_step_execution(
             task,
             loop_state,
