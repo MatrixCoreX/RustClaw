@@ -875,6 +875,40 @@ fn standalone_preference_turn_suppresses_active_task_context() {
 }
 
 #[test]
+fn standalone_task_request_suppresses_active_task_context() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::respond_trace();
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert!(should_suppress_active_task_context(&route, Some(&analysis)));
+}
+
+#[test]
+fn standalone_task_request_with_content_evidence_keeps_active_task_context_available() {
+    let mut route = base_route_result();
+    route.ask_mode = crate::AskMode::respond_trace();
+    route.output_contract.requires_content_evidence = true;
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert!(!should_suppress_active_task_context(
+        &route,
+        Some(&analysis)
+    ));
+}
+
+#[test]
 fn active_task_scope_update_keeps_active_task_context() {
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::respond_trace();
