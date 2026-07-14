@@ -10,6 +10,8 @@ use self::decision_envelope::agent_loop_round_plan_decision_envelope_json;
 mod task_journal_coding_state;
 #[path = "task_journal_coding_workflow.rs"]
 mod task_journal_coding_workflow;
+#[path = "task_journal_context_budget.rs"]
+mod task_journal_context_budget;
 #[path = "task_journal_event_stream.rs"]
 mod task_journal_event_stream;
 #[path = "task_journal_evidence_collect.rs"]
@@ -1759,6 +1761,7 @@ impl TaskJournal {
                 .collect::<Vec<_>>(),
             "input_text": crate::truncate_for_log(&self.input_text),
             "context_bundle_summary": self.context_bundle_summary.as_deref().map(crate::truncate_for_log),
+            "context_budget_report": task_journal_context_budget::context_budget_report_json(self.context_bundle_summary.as_deref()),
             "memory_trace": self.memory_trace.clone(),
             "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
             "route_result": self.route_result.as_ref().map(route_result_json),
