@@ -151,7 +151,16 @@ fn task_report_json_exposes_stable_machine_fields() {
                             "truncation_reason": "budget_limit",
                             "safety_reason": null,
                             "compaction_source": "deterministic"
-                        }
+                        },
+                        "transcript_compaction_records": [
+                            {
+                                "schema_version": 1,
+                                "compaction_id": "context_compaction:fnv64:0000000000000001",
+                                "summary_kind": "deterministic_context_budget",
+                                "source_refs": [{"ref": "recent_turns_full"}],
+                                "risk_flags": ["budget_excluded_context"]
+                            }
+                        ]
                     },
                     "trace": {
                         "contract_matrix": {
@@ -245,6 +254,15 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(
         report["context_budget"]["excluded_refs"][0],
         "transcript:old"
+    );
+    assert_eq!(
+        report["context_compaction"]["source"],
+        "task_journal_transcript_compaction_records"
+    );
+    assert_eq!(report["context_compaction"]["record_count"], 1);
+    assert_eq!(
+        report["context_compaction"]["records"][0]["source_refs"][0]["ref"],
+        "recent_turns_full"
     );
     assert_eq!(
         report["llm"]["budget_health"]["warnings"][0],

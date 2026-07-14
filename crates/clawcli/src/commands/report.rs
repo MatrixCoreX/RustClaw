@@ -26,6 +26,7 @@ pub(super) fn task_report_json(task: &task::TaskStatusView, include_events: bool
     let outcome = super::report_outcome::task_outcome_report_json(&task.raw_data, &coding);
     let session = task_session_projection_json(task);
     let context_budget = context_budget_report_json(&task.raw_data);
+    let context_compaction = context_compaction_report_json(&task.raw_data);
     json!({
         "report_kind": "rustclaw_task_report",
         "task_id": task.task_id,
@@ -48,6 +49,7 @@ pub(super) fn task_report_json(task: &task::TaskStatusView, include_events: bool
         },
         "llm": llm_report_json(task),
         "context_budget": context_budget,
+        "context_compaction": context_compaction,
         "coding": coding,
         "outcome": outcome,
         "artifacts": {
@@ -275,6 +277,20 @@ fn context_budget_report_json(data: &Value) -> Value {
                 Value::String("task_journal_context_budget_report".to_string()),
             );
             Value::Object(projected)
+        })
+        .unwrap_or(Value::Null)
+}
+
+fn context_compaction_report_json(data: &Value) -> Value {
+    data.pointer("/result_json/task_journal/summary/transcript_compaction_records")
+        .or_else(|| data.pointer("/task_journal/summary/transcript_compaction_records"))
+        .and_then(Value::as_array)
+        .map(|records| {
+            json!({
+                "source": "task_journal_transcript_compaction_records",
+                "record_count": records.len(),
+                "records": records,
+            })
         })
         .unwrap_or(Value::Null)
 }
