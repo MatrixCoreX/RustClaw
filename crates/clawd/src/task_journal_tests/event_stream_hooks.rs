@@ -405,7 +405,9 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
                     "summary_code": "patched"
                 }
             },
-            "text": "exit=0 command=cargo fmt --all"
+            "text": "exit=0 command=cargo fmt --all",
+            "test_command": "python3 test_calc_core.py",
+            "test_status": "passed"
         })
         .to_string(),
     ));
@@ -437,7 +439,7 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
                 .collect::<Vec<_>>()
         })
         .expect("coding checkpoint events");
-    assert_eq!(coding_checkpoints.len(), 3);
+    assert_eq!(coding_checkpoints.len(), 4);
     assert_eq!(
         coding_checkpoints[0]
             .pointer("/payload/checkpoint_kind")
@@ -474,6 +476,12 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
             .and_then(Value::as_str),
         Some("test")
     );
+    assert_eq!(
+        coding_checkpoints[3]
+            .pointer("/payload/verification_command")
+            .and_then(Value::as_str),
+        Some("python3 test_calc_core.py")
+    );
 
     let contract_event = trace
         .pointer("/event_stream")
@@ -506,13 +514,19 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
         contract_event
             .pointer("/payload/commands_run_count")
             .and_then(Value::as_u64),
-        Some(2)
+        Some(3)
     );
     assert_eq!(
         contract_event
             .pointer("/payload/tests_run/0")
             .and_then(Value::as_str),
         Some("cargo test -p clawd")
+    );
+    assert_eq!(
+        contract_event
+            .pointer("/payload/tests_run/1")
+            .and_then(Value::as_str),
+        Some("python3 test_calc_core.py")
     );
     assert_eq!(
         contract_event
@@ -570,10 +584,14 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
         Some("cargo test -p clawd")
     );
     assert_eq!(
+        event.pointer("/payload/tests/1").and_then(Value::as_str),
+        Some("python3 test_calc_core.py")
+    );
+    assert_eq!(
         event
             .pointer("/payload/verification_command_count")
             .and_then(Value::as_u64),
-        Some(2)
+        Some(3)
     );
     assert_eq!(
         event
@@ -586,6 +604,12 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
             .pointer("/payload/verification_commands/1")
             .and_then(Value::as_str),
         Some("cargo test -p clawd")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/verification_commands/2")
+            .and_then(Value::as_str),
+        Some("python3 test_calc_core.py")
     );
     assert_eq!(
         event

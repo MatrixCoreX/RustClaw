@@ -681,6 +681,39 @@ fn task_report_json_extracts_run_cmd_machine_excerpt_verification() {
 }
 
 #[test]
+fn task_report_json_extracts_coding_fields_from_json_string_result_text() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-coding-json-text".to_string(),
+        status: "succeeded".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "completed",
+            "result_json": {
+                "text": "{\"changed_files\":[\"tmp/live/calc_core.py\",\"tmp/live/test_calc_core.py\"],\"test_command\":\"python3 test_calc_core.py\",\"test_status\":\"passed\"}"
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let report = task_report_json(&task, false);
+
+    assert_eq!(report["coding"]["changed_file_count"], 2);
+    assert_eq!(
+        report["coding"]["changed_files"][0],
+        "tmp/live/calc_core.py"
+    );
+    assert_eq!(report["coding"]["verification_command_count"], 1);
+    assert_eq!(
+        report["coding"]["verification_commands"][0],
+        "python3 test_calc_core.py"
+    );
+    assert_eq!(report["coding"]["test_count"], 1);
+    assert_eq!(report["coding"]["tests"][0], "python3 test_calc_core.py");
+    assert_eq!(report["coding"]["state"]["verification_status"], "verified");
+}
+
+#[test]
 fn task_log_event_output_uses_task_events_not_raw_log_files() {
     let task = crate::task::TaskStatusView {
         task_id: "task-logs".to_string(),
