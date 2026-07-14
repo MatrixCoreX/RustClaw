@@ -15,6 +15,7 @@ pub(super) enum TuiCommand {
     Watch,
     Cancel,
     Resume,
+    Continue,
     Export,
     Quit,
 }
@@ -82,6 +83,21 @@ pub(crate) fn run_tui(
                         None,
                     )?);
                 }
+                TuiCommand::Continue => {
+                    let task_id =
+                        selected_task_id.context("selected_task_required_for_continue")?;
+                    let message = read_tui_continue_message()?;
+                    let message = message.trim();
+                    output::print_json_pretty(&task::resume_task_by_id(
+                        base_url,
+                        key,
+                        task_id,
+                        None,
+                        Some("operator_tui_continue"),
+                        (!message.is_empty()).then_some(message),
+                        None,
+                    )?);
+                }
                 TuiCommand::Export => {
                     let export = tui_export_json(&active, selected.as_ref());
                     if let Some(path) = export_path {
@@ -122,6 +138,7 @@ pub(super) fn tui_command_from_input(input: &str) -> Option<TuiCommand> {
         "w" => Some(TuiCommand::Watch),
         "c" => Some(TuiCommand::Cancel),
         "u" => Some(TuiCommand::Resume),
+        "n" => Some(TuiCommand::Continue),
         "e" => Some(TuiCommand::Export),
         "q" => Some(TuiCommand::Quit),
         _ => None,
@@ -229,6 +246,50 @@ pub(super) fn tui_selected_task_lines(task: &task::TaskStatusView) -> Vec<String
         &summary,
         "/artifacts/ref_count",
     );
+    push_first_tui_machine_line(
+        &mut lines,
+        "tui_selected_goal_id",
+        &task.raw_data,
+        &[
+            "/goal/goal_id",
+            "/task_goal/goal_id",
+            "/result_json/task_goal/goal_id",
+        ],
+    );
+    push_first_tui_machine_line(
+        &mut lines,
+        "tui_selected_goal_status",
+        &task.raw_data,
+        &[
+            "/goal/goal_status",
+            "/task_goal/goal_status",
+            "/result_json/task_goal/goal_status",
+        ],
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_outcome_state",
+        &summary,
+        "/outcome/state",
+    );
+    push_tui_count_line(
+        &mut lines,
+        "tui_selected_done_condition_count",
+        &summary,
+        "/outcome/done_conditions",
+    );
+    push_tui_count_line(
+        &mut lines,
+        "tui_selected_current_progress_count",
+        &summary,
+        "/outcome/current_progress",
+    );
+    push_tui_count_line(
+        &mut lines,
+        "tui_selected_remaining_work_count",
+        &summary,
+        "/outcome/remaining_work",
+    );
     lines
 }
 
@@ -248,9 +309,43 @@ fn push_tui_machine_line(lines: &mut Vec<String>, key: &str, source: &Value, poi
     lines.push(format!("{key}: {text}"));
 }
 
+fn push_first_tui_machine_line(
+    lines: &mut Vec<String>,
+    key: &str,
+    source: &Value,
+    pointers: &[&str],
+) {
+    for pointer in pointers {
+        let before = lines.len();
+        push_tui_machine_line(lines, key, source, pointer);
+        if lines.len() != before {
+            return;
+        }
+    }
+}
+
+fn push_tui_count_line(lines: &mut Vec<String>, key: &str, source: &Value, pointer: &str) {
+    let Some(count) = source
+        .pointer(pointer)
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .filter(|count| *count > 0)
+    else {
+        return;
+    };
+    lines.push(format!("{key}: {count}"));
+}
+
 fn print_tui_command_help() {
     println!();
-    println!("keys: r refresh | w watch | c cancel | u resume | e export | q quit");
+    println!("tui_keys: r,w,c,u,n,e,q");
+    println!("tui_key.r=refresh");
+    println!("tui_key.w=watch");
+    println!("tui_key.c=cancel");
+    println!("tui_key.u=resume");
+    println!("tui_key.n=continue");
+    println!("tui_key.e=export");
+    println!("tui_key.q=quit");
 }
 
 fn read_tui_command() -> Result<TuiCommand> {
@@ -266,6 +361,16 @@ fn read_tui_command() -> Result<TuiCommand> {
         }
         println!("unknown_key");
     }
+}
+
+fn read_tui_continue_message() -> Result<String> {
+    print!("clawcli-tui-continue> ");
+    io::stdout().flush().context("flush_tui_continue_prompt")?;
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .context("read_tui_continue_message_failed")?;
+    Ok(input)
 }
 
 fn watch_selected_task(
