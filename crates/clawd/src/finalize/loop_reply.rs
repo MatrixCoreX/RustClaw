@@ -340,6 +340,8 @@ use language_closeout::{
 mod local_code_projection;
 use local_code_projection::{
     attach_local_code_strict_json_projection, sync_final_delivery_with_local_code_projection,
+    sync_latest_synthesis_local_code_projection_if_needed,
+    sync_recorded_local_code_projection_if_needed,
 };
 
 #[path = "loop_reply_missing_delivery.rs"]
@@ -1720,6 +1722,38 @@ pub(crate) async fn finalize_loop_reply(
         agent_run_context,
         &mut delivery_deduped,
     );
+    if sync_latest_synthesis_local_code_projection_if_needed(
+        task,
+        user_text,
+        &mut loop_state,
+        agent_run_context,
+        &mut finalizer_summary,
+        &mut delivery_deduped,
+    ) {
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "final_delivery_from_synthesis_local_code_strict_json_projection",
+            "synced",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+    }
+    if sync_recorded_local_code_projection_if_needed(
+        task,
+        user_text,
+        &mut loop_state,
+        agent_run_context,
+        &mut finalizer_summary,
+        &mut delivery_deduped,
+    ) {
+        log_deterministic_delivery_record(
+            &task.task_id,
+            "final_delivery_from_recorded_local_code_strict_json_projection",
+            "synced",
+            agent_run_context,
+            loop_state.executed_step_results.len(),
+        );
+    }
 
     let final_text = final_answer_text_from_delivery(&delivery_deduped);
 

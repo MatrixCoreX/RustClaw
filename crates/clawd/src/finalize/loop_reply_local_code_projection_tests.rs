@@ -288,6 +288,218 @@ fn local_code_projection_syncs_final_delivery_after_generic_renderers() {
 }
 
 #[test]
+fn local_code_projection_replaces_readonly_machine_kv_with_requested_json() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.delivery_messages.push(
+        "project_dir=/workspace functions=[\"add\",\"sub\",\"safe_div\"] error_codes=[\"division_by_zero\"] test_status=passed evidence_files=[\"/workspace/calc_core.py\",\"/workspace/test_calc_core.py\"]"
+            .to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.latest_run_cmd_command".to_string(),
+        "python3 test_calc_core.py".to_string(),
+    );
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_text_range","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py","excerpt":"1|def add(a, b):\n2|    return a + b\n3|def sub(a, b):\n4|    return a - b\n5|def safe_div(a, b):\n6|    if b == 0:\n7|        return {\"ok\": False, \"error_code\": \"division_by_zero\"}"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"read_text_range","path":"/workspace/test_calc_core.py","resolved_path":"/workspace/test_calc_core.py","excerpt":"1|from calc_core import add, sub, safe_div\n2|def test_add(): pass\n3|def test_sub(): pass\n4|def test_safe_div_zero(): pass"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_3",
+        "run_cmd",
+        "Ran 4 tests in 0.000s\nOK\n",
+    ));
+    let mut summary = None;
+    let mut delivery_deduped = loop_state.delivery_messages.clone();
+
+    assert!(sync_final_delivery_with_local_code_projection(
+        &task(),
+        "Return JSON with project_dir, functions, error_codes, test_status, evidence_files.",
+        &mut loop_state,
+        None,
+        &mut summary,
+        &mut delivery_deduped,
+    ));
+
+    assert_eq!(delivery_deduped.len(), 1);
+    let value: serde_json::Value =
+        serde_json::from_str(delivery_deduped[0].as_str()).expect("strict json");
+    assert_eq!(value["project_dir"], "/workspace");
+    assert_eq!(
+        value["functions"],
+        serde_json::json!(["add", "sub", "safe_div"])
+    );
+    assert_eq!(
+        value["error_codes"],
+        serde_json::json!(["division_by_zero"])
+    );
+    assert_eq!(value["test_status"], "passed");
+    assert_eq!(
+        value["evidence_files"],
+        serde_json::json!(["/workspace/calc_core.py", "/workspace/test_calc_core.py"])
+    );
+    assert!(summary.is_some());
+}
+
+#[test]
+fn recorded_local_code_projection_syncs_stale_final_delivery() {
+    let mut loop_state = LoopState::new(2);
+    let projected = r#"{"evidence_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"],"functions":["add","sub","safe_div"],"error_codes":["division_by_zero"],"project_dir":"/workspace","test_status":"passed"}"#;
+    loop_state.output_vars.insert(
+        "agent_loop.strict_json_projection_publishable".to_string(),
+        "true".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.strict_json_projection_output".to_string(),
+        projected.to_string(),
+    );
+    let mut delivery_deduped = vec![
+        "project_dir=/workspace functions=[\"add\",\"sub\",\"safe_div\"] error_codes=[\"division_by_zero\"] test_status=passed evidence_files=[\"/workspace/calc_core.py\",\"/workspace/test_calc_core.py\"]"
+            .to_string(),
+    ];
+    let mut summary = None;
+
+    assert!(sync_recorded_local_code_projection_if_needed(
+        &task(),
+        "Return JSON with project_dir, functions, error_codes, test_status, evidence_files.",
+        &mut loop_state,
+        None,
+        &mut summary,
+        &mut delivery_deduped,
+    ));
+
+    assert_eq!(delivery_deduped, vec![projected.to_string()]);
+    assert_eq!(loop_state.delivery_messages, delivery_deduped);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(projected)
+    );
+    assert!(summary.is_some());
+}
+
+#[test]
+fn recorded_local_code_projection_does_not_sync_non_code_payload() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "agent_loop.strict_json_projection_publishable".to_string(),
+        "true".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.strict_json_projection_output".to_string(),
+        r#"{"field_path":"llm.selected_vendor","current_value":"minimax"}"#.to_string(),
+    );
+    let current = "minimax".to_string();
+    let mut delivery_deduped = vec![current.clone()];
+    let mut summary = None;
+
+    assert!(!sync_recorded_local_code_projection_if_needed(
+        &task(),
+        "Return current_value.",
+        &mut loop_state,
+        None,
+        &mut summary,
+        &mut delivery_deduped,
+    ));
+
+    assert_eq!(delivery_deduped, vec![current]);
+    assert!(summary.is_none());
+}
+
+#[test]
+fn latest_synthesis_local_code_projection_replaces_file_read_delivery() {
+    let mut loop_state = LoopState::new(2);
+    let synthesis = r#"{"changed_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"],"error_codes":["division_by_zero"],"functions":["add","sub","mul","safe_div"],"test_command":["python3 test_calc_core.py","python3 - <<'PY'\nimport calc_core\nresult = calc_core.safe_div(1, 0)\nprint(result)\nassert result == {\"ok\": False, \"error_code\": \"division_by_zero\"}\nPY"],"test_status":"passed"}"#;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"write_text","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"write_text","path":"/workspace/test_calc_core.py","resolved_path":"/workspace/test_calc_core.py"}}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step("step_3", "run_cmd", "all tests passed\n"));
+    loop_state.executed_step_results.push(ok_step(
+        "step_4",
+        "run_cmd",
+        r#"{'ok': False, 'error_code': 'division_by_zero'}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step("step_5", "synthesize_answer", synthesis));
+    loop_state.executed_step_results.push(ok_step(
+        "step_6",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py","excerpt":"1|def add(a, b):\n2|    return a + b\n3|def sub(a, b):\n4|    return a - b\n5|def mul(a, b):\n6|    return a * b\n7|def safe_div(a, b):\n8|    if b == 0:\n9|        return {\"ok\": False, \"error_code\": \"division_by_zero\"}"}}"#,
+    ));
+    let mut summary = None;
+    let mut delivery_deduped = vec![
+        "FILE:/workspace/test_calc_core.py\n\nassert calc_core.safe_div(1, 0)\n\nmissing_file"
+            .to_string(),
+    ];
+
+    assert!(sync_latest_synthesis_local_code_projection_if_needed(
+        &task(),
+        "继续刚才这个项目：增加 safe_div(a,b)。最后只输出 JSON，包含 changed_files、test_command、test_status、functions、error_codes。",
+        &mut loop_state,
+        None,
+        &mut summary,
+        &mut delivery_deduped,
+    ));
+
+    assert_eq!(delivery_deduped, vec![synthesis.to_string()]);
+    assert_eq!(loop_state.delivery_messages, delivery_deduped);
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.strict_json_projection_publishable")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.strict_json_projection_output")
+            .map(String::as_str),
+        Some(synthesis)
+    );
+    assert!(summary.is_some());
+}
+
+#[test]
+fn local_code_request_fields_merge_state_patch_and_user_machine_tokens() {
+    let context =
+        context_with_required_machine_fields(json!(["functions", "error_codes", "test_status"]));
+    let user_text =
+        "最后只输出 JSON，包含 project_dir、functions、error_codes、test_status、evidence_files。";
+    let partial =
+        r#"{"functions":["safe_div"],"error_codes":["division_by_zero"],"test_status":"passed"}"#;
+    let complete = r#"{"project_dir":"/workspace","functions":["safe_div"],"error_codes":["division_by_zero"],"test_status":"passed","evidence_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"]}"#;
+
+    assert!(
+        !crate::agent_engine::local_code_strict_json_answer_satisfies_request(
+            user_text,
+            partial,
+            Some(&context),
+        )
+    );
+    assert!(
+        crate::agent_engine::local_code_strict_json_answer_satisfies_request(
+            user_text,
+            complete,
+            Some(&context),
+        )
+    );
+}
+
+#[test]
 fn local_code_projection_keeps_existing_satisfying_json_delivery() {
     let mut loop_state = LoopState::new(2);
     let existing = r#"{"changed_files":["calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed","functions":["add","sub","mul"]}"#;
