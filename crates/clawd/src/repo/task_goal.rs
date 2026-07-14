@@ -4,6 +4,15 @@ use uuid::Uuid;
 
 use crate::{now_ts, AppState};
 
+const GOAL_STATUS_CREATED: &str = "created";
+const GOAL_STATUS_IN_PROGRESS: &str = "in_progress";
+const GOAL_STATUS_WAITING_USER: &str = "waiting_user";
+const GOAL_STATUS_BACKGROUND: &str = "background";
+const GOAL_STATUS_BLOCKED: &str = "blocked";
+const GOAL_STATUS_VERIFIED: &str = "verified";
+const GOAL_STATUS_COMPLETED: &str = "completed";
+const GOAL_STATUS_CANCELLED: &str = "cancelled";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskGoalControlOperation {
     Edit,
@@ -205,7 +214,6 @@ fn merge_goal_progress_fields(projected: &mut Map<String, Value>, goal: Option<&
         return;
     };
     for key in [
-        "goal_status",
         "goal_status_source",
         "current_progress",
         "remaining_work",
@@ -219,6 +227,7 @@ fn merge_goal_progress_fields(projected: &mut Map<String, Value>, goal: Option<&
     ] {
         copy_non_empty(projected, goal, key);
     }
+    copy_goal_status(projected, goal);
 }
 
 fn copy_non_empty(projected: &mut Map<String, Value>, source: &Value, key: &str) {
@@ -231,6 +240,18 @@ fn copy_non_empty(projected: &mut Map<String, Value>, source: &Value, key: &str)
     projected.insert(key.to_string(), value.clone());
 }
 
+fn copy_goal_status(projected: &mut Map<String, Value>, source: &Value) {
+    let Some(status) = source
+        .get("goal_status")
+        .or_else(|| source.get("state"))
+        .and_then(Value::as_str)
+        .and_then(canonical_goal_status_token)
+    else {
+        return;
+    };
+    projected.insert("goal_status".to_string(), json!(status));
+}
+
 fn value_is_empty(value: &Value) -> bool {
     match value {
         Value::Null => true,
@@ -241,11 +262,10 @@ fn value_is_empty(value: &Value) -> bool {
     }
 }
 
-fn explicit_goal_status(goal: Option<&Value>) -> Option<&str> {
+fn explicit_goal_status(goal: Option<&Value>) -> Option<&'static str> {
     goal.and_then(|goal| goal.get("goal_status").or_else(|| goal.get("state")))
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .and_then(canonical_goal_status_token)
 }
 
 fn lifecycle_goal_status(lifecycle: &Value) -> Option<&'static str> {
@@ -258,12 +278,26 @@ fn lifecycle_goal_status(lifecycle: &Value) -> Option<&'static str> {
         .filter(|value| !value.is_empty())?;
 
     match state {
-        "completed" | "succeeded" | "done" => Some("completed"),
-        "blocked" | "failed" | "timeout" => Some("blocked"),
-        "cancelled" | "canceled" => Some("cancelled"),
-        "background" | "waiting" => Some("background"),
-        "needs_user" | "needs_confirmation" => Some("waiting_user"),
-        "queued" | "running" => Some("in_progress"),
+        "completed" | "succeeded" | "done" => Some(GOAL_STATUS_COMPLETED),
+        "blocked" | "failed" | "timeout" => Some(GOAL_STATUS_BLOCKED),
+        "cancelled" | "canceled" => Some(GOAL_STATUS_CANCELLED),
+        "background" | "waiting" => Some(GOAL_STATUS_BACKGROUND),
+        "needs_user" | "needs_confirmation" => Some(GOAL_STATUS_WAITING_USER),
+        "queued" | "running" => Some(GOAL_STATUS_IN_PROGRESS),
+        _ => None,
+    }
+}
+
+fn canonical_goal_status_token(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "created" => Some(GOAL_STATUS_CREATED),
+        "in_progress" => Some(GOAL_STATUS_IN_PROGRESS),
+        "waiting_user" => Some(GOAL_STATUS_WAITING_USER),
+        "background" => Some(GOAL_STATUS_BACKGROUND),
+        "blocked" => Some(GOAL_STATUS_BLOCKED),
+        "verified" => Some(GOAL_STATUS_VERIFIED),
+        "completed" => Some(GOAL_STATUS_COMPLETED),
+        "cancelled" | "canceled" => Some(GOAL_STATUS_CANCELLED),
         _ => None,
     }
 }
@@ -288,7 +322,15 @@ fn normalize_goal_patch(goal_patch: Option<&Value>) -> anyhow::Result<Map<String
     ] {
         if let Some(value) = source.get(key) {
             if !value_is_empty(value) {
-                normalized.insert(key.to_string(), value.clone());
+                if key == "goal_status" {
+                    let status = value
+                        .as_str()
+                        .and_then(canonical_goal_status_token)
+                        .ok_or_else(|| anyhow::anyhow!("goal_status_invalid"))?;
+                    normalized.insert(key.to_string(), json!(status));
+                } else {
+                    normalized.insert(key.to_string(), value.clone());
+                }
             }
         }
     }
