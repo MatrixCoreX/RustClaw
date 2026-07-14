@@ -370,6 +370,36 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
                 recommended_next_action: "resolve_child_conflicts",
               },
             },
+            {
+              seq: 11,
+              event_type: "task_goal",
+              payload: {
+                task_id: "task-events",
+                goal_status: "verified",
+                goal_status_source: "validation_result",
+                validation_status: "passed",
+              },
+            },
+            {
+              seq: 12,
+              event_type: "context_budget",
+              payload: {
+                budget_tier: "light",
+                included_ref_count: 2,
+                excluded_ref_count: 1,
+                token_estimate: 96,
+                compaction_source: "deterministic_context_builder",
+              },
+            },
+            {
+              seq: 13,
+              event_type: "context_compaction",
+              payload: {
+                record_count: 1,
+                summary_kind: "deterministic_context_budget",
+                compaction_id: "context_compaction:1",
+              },
+            },
           ],
         },
       },
@@ -409,6 +439,12 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
   assert.ok(traceEventMeta(events[8]).includes("role=explorer"));
   assert.ok(traceEventMeta(events[8]).includes("required=true"));
   assert.ok(traceEventMeta(events[9]).includes("recommended_next_action=resolve_child_conflicts"));
+  assert.ok(traceEventMeta(events[10]).includes("goal_status=verified"));
+  assert.ok(traceEventMeta(events[10]).includes("validation_status=passed"));
+  assert.ok(traceEventMeta(events[11]).includes("budget_tier=light"));
+  assert.ok(traceEventMeta(events[11]).includes("included_ref_count=2"));
+  assert.ok(traceEventMeta(events[12]).includes("record_count=1"));
+  assert.ok(traceEventMeta(events[12]).includes("summary_kind=deterministic_context_budget"));
   assert.equal(buildTaskTraceEventView(events[1], "en").title, "Checkpoint saved");
   assert.equal(buildTaskTraceEventView(events[1], "en").tone, "attention");
   assert.equal(buildTaskTraceEventView(events[2], "en").detail, "run_cmd is running.");
@@ -432,6 +468,10 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
   assert.equal(buildTaskTraceEventView(events[8], "en").title, "Subagent finished");
   assert.equal(buildTaskTraceEventView(events[9], "en").title, "Agent team conflict");
   assert.equal(buildTaskTraceEventView(events[9], "en").tone, "attention");
+  assert.equal(buildTaskTraceEventView(events[10], "en").title, "Goal state");
+  assert.equal(buildTaskTraceEventView(events[10], "en").tone, "ok");
+  assert.equal(buildTaskTraceEventView(events[11], "en").title, "Context budget");
+  assert.equal(buildTaskTraceEventView(events[12], "en").title, "Context compaction");
 });
 
 test("collects artifact refs recursively without duplicate mirrored arrays", () => {

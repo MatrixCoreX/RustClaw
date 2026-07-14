@@ -229,6 +229,9 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
   for (const key of [
     "status",
     "state",
+    "goal_status",
+    "goal_status_source",
+    "validation_status",
     "task_id",
     "transition_index",
     "transition_ref",
@@ -275,6 +278,17 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "artifact_ref_count",
     "prompt_label",
     "llm_call_count",
+    "budget_tier",
+    "included_ref_count",
+    "excluded_ref_count",
+    "char_estimate",
+    "token_estimate",
+    "truncation_reason",
+    "safety_reason",
+    "compaction_source",
+    "record_count",
+    "summary_kind",
+    "compaction_id",
     "elapsed_ms",
     "provider_attempt_count",
     "provider_retry_count",
@@ -391,6 +405,48 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
       detail: checkpointId
         ? tLocal(`可以从 ${checkpointId} 继续。`, `Can resume from ${checkpointId}.`)
         : tLocal("任务已经保存可恢复进度。", "The task saved resumable progress."),
+      tone: "attention",
+      meta,
+    };
+  }
+
+  if (eventType === "task_goal") {
+    const goalStatus = field("goal_status");
+    return {
+      eventType,
+      title: tLocal("目标状态", "Goal state"),
+      detail: goalStatus || field("goal_status_source") || eventType,
+      tone: goalStatus === "blocked" || goalStatus === "cancelled"
+        ? "failed"
+        : goalStatus === "completed" || goalStatus === "verified"
+          ? "ok"
+          : tone,
+      meta,
+    };
+  }
+
+  if (eventType === "context_budget") {
+    const tier = field("budget_tier");
+    const included = field("included_ref_count") || "0";
+    const excluded = field("excluded_ref_count") || "0";
+    return {
+      eventType,
+      title: tLocal("上下文预算", "Context budget"),
+      detail: tLocal(
+        `预算 ${tier || "--"}，纳入 ${included} 项，排除 ${excluded} 项。`,
+        `Budget ${tier || "--"}, ${included} included, ${excluded} excluded.`,
+      ),
+      tone,
+      meta,
+    };
+  }
+
+  if (eventType === "context_compaction") {
+    const count = field("record_count") || "0";
+    return {
+      eventType,
+      title: tLocal("上下文压缩", "Context compaction"),
+      detail: tLocal(`压缩记录 ${count} 条。`, `${count} compaction record(s).`),
       tone: "attention",
       meta,
     };

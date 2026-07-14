@@ -28,6 +28,12 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
             lifecycle.clone(),
         ));
     }
+    events.push(task_event_json(
+        &mut seq,
+        "task_goal",
+        super::task_journal_goal::task_goal_summary_json(journal),
+    ));
+    append_context_budget_events(&mut seq, &mut events, journal);
     if let Some(checkpoint) = journal.task_checkpoint.as_ref() {
         events.push(task_event_json(
             &mut seq,
@@ -192,6 +198,29 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
         ));
     }
     events
+}
+
+fn append_context_budget_events(seq: &mut u64, events: &mut Vec<Value>, journal: &TaskJournal) {
+    if let Some(report) = super::task_journal_context_budget::context_budget_report_json(
+        journal.context_bundle_summary.as_deref(),
+    ) {
+        events.push(task_event_json(seq, "context_budget", report));
+    }
+    let Some(records) = super::task_journal_context_compaction::transcript_compaction_records_json(
+        journal.context_bundle_summary.as_deref(),
+    ) else {
+        return;
+    };
+    let record_count = records.as_array().map(Vec::len).unwrap_or(0);
+    events.push(task_event_json(
+        seq,
+        "context_compaction",
+        json!({
+            "schema_version": 1,
+            "record_count": record_count,
+            "records": records,
+        }),
+    ));
 }
 
 fn append_subagent_team_lifecycle_events(
