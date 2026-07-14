@@ -87,7 +87,7 @@ fn permission_report_text_lines(report: &Value) -> Vec<String> {
     if let Some(entries) = report.get("permission_entries").and_then(Value::as_array) {
         for entry in entries.iter().take(64) {
             lines.push(format!(
-                "permission: source={} decision={} risk_level={} action_effect={} needs_confirmation={} dry_run_required={} reason_code={}",
+                "permission: source={} decision={} risk_level={} action_effect={} needs_confirmation={} dry_run_required={} reason_code={} isolation_profile={} sandbox_profile={} sandbox_source={} filesystem_write={}",
                 value_token(entry.get("source")),
                 value_token(entry.get("decision")),
                 value_token(entry.get("risk_level")),
@@ -95,6 +95,10 @@ fn permission_report_text_lines(report: &Value) -> Vec<String> {
                 value_token(entry.get("needs_confirmation")),
                 value_token(entry.get("dry_run_required")),
                 value_token(entry.get("reason_code")),
+                value_token(entry.get("isolation_profile")),
+                value_token(entry.get("sandbox_profile")),
+                value_token(entry.get("sandbox_source")),
+                value_token(entry.get("filesystem_write")),
             ));
         }
     }
@@ -216,6 +220,14 @@ fn push_permission_entry(
             .or_else(|| machine_string_field(decision, "effect")),
         "reason_code": machine_string_field(decision, "reason_code")
             .or_else(|| machine_string_field(decision, "error_code")),
+        "isolation_profile": machine_string_field(decision, "isolation_profile")
+            .or_else(|| nested_machine_string_field(decision, &["command_policy", "isolation_profile"]))
+            .or_else(|| nested_machine_string_field(decision, &["capability_policy", "isolation_profile"])),
+        "sandbox_profile": machine_string_field(decision, "sandbox_profile")
+            .or_else(|| nested_machine_string_field(decision, &["sandbox", "profile"])),
+        "sandbox_source": nested_machine_string_field(decision, &["sandbox", "source"]),
+        "filesystem_write": decision.get("filesystem_write").and_then(Value::as_bool)
+            .or_else(|| nested_bool_field(decision, &["sandbox", "filesystem_write"])),
         "command_policy": decision.get("command_policy").cloned().unwrap_or(Value::Null),
         "capability_policy": decision.get("capability_policy").cloned().unwrap_or(Value::Null),
     });
@@ -257,6 +269,26 @@ fn machine_string_field(map: &Map<String, Value>, key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| is_machine_token(value))
         .map(ToString::to_string)
+}
+
+fn nested_machine_string_field(map: &Map<String, Value>, path: &[&str]) -> Option<String> {
+    let mut current = Value::Object(map.clone());
+    for key in path {
+        current = current.get(*key)?.clone();
+    }
+    current
+        .as_str()
+        .map(str::trim)
+        .filter(|value| is_machine_token(value))
+        .map(ToString::to_string)
+}
+
+fn nested_bool_field(map: &Map<String, Value>, path: &[&str]) -> Option<bool> {
+    let mut current = Value::Object(map.clone());
+    for key in path {
+        current = current.get(*key)?.clone();
+    }
+    current.as_bool()
 }
 
 fn value_token(value: Option<&Value>) -> String {

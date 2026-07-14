@@ -508,8 +508,21 @@ pub(super) fn subagent_report_text_lines(report: &Value) -> Vec<String> {
                 .get("decision_status")
                 .and_then(Value::as_str)
                 .unwrap_or("");
+            let tool_permission_profile = item
+                .get("tool_permission_profile")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let read_only_enforced = item
+                .get("read_only_enforced")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let write_isolation_status = item
+                .get("write_isolation_status")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let timeout_ms = item.get("timeout_ms").and_then(Value::as_u64).unwrap_or(0);
             lines.push(format!(
-                "subagent: child_run_id={child_run_id} subagent_id={subagent_id} status={status} conflict_count={conflict_count} decision_status={decision_status} finding_refs={finding_refs} evidence_refs={evidence_refs}"
+                "subagent: child_run_id={child_run_id} subagent_id={subagent_id} status={status} tool_permission_profile={tool_permission_profile} read_only_enforced={read_only_enforced} write_isolation_status={write_isolation_status} timeout_ms={timeout_ms} conflict_count={conflict_count} decision_status={decision_status} finding_refs={finding_refs} evidence_refs={evidence_refs}"
             ));
         }
     }
@@ -1359,6 +1372,9 @@ fn collect_subagent_event_fields(
         "role",
         "request_ref",
         "error_code",
+        "tool_permission_profile",
+        "write_isolation_status",
+        "execution_mode",
     ] {
         if let Some(value) = event.fields.get(key) {
             map.insert(key.to_string(), Value::String(value.clone()));
@@ -1400,6 +1416,11 @@ fn push_subagent_item(map: &Map<String, Value>, signals: &mut SubagentReportSign
         "subagent_id": subagent_id,
         "request_ref": request_ref,
         "role": machine_string_field(map, "role"),
+        "tool_permission_profile": subagent_tool_permission_profile(map),
+        "read_only_enforced": subagent_read_only_enforced(map),
+        "write_isolation_status": subagent_write_isolation_status(map),
+        "timeout_ms": subagent_timeout_ms(map),
+        "timeout_source": subagent_timeout_source(map),
         "status": machine_string_field(map, "status"),
         "result_status": machine_string_field(map, "result_status"),
         "outcome_code": machine_string_field(map, "outcome_code"),
@@ -1415,6 +1436,61 @@ fn push_subagent_item(map: &Map<String, Value>, signals: &mut SubagentReportSign
         "finding_refs": machine_ref_array(map.get("finding_refs")),
         "evidence_refs": machine_ref_array(map.get("evidence_refs")),
     }));
+}
+
+fn subagent_timeout_ms(map: &Map<String, Value>) -> Option<u64> {
+    map.get("timeout_ms").and_then(Value::as_u64).or_else(|| {
+        map.get("timeout_policy")
+            .and_then(|value| value.get("timeout_ms"))
+            .and_then(Value::as_u64)
+    })
+}
+
+fn subagent_timeout_source(map: &Map<String, Value>) -> Option<String> {
+    machine_string_field(map, "timeout_source").or_else(|| {
+        map.get("timeout_policy")
+            .and_then(Value::as_object)
+            .and_then(|policy| machine_string_field(policy, "source"))
+    })
+}
+
+fn subagent_tool_permission_profile(map: &Map<String, Value>) -> Option<String> {
+    machine_string_field(map, "tool_permission_profile").or_else(|| {
+        map.get("role_metadata")
+            .and_then(Value::as_object)
+            .and_then(|role| machine_string_field(role, "tool_permission_profile"))
+    })
+}
+
+fn subagent_read_only_enforced(map: &Map<String, Value>) -> Option<bool> {
+    if let Some(read_only) = map.get("read_only").and_then(Value::as_bool) {
+        return Some(read_only);
+    }
+    if subagent_tool_permission_profile(map).as_deref() == Some("read_only") {
+        return Some(true);
+    }
+    let execution_mode = machine_string_field(map, "execution_mode");
+    Some(matches!(
+        execution_mode.as_deref(),
+        Some("inline_readonly_child_run" | "bounded_parallel_readonly_child_runs")
+    ))
+}
+
+fn subagent_write_isolation_status(map: &Map<String, Value>) -> &'static str {
+    if matches!(
+        machine_string_field(map, "write_isolation_status").as_deref(),
+        Some("enabled")
+    ) {
+        return "enabled";
+    }
+    if map
+        .get("requested_write_isolation")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return "requested_denied";
+    }
+    "not_supported"
 }
 
 fn subagent_conflict_count(map: &Map<String, Value>) -> Option<u64> {
