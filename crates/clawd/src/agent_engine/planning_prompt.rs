@@ -263,6 +263,7 @@ pub(super) fn build_lightweight_tool_spec(
 
 const LIGHTWEIGHT_SKILL_PLAYBOOK_MAX_CHARS: usize = 700;
 const LIGHTWEIGHT_SKILL_SUMMARY_MAX_CHARS: usize = 140;
+const LIGHTWEIGHT_OPEN_SCOPE_FULL_PLAYBOOK_LIMIT: usize = 12;
 
 fn fallback_generated_skill_prompt_path(skill: &str) -> String {
     format!("prompts/layers/generated/skills/{skill}.md")
@@ -461,6 +462,9 @@ pub(super) fn build_lightweight_skill_playbooks_text(
     if visible.is_empty() {
         return "No skill playbooks configured.".to_string();
     }
+    if skill_scope.is_none() && visible.len() > LIGHTWEIGHT_OPEN_SCOPE_FULL_PLAYBOOK_LIMIT {
+        return build_open_scope_lightweight_skill_index(state, &visible);
+    }
     visible
         .iter()
         .map(|skill| {
@@ -479,6 +483,26 @@ pub(super) fn build_lightweight_skill_playbooks_text(
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+fn build_open_scope_lightweight_skill_index(state: &AppState, visible: &[String]) -> String {
+    let mut lines = vec![
+        "open_scope_lightweight_skill_index_v1".to_string(),
+        "planner_scope=open; capability_choice=all_visible; preferred_action=call_capability; capability_name_source=planner_capabilities".to_string(),
+        "playbook_detail=registry_metadata_only; fields=summary,semantic_tags,planner_capabilities,required,optional,risk,effect,output_contract".to_string(),
+    ];
+    for skill in visible {
+        let summary = load_skill_prompt_body_for_planner(state, skill)
+            .map(|body| lightweight_skill_summary_from_prompt(&body))
+            .unwrap_or_else(|| "generated prompt unavailable".to_string());
+        let metadata = registry_planner_metadata_hint(state, skill)
+            .and_then(|hint| hint.strip_prefix("Registry metadata: ").map(str::to_string));
+        match metadata {
+            Some(metadata) => lines.push(format!("- skill={skill}; summary={summary}; {metadata}")),
+            None => lines.push(format!("- skill={skill}; summary={summary}")),
+        }
+    }
+    lines.join("\n")
 }
 
 pub(super) fn build_lightweight_skill_quick_index_text(
