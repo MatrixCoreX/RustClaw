@@ -14,7 +14,8 @@ mod dispatch_synthesis_local_code_writes;
 #[path = "dispatch_synthesis_markdown.rs"]
 mod dispatch_synthesis_markdown;
 use dispatch_synthesis_local_code_fields::{
-    local_code_json_projection_field_value_supported, machine_error_code_token,
+    diff_summary_projection_value, local_code_json_projection_field_value_supported,
+    machine_error_code_token, path_size_bytes_by_path, run_cmd_commands_from_task_observations,
 };
 use dispatch_synthesis_local_code_readbacks::readbacks_for_local_code_projection;
 use dispatch_synthesis_local_code_writes::{
@@ -745,6 +746,12 @@ pub(super) fn local_code_task_strict_json_projection(
     let run_cmd_commands = successful_run_cmd_commands(loop_state);
     let functions = functions_from_readbacks(&readbacks, &evidence_paths);
     let error_codes = error_codes_from_readbacks(&readbacks);
+    let projected_changed_paths = if has_current_writes {
+        changed_write_paths.clone()
+    } else {
+        evidence_paths.clone()
+    };
+    let path_size_bytes = path_size_bytes_by_path(loop_state);
 
     let mut object = serde_json::Map::new();
     for field in &requested_fields {
@@ -756,14 +763,9 @@ pub(super) fn local_code_task_strict_json_projection(
                 object.insert(field.clone(), string_array_value(&evidence_paths));
             }
             "changed_files" => {
-                let changed_paths = if has_current_writes {
-                    &changed_write_paths
-                } else {
-                    &evidence_paths
-                };
-                object.insert(field.clone(), string_array_value(changed_paths));
+                object.insert(field.clone(), string_array_value(&projected_changed_paths));
             }
-            "test_command" => {
+            "test_command" | "verification_command" => {
                 object.insert(
                     field.clone(),
                     test_command_projection_value(&run_cmd_commands)?,
@@ -801,6 +803,18 @@ pub(super) fn local_code_task_strict_json_projection(
                 object.insert(
                     field.clone(),
                     Value::String(common_parent_path(&evidence_paths)?),
+                );
+            }
+            "diff_summary" => {
+                object.insert(
+                    field.clone(),
+                    diff_summary_projection_value(
+                        &readbacks,
+                        &projected_changed_paths,
+                        &functions,
+                        &error_codes,
+                        &path_size_bytes,
+                    )?,
                 );
             }
             _ => return None,
@@ -991,11 +1005,13 @@ fn local_code_json_projection_field_supported(field: &str) -> bool {
         "created_files"
             | "changed_files"
             | "test_command"
+            | "verification_command"
             | "test_status"
             | "functions"
             | "error_codes"
             | "evidence_files"
             | "project_dir"
+            | "diff_summary"
     )
 }
 
@@ -1188,6 +1204,9 @@ fn successful_run_cmd_commands(loop_state: &LoopState) -> Vec<String> {
     }
     if commands.is_empty() {
         commands = run_cmd_commands_from_plan_trace(loop_state);
+    }
+    if commands.is_empty() {
+        commands = run_cmd_commands_from_task_observations(loop_state);
     }
     if commands.len() > successful_count {
         commands.truncate(successful_count);

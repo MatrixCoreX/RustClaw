@@ -243,6 +243,84 @@ fn local_code_task_projection_prefers_structured_required_machine_fields_over_us
 }
 
 #[test]
+fn local_code_task_projection_supports_verification_command_and_diff_summary() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"write_text","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"write_text","path":"/workspace/test_calc_core.py","resolved_path":"/workspace/test_calc_core.py"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_3",
+        "run_cmd",
+        "......\n----------------------------------------------------------------------\nRan 6 tests in 0.000s\n\nOK\n",
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_4",
+        "fs_basic",
+        r#"{"extra":{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","resolved_path":"/workspace/calc_core.py","size_bytes":70},"path":"/workspace/calc_core.py"},{"exists":true,"fact":{"kind":"file","resolved_path":"/workspace/test_calc_core.py","size_bytes":604},"path":"/workspace/test_calc_core.py"}]}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_5",
+        "fs_basic",
+        r#"{"extra":{"action":"read_text_range","path":"/workspace/calc_core.py","resolved_path":"/workspace/calc_core.py","excerpt":"1|def add(a, b):\n2|    return a + b\n3|\n4|def subtract(a, b):\n5|    return a - b"}}"#,
+    ));
+    loop_state.task_observations.push(json!({
+        "owner_layer": "agent_hooks",
+        "stage": "post_tool_use",
+        "tool_or_skill": "run_cmd",
+        "status": "ok",
+        "args": {
+            "command": "python3 test_calc_core.py",
+            "cwd": "/workspace"
+        }
+    }));
+    let context = agent_context_with_required_machine_fields(json!([
+        "changed_files",
+        "verification_command",
+        "diff_summary"
+    ]));
+
+    let answer = local_code_task_strict_json_projection(
+        "Report changed files, verification command, and concise diff summary.",
+        &loop_state,
+        Some(&context),
+    )
+    .expect("projection should include verification command and diff summary");
+    let value: serde_json::Value = serde_json::from_str(&answer).expect("json");
+
+    assert_eq!(
+        value["changed_files"],
+        serde_json::json!(["/workspace/calc_core.py", "/workspace/test_calc_core.py"])
+    );
+    assert_eq!(value["verification_command"], "python3 test_calc_core.py");
+    assert_eq!(
+        value["diff_summary"][0]["summary_code"],
+        "source_file_updated"
+    );
+    assert_eq!(value["diff_summary"][0]["size_bytes"], 70);
+    assert_eq!(
+        value["diff_summary"][0]["functions"],
+        serde_json::json!(["add", "subtract"])
+    );
+    assert_eq!(
+        value["diff_summary"][1]["summary_code"],
+        "test_file_updated"
+    );
+    assert_eq!(value["diff_summary"][1]["size_bytes"], 604);
+    assert!(strict_json_projection_answer_satisfies_request(
+        "Report changed files, verification command, and concise diff summary.",
+        &answer,
+        Some(&context),
+    ));
+}
+
+#[test]
 fn local_code_task_projection_builds_created_files_test_command_and_status() {
     let mut loop_state = LoopState::new(2);
     loop_state.output_vars.insert(
