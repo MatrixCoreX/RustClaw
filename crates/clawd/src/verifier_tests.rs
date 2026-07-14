@@ -226,7 +226,7 @@ primary_fallback_role = "primary"
     registry
 }
 
-fn test_state() -> AppState {
+pub(super) fn test_state() -> AppState {
     let registry = Arc::new(test_registry());
     let skills_list = Arc::new(
         [
@@ -280,7 +280,7 @@ fn test_state() -> AppState {
     }
 }
 
-fn test_task() -> ClaimedTask {
+pub(super) fn test_task() -> ClaimedTask {
     ClaimedTask {
         task_id: "task-verify".to_string(),
         user_id: 1,
@@ -294,11 +294,11 @@ fn test_task() -> ClaimedTask {
     }
 }
 
-fn route_result(needs_clarify: bool) -> RouteResult {
+pub(super) fn route_result(needs_clarify: bool) -> RouteResult {
     route_result_with_risk(needs_clarify, crate::RiskCeiling::Unknown)
 }
 
-fn route_result_with_semantic(semantic_kind: crate::OutputSemanticKind) -> RouteResult {
+pub(super) fn route_result_with_semantic(semantic_kind: crate::OutputSemanticKind) -> RouteResult {
     let mut route = route_result(false);
     route.output_contract = crate::IntentOutputContract {
         semantic_kind,
@@ -308,7 +308,10 @@ fn route_result_with_semantic(semantic_kind: crate::OutputSemanticKind) -> Route
     route
 }
 
-fn route_result_with_risk(needs_clarify: bool, risk_ceiling: crate::RiskCeiling) -> RouteResult {
+pub(super) fn route_result_with_risk(
+    needs_clarify: bool,
+    risk_ceiling: crate::RiskCeiling,
+) -> RouteResult {
     RouteResult {
         ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "test".to_string(),
@@ -328,7 +331,7 @@ fn route_result_with_risk(needs_clarify: bool, risk_ceiling: crate::RiskCeiling)
     }
 }
 
-fn plan_result(steps: Vec<PlanStep>) -> PlanResult {
+pub(super) fn plan_result(steps: Vec<PlanStep>) -> PlanResult {
     PlanResult {
         goal: "test".to_string(),
         missing_slots: Vec::new(),
@@ -912,114 +915,6 @@ fn enforce_mode_blocks_mutation_above_low_risk_ceiling() {
             .pointer("/steps/0/risk_level")
             .and_then(serde_json::Value::as_str),
         Some("high")
-    );
-}
-
-#[test]
-fn workspace_fs_basic_mutation_does_not_emit_route_ceiling_or_confirmation_noise() {
-    let state = test_state();
-    let task = test_task();
-    let route = route_result_with_risk(false, crate::RiskCeiling::Low);
-    let result = verify_plan(
-        &state,
-        &task,
-        VerifyInput {
-            route_result: Some(&route),
-            request_text: None,
-            context_bundle_summary: None,
-            plan_result: &plan_result(vec![
-                PlanStep {
-                    step_id: "s1".to_string(),
-                    action_type: "call_tool".to_string(),
-                    skill: "fs_basic".to_string(),
-                    args: json!({
-                        "action": "make_dir",
-                        "path": "run/nl_eval_tmp/verifier_workspace_mutation"
-                    }),
-                    depends_on: Vec::new(),
-                    why: String::new(),
-                },
-                PlanStep {
-                    step_id: "s2".to_string(),
-                    action_type: "call_tool".to_string(),
-                    skill: "fs_basic".to_string(),
-                    args: json!({
-                        "action": "write_text",
-                        "path": "run/nl_eval_tmp/verifier_workspace_mutation/calc_core.py",
-                        "content": "def add(a, b):\n    return a + b\n"
-                    }),
-                    depends_on: vec!["s1".to_string()],
-                    why: String::new(),
-                },
-            ]),
-            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
-        },
-        VerifyMode::ObserveOnly,
-    );
-
-    assert!(result.approved, "issues: {:?}", result.issues);
-    assert!(!result.needs_confirmation, "issues: {:?}", result.issues);
-    assert!(result.issues.iter().all(|issue| {
-        !matches!(
-            issue.kind,
-            VerifyIssueKind::RiskBudgetExceeded | VerifyIssueKind::ConfirmationRequired
-        )
-    }));
-    assert_eq!(
-        result
-            .permission_decision
-            .pointer("/steps/0/decision")
-            .and_then(serde_json::Value::as_str),
-        Some("allow")
-    );
-    assert_eq!(
-        result
-            .permission_decision
-            .pointer("/steps/0/sandbox_profile")
-            .and_then(serde_json::Value::as_str),
-        Some("local_current_workspace")
-    );
-    assert_eq!(
-        result
-            .permission_decision
-            .pointer("/steps/0/sandbox/source")
-            .and_then(serde_json::Value::as_str),
-        Some("registry_capability_policy")
-    );
-    assert_eq!(
-        result
-            .permission_decision
-            .pointer("/steps/0/workspace_scope/scope")
-            .and_then(serde_json::Value::as_str),
-        Some("workspace_scoped")
-    );
-    assert_eq!(
-        result
-            .permission_decision
-            .pointer("/steps/0/workspace_scope/untrusted_path_present")
-            .and_then(serde_json::Value::as_bool),
-        Some(false)
-    );
-    assert_eq!(
-        result
-            .permission_decision
-            .pointer("/steps/1/decision")
-            .and_then(serde_json::Value::as_str),
-        Some("allow")
-    );
-    assert_eq!(
-        result
-            .permission_decision
-            .pointer("/steps/1/workspace_scope/path_arg_count")
-            .and_then(serde_json::Value::as_u64),
-        Some(1)
-    );
-    assert_eq!(
-        result
-            .permission_decision
-            .pointer("/steps/1/sandbox/filesystem_write")
-            .and_then(serde_json::Value::as_bool),
-        Some(true)
     );
 }
 
