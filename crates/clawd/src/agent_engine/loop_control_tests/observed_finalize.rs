@@ -957,6 +957,38 @@ fn executable_contract_capability_observe_only_round_continues_at_round_cap() {
 }
 
 #[test]
+fn executable_contract_fs_basic_capability_read_only_round_continues_planner() {
+    let mut loop_state = LoopState::new(4);
+    loop_state.round_no = 1;
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_text_range","path":"/workspace/project/calc_core.py","resolved_path":"/workspace/project/calc_core.py","excerpt":"1|def add(a,b): return a+b\n2|def sub(a,b): return a-b"}}"#,
+    ));
+    let mut route = route_result(OutputResponseShape::FileToken);
+    route.route_reason = "command_payload_preserved_for_agent_loop; executable_contract_preserved_for_agent_loop; current_turn_locator_overrides_contextual_path".to_string();
+    let actions = vec![AgentAction::CallCapability {
+        capability: "fs_basic.read_text_range".to_string(),
+        args: json!({"path":"/workspace/project/calc_core.py"}),
+    }];
+
+    assert!(executable_contract_observe_only_round_should_continue(
+        &route,
+        &loop_state,
+        &actions,
+    ));
+    assert!(!should_stop_for_observed_finalize(
+        Some(&AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        }),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
 fn recipe_done_does_not_scan_user_text_for_success_marker() {
     let mut loop_state = LoopState::new(2);
     loop_state.execution_recipe = ExecutionRecipeRuntimeState {

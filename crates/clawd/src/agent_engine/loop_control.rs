@@ -40,6 +40,7 @@ use loop_control_answer_recovery_text::*;
 use loop_control_executable_contract_observe::{
     executable_contract_observation_round_needs_planner,
     executable_contract_observe_only_round_should_continue,
+    executable_contract_read_observe_round_should_continue,
 };
 use loop_control_filesystem_mutation_recovery::*;
 use loop_control_finalization_gate::*;
@@ -1128,6 +1129,9 @@ fn should_stop_for_observed_finalize(
         } else {
             super::observed_output::has_observed_answer_candidates(loop_state)
         };
+    if executable_contract_read_observe_round_should_continue(route_result, loop_state, actions) {
+        return false;
+    }
     if executable_contract_observation_round_needs_planner(route_result, loop_state, actions)
         && !has_observed_stop_candidate
     {
