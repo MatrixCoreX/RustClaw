@@ -16,6 +16,8 @@ mod task_journal_evidence_collect;
 mod task_journal_evidence_coverage;
 #[path = "task_journal_evidence_registry.rs"]
 mod task_journal_evidence_registry;
+#[path = "task_journal_goal.rs"]
+mod task_journal_goal;
 #[path = "task_journal_rollout_attribution.rs"]
 mod task_journal_rollout_attribution;
 #[path = "task_journal_trace_storage.rs"]
@@ -38,6 +40,7 @@ pub(crate) use task_journal_evidence_registry::{
     evidence_extractor_registry_contains, evidence_extractor_registry_trace,
     observed_evidence_for_step_trace, observed_evidence_from_output,
 };
+use task_journal_goal::task_goal_summary_json;
 use task_journal_trace_storage::*;
 use task_journal_validation_result::validation_result_json;
 
@@ -1770,6 +1773,7 @@ impl TaskJournal {
             "answer_verifier_summary": self.answer_verifier_summary.as_ref().map(answer_verifier_summary_json),
             "task_lifecycle": self.task_lifecycle.clone(),
             "task_checkpoint": self.task_checkpoint.clone(),
+            "task_goal": task_goal_summary_json(self),
             "task_outcome": task_outcome_summary_json(self),
             "task_metrics": task_metrics_json(&self.task_metrics),
             "cost_budget": cost_budget_json(self),
@@ -1872,6 +1876,7 @@ impl TaskJournal {
             "answer_verifier_summary": self.answer_verifier_summary.as_ref().map(answer_verifier_summary_json),
             "task_lifecycle": self.task_lifecycle.clone(),
             "task_checkpoint": self.task_checkpoint.clone(),
+            "task_goal": task_goal_summary_json(self),
             "task_metrics": task_metrics_json(&self.task_metrics),
             "cost_budget": cost_budget_json(self),
             "validation_result": validation_result_json(self),
@@ -1922,6 +1927,10 @@ mod recent_artifacts_tests;
 #[cfg(test)]
 #[path = "task_journal_coding_state_tests.rs"]
 mod coding_state_tests;
+
+#[cfg(test)]
+#[path = "task_journal_goal_tests.rs"]
+mod goal_tests;
 
 #[cfg(test)]
 #[path = "task_journal_service_capability_evidence_tests.rs"]

@@ -206,9 +206,13 @@ fn merge_goal_progress_fields(projected: &mut Map<String, Value>, goal: Option<&
     };
     for key in [
         "goal_status",
+        "goal_status_source",
         "current_progress",
         "remaining_work",
         "success_evidence_refs",
+        "validation_status",
+        "verification_status",
+        "missing_evidence",
         "blocking_reason_code",
         "last_checkpoint_id",
         "last_successful_evidence_ref",

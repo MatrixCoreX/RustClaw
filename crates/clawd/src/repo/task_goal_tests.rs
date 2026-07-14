@@ -39,11 +39,13 @@ fn task_goal_projection_merges_payload_goal_and_structured_progress() {
     let result = json!({
         "task_journal": {
             "summary": {
-                "task_outcome": {
+                "task_goal": {
                     "goal_status": "completed",
+                    "goal_status_source": "journal_final_status",
                     "current_progress": ["changed_file_count=2"],
                     "remaining_work": [],
-                    "success_evidence_refs": ["event:task_completed"]
+                    "success_evidence_refs": ["event:task_completed"],
+                    "validation_status": "passed"
                 }
             }
         }
@@ -64,6 +66,8 @@ fn task_goal_projection_merges_payload_goal_and_structured_progress() {
     assert_eq!(goal["verification_commands"][0], "cargo test -p clawcli");
     assert_eq!(goal["constraints"][0]["scope"], "workspace");
     assert_eq!(goal["goal_status"], "completed");
+    assert_eq!(goal["goal_status_source"], "journal_final_status");
+    assert_eq!(goal["validation_status"], "passed");
     assert_eq!(goal["current_progress"][0], "changed_file_count=2");
     assert_eq!(goal["success_evidence_refs"][0], "event:task_completed");
 }
