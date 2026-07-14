@@ -10,6 +10,8 @@ mod task_answer_verifier_failure;
 mod task_config_guard_recovery;
 #[path = "task_content_evidence_delivery.rs"]
 mod task_content_evidence_delivery;
+#[path = "task_deterministic_recovery.rs"]
+mod task_deterministic_recovery;
 #[path = "task_failure_lifecycle.rs"]
 mod task_failure_lifecycle;
 #[path = "task_machine_kv_summary.rs"]
@@ -41,6 +43,11 @@ use task_config_guard_recovery::deterministic_config_guard_candidates_recovery;
 use task_content_evidence_delivery::{
     backfill_file_delivery_contract_from_journal, has_any_delivery_file_token,
     route_has_file_delivery_contract,
+};
+use task_deterministic_recovery::{
+    mark_answer_verifier_recovered_by_deterministic_observed_evidence,
+    recover_answer_verifier_gap_with_deterministic_machine_evidence,
+    recover_raw_command_machine_field_final_answer,
 };
 use task_failure_lifecycle::failed_task_lifecycle_payload;
 #[cfg(test)]
@@ -81,28 +88,6 @@ pub(crate) async fn retry_loop_answer_after_verifier(
         verifier,
     )
     .await
-}
-
-fn recover_raw_command_machine_field_final_answer(
-    route_result: &crate::RouteResult,
-    journal: &mut crate::task_journal::TaskJournal,
-    answer_text: &mut String,
-    answer_messages: &mut Vec<String>,
-) -> bool {
-    let Some(answer) =
-        crate::finalize::raw_command_machine_field_projection_from_journal(route_result, journal)
-    else {
-        return false;
-    };
-    if answer.trim() == answer_text.trim() {
-        return false;
-    }
-    *answer_text = answer;
-    answer_messages.clear();
-    answer_messages.push(answer_text.clone());
-    journal.record_final_answer(answer_text.as_str());
-    mark_answer_verifier_recovered_by_deterministic_observed_evidence(journal);
-    true
 }
 
 #[cfg(test)]
@@ -409,19 +394,6 @@ fn deterministic_raw_tail_read_failure_recovery(
             .as_deref()
             .and_then(|output| raw_tail_read_answer_from_step_output(output, prefer_english))
     })
-}
-
-fn mark_answer_verifier_recovered_by_deterministic_observed_evidence(
-    journal: &mut crate::task_journal::TaskJournal,
-) {
-    journal.record_answer_verifier_summary(crate::answer_verifier::AnswerVerifierOut {
-        pass: true,
-        missing_evidence_fields: Vec::new(),
-        answer_incomplete_reason: String::new(),
-        should_retry: false,
-        retry_instruction: String::new(),
-        confidence: 1.0,
-    });
 }
 
 fn assistant_memory_source_text(answer_text: &str, answer_messages: &[String]) -> String {
@@ -1386,7 +1358,23 @@ pub(crate) async fn finalize_ask_result(
                     let retry_verifier_input = answer_verifier.clone();
                     journal.record_answer_verifier_summary(answer_verifier);
                     if answer_verifier_retry {
-                        if let Some(retried_answer) = retry_answer_after_verifier(
+                        let recovered_by_machine_evidence =
+                            recover_answer_verifier_gap_with_deterministic_machine_evidence(
+                                prompt,
+                                route_result,
+                                &mut journal,
+                                &mut answer_text,
+                                &mut answer_messages,
+                            );
+                        if recovered_by_machine_evidence {
+                            failure_reply = false;
+                            semantic_clarify = false;
+                            info!(
+                                "finalize_answer_verifier_gap_recovered_before_llm_retry task_id={} answer={}",
+                                task.task_id,
+                                crate::truncate_for_log(&answer_text)
+                            );
+                        } else if let Some(retried_answer) = retry_answer_after_verifier(
                             state,
                             task,
                             prompt,

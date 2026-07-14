@@ -15,6 +15,7 @@ use super::{
     non_failure_final_status, normalize_existing_file_delivery_token_answer,
     promote_verified_terminal_answer_after_verifier_pass,
     record_answer_verifier_required_evidence_rollout_attribution,
+    recover_answer_verifier_gap_with_deterministic_machine_evidence,
     recover_requested_machine_kv_summary_final_answer, resume_context_has_directory_lookup_failure,
     resume_context_path_batch_facts_are_missing_only,
     resume_failure_is_unbound_path_lookup_clarify_result,
