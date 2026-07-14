@@ -163,6 +163,12 @@ run_metrics_gate() {
 
 echo "AGENT_PARITY_GATE out_dir=${OUT_DIR}"
 
+echo "AGENT_PARITY_GATE_STEP runtime_hard_reply_baseline"
+python3 "${ROOT_DIR}/scripts/check_no_runtime_hard_reply.py" --all \
+  --baseline "${ROOT_DIR}/scripts/baselines/runtime_hard_reply_baseline.txt" \
+  --fail-on-new \
+  > "${OUT_DIR}/runtime_hard_reply_baseline.txt"
+
 if [[ "$SKIP_COVERAGE" -eq 0 ]]; then
   echo "AGENT_PARITY_GATE_STEP compact_coverage"
   python3 "${SCRIPT_DIR}/check_compact_coverage.py" --report \
