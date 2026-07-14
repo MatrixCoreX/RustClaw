@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/schemas/context_compaction.schema.json",
+  "title": "RustClawModelAssistedContextCompaction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "summary_kind",
+    "facts",
+    "open_questions",
+    "active_goal_refs",
+    "artifact_refs",
+    "source_refs",
+    "risk_flags"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "summary_kind": {
+      "const": "model_assisted_context_compaction"
+    },
+    "facts": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "open_questions": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "type": "string"
+      }
+    },
+    "active_goal_refs": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "type": "string"
+      }
+    },
+    "artifact_refs": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "type": "string"
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "risk_flags": {
+      "type": "array",
+      "maxItems": 24,
+      "items": {
+        "type": "string",
+        "not": {
+          "enum": [
+            "current_user_instruction",
+            "user_instruction",
+            "assistant_instruction",
+            "next_instruction",
+            "next_action",
+            "task_directive"
+          ]
+        }
+      }
+    }
+  },
+  "not": {
+    "anyOf": [
+      { "required": ["current_user_instruction"] },
+      { "required": ["user_instruction"] },
+      { "required": ["assistant_instruction"] },
+      { "required": ["next_instruction"] },
+      { "required": ["next_action"] },
+      { "required": ["task_directive"] }
+    ]
+  }
+}
