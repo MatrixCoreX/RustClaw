@@ -5,6 +5,7 @@ import {
   buildTaskKindLabel,
   buildTaskLifecycleView,
   buildTaskPollingView,
+  buildResumeLifecycleMachineTokens,
   buildTaskStatusSummary,
   canCancelTaskControl,
   canPauseTaskControl,
@@ -157,6 +158,7 @@ export function ActiveTasksPanel({
           activeTasks.map((item) => {
             const lifecycleView = buildTaskLifecycleView(item.lifecycle, item.status, lang);
             const pollingView = buildTaskPollingView(item.lifecycle, lang);
+            const resumeMachineTokens = buildResumeLifecycleMachineTokens(item.lifecycle);
             const childView = buildChildTaskView(item);
             const taskKindLabel = buildTaskKindLabel(item.kind, lang);
             const canPause = canPauseTask(item);
@@ -208,6 +210,18 @@ export function ActiveTasksPanel({
                         </span>
                       ))}
                     </div>
+                    {resumeMachineTokens.length > 0 ? (
+                      <div className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                        <p className="text-xs font-medium text-white/70">{t("恢复机器字段", "Resume machine fields")}</p>
+                        <div className="mt-2 flex flex-wrap gap-1.5 font-mono text-[11px] text-white/60">
+                          {resumeMachineTokens.slice(0, 10).map((token) => (
+                            <span key={`${item.task_id}-${token}`} className="max-w-full break-all rounded-md border border-white/10 bg-black/20 px-2 py-1">
+                              {token}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button

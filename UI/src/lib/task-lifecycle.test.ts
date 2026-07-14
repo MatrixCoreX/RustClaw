@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildTaskKindLabel,
+  buildResumeLifecycleMachineTokens,
   buildTaskLifecycleView,
   buildTaskPollingView,
   buildTaskStatusSummary,
@@ -116,6 +117,43 @@ test("uses next action fields without exposing them as primary meta", () => {
   assert.ok(view.meta.some((item) => item === "Cancelable: Yes"));
   assert.equal(view.recommendedAction.actionKind, "poll_async_job");
   assert.equal(view.recommendedAction.label, "Waiting for background result");
+});
+
+test("builds resume lifecycle machine tokens for UI resume surface", () => {
+  const tokens = buildResumeLifecycleMachineTokens({
+    state: "background",
+    checkpoint_id: "ckpt-ready",
+    resume_due: true,
+    resume_wait_seconds: 0,
+    resume_owner: "worker-a",
+    resume_entrypoint: "next_planner_round",
+    resume_directive: "run_next_planner_round",
+    resume_reason: "agent_loop_soft_budget",
+    next_action_kind: "resume_checkpoint",
+    last_successful_evidence_ref: "step_3:evidence:1",
+    evidence_ref_count: 2,
+    budget: {
+      round: 2,
+      llm_calls: 5,
+      tool_calls: 7,
+    },
+  });
+
+  assert.deepEqual(tokens, [
+    "checkpoint_id=ckpt-ready",
+    "resume_due=true",
+    "resume_wait_seconds=0",
+    "resume_owner=worker-a",
+    "resume_entrypoint=next_planner_round",
+    "resume_directive=run_next_planner_round",
+    "resume_reason=agent_loop_soft_budget",
+    "next_action_kind=resume_checkpoint",
+    "last_successful_evidence_ref=step_3:evidence:1",
+    "evidence_ref_count=2",
+    "budget.round=2",
+    "budget.llm_calls=5",
+    "budget.tool_calls=7",
+  ]);
 });
 
 test("falls back to database status when lifecycle is absent", () => {
