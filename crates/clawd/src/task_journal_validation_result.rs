@@ -83,8 +83,8 @@ fn validation_signal_from_step(step: &TaskJournalStepTrace, code_context: bool) 
         return Some(json!({
             "step_id": &step.step_id,
             "source": "step_status",
-            "status": "passed",
-            "status_code": "validation_command_ok",
+            "status": "observed",
+            "status_code": "validation_command_observed",
             "message_key": Value::Null,
         }));
     }
