@@ -38,6 +38,16 @@ fn record_subagent_batch_action_with_config(
     let mut child_results = Vec::new();
     let mut child_requests = Vec::new();
     let mut child_summaries = Vec::new();
+    let mut team_children = Vec::new();
+    let mut team_lifecycle_events = vec![team_lifecycle_event(
+        "agent_team_started",
+        parallel_batch_id.as_str(),
+        None,
+        "started",
+        None,
+        None,
+        None,
+    )];
     let mut completed_count = 0usize;
     let mut rejected_count = 0usize;
     let mut skipped_count = 0usize;
@@ -55,6 +65,15 @@ fn record_subagent_batch_action_with_config(
             normalize_machine_token(child.role.as_str())
         );
         let role_token = child.role.trim();
+        team_lifecycle_events.push(team_lifecycle_event(
+            "subagent_started",
+            parallel_batch_id.as_str(),
+            Some(child_run_id.as_str()),
+            "started",
+            Some(machine_ref_or_empty(role_token)),
+            Some(child.required),
+            None,
+        ));
         let Some(role) = SubagentRole::parse_token(role_token) else {
             rejected_count += 1;
             if child.required {
@@ -68,6 +87,23 @@ fn record_subagent_batch_action_with_config(
                 child.required,
                 "subagent_role_not_allowed",
             );
+            team_children.push(agent_team_child_spec(
+                child_run_id.as_str(),
+                machine_ref_or_empty(role_token),
+                "unresolved",
+                child.required,
+                None,
+                "rejected",
+            ));
+            team_lifecycle_events.push(team_lifecycle_event(
+                "subagent_failed",
+                parallel_batch_id.as_str(),
+                Some(child_run_id.as_str()),
+                "rejected",
+                Some(machine_ref_or_empty(role_token)),
+                Some(child.required),
+                Some("subagent_role_not_allowed"),
+            ));
             child_summaries.push(child_summary_from_result(&child_result));
             child_results.push(child_result);
             continue;
@@ -85,6 +121,23 @@ fn record_subagent_batch_action_with_config(
                 child.required,
                 "subagent_role_disabled_by_config",
             );
+            team_children.push(agent_team_child_spec(
+                child_run_id.as_str(),
+                role.as_token(),
+                role.default_scope_token(),
+                child.required,
+                None,
+                "rejected",
+            ));
+            team_lifecycle_events.push(team_lifecycle_event(
+                "subagent_failed",
+                parallel_batch_id.as_str(),
+                Some(child_run_id.as_str()),
+                "rejected",
+                Some(role.as_token()),
+                Some(child.required),
+                Some("subagent_role_disabled_by_config"),
+            ));
             child_summaries.push(child_summary_from_result(&child_result));
             child_results.push(child_result);
             continue;
@@ -102,6 +155,23 @@ fn record_subagent_batch_action_with_config(
                 child.required,
                 "subagent_parallel_limit_exceeded",
             );
+            team_children.push(agent_team_child_spec(
+                child_run_id.as_str(),
+                role.as_token(),
+                role.default_scope_token(),
+                child.required,
+                None,
+                "skipped",
+            ));
+            team_lifecycle_events.push(team_lifecycle_event(
+                "subagent_failed",
+                parallel_batch_id.as_str(),
+                Some(child_run_id.as_str()),
+                "skipped",
+                Some(role.as_token()),
+                Some(child.required),
+                Some("subagent_parallel_limit_exceeded"),
+            ));
             child_summaries.push(child_summary_from_result(&child_result));
             child_results.push(child_result);
             continue;
@@ -114,6 +184,7 @@ fn record_subagent_batch_action_with_config(
         let budget_summary = subagent_budget_summary(child.options.budget.as_ref(), config);
         let timeout_policy = subagent_timeout_policy(&budget_summary);
         let cancellation_policy = subagent_cancellation_policy(&timeout_policy);
+        let timeout_ms = timeout_policy.get("timeout_ms").and_then(Value::as_u64);
         let findings = sanitized_findings(child.findings.as_ref());
         let finding_count = findings.len();
         finding_signals.observe_child_findings(child_run_id.as_str(), &findings);
@@ -145,6 +216,23 @@ fn record_subagent_batch_action_with_config(
             "failure_isolated": true,
         });
         completed_count += 1;
+        team_children.push(agent_team_child_spec(
+            child_run_id.as_str(),
+            role.as_token(),
+            role.default_scope_token(),
+            child.required,
+            timeout_ms,
+            "completed",
+        ));
+        team_lifecycle_events.push(team_lifecycle_event(
+            "subagent_finished",
+            parallel_batch_id.as_str(),
+            Some(child_run_id.as_str()),
+            "completed",
+            Some(role.as_token()),
+            Some(child.required),
+            None,
+        ));
         aggregated_evidence_refs.push(child_run_id.clone());
         if finding_count > 0 {
             aggregated_finding_refs.push(child_run_id.clone());
@@ -221,6 +309,37 @@ fn record_subagent_batch_action_with_config(
         conflict_count,
         expected_failure_delivery,
     );
+    let recommended_next_action = main_thread_decision
+        .get("recommended_next_action")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if conflict_count > 0 {
+        team_lifecycle_events.push(team_lifecycle_event(
+            "agent_team_conflict_detected",
+            parallel_batch_id.as_str(),
+            None,
+            "needs_conflict_resolution",
+            None,
+            None,
+            Some("subagent_conflict_detected"),
+        ));
+    }
+    team_lifecycle_events.push(team_lifecycle_event(
+        "agent_team_aggregated",
+        parallel_batch_id.as_str(),
+        None,
+        parent_result_status,
+        None,
+        None,
+        None,
+    ));
+    let team_spec = agent_team_spec(
+        parallel_batch_id.as_str(),
+        invocation_policy.parent_task_id.as_deref(),
+        config.max_parallel_readonly,
+        &team_children,
+    );
     let child_result = json!({
         "schema_version": 1,
         "status": aggregate_status,
@@ -262,6 +381,8 @@ fn record_subagent_batch_action_with_config(
         "actual_required_child_failed": required_failed_count > 0,
         "actual_failure_isolated": required_failed_count == 0,
         "runtime_config": config.trace_summary(),
+        "team_spec": team_spec,
+        "team_lifecycle_events": team_lifecycle_events,
         "scheduler": {
             "status": parent_scheduler_status,
             "reason_code": "bounded_parallel_readonly_execution",
@@ -302,6 +423,7 @@ fn record_subagent_batch_action_with_config(
             "conflict_summary": conflict_summary,
             "conflict_count": conflict_count,
             "main_thread_decision": main_thread_decision,
+            "recommended_next_action": recommended_next_action,
             "expected_failure_delivery": expected_failure_delivery,
         },
         "child_requests": child_requests,
@@ -331,10 +453,11 @@ fn record_subagent_batch_action_with_config(
         .then_some(SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED)
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 struct SubagentInvocationPolicy {
     dry_run: bool,
     expected_failure: bool,
+    parent_task_id: Option<String>,
 }
 
 impl SubagentInvocationPolicy {
@@ -342,10 +465,17 @@ impl SubagentInvocationPolicy {
         Self {
             dry_run: args.get("dry_run").and_then(Value::as_bool) == Some(true),
             expected_failure: args.get("expected_failure").and_then(Value::as_bool) == Some(true),
+            parent_task_id: args
+                .get("parent_task_id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .map(machine_ref_or_empty)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string),
         }
     }
 
-    fn expected_failure_delivery(self, required_failed_count: usize) -> bool {
+    fn expected_failure_delivery(&self, required_failed_count: usize) -> bool {
         self.dry_run && self.expected_failure && required_failed_count > 0
     }
 }
@@ -500,11 +630,85 @@ fn aggregation_main_thread_decision(
         "decision_owner": "parent_agent_loop",
         "decision_required": required_failed_count > 0 || conflict_count > 0,
         "decision_status": decision_status,
+        "recommended_next_action": if expected_failure_delivery {
+            "deliver_expected_failure_evidence"
+        } else if required_failed_count > 0 {
+            "repair_required_child_failure"
+        } else if conflict_count > 0 {
+            "resolve_child_conflicts"
+        } else {
+            "synthesize_from_child_findings"
+        },
         "input_refs": [
             "child_results",
             "aggregation.conflict_summary",
             "aggregation.confidence_summary"
         ],
+    })
+}
+
+fn agent_team_spec(
+    team_id: &str,
+    parent_task_id: Option<&str>,
+    max_parallel: u64,
+    children: &[Value],
+) -> Value {
+    json!({
+        "schema_version": 1,
+        "spec_kind": "agent_team_spec",
+        "team_id": team_id,
+        "parent_task_id": parent_task_id.unwrap_or_default(),
+        "child_task_ids": children
+            .iter()
+            .filter_map(|child| child.get("child_task_id").and_then(Value::as_str))
+            .collect::<Vec<_>>(),
+        "max_parallel": max_parallel,
+        "write_permission": "read_only",
+        "conflict_policy": "parent_loop_resolution_required",
+        "children": children,
+    })
+}
+
+fn agent_team_child_spec(
+    child_run_id: &str,
+    role: &str,
+    scope: &str,
+    required: bool,
+    timeout_ms: Option<u64>,
+    status: &str,
+) -> Value {
+    json!({
+        "schema_version": 1,
+        "child_task_id": child_run_id,
+        "child_run_id": child_run_id,
+        "role": role,
+        "scope": scope,
+        "required": required,
+        "timeout_ms": timeout_ms,
+        "write_permission": "read_only",
+        "status": status,
+    })
+}
+
+fn team_lifecycle_event(
+    event_type: &'static str,
+    team_id: &str,
+    child_run_id: Option<&str>,
+    status: &str,
+    role: Option<&str>,
+    required: Option<bool>,
+    reason_code: Option<&str>,
+) -> Value {
+    json!({
+        "schema_version": 1,
+        "event_type": event_type,
+        "team_id": team_id,
+        "child_run_id": child_run_id,
+        "status": status,
+        "role": role,
+        "required": required,
+        "reason_code": reason_code,
+        "write_permission": "read_only",
     })
 }
 

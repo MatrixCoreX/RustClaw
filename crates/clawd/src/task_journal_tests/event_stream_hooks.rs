@@ -116,6 +116,95 @@ fn trace_json_includes_pollable_machine_event_stream() {
 }
 
 #[test]
+fn trace_json_expands_subagent_team_lifecycle_events() {
+    let mut journal = TaskJournal::for_task("task-subagent-team", "ask", "inspect");
+    journal.push_task_observation(json!({
+        "schema_version": 1,
+        "owner_layer": "subagent_runtime",
+        "status": "completed",
+        "team_spec": {
+            "schema_version": 1,
+            "spec_kind": "agent_team_spec",
+            "team_id": "subagent-batch:1:1",
+            "max_parallel": 2,
+            "write_permission": "read_only",
+            "conflict_policy": "parent_loop_resolution_required",
+            "children": []
+        },
+        "team_lifecycle_events": [
+            {
+                "schema_version": 1,
+                "event_type": "agent_team_started",
+                "team_id": "subagent-batch:1:1",
+                "status": "started",
+                "write_permission": "read_only"
+            },
+            {
+                "schema_version": 1,
+                "event_type": "subagent_finished",
+                "team_id": "subagent-batch:1:1",
+                "child_run_id": "subagent-batch:1:1:explorer",
+                "role": "explorer",
+                "status": "completed",
+                "required": true,
+                "write_permission": "read_only"
+            },
+            {
+                "schema_version": 1,
+                "event_type": "agent_team_aggregated",
+                "team_id": "subagent-batch:1:1",
+                "status": "completed",
+                "write_permission": "read_only"
+            },
+            {
+                "schema_version": 1,
+                "event_type": "unsupported_team_event",
+                "team_id": "subagent-batch:1:1",
+                "status": "ignored"
+            }
+        ]
+    }));
+
+    let trace = journal.to_trace_json();
+    let events = trace
+        .get("event_stream")
+        .and_then(Value::as_array)
+        .expect("event_stream");
+    let event_types = events
+        .iter()
+        .filter_map(|event| event.get("event_type").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        event_types,
+        vec![
+            "subagent",
+            "agent_team_started",
+            "subagent_finished",
+            "agent_team_aggregated"
+        ]
+    );
+    assert_eq!(
+        events[1]
+            .pointer("/payload/team_id")
+            .and_then(Value::as_str),
+        Some("subagent-batch:1:1")
+    );
+    assert_eq!(
+        events[2]
+            .pointer("/payload/child_run_id")
+            .and_then(Value::as_str),
+        Some("subagent-batch:1:1:explorer")
+    );
+    assert_eq!(
+        events[3]
+            .pointer("/payload/write_permission")
+            .and_then(Value::as_str),
+        Some("read_only")
+    );
+}
+
+#[test]
 fn trace_json_projects_checkpoint_as_machine_event() {
     let mut journal = TaskJournal::for_task("task-checkpoint-event", "ask", "long task");
     journal.record_task_checkpoint(json!({

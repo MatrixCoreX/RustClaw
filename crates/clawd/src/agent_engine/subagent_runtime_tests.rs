@@ -334,6 +334,38 @@ fn subagent_batch_records_bounded_parallel_aggregation() {
         observation["execution_mode"],
         "bounded_parallel_readonly_child_runs"
     );
+    assert_eq!(observation["team_spec"]["spec_kind"], "agent_team_spec");
+    assert_eq!(observation["team_spec"]["team_id"], "subagent-batch:5:2");
+    assert_eq!(observation["team_spec"]["max_parallel"], 4);
+    assert_eq!(observation["team_spec"]["write_permission"], "read_only");
+    assert_eq!(
+        observation["team_spec"]["conflict_policy"],
+        "parent_loop_resolution_required"
+    );
+    assert_eq!(
+        observation["team_spec"]["children"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        observation["team_lifecycle_events"][0]["event_type"],
+        "agent_team_started"
+    );
+    assert!(observation["team_lifecycle_events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|event| event["event_type"] == "subagent_finished"));
+    assert_eq!(
+        observation["team_lifecycle_events"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["event_type"],
+        "agent_team_aggregated"
+    );
     assert_eq!(
         observation["scheduler"]["status"],
         "bounded_parallel_completed"
@@ -365,6 +397,10 @@ fn subagent_batch_records_bounded_parallel_aggregation() {
     assert_eq!(
         observation["aggregation"]["main_thread_decision"]["decision_status"],
         "ready_to_synthesize"
+    );
+    assert_eq!(
+        observation["aggregation"]["recommended_next_action"],
+        "synthesize_from_child_findings"
     );
     assert_eq!(
         observation["child_results"][0]["findings"][0]["kind"],
@@ -405,6 +441,10 @@ fn subagent_batch_records_bounded_parallel_aggregation() {
     assert_eq!(
         observation["child_requests"][1]["timeout_policy"]["terminal_status_on_timeout"],
         "timeout"
+    );
+    assert_eq!(
+        observation["child_requests"][1]["cancellation_policy"]["cancel_scope"],
+        "child_run"
     );
     assert_eq!(
         observation["child_result"]["outcome_code"],
@@ -489,6 +529,15 @@ fn subagent_batch_records_conflicting_findings_for_parent_decision() {
         observation["aggregation"]["main_thread_decision"]["decision_status"],
         "needs_conflict_resolution"
     );
+    assert_eq!(
+        observation["aggregation"]["recommended_next_action"],
+        "resolve_child_conflicts"
+    );
+    assert!(observation["team_lifecycle_events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|event| event["event_type"] == "agent_team_conflict_detected"));
     assert_eq!(observation["child_run_summary"]["conflict_count"], 1);
 }
 

@@ -19,6 +19,10 @@ import {
   attachmentIsImage,
   formatAttachmentSize,
 } from "../lib/chat-attachments";
+import {
+  teachingMessageInteractive,
+  teachingRunByMessageId,
+} from "../lib/chat-teaching";
 import type { ChatAttachment, ChatMessage, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
 import { TaskLlmTracePanel } from "./TaskLlmTracePanel";
 
@@ -151,21 +155,13 @@ export function ChatPage({
       null,
     [activeChatTeachingRunId, chatTeachingRuns],
   );
-  const teachingRunByMessageId = useMemo(() => {
-    const runsByMessage = new Map<string, ChatTeachingRunSummary>();
-    chatTeachingRuns.forEach((run) => {
-      runsByMessage.set(run.userMessageId, run);
-      if (run.assistantMessageId) {
-        runsByMessage.set(run.assistantMessageId, run);
-      }
-    });
-    return runsByMessage;
-  }, [chatTeachingRuns]);
-  const teachingPanelVisible = chatTeachingMode || chatTeachingRuns.length > 0;
+  const teachingRunByMessage = useMemo(
+    () => teachingRunByMessageId(chatTeachingRuns),
+    [chatTeachingRuns],
+  );
+  const teachingPanelVisible = chatTeachingMode;
   const selectTeachingRunFromMessage = (run: ChatTeachingRunSummary) => {
-    if (!chatTeachingMode) {
-      onChatTeachingModeChange(true);
-    }
+    if (!chatTeachingMode) return;
     onSelectChatTeachingRun(run.id);
   };
 
@@ -282,9 +278,10 @@ export function ChatPage({
 
       <div className="h-80 space-y-3 overflow-auto rounded-xl border border-white/10 bg-black/30 p-3">
         {chatMessages.map((message) => {
-          const messageTeachingRun = teachingRunByMessageId.get(message.id) ?? null;
+          const messageTeachingRun = teachingRunByMessage.get(message.id) ?? null;
+          const messageTeachingEnabled = teachingMessageInteractive(chatTeachingMode, messageTeachingRun);
           const messageTeachingSelected = Boolean(
-            messageTeachingRun &&
+            messageTeachingEnabled &&
               (messageTeachingRun.id === activeChatTeachingRunId || messageTeachingRun.selected),
           );
           const bubbleClass =
@@ -298,28 +295,28 @@ export function ChatPage({
               <div className="flex items-center gap-2 text-[11px] text-white/50">
                 <span>{message.role}</span>
                 <span>{toLocalTime(message.ts)}</span>
-                {messageTeachingRun ? (
+                {messageTeachingEnabled ? (
                   <span className="rounded border border-sky-300/25 px-1.5 py-0.5 text-sky-100">
                     {t("教学", "Teach")}
                   </span>
                 ) : null}
               </div>
               <div
-                role={messageTeachingRun ? "button" : undefined}
-                tabIndex={messageTeachingRun ? 0 : undefined}
-                title={messageTeachingRun ? t("点击查看这一轮的完整教学内容", "Click to show this turn's full teaching trace") : undefined}
+                role={messageTeachingEnabled ? "button" : undefined}
+                tabIndex={messageTeachingEnabled ? 0 : undefined}
+                title={messageTeachingEnabled ? t("点击查看这一轮的完整教学内容", "Click to show this turn's full teaching trace") : undefined}
                 onClick={() => {
-                  if (messageTeachingRun) {
+                  if (messageTeachingEnabled && messageTeachingRun) {
                     selectTeachingRunFromMessage(messageTeachingRun);
                   }
                 }}
                 onKeyDown={(event) => {
-                  if (!messageTeachingRun || (event.key !== "Enter" && event.key !== " ")) return;
+                  if (!messageTeachingEnabled || !messageTeachingRun || (event.key !== "Enter" && event.key !== " ")) return;
                   event.preventDefault();
                   selectTeachingRunFromMessage(messageTeachingRun);
                 }}
                 className={`${bubbleClass} ${
-                  messageTeachingRun
+                  messageTeachingEnabled
                     ? "cursor-pointer transition hover:ring-1 hover:ring-sky-300/45 focus:outline-none focus:ring-2 focus:ring-sky-300/60"
                     : ""
                 } ${messageTeachingSelected ? "ring-2 ring-sky-300/65" : ""}`}

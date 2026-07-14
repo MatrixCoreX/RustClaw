@@ -543,6 +543,8 @@ pub(super) fn subagent_report_json(task: &task::TaskStatusView) -> Value {
         "status": task.status,
         "execution_state": task.execution_state(),
         "lifecycle_state": task.lifecycle_state(),
+        "team_count": signals.teams.len(),
+        "teams": signals.teams,
         "subagent_count": signals.items.len(),
         "subagents": signals.items,
     })
@@ -1666,6 +1668,8 @@ fn collect_retry_fields(map: &Map<String, Value>, signals: &mut CodingReportSign
 struct SubagentReportSignals {
     seen: BTreeSet<String>,
     items: Vec<Value>,
+    seen_teams: BTreeSet<String>,
+    teams: Vec<Value>,
 }
 
 fn collect_subagent_report_signals(
@@ -1682,6 +1686,9 @@ fn collect_subagent_report_signals(
                 for child in children {
                     collect_subagent_report_signals(child, signals, depth + 1);
                 }
+            }
+            if let Some(Value::Object(team_spec)) = map.get("team_spec") {
+                push_subagent_team(team_spec, signals);
             }
             if is_subagent_object(map) {
                 push_subagent_item(map, signals);
@@ -1729,6 +1736,30 @@ fn is_subagent_object(map: &Map<String, Value>) -> bool {
         || map.get("subagent_id").is_some()
         || map.get("subagent_results").is_some()
         || map.get("finding_refs").is_some()
+}
+
+fn push_subagent_team(map: &Map<String, Value>, signals: &mut SubagentReportSignals) {
+    let team_id = machine_string_field(map, "team_id").unwrap_or_default();
+    if team_id.is_empty()
+        || !signals.seen_teams.insert(team_id.clone())
+        || signals.teams.len() >= 64
+    {
+        return;
+    }
+    let child_count = map
+        .get("children")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    signals.teams.push(json!({
+        "team_id": team_id,
+        "parent_task_id": machine_string_field(map, "parent_task_id"),
+        "max_parallel": map.get("max_parallel").and_then(Value::as_u64),
+        "write_permission": machine_string_field(map, "write_permission"),
+        "conflict_policy": machine_string_field(map, "conflict_policy"),
+        "child_count": child_count,
+        "child_task_ids": machine_ref_array(map.get("child_task_ids")),
+    }));
 }
 
 fn push_subagent_item(map: &Map<String, Value>, signals: &mut SubagentReportSignals) {

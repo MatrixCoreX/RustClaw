@@ -7,7 +7,7 @@ use super::{
     step_action_kind, TaskJournal, TaskJournalFinalStatus,
 };
 
-fn task_event_json(seq: &mut u64, event_type: &'static str, payload: Value) -> Value {
+fn task_event_json(seq: &mut u64, event_type: &str, payload: Value) -> Value {
     *seq += 1;
     json!({
         "seq": *seq,
@@ -154,7 +154,8 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
             if let Some(obj) = payload.as_object_mut() {
                 obj.insert("index".to_string(), json!(index));
             }
-            events.push(task_event_json(&mut seq, "subagent", payload));
+            events.push(task_event_json(&mut seq, "subagent", payload.clone()));
+            append_subagent_team_lifecycle_events(&mut seq, &mut events, &payload);
         } else {
             events.push(task_event_json(
                 &mut seq,
@@ -191,6 +192,41 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
         ));
     }
     events
+}
+
+fn append_subagent_team_lifecycle_events(
+    seq: &mut u64,
+    events: &mut Vec<Value>,
+    observation: &Value,
+) {
+    let Some(items) = observation
+        .get("team_lifecycle_events")
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    for item in items.iter().take(64) {
+        let Some(event_type) = item
+            .get("event_type")
+            .and_then(Value::as_str)
+            .and_then(subagent_team_event_type)
+        else {
+            continue;
+        };
+        events.push(task_event_json(seq, event_type, item.clone()));
+    }
+}
+
+fn subagent_team_event_type(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "agent_team_started" => Some("agent_team_started"),
+        "subagent_started" => Some("subagent_started"),
+        "subagent_finished" => Some("subagent_finished"),
+        "subagent_failed" => Some("subagent_failed"),
+        "agent_team_aggregated" => Some("agent_team_aggregated"),
+        "agent_team_conflict_detected" => Some("agent_team_conflict_detected"),
+        _ => None,
+    }
 }
 
 fn checkpoint_event_payload(checkpoint: &Value) -> Value {

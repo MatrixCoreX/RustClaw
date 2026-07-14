@@ -243,11 +243,19 @@ export function traceEventMeta(event: Record<string, unknown>): string[] {
     "decision",
     "reason_code",
     "role",
+    "team_id",
+    "parent_task_id",
+    "child_task_id",
     "execution_mode",
     "write_enabled",
+    "write_permission",
     "external_publish_enabled",
     "failure_isolated",
     "child_run_id",
+    "required",
+    "max_parallel",
+    "conflict_policy",
+    "recommended_next_action",
     "objective_present",
     "objective_char_count",
     "context_ref_count",
@@ -462,6 +470,46 @@ export function buildTaskTraceEventView(event: Record<string, unknown>, lang: Ta
           ? tLocal(`记录了 ${changed} 个变更文件。`, `Recorded ${changed} changed file(s).`)
           : tLocal("代码任务进度已记录。", "Coding task progress was recorded."),
       tone,
+      meta,
+    };
+  }
+
+  if (
+    eventType === "agent_team_started" ||
+    eventType === "agent_team_aggregated" ||
+    eventType === "agent_team_conflict_detected"
+  ) {
+    const teamId = field("team_id");
+    const action = field("recommended_next_action") || field("reason_code");
+    const title =
+      eventType === "agent_team_started"
+        ? tLocal("团队任务已启动", "Agent team started")
+        : eventType === "agent_team_conflict_detected"
+          ? tLocal("团队发现冲突", "Agent team conflict")
+          : tLocal("团队结果已聚合", "Agent team aggregated");
+    return {
+      eventType,
+      title,
+      detail: action || teamId || eventType,
+      tone: eventType === "agent_team_conflict_detected" ? "attention" : tone,
+      meta,
+    };
+  }
+
+  if (eventType === "subagent_started" || eventType === "subagent_finished" || eventType === "subagent_failed") {
+    const childRunId = field("child_run_id");
+    const role = field("role");
+    const title =
+      eventType === "subagent_started"
+        ? tLocal("子智能体开始", "Subagent started")
+        : eventType === "subagent_failed"
+          ? tLocal("子智能体失败", "Subagent failed")
+          : tLocal("子智能体完成", "Subagent finished");
+    return {
+      eventType,
+      title,
+      detail: childRunId || role || eventType,
+      tone: eventType === "subagent_failed" ? "failed" : tone,
       meta,
     };
   }
