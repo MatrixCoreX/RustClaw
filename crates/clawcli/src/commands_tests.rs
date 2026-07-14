@@ -119,14 +119,35 @@ fn task_report_json_exposes_stable_machine_fields() {
         }),
         result_text: Some("result-token".to_string()),
         error_text: None,
-        events: vec![crate::events::TaskEventLine {
-            event_type: "task_completed".to_string(),
-            line: "seq=1 type=task_completed status=succeeded".to_string(),
-            fields: std::collections::BTreeMap::from([(
-                "status".to_string(),
-                "succeeded".to_string(),
-            )]),
-        }],
+        events: vec![
+            crate::events::TaskEventLine {
+                event_type: "task_completed".to_string(),
+                line: "seq=1 type=task_completed status=succeeded".to_string(),
+                fields: std::collections::BTreeMap::from([(
+                    "status".to_string(),
+                    "succeeded".to_string(),
+                )]),
+            },
+            crate::events::TaskEventLine {
+                event_type: "provider_call".to_string(),
+                line: "seq=2 type=provider_call prompt_label=normalizer".to_string(),
+                fields: std::collections::BTreeMap::from([
+                    ("prompt_label".to_string(), "normalizer".to_string()),
+                    ("llm_call_count".to_string(), "1".to_string()),
+                    ("elapsed_ms".to_string(), "42".to_string()),
+                    ("provider_attempt_count".to_string(), "2".to_string()),
+                    ("provider_retry_count".to_string(), "1".to_string()),
+                    ("prompt_truncation_count".to_string(), "1".to_string()),
+                    ("prompt_bytes_before_max".to_string(), "157037".to_string()),
+                    ("prompt_bytes_budget_min".to_string(), "125200".to_string()),
+                    ("prompt_bytes_after_max".to_string(), "125180".to_string()),
+                    (
+                        "prompt_truncated_bytes_total".to_string(),
+                        "31857".to_string(),
+                    ),
+                ]),
+            },
+        ],
     };
 
     let report = task_report_json(&task, true);
@@ -137,8 +158,13 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(report["execution_state"], "completed");
     assert_eq!(report["lifecycle_state"], "completed");
     assert_eq!(report["terminal"], true);
-    assert_eq!(report["event_count"], 1);
+    assert_eq!(report["event_count"], 2);
     assert_eq!(report["events"][0]["event_type"], "task_completed");
+    assert_eq!(report["llm"]["provider_call_event_count"], 1);
+    assert_eq!(report["llm"]["llm_call_count"], 1);
+    assert_eq!(report["llm"]["prompt_truncation_count"], 1);
+    assert_eq!(report["llm"]["prompt_bytes_before_max"], 157037);
+    assert_eq!(report["llm"]["by_prompt"][0]["prompt_label"], "normalizer");
     assert_eq!(report["coding"]["changed_file_count"], 1);
     assert_eq!(report["coding"]["changed_files"][0], "src/lib.rs");
     assert_eq!(report["coding"]["verification_command_count"], 1);

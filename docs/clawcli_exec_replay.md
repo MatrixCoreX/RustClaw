@@ -131,6 +131,12 @@ clawcli review "$TASK_ID" --json
 clawcli subagents "$TASK_ID" --json
 ```
 
+Inspect prompt and provider-call cost attribution:
+
+```bash
+clawcli report "$TASK_ID" --json
+```
+
 Inspect permission and capability policy machine fields:
 
 ```bash
