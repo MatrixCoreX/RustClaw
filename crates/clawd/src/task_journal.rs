@@ -6,6 +6,8 @@ use serde_json::{json, Value};
 mod decision_envelope;
 use self::decision_envelope::agent_loop_round_plan_decision_envelope_json;
 
+#[path = "task_journal_coding_state.rs"]
+mod task_journal_coding_state;
 #[path = "task_journal_event_stream.rs"]
 mod task_journal_event_stream;
 #[path = "task_journal_evidence_collect.rs"]
@@ -21,6 +23,7 @@ mod task_journal_trace_storage;
 #[path = "task_journal_validation_result.rs"]
 mod task_journal_validation_result;
 
+use task_journal_coding_state::coding_state_transition_observation;
 use task_journal_event_stream::task_event_stream_json;
 use task_journal_evidence_collect::*;
 use task_journal_evidence_coverage::*;
@@ -1488,6 +1491,9 @@ impl TaskJournal {
             started_at: step_result.started_at,
             finished_at: step_result.finished_at,
         });
+        if let Some(observation) = coding_state_transition_observation(step_result) {
+            self.task_observations.push(observation);
+        }
     }
 
     pub(crate) fn push_task_observation(&mut self, observation: Value) {
@@ -1905,6 +1911,10 @@ mod decision_envelope_tests;
 #[cfg(test)]
 #[path = "task_journal_recent_artifacts_tests.rs"]
 mod recent_artifacts_tests;
+
+#[cfg(test)]
+#[path = "task_journal_coding_state_tests.rs"]
+mod coding_state_tests;
 
 #[cfg(test)]
 #[path = "task_journal_service_capability_evidence_tests.rs"]
