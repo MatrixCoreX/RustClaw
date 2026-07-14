@@ -617,11 +617,21 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
         raw_data: serde_json::json!({
             "task_id": "task-exec-artifact",
             "status": "succeeded",
+            "task_lifecycle": {
+                "state": "background",
+                "checkpoint_id": "ckpt-exec-artifact",
+                "completed_side_effect_count": 1,
+                "requires_idempotency_guard": true
+            },
             "result_json": {
                 "changed_files": ["crates/clawcli/src/main.rs"],
                 "final_diff_summary": {
                     "file_count": 1,
                     "summary_code": "clawcli_exec_artifacts"
+                },
+                "task_checkpoint": {
+                    "checkpoint_id": "ckpt-exec-artifact",
+                    "completed_side_effect_refs": ["write_file:crates/clawcli/src/main.rs"]
                 },
                 "task_journal": {
                     "trace": {
@@ -671,6 +681,8 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
         std::fs::read_to_string(artifact_dir.join("events.jsonl")).expect("read event artifact");
     let resume_file =
         std::fs::read_to_string(artifact_dir.join("resume.json")).expect("read resume artifact");
+    let resume: serde_json::Value =
+        serde_json::from_str(&resume_file).expect("parse resume artifact");
     let verification_file = std::fs::read_to_string(artifact_dir.join("verification.json"))
         .expect("read verification artifact");
     let diff_summary_file = std::fs::read_to_string(artifact_dir.join("diff_summary.json"))
@@ -680,6 +692,17 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
     assert!(task_file.contains("\"task-exec-artifact\""));
     assert!(events_file.contains("type=task_completed"));
     assert!(resume_file.contains("\"task-exec-artifact\""));
+    assert_eq!(resume["completed_side_effect_count"], 1);
+    assert_eq!(resume["requires_idempotency_guard"], true);
+    assert_eq!(
+        resume["completed_side_effect_refs"][0],
+        "write_file:crates/clawcli/src/main.rs"
+    );
+    assert_eq!(resume["coding"]["changed_file_count"], 1);
+    assert_eq!(
+        resume["coding"]["verification_commands"][0],
+        "cargo test -p clawcli"
+    );
     assert!(verification_file.contains("\"artifact_kind\": \"rustclaw_exec_verification\""));
     assert!(verification_file.contains("\"verification_status\": \"verified\""));
     assert!(verification_file.contains("\"cargo test -p clawcli\""));

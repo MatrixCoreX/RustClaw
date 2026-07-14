@@ -58,7 +58,7 @@ Artifact files:
 | `events.jsonl` | Raw task event lines for later filtering or replay export. |
 | `verification.json` | Machine-readable coding verification summary: commands, tests, failure-kind tokens, verification status, and residual unverified risk. |
 | `diff_summary.json` | Machine-readable coding change summary: changed files and bounded diff summary fields collected from task evidence. |
-| `resume.json` | Stable recovery fields such as `task_id`, `checkpoint_id`, `resume_due`, `poll_ref`, `next_poll_after`, and `recommended_command_tokens`. |
+| `resume.json` | Stable recovery fields such as `task_id`, `checkpoint_id`, `resume_due`, `poll_ref`, `next_poll_after`, `recommended_command_tokens`, coding evidence, completed side-effect refs, and idempotency guard state. |
 
 ## Exec Profiles
 
