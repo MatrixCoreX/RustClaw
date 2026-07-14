@@ -82,6 +82,32 @@ enum Command {
         print_effective_config: bool,
     },
 
+    /// Coding-agent shortcut for exec --profile coding.
+    Code {
+        #[arg(required = true, num_args = 1.., trailing_var_arg = true)]
+        prompt: Vec<String>,
+        #[arg(long)]
+        resume_task_id: Option<String>,
+        #[arg(long)]
+        detach: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        jsonl: bool,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
+        #[arg(long, default_value_t = 1000)]
+        poll_interval_ms: u64,
+        #[arg(long)]
+        continue_on_background: bool,
+        #[arg(long)]
+        fail_on_background: bool,
+        #[arg(long)]
+        artifact_dir: Option<PathBuf>,
+        #[arg(long)]
+        print_effective_config: bool,
+    },
+
     /// POST /v1/tasks with kind=run_skill.
     RunSkill {
         skill_name: String,
@@ -458,7 +484,7 @@ fn main() -> Result<()> {
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             let prompt = prompt.join(" ");
-            let exit_code = commands::run_exec(
+            run_exec_command(
                 base_url,
                 k,
                 &prompt,
@@ -473,12 +499,39 @@ fn main() -> Result<()> {
                 *fail_on_background,
                 artifact_dir.as_ref(),
                 *print_effective_config,
-            )?;
-            if exit_code == 0 {
-                Ok(())
-            } else {
-                std::process::exit(i32::from(exit_code));
-            }
+            )
+        }
+        Command::Code {
+            prompt,
+            resume_task_id,
+            detach,
+            json,
+            jsonl,
+            timeout_seconds,
+            poll_interval_ms,
+            continue_on_background,
+            fail_on_background,
+            artifact_dir,
+            print_effective_config,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            let prompt = prompt.join(" ");
+            run_exec_command(
+                base_url,
+                k,
+                &prompt,
+                Some("coding"),
+                resume_task_id.as_deref(),
+                *detach,
+                *json,
+                *jsonl,
+                *timeout_seconds,
+                *poll_interval_ms,
+                *continue_on_background,
+                *fail_on_background,
+                artifact_dir.as_ref(),
+                *print_effective_config,
+            )
         }
         Command::RunSkill {
             skill_name,
@@ -817,5 +870,45 @@ fn main() -> Result<()> {
             generate(*shell, &mut cmd, bin_name, &mut std::io::stdout());
             Ok(())
         }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_exec_command(
+    base_url: &str,
+    key: &str,
+    prompt: &str,
+    profile_name: Option<&str>,
+    resume_task_id: Option<&str>,
+    detach: bool,
+    json_output: bool,
+    jsonl_output: bool,
+    timeout_seconds: Option<u64>,
+    interval_ms: u64,
+    continue_on_background: bool,
+    fail_on_background: bool,
+    artifact_dir: Option<&PathBuf>,
+    print_effective_config: bool,
+) -> Result<()> {
+    let exit_code = commands::run_exec(
+        base_url,
+        key,
+        prompt,
+        profile_name,
+        resume_task_id,
+        detach,
+        json_output,
+        jsonl_output,
+        timeout_seconds,
+        interval_ms,
+        continue_on_background,
+        fail_on_background,
+        artifact_dir,
+        print_effective_config,
+    )?;
+    if exit_code == 0 {
+        Ok(())
+    } else {
+        std::process::exit(i32::from(exit_code));
     }
 }

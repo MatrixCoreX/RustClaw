@@ -15,6 +15,12 @@ Run an ask task and wait until terminal:
 clawcli exec --json --timeout-seconds 120 "audit the current workspace without edits"
 ```
 
+Run a coding task through the coding profile shortcut:
+
+```bash
+clawcli code --json "make the focused code change and run the affected tests"
+```
+
 Submit and return immediately:
 
 ```bash
