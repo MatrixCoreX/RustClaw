@@ -1,4 +1,23 @@
-import type { TaskLlmDebugFlowStageSummary, TaskLlmDebugFlowSummary } from "../types/api";
+import type {
+  TaskLlmDebugFlowStageSummary,
+  TaskLlmDebugResponse,
+  TaskLlmDebugFlowSummary,
+} from "../types/api";
+
+export interface AgentFlowTimelineRow {
+  stageOrder: number;
+  phaseToken: string;
+  flowStage: string;
+  callIndexes: number[];
+  callCount: number;
+  promptLabels: string[];
+  flowNodes: string[];
+  codeModules: string[];
+  codeEntrypoints: string[];
+  triggerCounts: Record<string, number>;
+  statusCounts: Record<string, number>;
+  providerErrorCount: number;
+}
 
 function compactValue(value: string | number | boolean | null | undefined): string | null {
   if (value == null) return null;
@@ -48,4 +67,80 @@ export function flowStageMachineTokens(stage: TaskLlmDebugFlowStageSummary): str
     ...sortedCounterEntries(stage.status_counts, 3).map((item) => `status=${item}`),
     ...sortedCounterEntries(stage.trigger_counts, 3).map((item) => `trigger=${item}`),
   ];
+}
+
+export function agentFlowPhaseToken(flowStage: string | null | undefined): string {
+  const stage = compactValue(flowStage) ?? "";
+  if (stage.startsWith("boundary.")) return "boundary";
+  if (stage.startsWith("memory.")) return "memory";
+  if (stage === "agent_loop.planner") return "planner";
+  if (stage === "agent_loop.repair") return "repair";
+  if (stage.startsWith("tool.")) return "tool";
+  if (stage === "agent_loop.observed_synthesis") return "observed_synthesis";
+  if (stage === "agent_loop.answer_verifier") return "answer_verifier";
+  if (stage.startsWith("finalizer.")) return "finalizer";
+  if (stage.startsWith("scheduler.")) return "scheduler";
+  if (stage.startsWith("policy.")) return "policy";
+  return "provider";
+}
+
+function agentFlowStageOrder(flowStage: string): number {
+  const phase = agentFlowPhaseToken(flowStage);
+  const baseOrder: Record<string, number> = {
+    boundary: 10,
+    memory: 20,
+    planner: 30,
+    repair: 35,
+    tool: 40,
+    observed_synthesis: 50,
+    answer_verifier: 60,
+    finalizer: 70,
+    scheduler: 80,
+    policy: 90,
+    provider: 100,
+  };
+  return baseOrder[phase] ?? 100;
+}
+
+function stageCallIndexes(debug: TaskLlmDebugResponse | null | undefined): Map<string, number[]> {
+  const calls = debug?.calls && debug.calls.length > 0 ? debug.calls : debug?.entries ?? [];
+  const indexes = new Map<string, number[]>();
+  calls.forEach((call, index) => {
+    const flowStage = compactValue(call.flow?.flow_stage);
+    if (!flowStage) return;
+    const callIndex = call.call_index ?? index + 1;
+    if (!Number.isFinite(callIndex)) return;
+    const existing = indexes.get(flowStage) ?? [];
+    existing.push(callIndex);
+    indexes.set(flowStage, existing);
+  });
+  return indexes;
+}
+
+export function agentFlowTimelineRows(
+  debug: TaskLlmDebugResponse | null | undefined,
+): AgentFlowTimelineRow[] {
+  const stages = debug?.flow_summary?.stages ?? [];
+  const callIndexes = stageCallIndexes(debug);
+  return stages
+    .filter((stage) => compactValue(stage.flow_stage))
+    .map((stage) => ({
+      stageOrder: agentFlowStageOrder(stage.flow_stage),
+      phaseToken: agentFlowPhaseToken(stage.flow_stage),
+      flowStage: stage.flow_stage,
+      callIndexes: callIndexes.get(stage.flow_stage) ?? [],
+      callCount: stage.call_count,
+      promptLabels: stage.prompt_labels,
+      flowNodes: stage.flow_nodes,
+      codeModules: stage.code_modules,
+      codeEntrypoints: stage.code_entrypoints,
+      triggerCounts: stage.trigger_counts,
+      statusCounts: stage.status_counts,
+      providerErrorCount: stage.provider_error_count,
+    }))
+    .sort(
+      (left, right) =>
+        left.stageOrder - right.stageOrder ||
+        left.flowStage.localeCompare(right.flowStage),
+    );
 }

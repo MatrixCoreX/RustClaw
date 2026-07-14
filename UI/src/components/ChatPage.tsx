@@ -147,6 +147,13 @@ export function ChatPage({
       return searchText.includes(normalizedThreadSearch);
     });
   }, [chatThreads, normalizedThreadSearch]);
+  const activeTeachingRun = useMemo(
+    () =>
+      chatTeachingRuns.find((run) => run.id === activeChatTeachingRunId) ??
+      chatTeachingRuns.find((run) => run.selected) ??
+      null,
+    [activeChatTeachingRunId, chatTeachingRuns],
+  );
 
   return (
     <section className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
@@ -309,6 +316,11 @@ export function ChatPage({
 
       {chatTeachingMode ? (
         <div className="mt-4 space-y-3">
+          <TeachingRunSnapshot
+            t={t}
+            run={activeTeachingRun}
+            debug={chatTeachingLlmDebug}
+          />
           <TeachingRunHistory
             t={t}
             runs={chatTeachingRuns}
@@ -459,6 +471,51 @@ export function ChatPage({
       ) : null}
       </div>
     </section>
+  );
+}
+
+function TeachingRunSnapshot({
+  t,
+  run,
+  debug,
+}: {
+  t: Translate;
+  run: ChatTeachingRunSummary | null;
+  debug: TaskLlmDebugResponse | null;
+}) {
+  if (!run) return null;
+  const flow = debug?.flow_summary ?? null;
+  const tokens = [
+    run.taskId ? `task_id=${run.taskId}` : null,
+    `status=${run.status}`,
+    `trace_loaded=${run.hasTrace}`,
+    `llm_calls=${flow?.call_count ?? run.callCount ?? 0}`,
+    flow ? `stage_count=${flow.stage_count}` : null,
+    flow ? `verifier_call_count=${flow.verifier_call_count}` : null,
+    flow ? `finalizer_call_count=${flow.finalizer_call_count}` : null,
+  ].filter((item): item is string => Boolean(item));
+
+  return (
+    <div className="border-y border-white/10 py-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold">{t("当前教学轮次", "Selected teaching turn")}</p>
+        {run.traceError ? (
+          <span className="rounded-md border border-red-300/25 bg-red-500/10 px-2 py-1 text-xs text-red-100">
+            {t("调用明细查询失败", "Trace query failed")}
+          </span>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {tokens.map((item) => (
+          <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-[11px] text-white/65">
+            {item}
+          </span>
+        ))}
+      </div>
+      <p className="mt-2 line-clamp-2 break-words text-xs text-white/55">
+        {run.userText}
+      </p>
+    </div>
   );
 }
 
