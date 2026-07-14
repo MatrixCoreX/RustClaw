@@ -1,12 +1,12 @@
 use super::{
     active_task_context_only_memory_context, apply_execution_context_to_prompts,
     build_active_execution_anchor_context, build_active_task_context, build_request_surface_hints,
-    build_session_alias_context, chat_memory_context_hint, classify_route_context_budget,
-    current_request_only_memory_context, needs_text_anchor_probe_for_route,
-    observed_facts_provide_immediate_anchor, planner_memory_context_hint,
-    request_can_fill_active_clarify_target, request_qualifies_for_anchor_only_route_context,
-    route_needs_recent_execution_history, session_snapshot_has_primary_task_context,
-    session_snapshot_provides_execution_state_anchor,
+    build_session_alias_context, build_task_goal_context, chat_memory_context_hint,
+    classify_route_context_budget, current_request_only_memory_context,
+    needs_text_anchor_probe_for_route, observed_facts_provide_immediate_anchor,
+    planner_memory_context_hint, request_can_fill_active_clarify_target,
+    request_qualifies_for_anchor_only_route_context, route_needs_recent_execution_history,
+    session_snapshot_has_primary_task_context, session_snapshot_provides_execution_state_anchor,
     should_prefer_light_execution_memory_from_session, should_suppress_active_task_context,
     should_suppress_boundary_only_execution_anchor_context,
     should_suppress_execution_anchor_context, uses_light_execution_context_budget,
@@ -1059,6 +1059,7 @@ fn context_bundle_summary_exposes_execution_light_profile() {
             budget_tier: crate::task_context_builder::ExecutionContextBudgetTier::Light,
             memory_ctx: empty_prompt_memory_context(),
             runtime_context: "<none>".to_string(),
+            goal_context: "<none>".to_string(),
             active_task_context: "<none>".to_string(),
             active_execution_anchor_context: "<none>".to_string(),
             session_alias_context: "<none>".to_string(),
@@ -1147,6 +1148,7 @@ fn memory_trace_combines_route_and_execution_stages() {
             budget_tier: crate::task_context_builder::ExecutionContextBudgetTier::Light,
             memory_ctx: execution_memory,
             runtime_context: "<none>".to_string(),
+            goal_context: "<none>".to_string(),
             active_task_context: "<none>".to_string(),
             active_execution_anchor_context: "<none>".to_string(),
             session_alias_context: "<none>".to_string(),
@@ -1186,6 +1188,7 @@ fn execution_context_adds_recent_turns_to_chat_prompt_before_last_turn_fallback(
                 recent_related_events: Vec::new(),
             },
             runtime_context: "<none>".to_string(),
+            goal_context: "<none>".to_string(),
             active_task_context: "<none>".to_string(),
             active_execution_anchor_context: "<none>".to_string(),
             session_alias_context: "<none>".to_string(),
@@ -1225,6 +1228,7 @@ fn execution_context_adds_runtime_context_to_chat_and_planner_prompts() {
                 recent_related_events: Vec::new(),
             },
             runtime_context: "### RUNTIME_CONTEXT\ncurrent_process_cwd: /tmp/workspace\nworkspace_root: /tmp/workspace".to_string(),
+            goal_context: "<none>".to_string(),
             active_task_context: "<none>".to_string(),
             active_execution_anchor_context: "<none>".to_string(),
             session_alias_context: "<none>".to_string(),
@@ -1243,6 +1247,68 @@ fn execution_context_adds_runtime_context_to_chat_and_planner_prompts() {
     assert!(chat_context.contains("current_process_cwd: /tmp/workspace"));
     assert!(execution.contains("### RUNTIME_CONTEXT"));
     assert!(execution.contains("workspace_root: /tmp/workspace"));
+}
+
+#[test]
+fn execution_context_adds_task_goal_context_to_planner_prompts() {
+    let task = crate::ClaimedTask {
+        task_id: "task-goal-context".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: Some("test-key".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: json!({
+            "text": "ship feature",
+            "goal": {
+                "objective": "ship feature",
+                "done_conditions": ["tests_pass"],
+                "verification_commands": ["cargo test -p clawcli"],
+                "goal_status": "created"
+            }
+        })
+        .to_string(),
+    };
+    let goal_context = build_task_goal_context(&task);
+    assert!(goal_context.contains("### TASK_GOAL_CONTEXT"));
+    assert!(goal_context.contains("\"source\": \"task_payload\""));
+    assert!(goal_context.contains("\"objective\": \"ship feature\""));
+
+    let bundle = TaskContextBundle {
+        raw_sources: TaskContextRawSources::default(),
+        planner_view: PlannerContextView::default(),
+        route_view: None,
+        execution_view: Some(ExecutionContextView {
+            budget_tier: crate::task_context_builder::ExecutionContextBudgetTier::Light,
+            memory_ctx: empty_prompt_memory_context(),
+            runtime_context: "<none>".to_string(),
+            goal_context,
+            active_task_context: "<none>".to_string(),
+            active_execution_anchor_context: "<none>".to_string(),
+            session_alias_context: "<none>".to_string(),
+            recent_turns_full: "<none>".to_string(),
+            last_turn_full: "<none>".to_string(),
+            recent_execution_anchor: "<none>".to_string(),
+            recent_execution_context: "<none>".to_string(),
+            image_context: None,
+        }),
+    };
+    let mut chat_context = "### MEMORY_CONTEXT\n<none>".to_string();
+    let mut resolved = "继续推进".to_string();
+    let mut execution = resolved.clone();
+
+    apply_execution_context_to_prompts(&bundle, &mut chat_context, &mut resolved, &mut execution);
+
+    assert!(resolved.contains("### TASK_GOAL_CONTEXT"));
+    assert!(resolved.contains("\"done_conditions\""));
+    assert!(execution.contains("cargo test -p clawcli"));
+    assert!(!chat_context.contains("### TASK_GOAL_CONTEXT"));
+    assert!(bundle.summary().contains("goal_context=true"));
+    assert!(bundle
+        .summary()
+        .contains("context_profile=execution_light_goal"));
 }
 
 #[test]
@@ -1265,6 +1331,7 @@ fn execution_context_adds_active_task_text_to_planner_prompts() {
                 recent_related_events: Vec::new(),
             },
             runtime_context: "<none>".to_string(),
+            goal_context: "<none>".to_string(),
             active_task_context: "### ACTIVE_TASK_CONTEXT\nlast_primary_task_prompt:\nWrite a short release note for RustClaw.\nlast_primary_task_output:\nRustClaw is easier to use for non-technical users.".to_string(),
             active_execution_anchor_context: "<none>".to_string(),
             session_alias_context: "<none>".to_string(),
@@ -1308,6 +1375,7 @@ fn execution_context_uses_recent_execution_context_fallback_for_planner_prompt()
                 recent_related_events: Vec::new(),
             },
             runtime_context: "<none>".to_string(),
+            goal_context: "<none>".to_string(),
             active_task_context: "<none>".to_string(),
             active_execution_anchor_context: "<none>".to_string(),
             session_alias_context: "<none>".to_string(),
@@ -1350,6 +1418,7 @@ fn execution_context_adds_active_ordered_anchor_to_planner_prompts() {
                 recent_related_events: Vec::new(),
             },
             runtime_context: "<none>".to_string(),
+            goal_context: "<none>".to_string(),
             active_task_context: "<none>".to_string(),
             active_execution_anchor_context:
                 "### ACTIVE_EXECUTION_ANCHOR\nfollowup_bound_target: /tmp/rustclaw/crates\nfollowup_ordered_entries: 1:claw-core | 2:clawcli | 3:clawd | 4:feishud | 5:larkd"
@@ -1396,6 +1465,7 @@ fn execution_context_adds_session_alias_bindings_to_planner_prompts() {
                 recent_related_events: Vec::new(),
             },
             runtime_context: "<none>".to_string(),
+            goal_context: "<none>".to_string(),
             active_task_context: "<none>".to_string(),
             active_execution_anchor_context: "<none>".to_string(),
             session_alias_context:

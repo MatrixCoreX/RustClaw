@@ -42,6 +42,7 @@ pub(crate) struct ExecutionContextView {
     pub(crate) budget_tier: ExecutionContextBudgetTier,
     pub(crate) memory_ctx: PromptMemoryContext,
     pub(crate) runtime_context: String,
+    pub(crate) goal_context: String,
     pub(crate) active_task_context: String,
     pub(crate) active_execution_anchor_context: String,
     pub(crate) session_alias_context: String,
@@ -194,6 +195,30 @@ fn build_active_task_context(
         lines.push(truncate_context_snippet(output, 1000));
     }
     lines.join("\n")
+}
+
+fn build_task_goal_context(task: &ClaimedTask) -> String {
+    let Some(payload) = serde_json::from_str::<Value>(&task.payload_json).ok() else {
+        return "<none>".to_string();
+    };
+    let Some(goal) = payload
+        .get("goal")
+        .or_else(|| payload.get("goal_spec"))
+        .or_else(|| payload.get("task_goal"))
+        .filter(|value| value.is_object())
+    else {
+        return "<none>".to_string();
+    };
+    let goal_context = json!({
+        "schema_version": 1,
+        "task_id": task.task_id,
+        "source": "task_payload",
+        "goal": goal,
+    });
+    format!(
+        "### TASK_GOAL_CONTEXT\n{}",
+        serde_json::to_string_pretty(&goal_context).unwrap_or_else(|_| goal_context.to_string())
+    )
 }
 
 fn ordered_entries_context_line(entries: &[String]) -> Option<String> {
@@ -1129,6 +1154,7 @@ pub(crate) fn build_execution_task_context_bundle(
         budget_tier,
         memory_ctx,
         runtime_context: build_runtime_context(state),
+        goal_context: build_task_goal_context(task),
         active_task_context: if suppress_preference_context {
             "<none>".to_string()
         } else {
@@ -1435,6 +1461,11 @@ pub(crate) fn apply_execution_context_to_prompts(
         );
         resolved_prompt_for_execution.push_str(&alias_context_block);
         prompt_with_memory_for_execution.push_str(&alias_context_block);
+    }
+    if execution_view.goal_context != "<none>" {
+        let goal_context_block = format!("\n\n{}", execution_view.goal_context);
+        resolved_prompt_for_execution.push_str(&goal_context_block);
+        prompt_with_memory_for_execution.push_str(&goal_context_block);
     }
     if execution_view.active_task_context != "<none>" {
         let active_task_context_block = format!("\n\n{}", execution_view.active_task_context);

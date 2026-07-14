@@ -494,6 +494,7 @@ fn compact_normalizer_prompt_tail_preserves_runtime_context_near_request() {
                 recent_related_events: Vec::new(),
             },
             runtime_context: runtime_context.to_string(),
+            goal_context: "<none>".to_string(),
             active_task_context: "<none>".to_string(),
             active_execution_anchor_context: "<none>".to_string(),
             session_alias_context: "<none>".to_string(),
