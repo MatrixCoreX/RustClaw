@@ -69,11 +69,12 @@ flowchart TD
     Y --> Z[Output-contract guard + task result]
     Z --> AA[Channel delivery]
     Z --> AB[Journal + session update]
-    AB --> AD[Task event stream<br/>transition + checkpoint + tool lifecycle + coding checkpoints/evidence]
+    AB --> AD[Task event stream<br/>goal + context + transition + checkpoint + tool/coding/team events]
     ASP --> AA
     ASP --> AB
     ASP --> AD
     AD --> AE[CLI / UI watch + report]
+    AD --> AF[Teaching mode timeline<br/>per-turn trace selection + raw JSON details]
     Z -. optional .-> AC[Background memory refresh]
 ```
 
@@ -113,7 +114,7 @@ Operationally: use `kind=ask` when the user gave a natural-language request and 
 - `Observed-output finalizer`: publishes grounded results only after the answer shape and evidence contract are satisfied.
 - `Output-contract guard`: normalizes final text, message arrays, file tokens, scalar/strict shapes, and channel delivery consistency before the result is saved.
 - `Journal + session update`: task state, observed facts, and active-session anchors are persisted after finalization; background memory work is optional and non-blocking.
-- `Task event stream`: journal trace events expose machine-readable progress such as `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_checkpoint`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, and `task_final`. CLI and UI render these fields directly, including `evidence_ref`, `checkpoint_ref`, `checkpoint_kind`, `pending_async_job_id`, coding counts, verification command counts/tokens, verification status/failure-kind tokens, unverified-risk tokens, and step timing, instead of reading raw logs or localized text.
+- `Task event stream`: journal trace events expose machine-readable progress such as `task_goal`, `context_budget`, `context_compaction`, `task_transition`, `checkpoint_created`, `tool_started`, `tool_step`, `tool_finished`, `coding_checkpoint`, `coding_task_contract`, `coding_evidence`, `provider_call`, `agent_hook`, `subagent`, `agent_team_started`, `subagent_started`, `subagent_finished`, `subagent_failed`, `agent_team_conflict_detected`, `agent_team_aggregated`, and `task_final`. CLI and UI render these fields directly, including `goal_status`, `goal_status_source`, `budget_tier`, `included_ref_count`, `excluded_ref_count`, `record_count`, `evidence_ref`, `checkpoint_ref`, `checkpoint_kind`, `pending_async_job_id`, coding counts, verification command counts/tokens, verification status/failure-kind tokens, unverified-risk tokens, subagent team ids, read-only policy tokens, conflict counts, recommended next action tokens, and step timing, instead of reading raw logs or localized text.
 
 ### Planner, LLM, And Capability Flow
 
@@ -142,7 +143,7 @@ flowchart TD
     Q -->|call_tool / call_skill| QA[Pre-tool hooks + adapter preflight]
     R --> QA
     QA -->|runtime async marker| AR[Allow async_start + strip internal marker]
-    QA -->|subagent tool| SS[Bounded read-only subagent batch<br/>role/config + aggregation]
+    QA -->|subagent tool| SS[Bounded read-only subagent batch<br/>AgentTeamSpec + role/config + aggregation]
     QA -->|call_tool| S[Tool executor]
     QA -->|call_skill| T[Skill dispatcher]
     AR --> T
@@ -156,7 +157,7 @@ flowchart TD
     V --> Z
     W --> Z
     Y --> Z
-    Z --> ZEV[Task journal event<br/>tool lifecycle + coding checkpoints/evidence + evidence refs]
+    Z --> ZEV[Task journal event<br/>goal/context + tool lifecycle + coding/team evidence refs]
     Q -->|synthesize_answer| ZA[LLM: grounded synthesis]
     Q -->|respond| ZB[Terminal response]
     ZA --> ZC[Evidence coverage]
@@ -177,8 +178,8 @@ flowchart TD
 - `Command payload contract repair`: declared command payloads are normalized to `RawCommandOutput` or `CommandOutputSummary` machine contracts when needed, including cases where an upstream hint mislabeled the request as service-status work.
 - `PlanVerifier`: blocks unavailable capabilities, missing required fields, unsafe mutations, and disallowed output/evidence shapes before any executor runs. Denials should carry stable machine fields rather than user-facing fixed reply text.
 - `Pre-tool hooks + adapter preflight`: loop execution and bounded recovery retries pass through the same hook, contract-argument, command-policy, and structured error checks before any effectful adapter runs.
-- `Task journal event`: executor observations are projected into stable `tool_started`, `tool_step`, `tool_finished`, optional `coding_checkpoint`, and optional `coding_evidence` events with step refs, evidence refs, artifact counts, coding counts, checkpoint kind, verification command counts/tokens, verification status/failure-kind tokens, verification-risk tokens, timing, and failure attribution for CLI/UI progress views.
-- `subagent tool`: planner-authorized subagents stay explicit and read-only. A single child run or a bounded `children` batch is recorded through role/config enforcement, timeout/cancellation policy fields, optional/required failure isolation, and machine-only aggregation (`child_results`, `finding_refs`, `evidence_refs`). It does not grant write or external-publish permission.
+- `Task journal event`: executor observations are projected into stable `task_goal`, `context_budget`, `context_compaction`, `tool_started`, `tool_step`, `tool_finished`, optional `coding_checkpoint`, optional `coding_task_contract`, optional `coding_evidence`, and optional team lifecycle events with refs, counts, status tokens, verification tokens, timing, and failure attribution for CLI/UI progress views.
+- `subagent tool`: planner-authorized subagents stay explicit and read-only. A single child run or a bounded `children` batch is recorded through `AgentTeamSpec`, role/config enforcement, timeout/cancellation policy fields, optional/required failure isolation, and machine-only aggregation (`child_results`, `finding_refs`, `evidence_refs`, `conflict_summary`, `recommended_next_action`). It does not grant write or external-publish permission.
 - `Skill dispatcher`: uses the same dispatch layer for direct `run_skill` and planner skill calls. Direct `run_skill` does not ask the normalizer/planner to choose a skill; it only dispatches the explicit `payload.skill_name`. Builtins run in-process, external skills use adapters, and runner skills launch `skill-runner` plus the concrete binary.
 - `Skill process protocol`: runner skills exchange one-line JSON over stdin/stdout and should return stable machine fields in `extra` when runtime needs to make decisions.
 - `synthesize_answer`: is scheduled inside the loop when evidence needs natural-language synthesis; it is not a fixed final LLM call after every task.
@@ -351,7 +352,7 @@ Recent records with safety flags are hidden by default in the UI. Fact-card deta
 
 ### Trace And Troubleshooting
 
-Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content. The browser teaching-mode trace and `/v1/debug/tasks/{task_id}` also show a compact `flow_summary` above numbered LLM calls, with stage/module/retry/verifier/finalizer/provider-error machine counts and the structured memory/KB policy next to raw request/response details. In teaching mode, the selected chat turn shows its task id, status, LLM call count, stage count, verifier/finalizer counts, and an agent-process timeline derived from `flow_stage`, `flow_node`, `code_module`, `code_entrypoint`, and call indexes.
+Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content. The browser teaching-mode trace and `/v1/debug/tasks/{task_id}` also show a compact `flow_summary` above numbered LLM calls, with stage/module/retry/verifier/finalizer/provider-error machine counts and the structured memory/KB policy next to raw request/response details. Each browser chat turn keeps a lightweight task/trace index. When teaching mode is selected, clicking either the user's question or the assistant's reply selects that turn and shows the corresponding task id, status, LLM call count, stage count, verifier/finalizer counts, goal/context/team/coding/checkpoint event timeline, and numbered raw LLM request/response details. When teaching mode is not selected, message clicks do not change the teaching trace.
 
 When debugging memory behavior, check these questions in order:
 
@@ -449,7 +450,7 @@ Important lifecycle details:
 - `clawcli tui --user-id <id> --chat-id <id>` is a terminal task console over the same task APIs; add `--once` for a single snapshot and `--task-id <task_id>` for selected task details. Selected-task snapshots include raw task data plus `selected_progress` and `selected_summary` machine fields for checkpoint/resume, goal/outcome state, LLM budget/calls, coding verification, side effects, and artifacts. Interactive key tokens are stable machine commands: `r` refresh, `w` watch, `p` pause, `c` cancel, `u` resume, `n` continue, `e` export, `1` report, `2` review, `3` subagents, `4` permission, and `q` quit.
 - `clawcli session list/show/resume/archive/delete/fork` keeps a local session navigation store for `session_id`, `task_ids`, `active_goal_id`, `workspace_root`, checkpoint, event sequence, archive status, and fork source. This store is operator metadata under `RUSTCLAW_CLAWCLI_SESSION_STORE`, `$XDG_STATE_HOME/rustclaw/`, or `~/.local/state/rustclaw/`; it is not used as a natural-language route source.
 - `clawcli llm-trace <task_id> [--raw] [--limit N]` reads the task debug endpoint and prints numbered LLM calls with flow/code attribution, provider/model/status tokens, and optional raw request/response fields.
-- Task event streams include transition, checkpoint, tool lifecycle, coding checkpoint/evidence, provider, hook, subagent, and final events. `clawcli events/watch`, `clawcli report`, `clawcli review`, `clawcli subagents`, `clawcli permission inspect`, and the browser task details render machine fields such as `evidence_ref`, `checkpoint_ref`, `checkpoint_kind`, `pending_async_job_id`, `step_ref`, `changed_file_count`, `test_count`, `verification_command_count`, `verification_command`, `verification_commands`, `verification_status`, `verification_failure_kinds`, `coding_current_phase_hint`, `coding_next_step`, `completed_side_effect_count`, `requires_idempotency_guard`, `unverified_risk`, `prompt_label`, `llm_call_count`, `prompt_truncation_count`, `prompt_bytes_before_max`, `llm_budget_status`, `child_run_id`, `finding_refs`, `tool_permission_profile`, `read_only_enforced`, `write_isolation_status`, `permission_decision`, `command_policy`, `isolation_profile`, `sandbox_source`, `started_at`, and `finished_at`; raw event JSON stays in secondary details.
+- Task event streams include goal, context budget, context compaction, transition, checkpoint, tool lifecycle, coding checkpoint/evidence, provider, hook, subagent/team, and final events. `clawcli events/watch`, `clawcli report`, `clawcli review`, `clawcli subagents`, `clawcli permission inspect`, and the browser task details render machine fields such as `goal_status`, `goal_status_source`, `budget_tier`, `included_ref_count`, `excluded_ref_count`, `record_count`, `evidence_ref`, `checkpoint_ref`, `checkpoint_kind`, `pending_async_job_id`, `step_ref`, `changed_file_count`, `test_count`, `verification_command_count`, `verification_command`, `verification_commands`, `verification_status`, `verification_failure_kinds`, `coding_current_phase_hint`, `coding_next_step`, `completed_side_effect_count`, `requires_idempotency_guard`, `unverified_risk`, `prompt_label`, `llm_call_count`, `prompt_truncation_count`, `prompt_bytes_before_max`, `llm_budget_status`, `team_id`, `child_run_id`, `finding_refs`, `conflict_count`, `recommended_next_action`, `tool_permission_profile`, `read_only_enforced`, `write_isolation_status`, `permission_decision`, `command_policy`, `isolation_profile`, `sandbox_source`, `started_at`, and `finished_at`; raw event JSON stays in secondary details.
 - `clawcli run-skill <skill_name> --args-json '{...}'` submits explicit `kind=run_skill` work without natural-language routing; add `--wait` to poll the same `task_id`.
 - `clawcli skills` reads registry-backed skill metadata; `clawcli capabilities` and `clawcli permission capability` read flattened capability/policy metadata. Add `--json` when another script should consume the response.
 - `clawcli replay export/run/diff` supports redacted recorded-only replay bundles for debugging and CI comparison without live model or tool calls; `replay run --coverage` exposes recorded coverage, `replay run --view llm|tools|checkpoints|summary` filters recorded evidence, and `replay diff` includes taxonomy tokens such as `route_changed`, `plan_changed`, `permission_changed`, and `final_status_changed`. See `docs/clawcli_exec_replay.md`.
@@ -477,6 +478,144 @@ flowchart LR
 - Seeded resume restores checkpoint budget counters, observations, artifact refs, repair budget fields, and completed side-effect fingerprints before re-entering the agent loop.
 - Runtime recovery and projection code moves only machine fields such as `status_code`, `message_key`, `executor_state`, `resume_directive`, `job_id`, and artifact refs. User-facing prose is rendered later by finalizer, i18n, UI, or the model.
 - Lease/heartbeat model: see `docs/task_lifecycle_lease_model.md`; current runtime uses `tasks.updated_at` plus checkpoint `resume_executor` machine fields, so new database lease columns are deferred until multi-worker claims require them.
+
+### Detailed Flow Diagrams
+
+The following diagrams break the same runtime into smaller observable flows. They describe current machine fields and UI/CLI behavior; they are not extra routing layers.
+
+Teaching mode per-turn trace flow:
+
+```mermaid
+flowchart TD
+    A[Browser chat thread] --> B[User sends one turn]
+    B --> C[Create lightweight teaching run<br/>userMessageId + task placeholder]
+    C --> D[POST /v1/tasks kind=ask]
+    D --> E[task_id assigned]
+    E --> F[Attach task_id to teaching run]
+    F --> G[Poll task result]
+    G --> H[Append assistant reply]
+    H --> I[Attach assistantMessageId to same teaching run]
+    I --> J{Teaching mode selected?}
+    J -->|no| K[Messages are normal chat bubbles<br/>click is inactive]
+    J -->|yes| L[Click user question or assistant reply]
+    L --> M[Select matching teaching run]
+    M --> N[GET /v1/debug/tasks/:task_id]
+    N --> O[Teaching panel]
+    O --> P[Agent process timeline<br/>goal/context/team/coding/checkpoint events]
+    O --> Q[Numbered LLM calls<br/>request + response + raw fields]
+```
+
+Task event stream projection flow:
+
+```mermaid
+flowchart TD
+    A[TaskJournal] --> B[task_goal summary]
+    A --> C[context_bundle_summary]
+    C --> C1[context_budget event]
+    C --> C2[context_compaction event]
+    A --> D[task_lifecycle + checkpoint]
+    D --> D1[task_lifecycle event]
+    D --> D2[checkpoint_created event]
+    A --> E[ask transitions]
+    E --> E1[task_transition events]
+    A --> F[LLM prompt metrics]
+    F --> F1[provider_call events]
+    A --> G[step_results]
+    G --> G1[tool_started]
+    G --> G2[tool_step]
+    G --> G3[tool_finished]
+    G --> G4[coding_checkpoint / coding_task_contract / coding_evidence]
+    A --> H[task_observations]
+    H --> H1[agent_hook]
+    H --> H2[subagent]
+    H2 --> H3[agent_team_started / subagent_started / subagent_finished / subagent_failed / agent_team_aggregated]
+    A --> I[final status]
+    I --> I1[task_final]
+    B --> Z[event_stream]
+    C1 --> Z
+    C2 --> Z
+    D1 --> Z
+    D2 --> Z
+    E1 --> Z
+    F1 --> Z
+    G1 --> Z
+    G2 --> Z
+    G3 --> Z
+    G4 --> Z
+    H1 --> Z
+    H2 --> Z
+    H3 --> Z
+    I1 --> Z
+    Z --> Y[CLI/UI render machine fields<br/>raw JSON in secondary details]
+```
+
+Context budget and compaction flow:
+
+```mermaid
+flowchart TD
+    A[Current task + session context] --> B[Context builder]
+    B --> C[Inventory input categories<br/>conversation + memory + goal + journal + artifacts + previous results + LLM trace + coding evidence]
+    C --> D[ContextBudgetReport]
+    D --> E{Budget policy}
+    E -->|fits| F[Included refs]
+    E -->|over budget / light profile / long session| G[Excluded refs]
+    G --> H[Deterministic transcript compaction records]
+    H --> I[Risk flags<br/>budget_excluded_context + old_assistant_output_not_instruction]
+    F --> J[Prompt machine block<br/>CONTEXT_BUDGET_REPORT]
+    H --> J
+    J --> K[Task journal summary]
+    K --> L[context_budget event]
+    K --> M[context_compaction event]
+    L --> N[Teaching mode + clawcli report]
+    M --> N
+```
+
+Subagent team orchestration flow:
+
+```mermaid
+flowchart TD
+    A[Planner action<br/>subagent children batch] --> B[Subagent runtime]
+    B --> C[Load agent_guard subagent config]
+    C --> D[Validate role tokens]
+    D --> E[Apply max_parallel_readonly]
+    E --> F[Build AgentTeamSpec<br/>team_id + child_task_ids + role + scope + required + timeout + read_only]
+    F --> G[Run bounded read-only child observations]
+    G --> H{Child result}
+    H -->|completed| I[subagent_finished]
+    H -->|invalid role / disabled / parallel limit| J[subagent_failed]
+    I --> K[Aggregate findings + evidence refs]
+    J --> K
+    K --> L{Conflict count or required failure?}
+    L -->|conflict| M[agent_team_conflict_detected<br/>recommended_next_action=resolve_child_conflicts]
+    L -->|required failure| N[parent stop signal<br/>subagent_required_child_failed]
+    L -->|ready| O[recommended_next_action=synthesize_from_child_findings]
+    M --> P[agent_team_aggregated]
+    N --> P
+    O --> P
+    P --> Q[clawcli subagents + UI task trace]
+```
+
+Goal, checkpoint, and resume flow:
+
+```mermaid
+flowchart TD
+    A[Task payload or goal API] --> B[TaskGoalSpec projection]
+    B --> C[Planner prompt goal machine context]
+    C --> D[Agent loop execution]
+    D --> E[Journal evidence<br/>step refs + validation + coding checkpoints]
+    E --> F[task_goal summary]
+    F --> G[task_goal event]
+    D --> H{Needs wait / long-tail / provider block?}
+    H -->|yes| I[task_lifecycle waiting/background]
+    I --> J[task_checkpoint<br/>checkpoint_id + pending async job + completed side effects]
+    J --> K[checkpoint_created event]
+    K --> L[clawcli watch / UI task details]
+    L --> M[resume-task / continue / worker recovery]
+    M --> N[Seed loop state<br/>budget + refs + side-effect guards]
+    N --> D
+    H -->|no| O[final status]
+    O --> F
+```
 
 ## Main Components
 
