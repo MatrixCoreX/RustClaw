@@ -84,6 +84,25 @@ function flowMeta(call: TaskLlmDebugCall): string[] {
   ].filter((item): item is string => Boolean(item));
 }
 
+function memoryTraceMeta(memoryTrace: unknown): string[] {
+  if (!memoryTrace || typeof memoryTrace !== "object") return [];
+  const record = memoryTrace as Record<string, unknown>;
+  return [
+    compactMetaValue(record.trace_kind as string | number | null | undefined)
+      ? `trace_kind=${record.trace_kind}`
+      : null,
+    compactMetaValue(record.stage as string | number | null | undefined)
+      ? `stage=${record.stage}`
+      : null,
+    compactMetaValue(record.use_policy as string | number | null | undefined)
+      ? `use_policy=${record.use_policy}`
+      : null,
+    compactMetaValue(record.stage_count as string | number | null | undefined)
+      ? `stage_count=${record.stage_count}`
+      : null,
+  ].filter((item): item is string => Boolean(item));
+}
+
 function FlowField({
   label,
   value,
@@ -154,6 +173,24 @@ export function TaskLlmTracePanel({
               llm_calls={callCount}
             </span>
           </div>
+
+          {taskLlmDebug.memory_trace ? (
+            <details className="mb-3 rounded-lg border border-emerald-300/15 bg-emerald-400/5 p-3">
+              <summary className="cursor-pointer text-xs font-medium text-emerald-100">
+                {t("记忆/知识库上下文策略", "Memory and KB context policy")}
+              </summary>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {memoryTraceMeta(taskLlmDebug.memory_trace).map((item) => (
+                  <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-[11px] text-emerald-50/75">
+                    {item}
+                  </span>
+                ))}
+              </div>
+              <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-black/40 p-3 text-[11px] leading-relaxed text-white/70">
+                {formatJsonish(taskLlmDebug.memory_trace)}
+              </pre>
+            </details>
+          ) : null}
 
           {calls.length > 0 ? (
             <div className="space-y-3">
