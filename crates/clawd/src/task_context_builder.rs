@@ -5,6 +5,9 @@ use crate::memory;
 use crate::memory::service::PromptMemoryContext;
 use crate::{AppState, ClaimedTask, RouteResult};
 
+#[path = "task_context_builder/summary.rs"]
+mod summary;
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskContextRawSources {
     pub(crate) resume_context: String,
@@ -58,31 +61,7 @@ pub(crate) struct TaskContextBundle {
 
 impl TaskContextBundle {
     pub(crate) fn summary(&self) -> String {
-        let route_attached = self.route_view.is_some();
-        let route_budget = self
-            .route_view
-            .as_ref()
-            .map(|view| view.budget_tier.as_str())
-            .unwrap_or("n/a");
-        let execution_attached = self.execution_view.is_some();
-        let execution_budget = self
-            .execution_view
-            .as_ref()
-            .map(|view| view.budget_tier.as_str())
-            .unwrap_or("n/a");
-        let visible_skills = self.planner_view.visible_skills.len();
-        let has_resume_context = self.raw_sources.resume_context != "<none>";
-        let has_binding_context = self.raw_sources.binding_context != "<none>";
-        format!(
-            "route_view={} route_budget={} execution_view={} execution_budget={} visible_skills={} resume_context={} binding_context={}",
-            route_attached,
-            route_budget,
-            execution_attached,
-            execution_budget,
-            visible_skills,
-            has_resume_context,
-            has_binding_context
-        )
+        summary::task_context_bundle_summary(self)
     }
 
     pub(crate) fn memory_trace(&self) -> Option<Value> {
