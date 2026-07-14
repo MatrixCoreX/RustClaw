@@ -1,7 +1,7 @@
 use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::{AppState, ClaimedTask};
 
-pub(super) fn run_compatibility_fallback_renderer_registry(
+pub(super) fn run_deterministic_fallback_renderer_registry(
     state: &AppState,
     task: &ClaimedTask,
     loop_state: &mut LoopState,
@@ -10,7 +10,7 @@ pub(super) fn run_compatibility_fallback_renderer_registry(
 ) -> bool {
     let mut rendered = false;
     for renderer in super::renderer_registry::renderers_for_shape_class(
-        super::renderer_registry::FinalizerRendererShapeClass::CompatibilityFallback,
+        super::renderer_registry::FinalizerRendererShapeClass::DeterministicFallback,
     ) {
         let rendered_by_renderer = match renderer.key {
             "scalar_placeholder_terminal_direct_answer" => {
@@ -28,7 +28,7 @@ pub(super) fn run_compatibility_fallback_renderer_registry(
             loop_state,
             renderer,
             rendered_by_renderer,
-            compatibility_renderer_evidence_refs(task, loop_state),
+            deterministic_fallback_renderer_evidence_refs(task, loop_state),
             (!rendered_by_renderer).then_some("not_applicable"),
         );
         rendered |= rendered_by_renderer;
@@ -36,7 +36,10 @@ pub(super) fn run_compatibility_fallback_renderer_registry(
     rendered
 }
 
-fn compatibility_renderer_evidence_refs(task: &ClaimedTask, loop_state: &LoopState) -> Vec<String> {
+fn deterministic_fallback_renderer_evidence_refs(
+    task: &ClaimedTask,
+    loop_state: &LoopState,
+) -> Vec<String> {
     let mut refs = loop_state
         .executed_step_results
         .iter()

@@ -36,7 +36,7 @@ fn finalizer_renderer_registry_covers_initial_shape_classes() {
         FinalizerRendererShapeClass::FinalAnswerShape,
         FinalizerRendererShapeClass::ArtifactDelivery,
         FinalizerRendererShapeClass::TaskLifecycle,
-        FinalizerRendererShapeClass::CompatibilityFallback,
+        FinalizerRendererShapeClass::DeterministicFallback,
     ] {
         assert!(
             classes.contains(required.as_str()),

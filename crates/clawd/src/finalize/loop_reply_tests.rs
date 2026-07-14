@@ -64,7 +64,7 @@ use super::{
     replace_git_repository_state_delivery_with_requested_machine_fields,
     replace_raw_observation_delivery_with_synthesis, resolve_file_token_from_auto_locator_answer,
     route_allows_file_token_only_fallback, route_prefers_language_rendered_execution_failed_step,
-    route_structured_clarify_context, run_compatibility_fallback_renderer_registry,
+    route_structured_clarify_context, run_deterministic_fallback_renderer_registry,
     run_task_lifecycle_renderer_registry, should_attach_execution_summary,
     should_drop_passthrough_delivery_for_content_evidence,
     should_return_missing_file_delivery_reply, should_try_observed_output_language_fallback,
@@ -309,8 +309,8 @@ mod clarify_envelope_tests;
 #[path = "loop_reply_task_lifecycle_renderers_tests.rs"]
 mod task_lifecycle_renderers_tests;
 
-#[path = "loop_reply_compatibility_renderers_tests.rs"]
-mod compatibility_renderers_tests;
+#[path = "loop_reply_deterministic_fallback_renderers_tests.rs"]
+mod deterministic_fallback_renderers_tests;
 
 #[path = "loop_reply_capability_result_renderers_tests.rs"]
 mod capability_result_renderers_tests;
