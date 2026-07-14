@@ -317,7 +317,7 @@ POST   /v1/memory/settings
 
 ### 追踪与排障
 
-Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use policy、召回 source refs、纳入原因和字符预算，但不复制原始记忆文本，便于排查“为什么这次任务用了记忆”，同时降低敏感内容泄露风险。
+Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use policy、召回 source refs、纳入原因和字符预算，但不复制原始记忆文本，便于排查“为什么这次任务用了记忆”，同时降低敏感内容泄露风险。浏览器教学模式的 trace 面板和 `/v1/debug/tasks/{task_id}` 也会在编号 LLM 调用旁展示这份结构化 memory/KB 策略。
 
 常用代码和配置入口：
 
@@ -410,6 +410,20 @@ flowchart TD
 - seeded resume 会恢复 checkpoint 中的预算计数、observations、artifact refs、repair budget 字段和已完成 side-effect fingerprints，再重新进入 agent loop。
 - runtime recovery 和 projection 只移动 `status_code`、`message_key`、`executor_state`、`resume_directive`、`job_id`、artifact refs 等机器字段。用户可见 prose 由 finalizer、i18n、UI 或模型渲染。
 - Lease/heartbeat 模型见 `docs/task_lifecycle_lease_model.md`；当前 runtime 使用 `tasks.updated_at` 与 checkpoint `resume_executor` 机器字段，新的数据库 lease columns 会等到 multi-worker claim 真正需要时再加入。
+
+CLI 任务操作流程：
+
+```mermaid
+flowchart LR
+    A[clawcli exec / submit / run-skill] --> B[POST /v1/tasks]
+    B --> C[task_id]
+    C --> D[watch / wait / get]
+    D --> E{task_lifecycle}
+    E -->|terminal| F[report / review / replay export]
+    E -->|waiting/background| G[resume.json + resume_hint]
+    G --> H[continue / resume-task / pause-task / cancel-task]
+    D --> I[events / logs / subagents / permission inspect]
+```
 
 ## 主要组件
 
