@@ -193,6 +193,7 @@ flowchart TD
 - `action_effect` 从结构化 skill/action 参数和 contract metadata 派生，不从用户语言短语里判断。
 - `run_cmd` 会在 `command_policy` 下输出 `policy_authority`、`literal_command_token`、`command_arg_present`、`unresolved_runtime_template_present` 和命令 effect 标记。
 - 显式用户命令用 `_clawd_literal_command` 表达；否则 `run_cmd` 作为 planner 结构化命令参数处理，继续受 contract 与媒体产物 blocker 约束。
+- 有风险的本地代码或文件变更能力应在 registry metadata 中声明 isolation profile。`local_temp_workspace` 用于一次性预览、dry-run 和可通过 artifact refs 清理的生成产物；`local_worktree` 用于明确写入当前工作区的开发任务，必须通过 task evidence、changed-file refs 和 verification commands 展示。UI 和 CLI 渲染 `permission_decision.steps[].sandbox`、`workspace_scope` 与 `registry_policy` 机器字段，不从本地化文本里推断权限状态。
 
 ## 自然语言契约边界
 

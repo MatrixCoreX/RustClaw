@@ -185,6 +185,45 @@ export function TaskResultPanel({
                   </span>
                 ))}
               </div>
+              {taskPermissionView.steps.length > 0 ? (
+                <details className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
+                  <summary className="cursor-pointer text-xs font-medium opacity-75">
+                    {t("权限步骤详情", "Permission step details")} · {taskPermissionView.steps.length}
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    {taskPermissionView.steps.map((step, stepIndex) => (
+                      <div key={`${step.title}-${stepIndex}`} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                        <p className="text-xs font-semibold opacity-90">{step.title}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {step.meta.map((item) => (
+                            <span key={item} className="rounded-md border border-white/10 bg-white/5 px-2 py-1 font-mono text-[11px] opacity-75">
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                        {[
+                          [t("沙箱", "Sandbox"), step.sandbox],
+                          [t("工作区", "Workspace"), step.workspace],
+                          [t("Registry 策略", "Registry policy"), step.registryPolicy],
+                        ].map(([label, items]) => (
+                          Array.isArray(items) && items.length > 0 ? (
+                            <div key={String(label)} className="mt-2">
+                              <p className="mb-1 text-[11px] font-medium opacity-60">{String(label)}</p>
+                              <div className="flex flex-wrap gap-2">
+                                {items.map((item) => (
+                                  <span key={item} className="rounded-md border border-white/10 bg-black/25 px-2 py-1 font-mono text-[11px] opacity-75">
+                                    {item}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
             </div>
           ) : null}
           {taskOutcome ? (

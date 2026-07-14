@@ -194,6 +194,7 @@ The permission plane is a structured execution boundary, not a second semantic r
 - `run_cmd` decisions include a nested `command_policy` for machine fields such as `policy_authority`, `literal_command_token`, `command_arg_present`, `unresolved_runtime_template_present`, and command effect flags.
 - Explicit user command preservation is represented by `_clawd_literal_command`; otherwise `run_cmd` is treated as planner-structured command args and remains subject to contract and media-artifact blockers.
 - Recovery paths such as non-interactive sudo retry are still adapter calls: they must reuse the same contract, hook, policy, and audit machinery as the original planner step.
+- Risky local coding or file-mutation capabilities should declare an isolation profile in registry metadata. `local_temp_workspace` is for disposable previews, dry runs, and generated artifacts that can be cleaned through artifact refs; `local_worktree` is for deliberate workspace edits that must be visible through task evidence, changed-file refs, and verification commands. UI and CLI surfaces read `permission_decision.steps[].sandbox`, `workspace_scope`, and `registry_policy` instead of interpreting localized text.
 
 ## Natural Language Contract Boundary
 
