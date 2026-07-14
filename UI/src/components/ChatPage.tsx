@@ -41,6 +41,8 @@ interface ChatThreadSummary {
 interface ChatTeachingRunSummary {
   id: string;
   taskId: string | null;
+  userMessageId: string;
+  assistantMessageId: string | null;
   userText: string;
   assistantText: string | null;
   status: TaskQueryResponse["status"] | "running";
@@ -149,6 +151,23 @@ export function ChatPage({
       null,
     [activeChatTeachingRunId, chatTeachingRuns],
   );
+  const teachingRunByMessageId = useMemo(() => {
+    const runsByMessage = new Map<string, ChatTeachingRunSummary>();
+    chatTeachingRuns.forEach((run) => {
+      runsByMessage.set(run.userMessageId, run);
+      if (run.assistantMessageId) {
+        runsByMessage.set(run.assistantMessageId, run);
+      }
+    });
+    return runsByMessage;
+  }, [chatTeachingRuns]);
+  const teachingPanelVisible = chatTeachingMode || chatTeachingRuns.length > 0;
+  const selectTeachingRunFromMessage = (run: ChatTeachingRunSummary) => {
+    if (!chatTeachingMode) {
+      onChatTeachingModeChange(true);
+    }
+    onSelectChatTeachingRun(run.id);
+  };
 
   return (
     <section className="grid gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
@@ -262,45 +281,74 @@ export function ChatPage({
       </div>
 
       <div className="h-80 space-y-3 overflow-auto rounded-xl border border-white/10 bg-black/30 p-3">
-        {chatMessages.map((message) => (
-          <div key={message.id} className="space-y-1">
-            <div className="flex items-center gap-2 text-[11px] text-white/50">
-              <span>{message.role}</span>
-              <span>{toLocalTime(message.ts)}</span>
+        {chatMessages.map((message) => {
+          const messageTeachingRun = teachingRunByMessageId.get(message.id) ?? null;
+          const messageTeachingSelected = Boolean(
+            messageTeachingRun &&
+              (messageTeachingRun.id === activeChatTeachingRunId || messageTeachingRun.selected),
+          );
+          const bubbleClass =
+            message.role === "user"
+              ? "theme-user-bubble max-w-[95%] rounded-xl px-3 py-2 text-sm text-white"
+              : message.role === "assistant"
+                ? "max-w-[95%] rounded-xl bg-emerald-500/15 px-3 py-2 text-sm text-white"
+                : "max-w-[95%] rounded-xl bg-white/10 px-3 py-2 text-sm text-white/80";
+          return (
+            <div key={message.id} className="space-y-1">
+              <div className="flex items-center gap-2 text-[11px] text-white/50">
+                <span>{message.role}</span>
+                <span>{toLocalTime(message.ts)}</span>
+                {messageTeachingRun ? (
+                  <span className="rounded border border-sky-300/25 px-1.5 py-0.5 text-sky-100">
+                    {t("教学", "Teach")}
+                  </span>
+                ) : null}
+              </div>
+              <div
+                role={messageTeachingRun ? "button" : undefined}
+                tabIndex={messageTeachingRun ? 0 : undefined}
+                title={messageTeachingRun ? t("点击查看这一轮的完整教学内容", "Click to show this turn's full teaching trace") : undefined}
+                onClick={() => {
+                  if (messageTeachingRun) {
+                    selectTeachingRunFromMessage(messageTeachingRun);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (!messageTeachingRun || (event.key !== "Enter" && event.key !== " ")) return;
+                  event.preventDefault();
+                  selectTeachingRunFromMessage(messageTeachingRun);
+                }}
+                className={`${bubbleClass} ${
+                  messageTeachingRun
+                    ? "cursor-pointer transition hover:ring-1 hover:ring-sky-300/45 focus:outline-none focus:ring-2 focus:ring-sky-300/60"
+                    : ""
+                } ${messageTeachingSelected ? "ring-2 ring-sky-300/65" : ""}`}
+              >
+                {message.role === "assistant" ? (
+                  <div className="chat-markdown">
+                    <ReactMarkdown>{message.text}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <pre className="whitespace-pre-wrap break-words font-sans">{message.text}</pre>
+                )}
+                {(message.attachments ?? message.images)?.length ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {(message.attachments ?? message.images ?? []).map((attachment, index) => (
+                      <AttachmentPreview
+                        key={`${message.id}-${attachment.name}-${index}`}
+                        attachment={attachment}
+                        t={t}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             </div>
-            <div
-              className={
-                message.role === "user"
-                  ? "theme-user-bubble max-w-[95%] rounded-xl px-3 py-2 text-sm text-white"
-                  : message.role === "assistant"
-                    ? "max-w-[95%] rounded-xl bg-emerald-500/15 px-3 py-2 text-sm text-white"
-                    : "max-w-[95%] rounded-xl bg-white/10 px-3 py-2 text-sm text-white/80"
-              }
-            >
-              {message.role === "assistant" ? (
-                <div className="chat-markdown">
-                  <ReactMarkdown>{message.text}</ReactMarkdown>
-                </div>
-              ) : (
-                <pre className="whitespace-pre-wrap break-words font-sans">{message.text}</pre>
-              )}
-              {(message.attachments ?? message.images)?.length ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {(message.attachments ?? message.images ?? []).map((attachment, index) => (
-                    <AttachmentPreview
-                      key={`${message.id}-${attachment.name}-${index}`}
-                      attachment={attachment}
-                      t={t}
-                    />
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {chatTeachingMode ? (
+      {teachingPanelVisible ? (
         <div className="mt-4 space-y-3">
           <TeachingRunSnapshot
             t={t}
