@@ -176,6 +176,7 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
         "skill:config_edit:action:apply_config_change".to_string(),
         1,
     );
+    loop_state.last_written_file_path = Some("src/lib.rs".to_string());
     loop_state
         .executed_step_results
         .push(crate::executor::StepExecutionResult {
@@ -222,6 +223,10 @@ fn soft_budget_checkpoint_payload_records_machine_resume_state() {
     assert_eq!(
         payload["task_checkpoint"]["completed_side_effect_refs"][0],
         "skill:config_edit:action:apply_config_change"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["artifact_refs"][0],
+        "changed_file:src/lib.rs"
     );
     assert_eq!(
         payload["task_checkpoint"]["observations"][0]["step_id"],
@@ -584,7 +589,10 @@ fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
             "status": "ok"
         })],
         evidence_refs: vec!["step_4".to_string()],
-        artifact_refs: vec!["artifact:report".to_string()],
+        artifact_refs: vec![
+            "artifact:report".to_string(),
+            "changed_file:src/lib.rs".to_string(),
+        ],
         completed_side_effect_refs: vec![
             "skill:config_edit:action:apply_config_change".to_string(),
             " ".to_string(),
@@ -641,6 +649,16 @@ fn seed_loop_state_restores_checkpoint_budget_and_side_effect_guards() {
             .output_vars
             .get("agent_loop.resume_completed_side_effect_count"),
         Some(&"1".to_string())
+    );
+    assert_eq!(
+        loop_state
+            .output_vars
+            .get("agent_loop.resume_changed_files_json"),
+        Some(&"[\"src/lib.rs\"]".to_string())
+    );
+    assert_eq!(
+        loop_state.last_written_file_path.as_deref(),
+        Some("src/lib.rs")
     );
     assert_eq!(
         loop_state
