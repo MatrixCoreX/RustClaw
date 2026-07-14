@@ -551,6 +551,14 @@ fn collect_command_fields(
     if let Some(command) = map.get("command").and_then(Value::as_str) {
         collect_command_token(command, signals, evidence_ref);
     }
+    if let Some(command) = map
+        .get("args")
+        .and_then(Value::as_object)
+        .and_then(|args| args.get("command"))
+        .and_then(Value::as_str)
+    {
+        collect_command_token(command, signals, evidence_ref);
+    }
     if let Some(command) = map.get("test_command").and_then(Value::as_str) {
         collect_command_token(command, signals, evidence_ref);
     }

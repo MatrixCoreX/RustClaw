@@ -143,3 +143,44 @@ background_wait_action_refs = ["fs_basic.read_text"]
                 == Some("background_wait")));
     assert!(loop_state.executed_step_results.is_empty());
 }
+
+#[test]
+fn post_tool_hook_records_safe_run_cmd_machine_args() {
+    let mut loop_state = super::LoopState::new(2);
+    loop_state.round_no = 1;
+
+    super::record_post_tool_use_observation(
+        &mut loop_state,
+        "run_cmd",
+        &json!({
+            "command": "python3 test_calc_core.py",
+            "cwd": "/tmp/rustclaw_live_resume",
+            "timeout_seconds": 30,
+            "api_key": "should-not-be-recorded"
+        }),
+        3,
+        2,
+        crate::executor::StepExecutionStatus::Ok,
+    );
+
+    let observation = loop_state
+        .task_observations
+        .iter()
+        .find(|observation| {
+            observation.get("stage").and_then(serde_json::Value::as_str) == Some("post_tool_use")
+        })
+        .expect("post tool observation");
+    assert_eq!(
+        observation
+            .get("status")
+            .and_then(serde_json::Value::as_str),
+        Some("ok")
+    );
+    assert_eq!(
+        observation
+            .pointer("/args/command")
+            .and_then(serde_json::Value::as_str),
+        Some("python3 test_calc_core.py")
+    );
+    assert!(observation.pointer("/args/api_key").is_none());
+}

@@ -425,6 +425,15 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
         "owner_layer": "coding_loop",
         "retry_count": 1
     }));
+    journal.push_task_observation(json!({
+        "owner_layer": "agent_hooks",
+        "stage": "post_tool_use",
+        "tool_or_skill": "run_cmd",
+        "status": "ok",
+        "args": {
+            "command": "python3 test_post_tool_observation.py"
+        }
+    }));
 
     let trace = journal.to_trace_json();
     let coding_checkpoints = trace
@@ -439,7 +448,7 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
                 .collect::<Vec<_>>()
         })
         .expect("coding checkpoint events");
-    assert_eq!(coding_checkpoints.len(), 4);
+    assert_eq!(coding_checkpoints.len(), 5);
     assert_eq!(
         coding_checkpoints[0]
             .pointer("/payload/checkpoint_kind")
@@ -482,6 +491,12 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
             .and_then(Value::as_str),
         Some("python3 test_calc_core.py")
     );
+    assert_eq!(
+        coding_checkpoints[4]
+            .pointer("/payload/verification_command")
+            .and_then(Value::as_str),
+        Some("python3 test_post_tool_observation.py")
+    );
 
     let contract_event = trace
         .pointer("/event_stream")
@@ -514,7 +529,7 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
         contract_event
             .pointer("/payload/commands_run_count")
             .and_then(Value::as_u64),
-        Some(3)
+        Some(4)
     );
     assert_eq!(
         contract_event
@@ -591,7 +606,7 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
         event
             .pointer("/payload/verification_command_count")
             .and_then(Value::as_u64),
-        Some(3)
+        Some(4)
     );
     assert_eq!(
         event
@@ -610,6 +625,12 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
             .pointer("/payload/verification_commands/2")
             .and_then(Value::as_str),
         Some("python3 test_calc_core.py")
+    );
+    assert_eq!(
+        event
+            .pointer("/payload/verification_commands/3")
+            .and_then(Value::as_str),
+        Some("python3 test_post_tool_observation.py")
     );
     assert_eq!(
         event
