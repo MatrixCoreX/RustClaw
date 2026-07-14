@@ -1,5 +1,6 @@
 use super::{
-    automation_runs_request_payload, coding_review_json, exec_effective_options, exec_exit_class,
+    automation_runs_request_payload, coding_review_json, exec_artifact_index_json,
+    exec_compact_text_lines, exec_effective_options, exec_exit_class,
     exec_failure_class_from_machine_tokens, exec_summary_json, permission_report_json, run_exec,
     subagent_report_json, task_event_output_lines, task_report_json, task_report_text_lines,
     task_resume_control_summary_json, tui_command_from_input, tui_export_json, tui_snapshot_json,
@@ -1009,6 +1010,9 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
         .expect("read llm summary artifact");
     let llm_summary: serde_json::Value =
         serde_json::from_str(&llm_summary_file).expect("parse llm summary artifact");
+    let index_file =
+        std::fs::read_to_string(artifact_dir.join("index.json")).expect("read index artifact");
+    let index: serde_json::Value = serde_json::from_str(&index_file).expect("parse index artifact");
 
     assert!(summary_file.contains("\"exit_class\": \"success\""));
     assert!(summary_file.contains("\"llm_call_count\": 2"));
@@ -1036,8 +1040,86 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
     assert!(diff_summary_file.contains("\"crates/clawcli/src/main.rs\""));
     assert_eq!(llm_summary["llm_call_count"], 2);
     assert_eq!(llm_summary["by_prompt"][0]["prompt_label"], "planner");
+    assert_eq!(index["artifact_kind"], "rustclaw_exec_artifact_index");
+    assert_eq!(index["task_id"], "task-exec-artifact");
+    assert_eq!(index["file_count"], 8);
+    assert!(index["files"]
+        .as_array()
+        .expect("index files")
+        .iter()
+        .any(|file| file["kind"] == "llm_summary" && file["path"] == "llm_summary.json"));
 
     std::fs::remove_dir_all(artifact_dir).ok();
+}
+
+#[test]
+fn exec_compact_text_lines_include_coding_budget_and_resume_tokens() {
+    let summary = serde_json::json!({
+        "task_id": "task-compact",
+        "status": "succeeded",
+        "lifecycle_state": "completed",
+        "outcome": "terminal",
+        "exit_class": "success",
+        "effective_config": {
+            "profile": "coding"
+        },
+        "resume": {
+            "mode": "new_task"
+        },
+        "resume_hint": {
+            "checkpoint_id": "ckpt-compact",
+            "resume_due": true
+        },
+        "llm": {
+            "budget_health": {
+                "status": "warning"
+            }
+        },
+        "coding": {
+            "changed_file_count": 1,
+            "changed_files": ["crates/clawcli/src/commands/exec.rs"],
+            "verification_command_count": 1,
+            "verification_commands": ["cargo test -p clawcli exec -- --quiet"],
+            "unverified_risk": null,
+            "state": {
+                "verification_status": "verified",
+                "next_step": "summarize",
+                "checkpoint_ref_count": 1,
+                "completed_side_effect_count": 1
+            }
+        },
+        "artifact_index": {
+            "path": "index.json"
+        }
+    });
+
+    let lines = exec_compact_text_lines(&summary);
+
+    assert!(lines.contains(&"exec_compact_profile: coding".to_string()));
+    assert!(lines.contains(&"exec_compact_task_id: task-compact".to_string()));
+    assert!(lines.contains(&"exec_compact_budget_status: warning".to_string()));
+    assert!(lines.contains(&"exec_compact_checkpoint_id: ckpt-compact".to_string()));
+    assert!(lines.contains(&"exec_compact_resume_due: true".to_string()));
+    assert!(lines.contains(&"exec_compact_changed_file_count: 1".to_string()));
+    assert!(lines.contains(&"exec_compact_verification_status: verified".to_string()));
+    assert!(lines.contains(&"exec_compact_artifact_index: index.json".to_string()));
+    assert!(lines
+        .contains(&"exec_compact_changed_file: crates/clawcli/src/commands/exec.rs".to_string()));
+    assert!(lines.contains(
+        &"exec_compact_verification_command: cargo test -p clawcli exec -- --quiet".to_string()
+    ));
+
+    let index = exec_artifact_index_json(
+        &summary,
+        std::path::Path::new("/tmp/rustclaw-artifacts"),
+        &[("summary", "summary.json"), ("index", "index.json")],
+    );
+    assert_eq!(index["artifact_kind"], "rustclaw_exec_artifact_index");
+    assert_eq!(index["file_count"], 2);
+    assert_eq!(
+        index["files"][0]["absolute_path"],
+        "/tmp/rustclaw-artifacts/summary.json"
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use super::{
-    replay_bundle_json, replay_diff_summary, replay_run_summary, run_diff, run_run,
-    validate_replay_bundle,
+    replay_bundle_json, replay_diff_summary, replay_run_summary, replay_view_json, run_diff,
+    run_run, validate_replay_bundle,
 };
 
 #[test]
@@ -126,6 +126,72 @@ fn replay_run_summary_is_recorded_only_machine_result() {
         summary["permission_summary"][0]["permission_decision"]["decision"],
         "allowed"
     );
+}
+
+#[test]
+fn replay_view_json_filters_llm_tools_and_checkpoints() {
+    let bundle = serde_json::json!({
+        "schema_version": 1,
+        "bundle_kind": "rustclaw_task_replay",
+        "task_id": "task-replay-view",
+        "status": "running",
+        "lifecycle_state": "background",
+        "task": {
+            "steps": [
+                {
+                    "step_id": "step_1",
+                    "skill": "run_cmd",
+                    "status": "ok",
+                    "tool_result": {
+                        "skill": "run_cmd",
+                        "status_code": "ok",
+                        "exit_code": 0
+                    }
+                }
+            ]
+        },
+        "events": [
+            {
+                "event_type": "provider_call",
+                "line": "type=provider_call prompt_label=planner",
+                "fields": {
+                    "prompt_label": "planner",
+                    "llm_call_count": "1"
+                }
+            },
+            {
+                "event_type": "checkpoint_created",
+                "line": "type=checkpoint_created checkpoint_id=ckpt-1",
+                "fields": {
+                    "checkpoint_id": "ckpt-1"
+                }
+            },
+            {
+                "event_type": "task_progress",
+                "fields": {
+                    "status": "running"
+                }
+            }
+        ]
+    });
+
+    let llm = replay_view_json(&bundle, "llm").expect("llm view");
+    let tools = replay_view_json(&bundle, "tools").expect("tools view");
+    let checkpoints = replay_view_json(&bundle, "checkpoints").expect("checkpoint view");
+
+    assert_eq!(llm["view"], "llm");
+    assert_eq!(llm["item_count"], 1);
+    assert_eq!(llm["items"][0]["event_type"], "provider_call");
+    assert_eq!(tools["view"], "tools");
+    assert!(tools["item_count"].as_u64().is_some_and(|count| count >= 1));
+    assert!(tools["items"]
+        .as_array()
+        .expect("tool items")
+        .iter()
+        .any(|item| item["skill"] == "run_cmd" || item["tool_result"]["skill"] == "run_cmd"));
+    assert_eq!(checkpoints["view"], "checkpoints");
+    assert_eq!(checkpoints["item_count"], 1);
+    assert_eq!(checkpoints["items"][0]["fields"]["checkpoint_id"], "ckpt-1");
 }
 
 #[test]
@@ -418,7 +484,7 @@ fn replay_offline_smoke_runs_bundle_and_diff_without_providers() {
     )
     .expect("write right bundle");
 
-    run_run(&left_path, true, false).expect("run replay bundle");
+    run_run(&left_path, true, false, "summary").expect("run replay bundle");
     run_diff(&left_path, &right_path, true).expect("diff replay bundles");
 
     std::fs::remove_dir_all(base_dir).ok();

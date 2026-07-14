@@ -54,17 +54,28 @@ pub(crate) fn run_export(
     Ok(())
 }
 
-pub(crate) fn run_run(bundle_path: &Path, json_output: bool, coverage_output: bool) -> Result<()> {
+pub(crate) fn run_run(
+    bundle_path: &Path,
+    json_output: bool,
+    coverage_output: bool,
+    view: &str,
+) -> Result<()> {
     let body = fs::read_to_string(bundle_path)
         .with_context(|| format!("read replay bundle {}", bundle_path.display()))?;
     let bundle: Value = serde_json::from_str(&body).context("parse replay bundle")?;
     validate_replay_bundle(&bundle)?;
-    let summary = replay_run_summary(&bundle);
+    let summary = if coverage_output || view == "summary" {
+        replay_run_summary(&bundle)
+    } else {
+        replay_view_json(&bundle, view)?
+    };
     if json_output {
         output::print_json_pretty(&summary);
     } else if coverage_output {
         let coverage = summary.get("coverage").cloned().unwrap_or(Value::Null);
         output::print_json_pretty(&coverage);
+    } else if view != "summary" {
+        print_replay_view_lines(&summary);
     } else {
         println!(
             "task_id: {}",
@@ -275,6 +286,107 @@ fn replay_run_summary(bundle: &Value) -> Value {
         "verifier_summary": verifier_summary,
         "permission_summary": permission_summary,
     })
+}
+
+fn replay_view_json(bundle: &Value, view: &str) -> Result<Value> {
+    let items = match view {
+        "llm" => replay_llm_view_items(bundle),
+        "tools" => replay_tool_result_summary(bundle),
+        "checkpoints" => replay_checkpoint_view_items(bundle),
+        "summary" => return Ok(replay_run_summary(bundle)),
+        _ => anyhow::bail!("replay_view_unknown:{view}"),
+    };
+    Ok(json!({
+        "bundle_kind": REPLAY_BUNDLE_KIND,
+        "schema_version": REPLAY_SCHEMA_VERSION,
+        "replay_mode": "recorded_only",
+        "live_provider": false,
+        "live_tool_invocations": false,
+        "view": view,
+        "task_id": bundle.get("task_id").and_then(Value::as_str),
+        "item_count": items.len(),
+        "items": items,
+    }))
+}
+
+fn replay_llm_view_items(bundle: &Value) -> Vec<Value> {
+    replay_event_view_items(bundle, |event_type, _event| event_type == "provider_call")
+}
+
+fn replay_checkpoint_view_items(bundle: &Value) -> Vec<Value> {
+    replay_event_view_items(bundle, |event_type, event| {
+        matches!(event_type, "checkpoint_created" | "coding_checkpoint")
+            || event
+                .get("fields")
+                .and_then(Value::as_object)
+                .is_some_and(|fields| {
+                    fields.contains_key("checkpoint_id") || fields.contains_key("checkpoint_ref")
+                })
+    })
+}
+
+fn replay_event_view_items(bundle: &Value, predicate: impl Fn(&str, &Value) -> bool) -> Vec<Value> {
+    bundle
+        .get("events")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter_map(|(index, event)| {
+            let event_type = event
+                .get("event_type")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
+            if event_type.is_empty() || !predicate(event_type, event) {
+                return None;
+            }
+            Some(json!({
+                "index": index,
+                "event_type": event_type,
+                "fields": event.get("fields").cloned().unwrap_or(Value::Null),
+                "line": event.get("line").and_then(Value::as_str),
+            }))
+        })
+        .collect()
+}
+
+fn print_replay_view_lines(summary: &Value) {
+    println!(
+        "replay_view: {}",
+        summary
+            .get("view")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    );
+    println!(
+        "task_id: {}",
+        summary
+            .get("task_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+    );
+    println!(
+        "item_count: {}",
+        summary
+            .get("item_count")
+            .and_then(Value::as_u64)
+            .unwrap_or_default()
+    );
+    for item in summary
+        .get("items")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(32)
+    {
+        let kind = item
+            .get("event_type")
+            .or_else(|| item.get("stage"))
+            .and_then(Value::as_str)
+            .unwrap_or("item");
+        println!("replay_item: kind={kind}");
+    }
 }
 
 fn recorded_execution_replay(

@@ -400,12 +400,18 @@ pub(crate) fn run_exec(
     )?;
     let exit_class = exec_exit_class(&task, outcome, effective.fail_on_background);
     let mut summary = exec_summary_json(&task, outcome, exit_class, resume_task_id);
+    let artifact_index = effective.artifact_dir.as_deref().map(|artifact_dir| {
+        exec_artifact_index_json(&summary, artifact_dir, exec_artifact_index_file_set())
+    });
     if let Some(map) = summary.as_object_mut() {
         map.insert(
             "effective_config".to_string(),
             exec_effective_config_json(&effective),
         );
         map.insert("resume_hint".to_string(), exec_resume_artifact_json(&task));
+        if let Some(artifact_index) = artifact_index {
+            map.insert("artifact_index".to_string(), artifact_index);
+        }
     }
     if let Some(artifact_dir) = effective.artifact_dir.as_deref() {
         write_exec_artifacts(artifact_dir, &task, &summary)?;
@@ -414,6 +420,9 @@ pub(crate) fn run_exec(
         output::print_json_pretty(&summary);
     } else {
         output::print_task_status(&task, false, &EventFilters::default());
+        for line in exec_compact_text_lines(&summary) {
+            println!("{line}");
+        }
         let llm = llm_report_json(&task);
         for line in llm_budget_text_lines(&llm) {
             println!("{line}");
@@ -429,6 +438,161 @@ pub(crate) fn run_exec(
         println!("exec_exit_code: {}", exit_class.code());
     }
     Ok(exit_class.code())
+}
+
+pub(super) fn exec_compact_text_lines(summary: &Value) -> Vec<String> {
+    let mut lines = Vec::new();
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_profile",
+        summary,
+        "/effective_config/profile",
+    );
+    push_summary_machine_line(&mut lines, "exec_compact_task_id", summary, "/task_id");
+    push_summary_machine_line(&mut lines, "exec_compact_status", summary, "/status");
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_lifecycle_state",
+        summary,
+        "/lifecycle_state",
+    );
+    push_summary_machine_line(&mut lines, "exec_compact_outcome", summary, "/outcome");
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_exit_class",
+        summary,
+        "/exit_class",
+    );
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_budget_status",
+        summary,
+        "/llm/budget_health/status",
+    );
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_resume_mode",
+        summary,
+        "/resume/mode",
+    );
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_checkpoint_id",
+        summary,
+        "/resume_hint/checkpoint_id",
+    );
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_resume_due",
+        summary,
+        "/resume_hint/resume_due",
+    );
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_changed_file_count",
+        summary,
+        "/coding/changed_file_count",
+    );
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_verification_command_count",
+        summary,
+        "/coding/verification_command_count",
+    );
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_verification_status",
+        summary,
+        "/coding/state/verification_status",
+    );
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_next_step",
+        summary,
+        "/coding/state/next_step",
+    );
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_checkpoint_ref_count",
+        summary,
+        "/coding/state/checkpoint_ref_count",
+    );
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_completed_side_effect_count",
+        summary,
+        "/coding/state/completed_side_effect_count",
+    );
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_unverified_risk",
+        summary,
+        "/coding/unverified_risk",
+    );
+    push_summary_machine_line(
+        &mut lines,
+        "exec_compact_artifact_index",
+        summary,
+        "/artifact_index/path",
+    );
+    push_summary_array_lines(
+        &mut lines,
+        "exec_compact_changed_file",
+        summary,
+        "/coding/changed_files",
+        8,
+    );
+    push_summary_array_lines(
+        &mut lines,
+        "exec_compact_verification_command",
+        summary,
+        "/coding/verification_commands",
+        4,
+    );
+    lines
+}
+
+fn push_summary_machine_line(lines: &mut Vec<String>, key: &str, source: &Value, pointer: &str) {
+    let Some(value) = source.pointer(pointer) else {
+        return;
+    };
+    let text = match value {
+        Value::String(value) => value.trim().to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Null | Value::Array(_) | Value::Object(_) => String::new(),
+    };
+    if text.is_empty() {
+        return;
+    }
+    push_exec_machine_line(lines, key, &text);
+}
+
+fn push_summary_array_lines(
+    lines: &mut Vec<String>,
+    key: &str,
+    source: &Value,
+    pointer: &str,
+    limit: usize,
+) {
+    let Some(items) = source.pointer(pointer).and_then(Value::as_array) else {
+        return;
+    };
+    for value in items.iter().filter_map(Value::as_str).take(limit) {
+        let text = value.trim();
+        if !text.is_empty() {
+            push_exec_machine_line(lines, key, text);
+        }
+    }
+}
+
+fn push_exec_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
+    let mut line = String::with_capacity(key.len() + value.len() + 2);
+    line.push_str(key);
+    line.push(':');
+    line.push(' ');
+    line.push_str(value);
+    lines.push(line);
 }
 
 pub(super) fn exec_exit_class(
@@ -559,7 +723,15 @@ fn is_exec_machine_token(value: &str) -> bool {
 fn write_exec_detached_artifacts(artifact_dir: &Path, summary: &Value) -> Result<()> {
     fs::create_dir_all(artifact_dir)
         .with_context(|| format!("create artifact dir {}", artifact_dir.display()))?;
-    write_json_file(&artifact_dir.join("summary.json"), summary)
+    write_json_file(&artifact_dir.join("summary.json"), summary)?;
+    write_json_file(
+        &artifact_dir.join("index.json"),
+        &exec_artifact_index_json(
+            summary,
+            artifact_dir,
+            exec_detached_artifact_index_file_set(),
+        ),
+    )
 }
 
 pub(super) fn write_exec_artifacts(
@@ -587,6 +759,10 @@ pub(super) fn write_exec_artifacts(
         &artifact_dir.join("resume.json"),
         &exec_resume_artifact_json(task),
     )?;
+    write_json_file(
+        &artifact_dir.join("index.json"),
+        &exec_artifact_index_json(summary, artifact_dir, exec_artifact_index_file_set()),
+    )?;
     let mut events = String::new();
     for event in &task.events {
         events.push_str(&event.line);
@@ -595,6 +771,52 @@ pub(super) fn write_exec_artifacts(
     fs::write(artifact_dir.join("events.jsonl"), events)
         .with_context(|| format!("write artifact dir {}", artifact_dir.display()))?;
     Ok(())
+}
+
+fn exec_artifact_index_file_set() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("summary", "summary.json"),
+        ("task", "task.json"),
+        ("events", "events.jsonl"),
+        ("verification", "verification.json"),
+        ("diff_summary", "diff_summary.json"),
+        ("llm_summary", "llm_summary.json"),
+        ("resume", "resume.json"),
+        ("index", "index.json"),
+    ]
+}
+
+fn exec_detached_artifact_index_file_set() -> &'static [(&'static str, &'static str)] {
+    &[("summary", "summary.json"), ("index", "index.json")]
+}
+
+pub(super) fn exec_artifact_index_json(
+    summary: &Value,
+    artifact_dir: &Path,
+    files: &[(&str, &str)],
+) -> Value {
+    let entries = files
+        .iter()
+        .map(|(kind, path)| {
+            json!({
+                "kind": kind,
+                "path": path,
+                "absolute_path": artifact_dir.join(path).display().to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "artifact_kind": "rustclaw_exec_artifact_index",
+        "schema_version": 1,
+        "task_id": summary.get("task_id").cloned().unwrap_or(Value::Null),
+        "status": summary.get("status").cloned().unwrap_or(Value::Null),
+        "outcome": summary.get("outcome").cloned().unwrap_or(Value::Null),
+        "exit_class": summary.get("exit_class").cloned().unwrap_or(Value::Null),
+        "path": "index.json",
+        "absolute_path": artifact_dir.join("index.json").display().to_string(),
+        "file_count": entries.len(),
+        "files": entries,
+    })
 }
 
 fn exec_resume_artifact_json(task: &task::TaskStatusView) -> Value {
