@@ -464,6 +464,8 @@ fn normalize_fs_basic_args(args: &mut Value) -> bool {
     let action = action_name(obj);
     if action.as_deref() == Some("read_text_range") {
         changed |= normalize_read_text_range_args(obj);
+    } else if matches!(action.as_deref(), Some("write_text" | "append_text")) {
+        changed |= normalize_fs_write_text_args(obj);
     } else {
         changed |= move_value_alias_if_missing(obj, "max_entries", &["limit"]);
     }
@@ -474,6 +476,14 @@ fn normalize_fs_basic_args(args: &mut Value) -> bool {
         changed |= promote_grep_pattern_to_query_if_missing(obj);
         changed |= move_value_alias_if_missing(obj, "query", &["text", "keyword"]);
     }
+    changed
+}
+
+fn normalize_fs_write_text_args(obj: &mut serde_json::Map<String, Value>) -> bool {
+    let mut changed = false;
+    changed |= move_value_alias_if_missing(obj, "path", &["file", "file_path", "target"]);
+    changed |= move_value_alias_if_missing(obj, "content", &["text", "data", "body"]);
+    changed |= move_value_alias_if_missing(obj, "mode", &["write_mode", "writeMode"]);
     changed
 }
 

@@ -449,7 +449,7 @@ fn normalize_capability_invocation(capability: &str, args: Value) -> (String, Va
     ) {
         return (normalized, normalize_run_command_args(args));
     }
-    let args = normalize_filesystem_listing_capability_args(&normalized, args);
+    let args = normalize_filesystem_capability_args(&normalized, args);
     let args = normalize_config_basic_capability_args(&normalized, args);
     (normalized, args)
 }
@@ -476,7 +476,7 @@ fn normalize_task_control_list_args(args: Value) -> Value {
     Value::Object(obj)
 }
 
-fn normalize_filesystem_listing_capability_args(normalized_capability: &str, args: Value) -> Value {
+fn normalize_filesystem_capability_args(normalized_capability: &str, args: Value) -> Value {
     let mut obj = match args {
         Value::Object(obj) => obj,
         other => return other,
@@ -496,7 +496,31 @@ fn normalize_filesystem_listing_capability_args(normalized_capability: &str, arg
         }
         _ => {}
     }
+    if is_filesystem_write_capability(normalized_capability, &obj) {
+        move_arg_alias_if_missing(&mut obj, "path", &["file", "file_path", "target"]);
+        move_arg_alias_if_missing(&mut obj, "content", &["text", "data", "body"]);
+        move_arg_alias_if_missing(&mut obj, "mode", &["write_mode", "writeMode"]);
+    }
     Value::Object(obj)
+}
+
+fn is_filesystem_write_capability(
+    normalized_capability: &str,
+    obj: &serde_json::Map<String, Value>,
+) -> bool {
+    let action = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(normalize_capability_name)
+        .or_else(|| {
+            normalized_capability
+                .rsplit_once('.')
+                .map(|(_, action)| normalize_capability_name(action))
+        });
+    matches!(
+        action.as_deref(),
+        Some("write_text" | "write_file" | "append_text" | "append_file")
+    )
 }
 
 fn normalize_config_basic_capability_args(normalized_capability: &str, args: Value) -> Value {
