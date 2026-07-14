@@ -70,6 +70,40 @@ pub(super) fn coding_state_transition_observation(
     Some(payload)
 }
 
+pub(super) fn coding_milestone_checkpoint_observation(
+    transition: &Value,
+    prior_observations: &[Value],
+) -> Option<Value> {
+    if transition.get("kind").and_then(Value::as_str) != Some("coding_state_transition") {
+        return None;
+    }
+    let phase = transition.get("phase").and_then(Value::as_str)?;
+    let checkpoint_kind = coding_checkpoint_kind(phase, transition, prior_observations)?;
+    let step_id = transition.get("step_id").and_then(Value::as_str)?;
+    let checkpoint_ref = format!("coding_checkpoint:{checkpoint_kind}:{step_id}");
+    let mut payload = json!({
+        "kind": "coding_checkpoint",
+        "schema_version": 1,
+        "checkpoint_kind": checkpoint_kind,
+        "checkpoint_ref": checkpoint_ref,
+        "evidence_ref": checkpoint_ref,
+        "source_step_id": step_id,
+        "phase": phase,
+        "status": transition.get("status").cloned().unwrap_or(Value::Null),
+        "next_phase_hint": transition.get("next_phase_hint").cloned().unwrap_or(Value::Null),
+        "verification_status": coding_checkpoint_verification_status(phase, transition),
+    });
+    let object = payload.as_object_mut()?;
+    copy_transition_field(object, transition, "action");
+    copy_transition_field(object, transition, "command");
+    copy_transition_field(object, transition, "verification_command");
+    copy_transition_field(object, transition, "failure_kind");
+    copy_transition_field(object, transition, "changed_files");
+    copy_transition_field(object, transition, "files_read");
+    copy_transition_field(object, transition, "completed_side_effect_refs");
+    Some(payload)
+}
+
 #[derive(Default)]
 struct CodingTransitionSignals {
     action: Option<String>,
@@ -93,6 +127,61 @@ impl CodingTransitionSignals {
             || self.checkpoint_kind.is_some()
             || self.checkpoint_ref.is_some()
             || !self.completed_side_effect_refs.is_empty()
+    }
+}
+
+fn coding_checkpoint_kind(
+    phase: &str,
+    transition: &Value,
+    prior_observations: &[Value],
+) -> Option<&'static str> {
+    match phase {
+        "edit" => {
+            if prior_observations
+                .iter()
+                .any(observation_is_repair_transition)
+            {
+                Some("fix_applied")
+            } else {
+                Some("file_edit_group")
+            }
+        }
+        "verify" => Some("verification_command"),
+        "repair" => Some("failed_step"),
+        "checkpoint" => transition
+            .get("checkpoint_kind")
+            .and_then(Value::as_str)
+            .and_then(|value| match value {
+                "file_edit_group" => Some("file_edit_group"),
+                "verification_command" => Some("verification_command"),
+                "failed_step" => Some("failed_step"),
+                "fix_applied" => Some("fix_applied"),
+                _ => None,
+            }),
+        _ => None,
+    }
+}
+
+fn observation_is_repair_transition(value: &Value) -> bool {
+    value.get("kind").and_then(Value::as_str) == Some("coding_state_transition")
+        && value.get("phase").and_then(Value::as_str) == Some("repair")
+}
+
+fn coding_checkpoint_verification_status(phase: &str, transition: &Value) -> &'static str {
+    if transition.get("status").and_then(Value::as_str) == Some("error") {
+        "failed"
+    } else if phase == "verify" {
+        "verified"
+    } else if phase == "edit" {
+        "unverified"
+    } else {
+        "not_applicable"
+    }
+}
+
+fn copy_transition_field(map: &mut Map<String, Value>, transition: &Value, key: &str) {
+    if let Some(value) = transition.get(key).filter(|value| !value.is_null()) {
+        map.insert(key.to_string(), value.clone());
     }
 }
 

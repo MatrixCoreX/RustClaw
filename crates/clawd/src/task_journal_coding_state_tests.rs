@@ -18,6 +18,17 @@ fn step_result(
     }
 }
 
+fn observation<'a>(
+    journal: &'a crate::task_journal::TaskJournal,
+    kind: &str,
+) -> &'a serde_json::Value {
+    journal
+        .task_observations
+        .iter()
+        .find(|value| value.get("kind").and_then(serde_json::Value::as_str) == Some(kind))
+        .expect("expected observation")
+}
+
 #[test]
 fn step_result_records_coding_edit_transition_observation() {
     let mut journal = crate::task_journal::TaskJournal::for_task(
@@ -42,18 +53,17 @@ fn step_result_records_coding_edit_transition_observation() {
         None,
     ));
 
-    let observation = journal
-        .task_observations
-        .iter()
-        .find(|value| {
-            value.get("kind").and_then(serde_json::Value::as_str) == Some("coding_state_transition")
-        })
-        .expect("coding transition observation");
-    assert_eq!(observation["phase"], "edit");
-    assert_eq!(observation["next_phase_hint"], "verify");
-    assert_eq!(observation["status"], "ok");
-    assert_eq!(observation["action"], "write_text");
-    assert_eq!(observation["changed_files"][0], "src/lib.rs");
+    let transition = observation(&journal, "coding_state_transition");
+    assert_eq!(transition["phase"], "edit");
+    assert_eq!(transition["next_phase_hint"], "verify");
+    assert_eq!(transition["status"], "ok");
+    assert_eq!(transition["action"], "write_text");
+    assert_eq!(transition["changed_files"][0], "src/lib.rs");
+
+    let checkpoint = observation(&journal, "coding_checkpoint");
+    assert_eq!(checkpoint["checkpoint_kind"], "file_edit_group");
+    assert_eq!(checkpoint["verification_status"], "unverified");
+    assert_eq!(checkpoint["changed_files"][0], "src/lib.rs");
 }
 
 #[test]
@@ -71,17 +81,58 @@ fn step_result_records_failed_verification_transition_observation() {
         Some("exit=101 command=cargo test -p clawd".to_string()),
     ));
 
-    let observation = journal
+    let transition = observation(&journal, "coding_state_transition");
+    assert_eq!(transition["phase"], "repair");
+    assert_eq!(transition["next_phase_hint"], "repair");
+    assert_eq!(transition["status"], "error");
+    assert_eq!(transition["command"], "cargo test -p clawd");
+    assert_eq!(transition["verification_command"], "cargo test -p clawd");
+    assert_eq!(transition["failure_kind"], "test");
+
+    let checkpoint = observation(&journal, "coding_checkpoint");
+    assert_eq!(checkpoint["checkpoint_kind"], "failed_step");
+    assert_eq!(checkpoint["verification_status"], "failed");
+    assert_eq!(checkpoint["failure_kind"], "test");
+}
+
+#[test]
+fn edit_after_repair_records_fix_applied_checkpoint() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-coding-state-fix",
+        "ask",
+        "fix failing test",
+    );
+    journal.push_step_result(&step_result(
+        "step_1",
+        "run_cmd",
+        crate::executor::StepExecutionStatus::Error,
+        None,
+        Some("exit=101 command=cargo test -p clawd".to_string()),
+    ));
+    journal.push_step_result(&step_result(
+        "step_2",
+        "fs_basic",
+        crate::executor::StepExecutionStatus::Ok,
+        Some(
+            json!({
+                "extra": {
+                    "action": "write_text",
+                    "path": "src/lib.rs"
+                }
+            })
+            .to_string(),
+        ),
+        None,
+    ));
+
+    let checkpoints = journal
         .task_observations
         .iter()
-        .find(|value| {
-            value.get("kind").and_then(serde_json::Value::as_str) == Some("coding_state_transition")
+        .filter(|value| {
+            value.get("kind").and_then(serde_json::Value::as_str) == Some("coding_checkpoint")
         })
-        .expect("coding transition observation");
-    assert_eq!(observation["phase"], "repair");
-    assert_eq!(observation["next_phase_hint"], "repair");
-    assert_eq!(observation["status"], "error");
-    assert_eq!(observation["command"], "cargo test -p clawd");
-    assert_eq!(observation["verification_command"], "cargo test -p clawd");
-    assert_eq!(observation["failure_kind"], "test");
+        .collect::<Vec<_>>();
+    assert_eq!(checkpoints.len(), 2);
+    assert_eq!(checkpoints[1]["checkpoint_kind"], "fix_applied");
+    assert_eq!(checkpoints[1]["changed_files"][0], "src/lib.rs");
 }

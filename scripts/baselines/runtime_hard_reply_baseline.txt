@@ -12,7 +12,6 @@ crates/claw-core/src/channel_commands.rs	core channel command `{}` is missing co
 crates/claw-core/src/channel_commands.rs	parse channel command config failed: {err}	.map_err(|err| format!("parse channel command config failed: {err}"))?;
 crates/claw-core/src/channel_commands.rs	read channel command config failed: {err}	.map_err(|err| format!("read channel command config failed: {err}"))?;
 crates/claw-core/src/channel_commands.rs	skill channel command `{}` is missing skill_name	"skill channel command `{}` is missing skill_name",
-crates/claw-core/src/channel_i18n.rs	rustclaw_channel_i18n_{name}_{unique}.toml	std::env::temp_dir().join(format!("rustclaw_channel_i18n_{name}_{unique}.toml"))
 crates/claw-core/src/channel_i18n.rs	time before unix epoch	.expect("time before unix epoch")
 crates/claw-core/src/config.rs	不主动设置	/// 全部 `Option`，缺省即"不主动设置"，**完全向后兼容**。
 crates/claw-core/src/config.rs	未配置即默认全开	// 显式设为 true 时才启用，避免"未配置即默认全开"的权限面过大问题。
@@ -33,7 +32,6 @@ crates/claw-core/src/secrets.rs	secret token `{token}` not found or already rede
 crates/claw-core/src/secrets.rs	secret token record at `{path}` is invalid JSON: {source}	#[error("secret token record at `{path}` is invalid JSON: {source}")]
 crates/claw-core/src/secrets.rs	secret token record must serialize	let payload = serde_json::to_vec(&record).expect("secret token record must serialize");
 crates/claw-core/src/secrets.rs	secret token store IO failed at `{path}`: {source}	#[error("secret token store IO failed at `{path}`: {source}")]
-crates/claw-core/src/secrets.rs	{SECRET_TOKEN_PREFIX}{token}	Ok(format!("{SECRET_TOKEN_PREFIX}{token}"))
 crates/claw-core/src/secrets.rs	全大写 + 可选前缀	//! - 默认实现 [`EnvSecretsBroker`] 把 secret 名按"全大写 + 可选前缀"映射到
 crates/claw-core/src/secrets.rs	子进程 env 名 → secret 值	/// 把 manifest 上声明的 [`Capability::Secrets`] 翻译成"子进程 env 名 → secret 值"。
 crates/claw-core/src/secrets.rs	按这个名字能不能找到 secret	/// 实现者只要回答"按这个名字能不能找到 secret"。**不**负责命名规范校验
@@ -72,7 +70,6 @@ crates/clawcli/src/chat.rs	clawcli chat mode (type a message, empty line or 'exi
 crates/clawcli/src/chat.rs	rustyline init (is stdin a TTY?)	let mut rl = rustyline::DefaultEditor::new().context("rustyline init (is stdin a TTY?)")?;
 crates/clawcli/src/commands/common.rs	parse {context_label} response	.with_context(|| format!("parse {context_label} response"))?;
 crates/clawcli/src/commands/common.rs	request {context_label} failed	.with_context(|| format!("request {context_label} failed"))?;
-crates/clawcli/src/commands/exec.rs	exec_profile_unknown:{other}	Some(other) => anyhow::bail!("exec_profile_unknown:{other}"),
 crates/clawcli/src/commands/report.rs	coding_changed_file_count: {}	"coding_changed_file_count: {}",
 crates/clawcli/src/commands/report.rs	coding_changed_file_count: {}	"coding_changed_file_count: {}",
 crates/clawcli/src/commands/report.rs	coding_changed_file_count: {}	"coding_changed_file_count: {}",
@@ -130,18 +127,7 @@ crates/clawd/src/agent_engine.rs	failed_action: {failed_action}	format!("failed_
 crates/clawd/src/agent_engine.rs	failed_step_index: {failed_index}	format!("failed_step_index: {failed_index}"),
 crates/clawd/src/agent_engine.rs	remaining_steps_count: {remaining_steps_count}	format!("remaining_steps_count: {remaining_steps_count}"),
 crates/clawd/src/agent_engine.rs	skill enabled but registry prompt_file logical path missing	"skill enabled but registry prompt_file logical path missing".to_string()
-crates/clawd/src/agent_engine.rs	s{global_step}.content_status	format!("s{global_step}.content_status"),
-crates/clawd/src/agent_engine.rs	s{global_step}.content_status	format!("s{global_step}.content_status"),
-crates/clawd/src/agent_engine.rs	s{global_step}.output_kind	format!("s{global_step}.output_kind"),
-crates/clawd/src/agent_engine.rs	s{round_step}.content_status	format!("s{round_step}.content_status"),
-crates/clawd/src/agent_engine.rs	s{round_step}.content_status	format!("s{round_step}.content_status"),
-crates/clawd/src/agent_engine.rs	s{round_step}.output_kind	format!("s{round_step}.output_kind"),
 crates/clawd/src/agent_engine.rs	use this skill when user intent matches its capability	"use this skill when user intent matches its capability".to_string()
-crates/clawd/src/agent_engine.rs	{key_prefix}.content_status	.insert(format!("{key_prefix}.content_status"), failed_status);
-crates/clawd/src/agent_engine.rs	{key_prefix}.content_status	format!("{key_prefix}.content_status"),
-crates/clawd/src/agent_engine.rs	{key_prefix}.error_kind	format!("{key_prefix}.error_kind"),
-crates/clawd/src/agent_engine.rs	{key_prefix}.last_output	.insert(format!("{key_prefix}.last_output"), value);
-crates/clawd/src/agent_engine.rs	{key_prefix}.output_kind	format!("{key_prefix}.output_kind"),
 crates/clawd/src/agent_engine/arg_resolver.rs	double brace placeholder regex	Regex::new(r"\\{\\{\\s*([^{}]+?)\\s*\\}\\}").expect("double brace placeholder regex")
 crates/clawd/src/agent_engine/arg_resolver.rs	默认 path 兜底	// AUTO_LOCATOR 只是 turn 级"默认 path 兜底"，仅当 LLM 给的 path 看起来是
 crates/clawd/src/agent_engine/async_start_checkpoint.rs	agent-loop:{}:round-{}:step-{}:async-job:{}	"agent-loop:{}:round-{}:step-{}:async-job:{}",
@@ -156,8 +142,6 @@ crates/clawd/src/agent_engine/attempt_ledger.rs	stop_and_report_credential_probl
 crates/clawd/src/agent_engine/concrete_respond_structural_observation.rs	non-empty checked above	let respond = rewritten.pop().expect("non-empty checked above");
 crates/clawd/src/agent_engine/dispatch_support.rs	invalid file delivery token: runtime observation was embedded into FILE path	let error = "invalid file delivery token: runtime observation was embedded into FILE path";
 crates/clawd/src/agent_engine/explicit_observed_paths.rs	last_output indexed placeholder regex	.expect("last_output indexed placeholder regex")
-crates/clawd/src/agent_engine/loop_control.rs	agent_loop.decision_envelope.{field}	format!("agent_loop.decision_envelope.{field}"),
-crates/clawd/src/agent_engine/loop_control_answer_recovery.rs	answer_verifier_retry_exhausted_recovered_with_{reason}	info!("answer_verifier_retry_exhausted_recovered_with_{reason}");
 crates/clawd/src/agent_engine/loop_control_post_write_evidence_guard.rs	collect the missing structured machine evidence from tools before publishing the final local-code JSON	"collect the missing structured machine evidence from tools before publishing the final local-code JSON"
 crates/clawd/src/agent_engine/observed_output.rs	### multi_count_quantity_comparison_guard	"### multi_count_quantity_comparison_guard".to_string(),
 crates/clawd/src/agent_engine/observed_output.rs	LLM 过保守错判为不可发	// 保留"LLM 过保守错判为不可发"的救回链路。
@@ -207,7 +191,6 @@ crates/clawd/src/agent_engine/skill_execution.rs	call_skill(auto_sudo_retry)	"ca
 crates/clawd/src/agent_engine/skill_execution.rs	skill(run_cmd:auto_sudo_retry)	"skill(run_cmd:auto_sudo_retry)",
 crates/clawd/src/agent_engine/skill_execution.rs	skill(run_cmd:auto_sudo_retry)	"skill(run_cmd:auto_sudo_retry)",
 crates/clawd/src/agent_engine/skill_execution.rs	skill:run_cmd:auto_sudo_retry:{}	&format!("skill:run_cmd:auto_sudo_retry:{}", retry_args),
-crates/clawd/src/agent_engine/skill_execution.rs	step_{global_step}_sudo_retry	&format!("step_{global_step}_sudo_retry"),
 crates/clawd/src/agent_engine/skill_execution.rs	sudo -n sh -c {} sh {} | sort | head -n {}	"sudo -n sh -c {} sh {} | sort | head -n {}",
 crates/clawd/src/agent_engine/skill_execution.rs	sudo -n tail -n {n} {quoted_path}	"tail" => Some(format!("sudo -n tail -n {n} {quoted_path}")),
 crates/clawd/src/agent_engine/skill_execution.rs	validation result was inconclusive	"validation result was inconclusive",
@@ -222,15 +205,10 @@ crates/clawd/src/agent_engine/skill_execution_preflight.rs	path argument contain
 crates/clawd/src/agent_engine/sqlite_table_listing_rewrite.rs	SELECT DISTINCT {} FROM {} WHERE {} IS NOT NULL LIMIT {}	"SELECT DISTINCT {} FROM {} WHERE {} IS NOT NULL LIMIT {}",
 crates/clawd/src/agent_engine/sqlite_table_listing_rewrite.rs	sqlite count query regex	.expect("sqlite count query regex")
 crates/clawd/src/agent_engine/structured_multi_field_read_rewrite.rs	valid dotted selector regex	.expect("valid dotted selector regex")
-crates/clawd/src/agent_engine/structured_multi_field_read_rewrite.rs	{identity_value}.{field_key}	push_unique_selector(out, format!("{identity_value}.{field_key}"));
-crates/clawd/src/agent_engine/structured_multi_field_read_rewrite.rs	{identity_value}.{identity_key}	push_unique_selector(out, format!("{identity_value}.{identity_key}"));
 crates/clawd/src/agent_engine/support.rs	agent-loop:{}:round-{}:step-{}:{}	"agent-loop:{}:round-{}:step-{}:{}",
-crates/clawd/src/agent_engine/support.rs	{quote_prefix}{out}{quote_suffix}	format!("{quote_prefix}{out}{quote_suffix}")
 crates/clawd/src/agent_runtime_contract.rs	hook_stages:pre_tool_use|post_tool_use|stop|session_start|session_end|user_prompt_submit	"hook_stages:pre_tool_use|post_tool_use|stop|session_start|session_end|user_prompt_submit"
 crates/clawd/src/answer_verifier_runtime.rs	Use the already observed listing items and content excerpt to produce one combined final answer in the requested shape.	retry_instruction: "Use the already observed listing items and content excerpt to produce one combined final answer in the requested shape.".to_string(),
 crates/clawd/src/answer_verifier_runtime.rs	answer omitted observed listing item(s): {}	"answer omitted observed listing item(s): {}",
-crates/clawd/src/answer_verifier_runtime.rs	collect_required_evidence_fields:{missing_fields}	retry_instruction: format!("collect_required_evidence_fields:{missing_fields}"),
-crates/clawd/src/answer_verifier_runtime.rs	missing_required_evidence:{missing_fields}	answer_incomplete_reason: format!("missing_required_evidence:{missing_fields}"),
 crates/clawd/src/app_helpers.rs	PRAGMA table_info({table_name})	let pragma = format!("PRAGMA table_info({table_name})");
 crates/clawd/src/bootstrap/config_loaders.rs	An identical scheduled job already exists: {job_id}\nType: {type}\nTimezone: {timezone}\nNext run: {next_run_human}\nTask content: {task_content}	"An identical scheduled job already exists: {job_id}\\nType: {type}\\nTimezone: {timezone}\\nNext run: {next_run_human}\\nTask content: {task_content}".to_string()
 crates/clawd/src/bootstrap/config_loaders.rs	Create failed: cannot compute next run time; please check the time format.	"Create failed: cannot compute next run time; please check the time format.".to_string()
@@ -308,7 +286,6 @@ crates/clawd/src/clarify_followup.rs	上一轮要 clarify 什么	//   1. "上一
 crates/clawd/src/clarify_followup.rs	用户回了什么	//   2. "用户回了什么" 只做 locator/path/filename 形态判断，不做语义路由
 crates/clawd/src/clarify_followup.rs	那个文件	//   - 不 resolve alias-deictic（"那个文件"指 X 已绑定）；alias bindings 已作为
 crates/clawd/src/clarify_state.rs	acquire db for clarify state clear: {err}	.map_err(|err| anyhow::anyhow!("acquire db for clarify state clear: {err}"))?;
-crates/clawd/src/clarify_state.rs	{STRUCTURED_FIELD_SELECTOR_TOKEN_PREFIX}{selector}	let token = format!("{STRUCTURED_FIELD_SELECTOR_TOKEN_PREFIX}{selector}");
 crates/clawd/src/clarify_state.rs	{source}\n{CLARIFY_STATE_RESOLVED_INTENT_MARKER}\n{resolved}	format!("{source}\\n{CLARIFY_STATE_RESOLVED_INTENT_MARKER}\\n{resolved}")
 crates/clawd/src/contract_matrix.rs	contract `{key}` declares semantic_kind `{declared}`	"contract `{key}` declares semantic_kind `{declared}`"
 crates/clawd/src/contract_matrix.rs	contract `{key}` has unknown evidence_expression token `{token}`	"contract `{key}` has unknown evidence_expression token `{token}`"
@@ -401,10 +378,6 @@ crates/clawd/src/delivery_utils/output_contract.rs	假成功	// 单孤立数字�
 crates/clawd/src/delivery_utils/output_contract.rs	较大方 + 双方数值	// QuantityComparison 的回答天然由"较大方 + 双方数值"组成（如 "docs 更多：docs 有 3 个，logs 有 2 个"），
 crates/clawd/src/execution_adapters.rs	无 task 上下文	// `crate::skills::execute_builtin_skill` 走"无 task 上下文"路径），但实际生产
 crates/clawd/src/execution_isolation.rs	git_worktree_add_failed:{}	"git_worktree_add_failed:{}",
-crates/clawd/src/execution_isolation.rs	isolation:{TEMP_DIR}:{task_key}	let cleanup_ref = Some(format!("isolation:{TEMP_DIR}:{task_key}"));
-crates/clawd/src/execution_isolation.rs	isolation:{WORKTREE_DIR}:{task_key}	let cleanup_ref = Some(format!("isolation:{WORKTREE_DIR}:{task_key}"));
-crates/clawd/src/execution_isolation.rs	unknown_isolation_creation_kind:{other}	other => bail!("unknown_isolation_creation_kind:{other}"),
-crates/clawd/src/execution_isolation.rs	unknown_isolation_creation_kind:{other}	other => bail!("unknown_isolation_creation_kind:{other}"),
 crates/clawd/src/execution_recipe.rs	config_change requires post-change validation through parsing, checking, reloading, or effective-state verification	"config_change requires post-change validation through parsing, checking, reloading, or effective-state verification"
 crates/clawd/src/execution_recipe.rs	current_repo scope must stay inside the current workspace and should not drift to external absolute paths	"current_repo scope must stay inside the current workspace and should not drift to external absolute paths"
 crates/clawd/src/execution_recipe.rs	database_change requires schema, table, version, or query validation after mutation	"database_change requires schema, table, version, or query validation after mutation"
@@ -437,8 +410,6 @@ crates/clawd/src/finalize/loop_reply_missing_delivery.rs	no publishable final an
 crates/clawd/src/finalize/loop_reply_missing_delivery.rs	no publishable final answer was produced; {}	"no publishable final answer was produced; {}",
 crates/clawd/src/finalize/loop_reply_route_helpers.rs	clarify_case: {clarify_case}	format!("clarify_case: {clarify_case}"),
 crates/clawd/src/finalize/task.rs	Unfinished goal\nUser request: {}\nCurrent blocker: {}	"Unfinished goal\\nUser request: {}\\nCurrent blocker: {}",
-crates/clawd/src/finalize/task.rs	finalize_{qualified_resume_reason}_resume_success	&format!("finalize_{qualified_resume_reason}_resume_success"),
-crates/clawd/src/finalize/task.rs	{parent_task_id}:memory_intent	task.task_id = format!("{parent_task_id}:memory_intent");
 crates/clawd/src/finalize/task.rs	上一次状态	// from = None 因为 dispatch 内部各分支态没向调用面回传"上一次状态"；
 crates/clawd/src/finalize/task_machine_kv_summary.rs	Return target, status, manager_type.	"Return target, status, manager_type.",
 crates/clawd/src/finalize/task_resume.rs	Execution failed.	.unwrap_or("Execution failed.");
@@ -455,7 +426,6 @@ crates/clawd/src/fixture_replay_e2e.rs	expected_llm_call_count ({exact}) > expec
 crates/clawd/src/fixture_replay_e2e.rs	expected_llm_call_count: expected {exact}, got {}	"expected_llm_call_count: expected {exact}, got {}",
 crates/clawd/src/fixture_replay_e2e.rs	expected_min_llm_call_count ({min}) > expected_max_llm_call_count ({max})	"expected_min_llm_call_count ({min}) > expected_max_llm_call_count ({max})"
 crates/clawd/src/fixture_replay_e2e.rs	fixture case dir not found: {} (did you record this case yet?)	"fixture case dir not found: {} (did you record this case yet?)",
-crates/clawd/src/fixture_replay_e2e.rs	fixture-history-{case_name}-{idx}	let prior_task_id = format!("fixture-history-{case_name}-{idx}");
 crates/clawd/src/fixture_replay_e2e.rs	load expected.json failed: {e}	.map_err(|e| format!("load expected.json failed: {e}"))?
 crates/clawd/src/fixture_replay_e2e.rs	mark task running failed: {e}	.map_err(|e| format!("mark task running failed: {e}"))?;
 crates/clawd/src/fixture_replay_e2e.rs	prior_turns[{idx}].assistant_text must not be empty	"prior_turns[{idx}].assistant_text must not be empty"
@@ -733,7 +703,6 @@ crates/clawd/src/http/ui_routes/workspace_update.rs	... output truncated ...	if 
 crates/clawd/src/http/ui_routes/workspace_update.rs	; fi; cargo build -p clawd --release	r#"set -euo pipefail; if [[ -f "$HOME/.cargo/env" ]]; then . "$HOME/.cargo/env"; fi; cargo build -p clawd --release"#,
 crates/clawd/src/http/ui_routes/workspace_update.rs	RustClaw 正在重启，请等待 10-20 秒后刷新页面。	guard.next_step = Some("RustClaw 正在重启，请等待 10-20 秒后刷新页面。".to_string());
 crates/clawd/src/http/ui_routes/workspace_update.rs	RustClaw 正在重启，请等待 10-20 秒后刷新页面。	guard.next_step = Some("RustClaw 正在重启，请等待 10-20 秒后刷新页面。".to_string());
-crates/clawd/src/http/ui_routes/workspace_update.rs	RustClaw-{tag}.tar.gz	name.startswith(asset_prefix) or name == f"RustClaw-{tag}.tar.gz"
 crates/clawd/src/http/ui_routes/workspace_update.rs	cargo build -p clawd --release failed	"cargo build -p clawd --release failed",
 crates/clawd/src/http/ui_routes/workspace_update.rs	clawd 构建已完成，但自动重启失败。请在服务器上手动重启 clawd。	"clawd 构建已完成，但自动重启失败。请在服务器上手动重启 clawd。",
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to capture {program} stderr	.ok_or_else(|| format!("failed to capture {program} stderr"))?;
@@ -856,8 +825,6 @@ crates/clawd/src/main.rs	留够空间但不让单行失控	///      -f` / `docke
 crates/clawd/src/main.rs	，又要防	/// follow"，又要防"model_io.log 总量爆磁盘"；后者已被
 crates/clawd/src/memory.rs	[safety_signal content omitted]	out.push((role, "[safety_signal content omitted]".to_string()));
 crates/clawd/src/memory.rs	[safety_signal content omitted]	out.push((role, "[safety_signal content omitted]".to_string()));
-crates/clawd/src/memory.rs	anon:{user_id}:{chat_id}	.unwrap_or_else(|| format!("anon:{user_id}:{chat_id}"))
-crates/clawd/src/memory.rs	memory_fact:{fact_id}	format!("memory_fact:{fact_id}")
 crates/clawd/src/memory.rs	where did this retrieval row come from?	// `source_kind` answers "where did this retrieval row come from?"
 crates/clawd/src/memory/api.rs	unsupported memory id prefix	Some((_, _)) => anyhow::bail!("unsupported memory id prefix"),
 crates/clawd/src/memory/indexing.rs	ALTER TABLE memory_retrieval_index ADD COLUMN embedding_dims INTEGER NOT NULL DEFAULT 24	"ALTER TABLE memory_retrieval_index ADD COLUMN embedding_dims INTEGER NOT NULL DEFAULT 24",
@@ -877,7 +844,6 @@ crates/clawd/src/memory/service.rs	read memories for summary failed: {err}	.map_
 crates/clawd/src/memory/service.rs	read previous long-term summary failed: {err}	.map_err(|err| format!("read previous long-term summary failed: {err}"))?
 crates/clawd/src/memory/service.rs	write knowledge candidates failed: {err}	.map_err(|err| format!("write knowledge candidates failed: {err}"))?;
 crates/clawd/src/memory/service.rs	write long-term summary failed: {err}	.map_err(|err| format!("write long-term summary failed: {err}"))?;
-crates/clawd/src/memory/service.rs	{normalized_namespace}:{fact_key}	Some(format!("{normalized_namespace}:{fact_key}"))
 crates/clawd/src/memory/service.rs	{role}: [safety_signal content omitted]	convo_lines.push(format!("{role}: [safety_signal content omitted]"));
 crates/clawd/src/memory/use_policy.rs	### MEMORY_USE_POLICY\nprofile: {}\nreason: {}	"### MEMORY_USE_POLICY\\nprofile: {}\\nreason: {}",
 crates/clawd/src/memory_recent.rs	[provider_unavailable_reply_omitted]	"[provider_unavailable_reply_omitted]"
@@ -1013,8 +979,6 @@ crates/clawd/src/repo/auth_webd.rs	invalid stored password hash: {e}	.map_err(|e
 crates/clawd/src/repo/auth_webd.rs	user_key does not exist or is disabled in auth_keys	anyhow::bail!("user_key does not exist or is disabled in auth_keys");
 crates/clawd/src/repo/auth_webd.rs	username already assigned to another key	anyhow::bail!("username already assigned to another key");
 crates/clawd/src/repo/auth_webd.rs	username and user_key required	anyhow::bail!("username and user_key required");
-crates/clawd/src/repo/child_tasks.rs	child_task:{child_task_id}:structured_result	json!([format!("child_task:{child_task_id}:structured_result")])
-crates/clawd/src/repo/child_tasks.rs	task:{child_task_id}:result_json	"evidence_refs": [format!("task:{child_task_id}:result_json")],
 crates/clawd/src/runtime/policy.rs	invalid tools pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')	"invalid tools pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')"
 crates/clawd/src/runtime/policy.rs	invalid tools.by_provider.{key} pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')	"invalid tools.by_provider.{key} pattern: {p}; expected '*' or prefix 'skill:' (legacy 'tool:' is auto-converted to 'skill:')"
 crates/clawd/src/runtime/policy.rs	tools.by_provider contains empty key	return Err("tools.by_provider contains empty key".to_string());
@@ -1022,7 +986,6 @@ crates/clawd/src/runtime/state.rs	INSERT INTO tasks for fixture-replay e2e seed	
 crates/clawd/src/runtime/state.rs	Step 4.b 前置清单	/// "Step 4.b 前置清单"。
 crates/clawd/src/runtime/state.rs	acquire test main-db connection for schema seed	.expect("acquire test main-db connection for schema seed");
 crates/clawd/src/runtime/state.rs	acquire test main-db connection for tasks seed	.expect("acquire test main-db connection for tasks seed");
-crates/clawd/src/runtime/state.rs	anon:{user_id}:{chat_id}	let user_key = format!("anon:{user_id}:{chat_id}");
 crates/clawd/src/runtime/state.rs	build real skill views for fixture-replay test	.expect("build real skill views for fixture-replay test");
 crates/clawd/src/runtime/state.rs	build tools policy from real config for fixture-replay test	.expect("build tools policy from real config for fixture-replay test");
 crates/clawd/src/runtime/state.rs	ensure_channel_schema for test main db	crate::ensure_channel_schema(&conn).expect("ensure_channel_schema for test main db");
@@ -1094,9 +1057,6 @@ crates/clawd/src/skills.rs	secrets 成为唯一渠道	///   契约下来 —— 
 crates/clawd/src/skills.rs	skill semaphore closed: {err}	.map_err(|err| format!("skill semaphore closed: {err}"))?;
 crates/clawd/src/skills.rs	skill_name is empty	return Err("skill_name is empty".to_string());
 crates/clawd/src/skills.rs	write operation failed: content is too large	"content_too_large" => "write operation failed: content is too large".to_string(),
-crates/clawd/src/skills.rs	{POLICY_BLOCK_ERROR_PREFIX}{encoded}	format!("{POLICY_BLOCK_ERROR_PREFIX}{encoded}")
-crates/clawd/src/skills.rs	{STRUCTURED_SKILL_ERROR_PREFIX}{encoded}	format!("{STRUCTURED_SKILL_ERROR_PREFIX}{encoded}")
-crates/clawd/src/skills.rs	{STRUCTURED_SKILL_ERROR_PREFIX}{encoded}	format!("{STRUCTURED_SKILL_ERROR_PREFIX}{encoded}")
 crates/clawd/src/skills.rs	假装 registry 没加载	/// - 直接调本函数等价于"假装 registry 没加载"，会丢掉别名归一化能力。
 crates/clawd/src/skills.rs	双来源真相	/// 是典型的"双来源真相"。现在已经把那张表里的所有别名（包括拼写错容错 `fs_rearch`）
 crates/clawd/src/skills.rs	哪些 skill 是 builtin（in-process）	/// 用这个常量名单兜底"哪些 skill 是 builtin（in-process）"。**真正生效的是
@@ -1292,8 +1252,6 @@ crates/clawd/src/worker/mod.rs	worker_once: no queued tasks, idle tick	debug!("w
 crates/clawd/src/worker/mod.rs	{prefix}\n{job_id_label}: {job_id}	let status_block = format!("{prefix}\\n{job_id_label}: {job_id}");
 crates/clawd/src/worker/mod.rs	{text_trimmed}\n\n{status_block}	format!("{text_trimmed}\\n\\n{status_block}")
 crates/clawd/src/worker/run_skill_finalize.rs	run-skill:{}:async-job:{}	let checkpoint_id = format!("run-skill:{}:async-job:{}", task.task_id, job.job_id);
-crates/clawd/src/worker/run_skill_finalize.rs	run_skill:{skill_name}	format!("run_skill:{skill_name}"),
-crates/clawd/src/worker/run_skill_finalize.rs	run_skill:{skill_name}	format!("run_skill:{skill_name}"),
 crates/clawd/src/worker/run_skill_finalize.rs	run_skill:{skill_name}:async_job:{}	"run_skill:{skill_name}:async_job:{}",
 crates/clawd/src/worker/runtime_support/background_workers.rs	DELETE FROM audit_logs WHERE CAST(ts AS INTEGER) < ?1	"DELETE FROM audit_logs WHERE CAST(ts AS INTEGER) < ?1",
 crates/clawd/src/worker/runtime_support/background_workers.rs	DELETE FROM tasks WHERE CAST(created_at AS INTEGER) < ?1	"DELETE FROM tasks WHERE CAST(created_at AS INTEGER) < ?1",
@@ -1357,12 +1315,7 @@ crates/skills/archive_basic/src/main.rs	unsupported archive format for read	"uns
 crates/skills/archive_basic/src/main.rs	unsupported archive format for unpack	"unsupported archive format for unpack",
 crates/skills/archive_basic/src/main.rs	unsupported format; use zip|tar.gz	"unsupported format; use zip|tar.gz",
 crates/skills/archive_basic/src/main.rs	{role} not found: {path_text}	format!("{role} not found: {path_text}"),
-crates/skills/audio_synthesize/src/async_contract.rs	AUDIO_TASK_CANCELLED:{task_id}	format!("AUDIO_TASK_CANCELLED:{task_id}"),
-crates/skills/audio_synthesize/src/async_contract.rs	AUDIO_TASK_CANCEL_ADAPTER_REQUIRED:{task_id}	format!("AUDIO_TASK_CANCEL_ADAPTER_REQUIRED:{task_id}"),
-crates/skills/audio_synthesize/src/async_contract.rs	provider:audio_synthesize:{provider}:{task_id}	format!("provider:audio_synthesize:{provider}:{task_id}")
-crates/skills/audio_synthesize/src/async_projection.rs	AUDIO_TASK:{task_id}	format!("AUDIO_TASK:{task_id}"),
 crates/skills/audio_synthesize/src/async_projection.rs	adapter_result must be object	return Err("adapter_result must be object".to_string());
-crates/skills/audio_synthesize/src/main.rs	VOICE_FILE:{saved_path}	Ok((format!("VOICE_FILE:{saved_path}"), extra))
 crates/skills/audio_synthesize/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/audio_synthesize/src/main.rs	build {vendor_name} client failed: {err}	.map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
 crates/skills/audio_synthesize/src/main.rs	create output dir failed: {err}	std::fs::create_dir_all(parent).map_err(|err| format!("create output dir failed: {err}"))
@@ -1547,8 +1500,6 @@ crates/skills/crypto/src/main.rs	build hmac failed: {err}	.map_err(|err| format!
 crates/skills/crypto/src/main.rs	private exchange API request failed before a safe response could be read	return "private exchange API request failed before a safe response could be read"
 crates/skills/crypto/src/main.rs	private exchange account access failed	"detail": "private exchange account access failed"
 crates/skills/crypto/src/main.rs	private exchange account access failed	return "private exchange account access failed".to_string();
-crates/skills/crypto/src/main.rs	{CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX}{encoded}	format!("{CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX}{encoded}")
-crates/skills/crypto/src/main.rs	{CRYPTO_CONFIG_ERROR_PREFIX}{encoded}	format!("{CRYPTO_CONFIG_ERROR_PREFIX}{encoded}")
 crates/skills/crypto/src/market_data.rs	binance bookTicker missing askPrice	.ok_or_else(|| "binance bookTicker missing askPrice".to_string())?;
 crates/skills/crypto/src/market_data.rs	binance bookTicker missing askQty	.ok_or_else(|| "binance bookTicker missing askQty".to_string())?;
 crates/skills/crypto/src/market_data.rs	binance bookTicker missing bidPrice	.ok_or_else(|| "binance bookTicker missing bidPrice".to_string())?;
@@ -1607,7 +1558,6 @@ crates/skills/crypto/src/market_data.rs	okx quote parse failed: {err}	.map_err(|
 crates/skills/crypto/src/market_data.rs	okx quote request failed: {err}	.map_err(|err| format!("okx quote request failed: {err}"))?
 crates/skills/crypto/src/market_data.rs	parse binance candles failed: {err}	.map_err(|err| format!("parse binance candles failed: {err}"))?;
 crates/skills/crypto/src/market_data.rs	parse okx candles failed: {err}	.map_err(|err| format!("parse okx candles failed: {err}"))?;
-crates/skills/crypto/src/market_data.rs	{sign}{int_part}.{frac_part}	format!("{sign}{int_part}.{frac_part}")
 crates/skills/crypto/src/market_handlers.rs	all market sources failed: {}	return Err(format!("all market sources failed: {}", errors.join("; ")));
 crates/skills/crypto/src/market_handlers.rs	binance symbol check ok: {symbol}	format!("binance symbol check ok: {symbol}"),
 crates/skills/crypto/src/market_handlers.rs	crypto healthcheck ok (binance+okx)	"crypto healthcheck ok (binance+okx)".to_string()
@@ -1930,10 +1880,6 @@ crates/skills/image_edit/src/providers.rs	{vendor_name} native image edit adapte
 crates/skills/image_edit/src/providers.rs	{vendor_name} request failed: {err}	.map_err(|err| format!("{vendor_name} request failed: {err}"))?;
 crates/skills/image_edit/src/providers.rs	{vendor_name} response contains no image payload: {}	"{vendor_name} response contains no image payload: {}",
 crates/skills/image_edit/src/providers.rs	{vendor_name} response missing data: {}	"{vendor_name} response missing data: {}",
-crates/skills/image_generate/src/async_contract.rs	IMAGE_TASK_CANCELLED:{task_id}	format!("IMAGE_TASK_CANCELLED:{task_id}"),
-crates/skills/image_generate/src/async_contract.rs	IMAGE_TASK_CANCEL_ADAPTER_REQUIRED:{task_id}	format!("IMAGE_TASK_CANCEL_ADAPTER_REQUIRED:{task_id}"),
-crates/skills/image_generate/src/async_contract.rs	provider:image_generate:{provider}:{task_id}	format!("provider:image_generate:{provider}:{task_id}")
-crates/skills/image_generate/src/async_projection.rs	IMAGE_TASK:{task_id}	format!("IMAGE_TASK:{task_id}"),
 crates/skills/image_generate/src/async_projection.rs	adapter_result must be object	return Err("adapter_result must be object".to_string());
 crates/skills/image_generate/src/i18n.rs	Generated successfully and saved: {path}	"Generated successfully and saved: {path}".to_string(),
 crates/skills/image_generate/src/i18n.rs	图片生成成功并已保存：{path}	"图片生成成功并已保存：{path}".to_string(),
@@ -2101,10 +2047,6 @@ crates/skills/log_analyze/src/main.rs	read log failed: {err}	std::fs::read_to_st
 crates/skills/log_analyze/src/main.rs	read log file metadata failed: {err}	.map_err(|err| format!("read log file metadata failed: {err}"))?;
 crates/skills/log_analyze/src/main.rs	read log file metadata failed: {err}	.map_err(|err| format!("read log file metadata failed: {err}"))?;
 crates/skills/map_merchant/src/main.rs	places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.primaryType,places.primaryTypeDisplayName,places.nationalPhoneNumber,places.googleMapsUri	"places.displayName,places.formattedAddress,places.location,places.rating,places.priceLevel,places.primaryType,places.primaryTypeDisplayName,places.nationalPhoneNumber,places.googleMapsUri",
-crates/skills/music_generate/src/async_contract.rs	MUSIC_TASK_CANCELLED:{task_id}	format!("MUSIC_TASK_CANCELLED:{task_id}"),
-crates/skills/music_generate/src/async_contract.rs	MUSIC_TASK_CANCEL_ADAPTER_REQUIRED:{task_id}	format!("MUSIC_TASK_CANCEL_ADAPTER_REQUIRED:{task_id}"),
-crates/skills/music_generate/src/async_contract.rs	provider:music_generate:{provider}:{task_id}	format!("provider:music_generate:{provider}:{task_id}")
-crates/skills/music_generate/src/async_projection.rs	MUSIC_TASK:{task_id}	format!("MUSIC_TASK:{task_id}"),
 crates/skills/music_generate/src/async_projection.rs	adapter_result must be object	return Err("adapter_result must be object".to_string());
 crates/skills/music_generate/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/music_generate/src/main.rs	build {provider_name} client failed: {err}	.map_err(|err| format!("build {provider_name} client failed: {err}"))?;
@@ -2198,7 +2140,6 @@ crates/skills/rss_fetch/src/main.rs	fetch requires url, feed_url, or feed_urls	E
 crates/skills/rss_fetch/src/main.rs	http request failed: {err}	.map_err(|err| format!("http request failed: {err}"))?;
 crates/skills/rss_fetch/src/main.rs	no feed items available: all {} source(s) failed or returned no items	"no feed items available: all {} source(s) failed or returned no items",
 crates/skills/rss_fetch/src/main.rs	read response body failed: {err}	.map_err(|err| format!("read response body failed: {err}"))
-crates/skills/rss_fetch/src/main.rs	rss.topic.{class_key}	i18n.text_or(&format!("rss.topic.{class_key}"), class_key)
 crates/skills/rss_fetch/src/main.rs	rss_fetch save_config failed: {}\n	.write_fmt(format_args!("rss_fetch save_config failed: {}\\n", e));
 crates/skills/rss_fetch/src/main.rs	unsupported action; use fetch|latest|news	_ => Err("unsupported action; use fetch|latest|news".to_string()),
 crates/skills/rss_fetch/src/main.rs	url and feed_url must be strings	.ok_or_else(|| "url and feed_url must be strings".to_string())?
@@ -2265,7 +2206,6 @@ crates/skills/stock/src/main.rs	args must be object	.ok_or_else(|| "args must be
 crates/skills/stock/src/main.rs	name,open,prev,current,...	/// 解析新浪 var hq_str_sh600519="name,open,prev,current,...";
 crates/skills/stock/src/main.rs	raw_input: {}\ncandidates:\n{}\nReturn exactly one candidate alias from the list, or NONE.	"raw_input: {}\\ncandidates:\\n{}\\nReturn exactly one candidate alias from the list, or NONE.",
 crates/skills/stock/src/main.rs	stock_alias_choice schema must be valid JSON	.expect("stock_alias_choice schema must be valid JSON")
-crates/skills/stock/src/main.rs	{SINA_HQ_URL}{code}	let url = format!("{SINA_HQ_URL}{code}");
 crates/skills/system_basic/src/main.rs	args must be object	.ok_or_else(|| SkillError::invalid_input("args must be object"))?;
 crates/skills/system_basic/src/main.rs	dir_compare requires both paths to be directories	"dir_compare requires both paths to be directories",
 crates/skills/system_basic/src/main.rs	field_paths is required	return Err(SkillError::invalid_input("field_paths is required"));
@@ -2289,8 +2229,6 @@ crates/skills/system_basic/src/structured_helpers.rs	toml convert failed: {err}	
 crates/skills/system_basic/src/structured_helpers.rs	toml parse failed: {err}	.map_err(|err| SkillError::invalid_data(format!("toml parse failed: {err}")))?;
 crates/skills/system_basic/src/structured_helpers.rs	unsupported format: {other}; use json|toml|yaml	"unsupported format: {other}; use json|toml|yaml"
 crates/skills/system_basic/src/structured_helpers.rs	yaml parse failed: {err}	.map_err(|err| SkillError::invalid_data(format!("yaml parse failed: {err}")))?,
-crates/skills/system_basic/src/structured_helpers.rs	{base_path}.{nested_field_path}	out.push((format!("{base_path}.{nested_field_path}"), nested_value));
-crates/skills/system_basic/src/structured_helpers.rs	{current_path}.properties.{property_key}	format!("{current_path}.properties.{property_key}")
 crates/skills/task_control/src/main.rs	api response missing data	.ok_or_else(|| "api response missing data".to_string())?;
 crates/skills/task_control/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/task_control/src/main.rs	build http client failed: {e}	.map_err(|e| format!("build http client failed: {e}"))?;
@@ -2305,14 +2243,6 @@ crates/skills/task_control/src/main.rs	request failed with status {status}	.unwr
 crates/skills/task_control/src/main.rs	request task control by id failed: {e}	.map_err(|e| format!("request task control by id failed: {e}"))?;
 crates/skills/task_control/src/main.rs	request task detail failed: {e}	.map_err(|e| format!("request task detail failed: {e}"))?;
 crates/skills/task_control/src/main.rs	{"action":"get","status":"decode_error"}	.unwrap_or_else(|_| "{\\"action\\":\\"get\\",\\"status\\":\\"decode_error\\"}".to_string())
-crates/skills/task_control/src/response_contract.rs	task_control.get.{status}	"message_key": format!("task_control.get.{status}"),
-crates/skills/task_control/src/response_contract.rs	task_control.get.{status}	"message_key": format!("task_control.get.{status}"),
-crates/skills/task_control/src/response_contract.rs	task_control.{action}.dry_run	"message_key": format!("task_control.{action}.dry_run"),
-crates/skills/task_control/src/response_contract.rs	task_control.{action}.dry_run	"message_key": format!("task_control.{action}.dry_run"),
-crates/skills/task_control/src/response_contract.rs	task_control.{action}.ok	"message_key": format!("task_control.{action}.ok"),
-crates/skills/task_control/src/response_contract.rs	task_control.{action}.ok	"message_key": format!("task_control.{action}.ok"),
-crates/skills/task_control/src/response_contract.rs	task_control.{action}.{status}	"message_key": format!("task_control.{action}.{status}"),
-crates/skills/task_control/src/response_contract.rs	task_control.{action}.{status}	"message_key": format!("task_control.{action}.{status}"),
 crates/skills/transform/src/main.rs	cannot compare null values	return Err(anyhow!("cannot compare null values"));
 crates/skills/transform/src/main.rs	cmp `in` requires array value	Err(anyhow!("cmp `in` requires array value"))
 crates/skills/transform/src/main.rs	csv_text header must contain at least two columns	return Err(anyhow!("csv_text header must contain at least two columns"));
@@ -2329,11 +2259,6 @@ crates/skills/transform/src/main.rs	rename source field not found: {}	.push(form
 crates/skills/transform/src/main.rs	rename source field not found: {}	return Err(anyhow!("rename source field not found: {}", from));
 crates/skills/transform/src/main.rs	skip unsupported aggregation op `{}`	.push(format!("skip unsupported aggregation op `{}`", op));
 crates/skills/transform/src/main.rs	unsupported output_format `{}`; fallback to json	"unsupported output_format `{}`; fallback to json",
-crates/skills/video_generate/src/main.rs	VIDEO_TASK:{task_id}	format!("VIDEO_TASK:{task_id}"),
-crates/skills/video_generate/src/main.rs	VIDEO_TASK:{task_id}	format!("VIDEO_TASK:{task_id}"),
-crates/skills/video_generate/src/main.rs	VIDEO_TASK:{task_id}	format!("VIDEO_TASK:{task_id}"),
-crates/skills/video_generate/src/main.rs	VIDEO_TASK_CANCELLED:{task_id}	format!("VIDEO_TASK_CANCELLED:{task_id}"),
-crates/skills/video_generate/src/main.rs	VIDEO_TASK_CANCEL_ADAPTER_REQUIRED:{task_id}	format!("VIDEO_TASK_CANCEL_ADAPTER_REQUIRED:{task_id}"),
 crates/skills/video_generate/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/video_generate/src/main.rs	args must be object	.ok_or_else(|| "args must be object".to_string())?;
 crates/skills/video_generate/src/main.rs	build {provider_name} client failed: {err}	.map_err(|err| format!("build {provider_name} client failed: {err}"))?;
@@ -2355,7 +2280,6 @@ crates/skills/video_generate/src/main.rs	parse minimax file retrieve response fa
 crates/skills/video_generate/src/main.rs	parse minimax video create response failed: {err}	.map_err(|err| format!("parse minimax video create response failed: {err}"))?;
 crates/skills/video_generate/src/main.rs	parse minimax video query response failed: {err}	.map_err(|err| format!("parse minimax video query response failed: {err}"))?;
 crates/skills/video_generate/src/main.rs	path is outside workspace	return Err("path is outside workspace".to_string());
-crates/skills/video_generate/src/main.rs	provider:video_generate:{provider}:{task_id}	format!("provider:video_generate:{provider}:{task_id}")
 crates/skills/video_generate/src/main.rs	read image input failed: {err}	let bytes = std::fs::read(&path).map_err(|err| format!("read image input failed: {err}"))?;
 crates/skills/video_generate/src/main.rs	read image metadata failed: {err}	std::fs::metadata(&path).map_err(|err| format!("read image metadata failed: {err}"))?;
 crates/skills/video_generate/src/main.rs	read video response failed: {err}	.map_err(|err| format!("read video response failed: {err}"))?;
@@ -2477,7 +2401,6 @@ crates/telegramd/src/task_delivery.rs	decode query task response failed	.context
 crates/telegramd/src/task_delivery.rs	decode submit task response failed	.context("decode submit task response failed")?;
 crates/telegramd/src/task_delivery.rs	query task status failed	.context("query task status failed")?;
 crates/telegramd/src/task_delivery.rs	request cancel tasks failed	.context("request cancel tasks failed")?;
-crates/telegramd/src/task_delivery.rs	rustclaw-{sanitized}-{millis}.txt	let path = std::env::temp_dir().join(format!("rustclaw-{sanitized}-{millis}.txt"));
 crates/telegramd/src/task_delivery.rs	send subtask code block failed	.context("send subtask code block failed")?;
 crates/telegramd/src/task_delivery.rs	send subtask header failed	.context("send subtask header failed")?;
 crates/telegramd/src/task_delivery.rs	submit task request failed	.context("submit task request failed")?;
@@ -2561,7 +2484,6 @@ crates/wechatd/src/wechat_api.rs	parse QR code response failed: {e}	.map_err(|e|
 crates/wechatd/src/wechat_api.rs	parse QR status failed: {e}	.map_err(|e| format!("parse QR status failed: {e}"))
 crates/wechatd/src/wechat_api.rs	poll QR status failed: {e}	.map_err(|e| format!("poll QR status failed: {e}"))?;
 crates/wechatd/src/wechat_api.rs	wechat request failed: {err}	Err(err) => return Err(format!("wechat request failed: {err}")),
-crates/wechatd/src/wechat_api.rs	{account_id}:{user_id}	format!("{account_id}:{user_id}")
 crates/whatsapp_webd/src/main.rs	bind wrapper listen failed: {}	"bind wrapper listen failed: {}",
 crates/whatsapp_webd/src/main.rs	bridge supervisor exited with error: {}	error!("bridge supervisor exited with error: {}", err);
 crates/whatsapp_webd/src/main.rs	bridge wait failed: {error}	const WA_WEB_BRIDGE_WAIT_FAILED_FALLBACK: &str = "bridge wait failed: {error}";
