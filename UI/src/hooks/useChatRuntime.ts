@@ -935,6 +935,7 @@ function compactTaskResultForChatStorage(result: TaskQueryResponse): TaskQueryRe
   return {
     task_id: result.task_id,
     status: result.status,
+    goal: result.goal ?? null,
     result_json: null,
     error_text: result.error_text ?? null,
   };
@@ -981,6 +982,7 @@ function normalizeStoredTaskResult(raw: unknown): TaskQueryResponse | null {
   return {
     task_id: record.task_id,
     status: typeof record.status === "string" ? record.status : "succeeded",
+    goal: record.goal ?? null,
     result_json: null,
     error_text: typeof record.error_text === "string" ? record.error_text : null,
   };

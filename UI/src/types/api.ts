@@ -53,6 +53,7 @@ export interface HealthResponse {
 export interface TaskQueryResponse {
   task_id: string;
   status: "queued" | "running" | "succeeded" | "failed" | "canceled" | "timeout";
+  goal?: unknown | null;
   result_json?: unknown | null;
   error_text?: string | null;
   lifecycle?: TaskLifecycleProjection | null;

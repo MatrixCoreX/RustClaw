@@ -15,6 +15,20 @@ export interface TaskOutcomeView {
   remainingWork: string[];
 }
 
+export interface TaskGoalView {
+  title: string;
+  tone: "ok" | "running" | "attention" | "failed";
+  status: string;
+  statusSource?: string;
+  objective?: string;
+  meta: string[];
+  doneConditions: string[];
+  constraints: string[];
+  verificationCommands: string[];
+  currentProgress: string[];
+  remainingWork: string[];
+}
+
 export interface TaskPermissionView {
   tone: "ok" | "attention" | "failed";
   title: string;
@@ -152,6 +166,41 @@ function taskTraceRoot(result: TaskQueryResponse): unknown {
 
 function taskSummaryRoot(result: TaskQueryResponse): unknown {
   return getPathValue(result.result_json, ["task_journal", "summary"]);
+}
+
+export function buildTaskGoalView(
+  result: TaskQueryResponse,
+  lang: TaskLifecycleLang,
+): TaskGoalView | null {
+  const goal = asRecord(result.goal);
+  if (!goal) return null;
+  const tLocal = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const status = stringAt(goal, ["goal_status"]) ?? stringAt(goal, ["state"]) ?? "unknown";
+  const objective = stringAt(goal, ["objective"]);
+  const statusSource = stringAt(goal, ["goal_status_source"]);
+  const tone: TaskGoalView["tone"] =
+    status === "completed" || status === "verified"
+      ? "ok"
+      : status === "blocked" || status === "failed" || status === "cancelled" || status === "canceled"
+        ? "failed"
+        : status === "waiting_user" || status === "needs_user"
+          ? "attention"
+          : "running";
+  const meta = objectMeta(goal, ["goal_id", "task_id", "schema_version"]);
+  if (statusSource) meta.push(`goal_status_source=${statusSource}`);
+  return {
+    title: tLocal("目标进度", "Goal progress"),
+    tone,
+    status,
+    statusSource,
+    objective,
+    meta,
+    doneConditions: valueMetaList(goal.done_conditions),
+    constraints: valueMetaList(goal.constraints),
+    verificationCommands: valueMetaList(goal.verification_commands),
+    currentProgress: valueMetaList(goal.current_progress),
+    remainingWork: valueMetaList(goal.remaining_work),
+  };
 }
 
 export function taskTraceEvents(result: TaskQueryResponse): Record<string, unknown>[] {

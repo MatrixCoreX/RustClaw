@@ -3,6 +3,7 @@ import { Loader2, MessageCircle, RefreshCw } from "lucide-react";
 import { buildTaskLifecycleView, buildTaskPollingView, type TaskLifecycleLang } from "../lib/task-lifecycle";
 import {
   buildReplaySummary,
+  buildTaskGoalView,
   buildTaskOutcome,
   buildTaskPermissionView,
   buildTaskTraceEventView,
@@ -65,6 +66,7 @@ export function TaskResultPanel({
   onSubmitResume,
 }: TaskResultPanelProps) {
   const taskOutcome = taskResult ? buildTaskOutcome(taskResult, lang) : null;
+  const taskGoalView = taskResult ? buildTaskGoalView(taskResult, lang) : null;
   const taskLifecycleView = taskResult ? buildTaskLifecycleView(taskResult.lifecycle, taskResult.status, lang) : null;
   const taskPollingView = taskResult ? buildTaskPollingView(taskResult.lifecycle, lang) : null;
   const taskPermissionView = taskResult ? buildTaskPermissionView(taskResult, lang) : null;
@@ -113,6 +115,61 @@ export function TaskResultPanel({
               <p className="text-red-200">{taskResult.error_text || "--"}</p>
             </div>
           </div>
+          {taskGoalView ? (
+            <div className={`mt-4 rounded-xl border px-3 py-3 ${toneClassName(taskGoalView.tone)}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-semibold">{taskGoalView.title}</p>
+                <span className="theme-status-pill rounded-md px-2 py-1 font-mono text-xs">
+                  {taskGoalView.status}
+                </span>
+              </div>
+              {taskGoalView.objective ? (
+                <p className="mt-2 text-sm opacity-85">{taskGoalView.objective}</p>
+              ) : null}
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                {taskGoalView.meta.map((item) => (
+                  <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono">
+                    {item}
+                  </span>
+                ))}
+              </div>
+              {[
+                [t("完成条件", "Done conditions"), taskGoalView.doneConditions],
+                [t("约束", "Constraints"), taskGoalView.constraints],
+                [t("验证命令", "Verification commands"), taskGoalView.verificationCommands],
+                [t("当前进度", "Current progress"), taskGoalView.currentProgress],
+                [t("剩余工作", "Remaining work"), taskGoalView.remainingWork],
+              ].some(([, items]) => Array.isArray(items) && items.length > 0) ? (
+                <details className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
+                  <summary className="cursor-pointer text-xs font-medium opacity-75">
+                    {t("目标字段", "Goal fields")}
+                  </summary>
+                  <div className="mt-3 space-y-2">
+                    {[
+                      [t("完成条件", "Done conditions"), taskGoalView.doneConditions],
+                      [t("约束", "Constraints"), taskGoalView.constraints],
+                      [t("验证命令", "Verification commands"), taskGoalView.verificationCommands],
+                      [t("当前进度", "Current progress"), taskGoalView.currentProgress],
+                      [t("剩余工作", "Remaining work"), taskGoalView.remainingWork],
+                    ].map(([label, items]) => (
+                      Array.isArray(items) && items.length > 0 ? (
+                        <div key={String(label)}>
+                          <p className="mb-1 text-[11px] font-medium opacity-60">{String(label)}</p>
+                          <div className="flex flex-wrap gap-2">
+                            {items.map((item) => (
+                              <span key={item} className="rounded-md border border-white/10 bg-black/25 px-2 py-1 font-mono text-[11px] opacity-75">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+            </div>
+          ) : null}
           {taskLifecycleView ? (
             <div className={`mt-4 rounded-xl border px-3 py-3 ${toneClassName(taskLifecycleView.tone)}`}>
               <div className="flex flex-wrap items-center justify-between gap-2">
