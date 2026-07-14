@@ -709,6 +709,10 @@ fn tui_command_parser_accepts_basic_key_tokens() {
     assert_eq!(tui_command_from_input("u"), Some(TuiCommand::Resume));
     assert_eq!(tui_command_from_input("n"), Some(TuiCommand::Continue));
     assert_eq!(tui_command_from_input("e"), Some(TuiCommand::Export));
+    assert_eq!(tui_command_from_input("1"), Some(TuiCommand::Report));
+    assert_eq!(tui_command_from_input("2"), Some(TuiCommand::Review));
+    assert_eq!(tui_command_from_input("3"), Some(TuiCommand::Subagents));
+    assert_eq!(tui_command_from_input("4"), Some(TuiCommand::Permission));
     assert_eq!(tui_command_from_input("q"), Some(TuiCommand::Quit));
     assert_eq!(tui_command_from_input("watch"), None);
 }
