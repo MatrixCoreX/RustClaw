@@ -417,6 +417,8 @@ enum ReplayCommand {
         json: bool,
         #[arg(long)]
         coverage: bool,
+        #[arg(long, value_enum, default_value_t = ReplayView::Summary)]
+        view: ReplayView,
     },
     /// Compare two replay bundles using stable machine fields.
     Diff {
@@ -425,6 +427,25 @@ enum ReplayCommand {
         #[arg(long)]
         json: bool,
     },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ReplayView {
+    Summary,
+    Llm,
+    Tools,
+    Checkpoints,
+}
+
+impl ReplayView {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Summary => "summary",
+            Self::Llm => "llm",
+            Self::Tools => "tools",
+            Self::Checkpoints => "checkpoints",
+        }
+    }
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -861,7 +882,8 @@ fn main() -> Result<()> {
                 bundle,
                 json,
                 coverage,
-            } => replay::run_run(bundle, *json, *coverage),
+                view,
+            } => replay::run_run(bundle, *json, *coverage, view.as_str()),
             ReplayCommand::Diff { left, right, json } => replay::run_diff(left, right, *json),
         },
         Command::Completions { shell } => {

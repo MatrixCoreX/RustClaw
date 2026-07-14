@@ -33,8 +33,9 @@ pub(crate) use tui::run_tui;
 
 #[cfg(test)]
 use exec::{
-    exec_effective_options, exec_exit_class, exec_failure_class_from_machine_tokens,
-    exec_summary_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
+    exec_artifact_index_json, exec_compact_text_lines, exec_effective_options, exec_exit_class,
+    exec_failure_class_from_machine_tokens, exec_summary_json, write_exec_artifacts, ExecExitClass,
+    ExecWaitOutcome,
 };
 #[cfg(test)]
 use permission::permission_report_json;
