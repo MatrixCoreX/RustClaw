@@ -412,7 +412,33 @@ fn parent_child_task_ids(parent_result: &Value) -> Vec<String> {
             .and_then(|value| value.get("child_task_ids")),
         &mut child_task_ids,
     );
+    append_nested_child_task_ids(parent_result, &mut child_task_ids, 0);
     child_task_ids
+}
+
+fn append_nested_child_task_ids(value: &Value, output: &mut Vec<String>, depth: usize) {
+    if depth > 8 || output.len() >= crate::child_task_contract::DEFAULT_MAX_CHILDREN_PER_PARENT {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            append_child_task_id_array(map.get("child_task_ids"), output);
+            append_child_task_id_array(
+                map.get("child_task_enqueue")
+                    .and_then(|value| value.get("child_task_ids")),
+                output,
+            );
+            for child in map.values() {
+                append_nested_child_task_ids(child, output, depth + 1);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                append_nested_child_task_ids(item, output, depth + 1);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
 }
 
 fn append_child_task_id_array(value: Option<&Value>, output: &mut Vec<String>) {

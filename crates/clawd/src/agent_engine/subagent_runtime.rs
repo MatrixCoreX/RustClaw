@@ -18,6 +18,8 @@ mod subagent_runtime_batch;
 mod subagent_runtime_context;
 #[path = "subagent_runtime_model.rs"]
 mod subagent_runtime_model;
+#[path = "subagent_runtime_persistent.rs"]
+mod subagent_runtime_persistent;
 
 use subagent_runtime_context::{
     context_evidence_action, context_evidence_combined_excerpt,
@@ -366,6 +368,30 @@ pub(super) fn record_subagent_action_from_args_with_config(
         &objective,
         &context_refs,
         options,
+        config,
+    )
+}
+
+pub(super) fn persistent_child_task_requested(args: &Value) -> bool {
+    subagent_runtime_persistent::persistent_child_task_requested(args)
+}
+
+pub(super) fn record_persistent_child_task_from_args(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    args: &Value,
+    config: &SubagentRuntimeConfig,
+) -> Result<&'static str, &'static str> {
+    subagent_runtime_persistent::record_persistent_child_task_from_args(
+        state,
+        task,
+        loop_state,
+        global_step,
+        step_in_round,
+        args,
         config,
     )
 }
