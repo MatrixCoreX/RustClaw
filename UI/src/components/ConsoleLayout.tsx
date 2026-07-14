@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, ShieldAlert } from "lucide-react";
+import { ChevronDown, PanelLeftClose, PanelLeftOpen, ShieldAlert } from "lucide-react";
 
 import type { AuthIdentityResponse, ConsolePage } from "../types/api";
 
 type UiLanguage = "zh" | "en";
 type AuthMode = "key" | "webd" | null;
 type Translate = (zh: string, en: string) => string;
+
+const NAV_COLLAPSED_STORAGE_KEY = "rustclaw.monitor.navCollapsed";
 
 export interface ConsoleNavItem {
   id: ConsolePage;
@@ -50,7 +52,16 @@ export function ConsoleLayout({
   onOpenFactoryReset,
 }: ConsoleLayoutProps) {
   const [navDropdownOpen, setNavDropdownOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(NAV_COLLAPSED_STORAGE_KEY) === "true";
+  });
   const navDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(NAV_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
     if (!navDropdownOpen) return;
@@ -157,13 +168,35 @@ export function ConsoleLayout({
         </div>
       </header>
 
-      <div className="px-3 py-4 sm:px-6 sm:py-6 lg:pl-[236px]">
-        <aside className="fixed left-0 top-16 z-30 hidden h-[calc(100vh-4rem)] w-[220px] overflow-y-auto lg:block">
-          <div className="theme-sidebar-shell mx-3 mt-0 sm:mx-4">
-            <div className="mb-3 px-1">
-              <p className="theme-kicker text-[10px] uppercase tracking-[0.3em]">{t("导航", "Navigation")}</p>
+      <div className={`px-3 py-4 sm:px-6 sm:py-6 ${sidebarCollapsed ? "lg:pl-[88px]" : "lg:pl-[236px]"}`}>
+        <aside
+          className={`fixed left-0 top-16 z-30 hidden h-[calc(100vh-4rem)] overflow-y-auto transition-[width] lg:block ${
+            sidebarCollapsed ? "w-[72px]" : "w-[220px]"
+          }`}
+        >
+          <div className={`theme-sidebar-shell mt-0 ${sidebarCollapsed ? "mx-2" : "mx-3 sm:mx-4"}`}>
+            <div className={sidebarCollapsed ? "mb-3 flex justify-center" : "mb-3 flex items-center justify-between gap-2 px-1"}>
+              {sidebarCollapsed ? null : (
+                <p className="theme-kicker text-[10px] uppercase tracking-[0.3em]">{t("导航", "Navigation")}</p>
+              )}
+              <button
+                type="button"
+                onClick={() => setSidebarCollapsed((value) => !value)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/65 transition hover:bg-white/10 hover:text-white"
+                title={sidebarCollapsed ? t("展开导航", "Expand navigation") : t("隐藏导航", "Collapse navigation")}
+                aria-label={sidebarCollapsed ? t("展开导航", "Expand navigation") : t("隐藏导航", "Collapse navigation")}
+                aria-expanded={!sidebarCollapsed}
+              >
+                {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+              </button>
             </div>
-            <nav className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible">
+            <nav
+              className={
+                sidebarCollapsed
+                  ? "flex gap-2 overflow-x-auto pb-1 lg:flex lg:flex-col lg:items-center lg:overflow-visible"
+                  : "flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible"
+              }
+            >
               {navItems.map((item) => {
                 const active = currentPage === item.id;
                 return (
@@ -175,13 +208,20 @@ export function ConsoleLayout({
                       onCurrentPageChange(item.id);
                       (event.currentTarget as HTMLButtonElement).blur();
                     }}
-                    className={`theme-nav-item min-w-[148px] rounded-2xl border px-3 py-2.5 text-left transition lg:block lg:w-full ${
+                    title={sidebarCollapsed ? item.label : undefined}
+                    className={`theme-nav-item min-w-[148px] rounded-2xl border px-3 py-2.5 text-left transition ${
+                      sidebarCollapsed
+                        ? "lg:flex lg:h-11 lg:w-11 lg:min-w-0 lg:items-center lg:justify-center lg:px-0"
+                        : "lg:block lg:w-full"
+                    } ${
                       active ? "theme-nav-active" : "theme-nav-idle"
                     }`}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className={sidebarCollapsed ? "flex items-center justify-center" : "flex items-center gap-2"}>
                       <span className={active ? "theme-icon-soft" : "text-white/70"}>{item.icon}</span>
-                      <span className="text-sm font-medium leading-5">{item.label}</span>
+                      <span className={sidebarCollapsed ? "text-sm font-medium leading-5 lg:sr-only" : "text-sm font-medium leading-5"}>
+                        {item.label}
+                      </span>
                     </div>
                   </button>
                 );
@@ -192,14 +232,20 @@ export function ConsoleLayout({
               <button
                 type="button"
                 onClick={onOpenFactoryReset}
-                className="mt-3 flex w-full items-center gap-2 rounded-2xl border border-red-500/25 bg-red-500/10 px-3 py-2.5 text-left text-sm font-medium text-red-100 transition hover:bg-red-500/15"
+                title={sidebarCollapsed ? t("恢复出厂设置", "Factory Reset") : undefined}
+                aria-label={t("恢复出厂设置", "Factory Reset")}
+                className={`mt-3 flex items-center rounded-2xl border border-red-500/25 bg-red-500/10 text-left text-sm font-medium text-red-100 transition hover:bg-red-500/15 ${
+                  sidebarCollapsed
+                    ? "h-11 w-11 justify-center px-0 py-0"
+                    : "w-full gap-2 px-3 py-2.5"
+                }`}
               >
                 <ShieldAlert className="h-4 w-4" />
-                <span>{t("恢复出厂设置", "Factory Reset")}</span>
+                <span className={sidebarCollapsed ? "lg:sr-only" : undefined}>{t("恢复出厂设置", "Factory Reset")}</span>
               </button>
             ) : null}
 
-            <div className="theme-panel-soft mt-3 p-3.5 text-sm text-white/70">
+            <div className={sidebarCollapsed ? "hidden" : "theme-panel-soft mt-3 p-3.5 text-sm text-white/70"}>
               <p className="font-medium text-white">{t("当前登录身份", "Current identity")}</p>
               {authMode === "webd" ? (
                 <div className="mt-2 space-y-1 text-xs text-white/55">
