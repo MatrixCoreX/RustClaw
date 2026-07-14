@@ -350,7 +350,7 @@ Recent records with safety flags are hidden by default in the UI. Fact-card deta
 
 ### Trace And Troubleshooting
 
-Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content.
+Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content. The browser teaching-mode trace and `/v1/debug/tasks/{task_id}` can also show this structured memory/KB policy next to numbered LLM calls.
 
 When debugging memory behavior, check these questions in order:
 
