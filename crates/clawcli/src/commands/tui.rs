@@ -7,7 +7,11 @@ use std::time::Duration;
 
 use crate::{client, events::EventFilters, output, task};
 
-use super::{report::task_report_json, task_query::watch_progress_json};
+use super::{
+    permission::permission_report_json,
+    report::{coding_review_json, subagent_report_json, task_report_json},
+    task_query::watch_progress_json,
+};
 
 const TUI_DEFAULT_PAUSE_SECONDS: u64 = 3600;
 
@@ -20,6 +24,10 @@ pub(super) enum TuiCommand {
     Resume,
     Continue,
     Export,
+    Report,
+    Review,
+    Subagents,
+    Permission,
     Quit,
 }
 
@@ -119,6 +127,30 @@ pub(crate) fn run_tui(
                         output::print_json_pretty(&export);
                     }
                 }
+                TuiCommand::Report => {
+                    let task = selected
+                        .as_ref()
+                        .context("selected_task_required_for_report")?;
+                    output::print_json_pretty(&task_report_json(task, include_events));
+                }
+                TuiCommand::Review => {
+                    let task = selected
+                        .as_ref()
+                        .context("selected_task_required_for_review")?;
+                    output::print_json_pretty(&coding_review_json(task, include_events));
+                }
+                TuiCommand::Subagents => {
+                    let task = selected
+                        .as_ref()
+                        .context("selected_task_required_for_subagents")?;
+                    output::print_json_pretty(&subagent_report_json(task));
+                }
+                TuiCommand::Permission => {
+                    let task = selected
+                        .as_ref()
+                        .context("selected_task_required_for_permission")?;
+                    output::print_json_pretty(&permission_report_json(task));
+                }
             }
             continue;
         }
@@ -153,6 +185,10 @@ pub(super) fn tui_command_from_input(input: &str) -> Option<TuiCommand> {
         "u" => Some(TuiCommand::Resume),
         "n" => Some(TuiCommand::Continue),
         "e" => Some(TuiCommand::Export),
+        "1" => Some(TuiCommand::Report),
+        "2" => Some(TuiCommand::Review),
+        "3" => Some(TuiCommand::Subagents),
+        "4" => Some(TuiCommand::Permission),
         "q" => Some(TuiCommand::Quit),
         _ => None,
     }
@@ -351,7 +387,7 @@ fn push_tui_count_line(lines: &mut Vec<String>, key: &str, source: &Value, point
 
 fn print_tui_command_help() {
     println!();
-    println!("tui_keys: r,w,p,c,u,n,e,q");
+    println!("tui_keys: r,w,p,c,u,n,e,1,2,3,4,q");
     println!("tui_key.r=refresh");
     println!("tui_key.w=watch");
     println!("tui_key.p=pause");
@@ -359,6 +395,10 @@ fn print_tui_command_help() {
     println!("tui_key.u=resume");
     println!("tui_key.n=continue");
     println!("tui_key.e=export");
+    println!("tui_key.1=report");
+    println!("tui_key.2=review");
+    println!("tui_key.3=subagents");
+    println!("tui_key.4=permission");
     println!("tui_key.q=quit");
 }
 
