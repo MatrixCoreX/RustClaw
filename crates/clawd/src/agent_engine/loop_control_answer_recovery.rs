@@ -338,6 +338,14 @@ pub(super) fn answer_verifier_gap_is_structurally_satisfied(
     if terminal_model_output_format_gap_satisfies_contract(reply, route) {
         return true;
     }
+    if summary.missing_evidence_fields.iter().any(|field| {
+        matches!(
+            field.as_str(),
+            "output_format" | "unsupported_claims" | "candidates"
+        )
+    }) {
+        return false;
+    }
     if let (Some(journal), Some(answer)) = (
         reply.task_journal.as_ref(),
         final_user_answer_candidate(reply),

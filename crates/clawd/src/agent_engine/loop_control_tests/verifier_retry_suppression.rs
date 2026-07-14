@@ -1374,6 +1374,45 @@ fn terminal_model_answer_suppresses_output_format_only_verifier_retry() {
 }
 
 #[test]
+fn raw_observation_output_format_gap_does_not_suppress_structural_retry() {
+    let raw_answer = "2026-04-01 WARN latency increased\n2026-04-01 ERROR provider timeout";
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+    journal.push_step_result(&ok_step(
+        "step_1",
+        "log_analyze",
+        r#"{"keyword_counts":{"warn":1,"error":1},"matches":[{"level":"WARN"},{"level":"ERROR"}]}"#,
+    ));
+    journal.push_step_result(&ok_step(
+        "step_2",
+        "doc_parse",
+        r##"{"extra":{"content_excerpt":"# Service Notes\nbody","path":"docs/service_notes.md"}}"##,
+    ));
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["output_format".to_string()],
+        answer_incomplete_reason:
+            "answer dumped raw observations and omitted the requested summary/table".to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite from observed evidence in the requested shape".to_string(),
+        confidence: 0.95,
+    });
+    let mut reply = AskReply::non_llm(raw_answer.to_string())
+        .with_messages(vec![raw_answer.to_string()])
+        .with_task_journal(journal);
+
+    assert!(!suppress_answer_verifier_retry_if_structurally_satisfied(
+        &mut reply,
+        Some(&route)
+    ));
+    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_some());
+}
+
+#[test]
 fn terminal_model_answer_does_not_suppress_non_format_evidence_gap() {
     let answer = "RustClaw combines the local clawd runtime, channel entry points, and skill dispatch into one deployable stack.";
     let mut route = route_result(OutputResponseShape::Free);

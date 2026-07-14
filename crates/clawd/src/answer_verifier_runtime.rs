@@ -151,6 +151,7 @@ pub(crate) async fn verify_answer_observe_only(
         }
     };
     if validation.high_confidence_gap()
+        && !verifier_gap_requires_visible_answer_repair(&validation)
         && structurally_satisfies_answer_contract(route_result, journal, candidate_answer)
     {
         tracing::info!(
@@ -172,6 +173,15 @@ pub(crate) async fn verify_answer_observe_only(
         );
     }
     Some(validation)
+}
+
+fn verifier_gap_requires_visible_answer_repair(validation: &AnswerVerifierOut) -> bool {
+    validation.missing_evidence_fields.iter().any(|field| {
+        matches!(
+            field.as_str(),
+            "output_format" | "unsupported_claims" | "candidates"
+        )
+    })
 }
 
 pub(super) fn answer_verifier_user_request_for_prompt(
