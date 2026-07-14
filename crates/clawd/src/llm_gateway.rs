@@ -78,7 +78,7 @@ fn stop_llm_task_lease_heartbeat(stop_tx: &mut Option<oneshot::Sender<()>>) {
 pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
     let s = prompt_source.to_ascii_lowercase();
     // 顺序很重要：更具体的匹配放前面，避免被宽泛规则吃掉。
-    if s.contains("intent_normalizer") {
+    if s.contains("intent_normalizer") || s.contains("normalizer") {
         "normalizer"
     } else if s.contains("contract_repair") {
         "contract_repair"

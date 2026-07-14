@@ -799,11 +799,178 @@ fn numbered_task_debug_calls(entries: &[TaskDebugEntry]) -> Vec<TaskDebugCall> {
         .iter()
         .cloned()
         .enumerate()
-        .map(|(index, entry)| TaskDebugCall {
-            call_index: index + 1,
-            entry,
+        .map(|(index, entry)| {
+            let flow = task_debug_flow_for_entry(&entry);
+            TaskDebugCall {
+                call_index: index + 1,
+                flow,
+                entry,
+            }
         })
         .collect()
+}
+
+fn task_debug_flow_for_entry(entry: &TaskDebugEntry) -> TaskDebugFlow {
+    let source = entry
+        .prompt_source
+        .as_deref()
+        .or(entry.prompt_file.as_deref())
+        .unwrap_or("");
+    let prompt_label = crate::llm_gateway::classify_prompt_source(source);
+    let (flow_stage, flow_node, code_module, code_entrypoint) =
+        prompt_flow_location(prompt_label);
+    TaskDebugFlow {
+        prompt_label: prompt_label.to_string(),
+        flow_stage: flow_stage.to_string(),
+        flow_node: flow_node.to_string(),
+        code_module: code_module.to_string(),
+        code_entrypoint: code_entrypoint.to_string(),
+        trigger_kind: prompt_flow_trigger_kind(source, entry).to_string(),
+    }
+}
+
+fn prompt_flow_location(prompt_label: &str) -> (&'static str, &'static str, &'static str, &'static str) {
+    match prompt_label {
+        "normalizer" => (
+            "boundary.normalizer",
+            "intent_normalizer",
+            "crates/clawd/src/intent_router_normalizer_model.rs",
+            "run_intent_normalizer_model_step",
+        ),
+        "contract_repair" => (
+            "boundary.contract_repair",
+            "contract_repair_judge",
+            "crates/clawd/src/intent_router_contract_repair_judge.rs",
+            "run_contract_repair_judge",
+        ),
+        "router_legacy" => (
+            "compat.route_hint",
+            "legacy_router_hint",
+            "crates/clawd/src/intent_router.rs",
+            "prepare_ask_routing",
+        ),
+        "plan" => (
+            "agent_loop.planner",
+            "planner_round",
+            "crates/clawd/src/agent_engine/planning.rs",
+            "plan_round_actions",
+        ),
+        "plan_repair" => (
+            "agent_loop.repair",
+            "plan_repair",
+            "crates/clawd/src/agent_engine/planning.rs",
+            "plan_round_actions",
+        ),
+        "delivery_classifier" => (
+            "finalizer.delivery",
+            "delivery_text_classifier",
+            "crates/clawd/src/semantic_judge.rs",
+            "classify_delivery_text_with_llm",
+        ),
+        "direct_classifier" => (
+            "finalizer.direct_classifier",
+            "direct_classifier_reply",
+            "crates/clawd/src/finalize/task.rs",
+            "run_direct_classifier_reply",
+        ),
+        "observed" => (
+            "agent_loop.observed_synthesis",
+            "observed_output_synthesis",
+            "crates/clawd/src/agent_engine/observed_output.rs",
+            "try_synthesize_answer_from_observed_output",
+        ),
+        "user_response_composer" => (
+            "finalizer.response_composer",
+            "user_response_composer",
+            "crates/clawd/src/fallback.rs",
+            "compose_user_response_from_contract_impl",
+        ),
+        "user_response_validator" => (
+            "finalizer.response_validator",
+            "user_response_contract_validator",
+            "crates/clawd/src/fallback.rs",
+            "user_response_contract_llm_validated",
+        ),
+        "clarify" => (
+            "boundary.clarify",
+            "clarify_question",
+            "crates/clawd/src/intent_router_clarify.rs",
+            "generate_or_reuse_clarify_question",
+        ),
+        "intent_meta" => (
+            "boundary.intent_meta",
+            "intent_meta_summary",
+            "crates/clawd/src/intent_router_prompt_render.rs",
+            "render_intent_normalizer_prompt",
+        ),
+        "schedule" => (
+            "scheduler.intent",
+            "schedule_intent",
+            "crates/clawd/src/schedule_service.rs",
+            "schedule_service",
+        ),
+        "nl2cmd" => (
+            "tool.command_intent",
+            "command_intent",
+            "crates/clawd/src/skills/builtin.rs",
+            "run_command_skill",
+        ),
+        "self_extension" => (
+            "boundary.self_extension",
+            "self_extension",
+            "crates/clawd/src/fallback.rs",
+            "compose_user_response_from_contract",
+        ),
+        "memory" => (
+            "memory.background",
+            "memory_summary_or_extract",
+            "crates/clawd/src/memory/service.rs",
+            "memory_service",
+        ),
+        "verifier" => (
+            "agent_loop.answer_verifier",
+            "answer_verifier",
+            "crates/clawd/src/answer_verifier_runtime.rs",
+            "verify_answer_observe_only",
+        ),
+        "chat" => (
+            "agent_loop.chat",
+            "chat_response",
+            "crates/clawd/src/fallback.rs",
+            "compose_user_response_from_contract",
+        ),
+        "semantic_judge" => (
+            "policy.semantic_judge",
+            "semantic_judge",
+            "crates/clawd/src/semantic_judge.rs",
+            "is_meta_respond_instruction",
+        ),
+        _ => (
+            "provider.llm_call",
+            "unclassified_prompt",
+            "crates/clawd/src/llm_gateway.rs",
+            "run_with_fallback_with_prompt_source",
+        ),
+    }
+}
+
+fn prompt_flow_trigger_kind(source: &str, entry: &TaskDebugEntry) -> &'static str {
+    let lower = source.to_ascii_lowercase();
+    if entry.error.as_deref().map(str::trim).is_some_and(|value| !value.is_empty()) {
+        "provider_error"
+    } else if lower.contains("#retry=json_only") {
+        "json_retry"
+    } else if lower.contains("repair") {
+        "repair"
+    } else if lower.contains("retry") {
+        "retry"
+    } else if lower.contains("fallback") {
+        "fallback"
+    } else if entry.status.as_deref() == Some("ok") {
+        "normal"
+    } else {
+        "unknown"
+    }
 }
 
 async fn task_debug_detail(
@@ -967,10 +1134,18 @@ mod logs_usage_debug_tests {
             calls[0].entry.call_id.as_deref(),
             Some("task-1:normalizer")
         );
+        assert_eq!(calls[0].flow.prompt_label, "normalizer");
+        assert_eq!(calls[0].flow.flow_stage, "boundary.normalizer");
+        assert_eq!(
+            calls[0].flow.code_module,
+            "crates/clawd/src/intent_router_normalizer_model.rs"
+        );
         assert_eq!(
             calls[0].entry.request_payload.as_ref(),
             entries[0].request_payload.as_ref()
         );
+        assert_eq!(calls[1].flow.prompt_label, "other");
+        assert_eq!(calls[1].flow.flow_stage, "provider.llm_call");
         assert_eq!(
             calls[1].entry.raw_response.as_deref(),
             Some("{\"id\":\"resp-2\"}")

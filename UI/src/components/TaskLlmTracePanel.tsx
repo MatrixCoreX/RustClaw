@@ -73,6 +73,36 @@ function rawFields(call: TaskLlmDebugCall): string {
     .join(", ");
 }
 
+function flowMeta(call: TaskLlmDebugCall): string[] {
+  const flow = call.flow;
+  if (!flow) return [];
+  return [
+    compactMetaValue(flow.prompt_label) ? `prompt_label=${flow.prompt_label}` : null,
+    compactMetaValue(flow.flow_stage) ? `flow_stage=${flow.flow_stage}` : null,
+    compactMetaValue(flow.flow_node) ? `flow_node=${flow.flow_node}` : null,
+    compactMetaValue(flow.trigger_kind) ? `trigger=${flow.trigger_kind}` : null,
+  ].filter((item): item is string => Boolean(item));
+}
+
+function FlowField({
+  label,
+  value,
+  wide = false,
+}: {
+  label: string;
+  value?: string | null;
+  wide?: boolean;
+}) {
+  return (
+    <div className={wide ? "min-w-0 md:col-span-2" : "min-w-0"}>
+      <div className="mb-1 text-white/45">{label}</div>
+      <div className="truncate rounded-md border border-white/10 bg-black/25 px-2 py-1 font-mono text-white/75" title={value ?? "--"}>
+        {value ?? "--"}
+      </div>
+    </div>
+  );
+}
+
 export function TaskLlmTracePanel({
   t,
   tSlash,
@@ -148,6 +178,11 @@ export function TaskLlmTracePanel({
                         </span>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-2">
+                        {flowMeta(call).slice(0, 4).map((item) => (
+                          <span key={item} className="rounded-md border border-sky-300/20 bg-sky-400/10 px-2 py-1 font-mono text-[11px] text-sky-100">
+                            {item}
+                          </span>
+                        ))}
                         {callMeta(call).slice(0, 8).map((item) => (
                           <span key={item} className="rounded-md border border-white/10 bg-white/5 px-2 py-1 font-mono text-[11px] text-white/60">
                             {item}
@@ -155,6 +190,22 @@ export function TaskLlmTracePanel({
                         ))}
                       </div>
                     </summary>
+
+                    {call.flow ? (
+                      <div className="mt-3 rounded-lg border border-sky-300/15 bg-sky-400/5 p-3">
+                        <p className="mb-2 text-xs font-medium text-sky-100">
+                          {t("RustClaw 流程", "RustClaw flow")}
+                        </p>
+                        <div className="grid gap-2 text-[11px] md:grid-cols-2">
+                          <FlowField label={t("流程阶段", "Flow stage")} value={call.flow.flow_stage} />
+                          <FlowField label={t("流程节点", "Flow node")} value={call.flow.flow_node} />
+                          <FlowField label={t("触发类型", "Trigger")} value={call.flow.trigger_kind} />
+                          <FlowField label={t("Prompt 标签", "Prompt label")} value={call.flow.prompt_label} />
+                          <FlowField label={t("代码模块", "Code module")} value={call.flow.code_module} wide />
+                          <FlowField label={t("入口函数", "Entrypoint")} value={call.flow.code_entrypoint} wide />
+                        </div>
+                      </div>
+                    ) : null}
 
                     <div className="mt-3 grid gap-3 xl:grid-cols-2">
                       <div>
