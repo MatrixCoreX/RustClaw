@@ -763,6 +763,36 @@ fn fs_basic_append_text_rewrites_to_append_write_file() {
 }
 
 #[test]
+fn fs_basic_write_text_write_mode_alias_rewrites_to_write_file_mode() {
+    let mut args = json!({
+        "action": "write_text",
+        "path": "memo.txt",
+        "content": "new\n",
+        "write_mode": "overwrite"
+    });
+    assert!(normalize_virtual_tool_arg_aliases("fs_basic", &mut args));
+    let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+        .unwrap()
+        .expect("rewrite");
+
+    assert_eq!(rewrite.runtime_tool, "write_file");
+    assert_eq!(
+        rewrite.runtime_args.get("path").and_then(|v| v.as_str()),
+        Some("memo.txt")
+    );
+    assert_eq!(
+        rewrite.runtime_args.get("content").and_then(|v| v.as_str()),
+        Some("new\n")
+    );
+    assert_eq!(
+        rewrite.runtime_args.get("mode").and_then(|v| v.as_str()),
+        Some("overwrite")
+    );
+    assert!(rewrite.runtime_args.get("write_mode").is_none());
+    assert!(rewrite.runtime_args.get("action").is_none());
+}
+
+#[test]
 fn config_basic_read_field_rewrites_to_system_basic_extract_field() {
     let mut args =
         json!({"action":"extract_field", "file":"Cargo.toml", "key":"workspace.package.version"});

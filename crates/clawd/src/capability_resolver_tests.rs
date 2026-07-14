@@ -178,6 +178,40 @@ fn capability_resolution_record_covers_resolved_mapping() {
 }
 
 #[test]
+fn filesystem_write_text_capability_normalizes_write_mode_alias() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "filesystem.write_text",
+        json!({
+            "path": "notes/memo.txt",
+            "content": "hello\n",
+            "write_mode": "overwrite"
+        }),
+    );
+    let action = action.expect("filesystem.write_text should resolve");
+    let AgentAction::CallTool { tool, args } = action else {
+        panic!("expected fs_basic tool action, got {action:?}");
+    };
+    assert_eq!(tool, "fs_basic");
+    assert_eq!(
+        args.get("action").and_then(Value::as_str),
+        Some("write_text")
+    );
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some("notes/memo.txt")
+    );
+    assert_eq!(args.get("content").and_then(Value::as_str), Some("hello\n"));
+    assert_eq!(args.get("mode").and_then(Value::as_str), Some("overwrite"));
+    assert!(args.get("write_mode").is_none());
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+}
+
+#[test]
 fn workspace_registry_requires_explicit_bare_capability_action() {
     let state = state_with_workspace_registry();
     let (action, record) =

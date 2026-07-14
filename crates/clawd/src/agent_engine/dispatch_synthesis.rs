@@ -16,6 +16,7 @@ mod dispatch_synthesis_markdown;
 use dispatch_synthesis_local_code_fields::{
     diff_summary_projection_value, local_code_json_projection_field_value_supported,
     machine_error_code_token, path_size_bytes_by_path, run_cmd_commands_from_task_observations,
+    run_cmd_failure_projection,
 };
 use dispatch_synthesis_local_code_readbacks::readbacks_for_local_code_projection;
 use dispatch_synthesis_local_code_writes::{
@@ -752,6 +753,7 @@ pub(super) fn local_code_task_strict_json_projection(
         evidence_paths.clone()
     };
     let path_size_bytes = path_size_bytes_by_path(loop_state);
+    let failure_projection = run_cmd_failure_projection(loop_state, &run_cmd_commands);
 
     let mut object = serde_json::Map::new();
     for field in &requested_fields {
@@ -764,6 +766,27 @@ pub(super) fn local_code_task_strict_json_projection(
             }
             "changed_files" => {
                 object.insert(field.clone(), string_array_value(&projected_changed_paths));
+            }
+            "failed_command" => {
+                object.insert(
+                    field.clone(),
+                    Value::String(failure_projection.as_ref()?.failed_command.clone()),
+                );
+            }
+            "failure_observed" => {
+                object.insert(field.clone(), Value::Bool(failure_projection.is_some()));
+            }
+            "failure_evidence" => {
+                object.insert(
+                    field.clone(),
+                    failure_projection.as_ref()?.failure_evidence.clone(),
+                );
+            }
+            "fix_summary" => {
+                object.insert(
+                    field.clone(),
+                    failure_projection.as_ref()?.fix_summary.clone(),
+                );
             }
             "test_command" | "verification_command" => {
                 object.insert(
@@ -1004,6 +1027,10 @@ fn local_code_json_projection_field_supported(field: &str) -> bool {
         field,
         "created_files"
             | "changed_files"
+            | "failed_command"
+            | "failure_observed"
+            | "failure_evidence"
+            | "fix_summary"
             | "test_command"
             | "verification_command"
             | "test_status"
@@ -1202,11 +1229,20 @@ fn successful_run_cmd_commands(loop_state: &LoopState) -> Vec<String> {
             commands.push(command.to_string());
         }
     }
-    if commands.is_empty() {
-        commands = run_cmd_commands_from_plan_trace(loop_state);
+    if commands.len() < successful_count {
+        let plan_commands = run_cmd_commands_from_plan_trace(loop_state);
+        if plan_commands.len() >= successful_count {
+            commands = plan_commands;
+        } else {
+            for command in plan_commands {
+                push_unique_string(&mut commands, &command);
+            }
+        }
     }
-    if commands.is_empty() {
-        commands = run_cmd_commands_from_task_observations(loop_state);
+    if commands.len() < successful_count {
+        for command in run_cmd_commands_from_task_observations(loop_state) {
+            push_unique_string(&mut commands, &command);
+        }
     }
     if commands.len() > successful_count {
         commands.truncate(successful_count);
@@ -1236,7 +1272,7 @@ fn run_cmd_commands_from_plan_trace(loop_state: &LoopState) -> Vec<String> {
             let Some(command) = run_cmd_command_from_action(&action) else {
                 continue;
             };
-            push_unique_string(&mut commands, &command);
+            commands.push(command);
         }
     }
     commands

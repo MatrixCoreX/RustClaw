@@ -3,6 +3,13 @@ use std::collections::BTreeMap;
 
 use crate::agent_engine::LoopState;
 
+#[derive(Debug, Clone)]
+pub(super) struct RunCmdFailureProjection {
+    pub(super) failed_command: String,
+    pub(super) failure_evidence: Value,
+    pub(super) fix_summary: Value,
+}
+
 pub(super) fn local_code_json_projection_field_value_supported(field: &str, value: &Value) -> bool {
     if field != "error_codes" {
         return true;
@@ -37,9 +44,60 @@ pub(super) fn run_cmd_commands_from_task_observations(loop_state: &LoopState) ->
         else {
             continue;
         };
-        super::push_unique_string(&mut commands, command);
+        commands.push(command.to_string());
     }
     commands
+}
+
+pub(super) fn run_cmd_failure_projection(
+    loop_state: &LoopState,
+    commands: &[String],
+) -> Option<RunCmdFailureProjection> {
+    let observations = run_cmd_projection_observations(loop_state, commands);
+    let (failed_index, failed) = observations
+        .iter()
+        .enumerate()
+        .find(|(_, observation)| observation.exit_code.is_some_and(|code| code != 0))?;
+    let validation = observations
+        .iter()
+        .skip(failed_index + 1)
+        .find(|observation| observation.exit_code == Some(0))?;
+
+    let mut evidence = serde_json::Map::new();
+    evidence.insert(
+        "exit_code".to_string(),
+        Value::Number(serde_json::Number::from(failed.exit_code?)),
+    );
+    evidence.insert(
+        "output_excerpt".to_string(),
+        Value::String(truncated_machine_excerpt(&failed.output, 800)),
+    );
+    evidence.insert(
+        "output_chars".to_string(),
+        Value::Number(serde_json::Number::from(
+            failed.output.chars().count() as u64
+        )),
+    );
+
+    let mut fix_summary = serde_json::Map::new();
+    fix_summary.insert(
+        "status_code".to_string(),
+        Value::String("post_failure_validation_passed".to_string()),
+    );
+    fix_summary.insert(
+        "validation_command".to_string(),
+        Value::String(validation.command.clone()),
+    );
+    fix_summary.insert(
+        "validation_exit_code".to_string(),
+        Value::Number(serde_json::Number::from(0)),
+    );
+
+    Some(RunCmdFailureProjection {
+        failed_command: failed.command.clone(),
+        failure_evidence: Value::Object(evidence),
+        fix_summary: Value::Object(fix_summary),
+    })
 }
 
 pub(super) fn path_size_bytes_by_path(loop_state: &LoopState) -> BTreeMap<String, u64> {
@@ -173,4 +231,101 @@ fn string_or_array_values(value: &Value) -> Vec<String> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+struct RunCmdProjectionObservation {
+    command: String,
+    output: String,
+    exit_code: Option<i64>,
+}
+
+fn run_cmd_projection_observations(
+    loop_state: &LoopState,
+    commands: &[String],
+) -> Vec<RunCmdProjectionObservation> {
+    let mut observations = Vec::new();
+    let mut run_cmd_index = 0usize;
+    for step in &loop_state.executed_step_results {
+        if step.skill != "run_cmd" {
+            continue;
+        }
+        let output = step
+            .output
+            .as_deref()
+            .or(step.error.as_deref())
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let command = commands
+            .get(run_cmd_index)
+            .map(String::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let exit_code = run_cmd_observed_exit_code(&output);
+        observations.push(RunCmdProjectionObservation {
+            command,
+            output,
+            exit_code,
+        });
+        run_cmd_index += 1;
+    }
+    observations
+        .into_iter()
+        .filter(|observation| {
+            !observation.command.is_empty()
+                && !observation.output.is_empty()
+                && observation.exit_code.is_some()
+        })
+        .collect()
+}
+
+fn run_cmd_observed_exit_code(output: &str) -> Option<i64> {
+    structured_run_cmd_exit_code(output).or_else(|| machine_exit_code_marker(output))
+}
+
+fn structured_run_cmd_exit_code(output: &str) -> Option<i64> {
+    if let Some(value) = super::skill_output_payload(output) {
+        if let Some(exit_code) = value.get("exit_code").and_then(Value::as_i64) {
+            return Some(exit_code);
+        }
+        if let Some(exit_code) = value
+            .get("extra")
+            .and_then(|extra| extra.get("exit_code"))
+            .and_then(Value::as_i64)
+        {
+            return Some(exit_code);
+        }
+    }
+    let raw = output.trim().strip_prefix("__RC_SKILL_ERROR__:")?;
+    let value = serde_json::from_str::<Value>(raw.trim()).ok()?;
+    value
+        .get("extra")
+        .and_then(|extra| extra.get("exit_code"))
+        .and_then(Value::as_i64)
+        .or_else(|| value.get("exit_code").and_then(Value::as_i64))
+}
+
+fn machine_exit_code_marker(output: &str) -> Option<i64> {
+    for line in output.lines() {
+        let line = line.trim();
+        for prefix in ["EXIT_CODE=", "EXIT_CODE:", "exit_code=", "exit_code:"] {
+            let Some(raw) = line.strip_prefix(prefix) else {
+                continue;
+            };
+            let token = raw.trim().trim_matches('"').trim_matches('\'');
+            if let Ok(value) = token.parse::<i64>() {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+fn truncated_machine_excerpt(value: &str, max_chars: usize) -> String {
+    let trimmed = value.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    trimmed.chars().take(max_chars).collect()
 }

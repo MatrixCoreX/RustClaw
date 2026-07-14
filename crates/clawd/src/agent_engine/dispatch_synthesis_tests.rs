@@ -452,6 +452,114 @@ fn local_code_task_projection_preserves_multiple_validation_commands() {
 }
 
 #[test]
+fn local_code_task_projection_includes_failing_command_repair_fields() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "agent_loop.latest_run_cmd_command".to_string(),
+        "cd /workspace/project && python3 test_calc_core.py; echo \"EXIT_CODE=$?\"".to_string(),
+    );
+    loop_state
+        .round_traces
+        .push(crate::task_journal::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: "observe failing command, fix code, and validate".to_string(),
+            execution_recipe_summary: None,
+            plan_result: Some(crate::PlanResult {
+                goal: "observe failing command, fix code, and validate".to_string(),
+                missing_slots: Vec::new(),
+                needs_confirmation: false,
+                steps: vec![
+                    crate::PlanStep {
+                        step_id: "step_1".to_string(),
+                        action_type: "call_tool".to_string(),
+                        skill: "run_cmd".to_string(),
+                        args: json!({
+                            "command": "cd /workspace/project && python3 test_calc_core.py; echo \"EXIT_CODE=$?\"",
+                        }),
+                        depends_on: Vec::new(),
+                        why: "observe failure".to_string(),
+                    },
+                    crate::PlanStep {
+                        step_id: "step_2".to_string(),
+                        action_type: "call_tool".to_string(),
+                        skill: "run_cmd".to_string(),
+                        args: json!({
+                            "command": "cd /workspace/project && python3 test_calc_core.py; echo \"EXIT_CODE=$?\"",
+                        }),
+                        depends_on: vec!["step_1".to_string()],
+                        why: "validate fix".to_string(),
+                    },
+                ],
+                planner_notes: String::new(),
+                plan_kind: PlanKind::Single,
+                raw_plan_text: String::new(),
+            }),
+            verify_result: None,
+        });
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"write_text","path":"/workspace/project/calc_core.py","resolved_path":"/workspace/project/calc_core.py"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"write_text","path":"/workspace/project/test_calc_core.py","resolved_path":"/workspace/project/test_calc_core.py"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_3",
+        "run_cmd",
+        "EXIT_CODE=1\nAssertionError: expected division_by_zero\n",
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_4",
+        "fs_basic",
+        r#"{"extra":{"action":"write_text","path":"/workspace/project/calc_core.py","resolved_path":"/workspace/project/calc_core.py"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_5",
+        "run_cmd",
+        "All tests passed\nEXIT_CODE=0\n",
+    ));
+    let context = agent_context_with_required_machine_fields(json!([
+        "project_dir",
+        "changed_files",
+        "failed_command",
+        "failure_observed",
+        "failure_evidence",
+        "fix_summary",
+        "test_command",
+        "test_status"
+    ]));
+
+    let answer = local_code_task_strict_json_projection(
+        "Return JSON with project_dir, changed_files, failed_command, failure_observed, failure_evidence, fix_summary, test_command, test_status.",
+        &loop_state,
+        Some(&context),
+    )
+    .expect("projection should include failure and repair evidence");
+    let value: serde_json::Value = serde_json::from_str(&answer).expect("json");
+
+    assert_eq!(value["failure_observed"], true);
+    assert_eq!(
+        value["failed_command"],
+        "cd /workspace/project && python3 test_calc_core.py; echo \"EXIT_CODE=$?\""
+    );
+    assert_eq!(value["failure_evidence"]["exit_code"], 1);
+    assert_eq!(
+        value["fix_summary"]["status_code"],
+        "post_failure_validation_passed"
+    );
+    assert_eq!(value["fix_summary"]["validation_exit_code"], 0);
+    assert_eq!(value["test_status"], "passed");
+    assert!(strict_json_projection_answer_satisfies_request(
+        "Return JSON with project_dir, changed_files, failed_command, failure_observed, failure_evidence, fix_summary, test_command, test_status.",
+        &answer,
+        Some(&context),
+    ));
+}
+
+#[test]
 fn local_code_task_projection_uses_plan_trace_run_cmd_commands() {
     let mut loop_state = LoopState::new(2);
     loop_state
