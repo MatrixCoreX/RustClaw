@@ -46,6 +46,7 @@ fn trace_json_includes_pollable_machine_event_stream() {
         event_types,
         vec![
             "task_lifecycle",
+            "task_goal",
             "agent_round",
             "tool_started",
             "tool_step",
@@ -56,62 +57,111 @@ fn trace_json_includes_pollable_machine_event_stream() {
     );
     assert_eq!(events[0].get("seq").and_then(Value::as_u64), Some(1));
     assert_eq!(
-        events[2].pointer("/payload/phase").and_then(Value::as_str),
+        events[3].pointer("/payload/phase").and_then(Value::as_str),
         Some("started")
     );
     assert_eq!(
-        events[2]
+        events[3]
             .pointer("/payload/evidence_ref")
             .and_then(Value::as_str),
         Some("step_1")
     );
     assert_eq!(
-        events[3].pointer("/payload/status").and_then(Value::as_str),
+        events[4].pointer("/payload/status").and_then(Value::as_str),
         Some("ok")
     );
     assert_eq!(
-        events[3]
+        events[4]
             .pointer("/payload/action_kind")
             .and_then(Value::as_str),
         Some("call_capability")
     );
     assert_eq!(
-        events[3]
+        events[4]
             .pointer("/payload/requested_capability")
             .and_then(Value::as_str),
         Some("filesystem.list_entries")
     );
     assert_eq!(
-        events[3]
+        events[4]
             .pointer("/payload/resolved_tool_or_skill")
             .and_then(Value::as_str),
         Some("fs_basic")
     );
     assert_eq!(
-        events[3]
+        events[4]
             .pointer("/payload/resolution_source")
             .and_then(Value::as_str),
         Some("capability_resolver")
     );
     assert_eq!(
-        events[3]
+        events[4]
             .pointer("/payload/artifact_ref_count")
             .and_then(Value::as_u64),
         Some(1)
     );
     assert_eq!(
-        events[3]
+        events[4]
             .pointer("/payload/artifact_refs/0/ref")
             .and_then(Value::as_str),
         Some("reports/out.txt")
     );
     assert_eq!(
-        events[4].pointer("/payload/phase").and_then(Value::as_str),
+        events[5].pointer("/payload/phase").and_then(Value::as_str),
         Some("finished")
     );
     assert_eq!(
-        events[4].pointer("/payload/status").and_then(Value::as_str),
+        events[5].pointer("/payload/status").and_then(Value::as_str),
         Some("ok")
+    );
+}
+
+#[test]
+fn trace_json_projects_goal_and_context_budget_events() {
+    let mut journal = TaskJournal::for_task("task-context-events", "ask", "inspect");
+    journal.record_context_bundle_summary(
+        r#"route_view=false execution_view=true context_budget_report={"schema_version":1,"budget_tier":"light","included_ref_count":1,"excluded_ref_count":1,"char_estimate":64,"token_estimate":16,"truncation_reason":"light_execution_budget","safety_reason":"context_budget_policy","compaction_source":"deterministic_context_builder"} transcript_compaction_records=[{"schema_version":1,"compaction_id":"context_compaction:fnv64:0000000000000001","summary_kind":"deterministic_context_budget","active_goal_refs":["goal_context"],"risk_flags":["budget_excluded_context"]}]"#,
+    );
+
+    let trace = journal.to_trace_json();
+    let events = trace
+        .get("event_stream")
+        .and_then(Value::as_array)
+        .expect("event_stream");
+    let goal = events
+        .iter()
+        .find(|event| event.get("event_type").and_then(Value::as_str) == Some("task_goal"))
+        .expect("task_goal event");
+    let budget = events
+        .iter()
+        .find(|event| event.get("event_type").and_then(Value::as_str) == Some("context_budget"))
+        .expect("context_budget event");
+    let compaction = events
+        .iter()
+        .find(|event| event.get("event_type").and_then(Value::as_str) == Some("context_compaction"))
+        .expect("context_compaction event");
+
+    assert_eq!(
+        goal.pointer("/payload/goal_status").and_then(Value::as_str),
+        Some("in_progress")
+    );
+    assert_eq!(
+        budget
+            .pointer("/payload/budget_tier")
+            .and_then(Value::as_str),
+        Some("light")
+    );
+    assert_eq!(
+        compaction
+            .pointer("/payload/record_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        compaction
+            .pointer("/payload/records/0/summary_kind")
+            .and_then(Value::as_str),
+        Some("deterministic_context_budget")
     );
 }
 
@@ -178,6 +228,7 @@ fn trace_json_expands_subagent_team_lifecycle_events() {
     assert_eq!(
         event_types,
         vec![
+            "task_goal",
             "subagent",
             "agent_team_started",
             "subagent_finished",
@@ -185,19 +236,19 @@ fn trace_json_expands_subagent_team_lifecycle_events() {
         ]
     );
     assert_eq!(
-        events[1]
+        events[2]
             .pointer("/payload/team_id")
             .and_then(Value::as_str),
         Some("subagent-batch:1:1")
     );
     assert_eq!(
-        events[2]
+        events[3]
             .pointer("/payload/child_run_id")
             .and_then(Value::as_str),
         Some("subagent-batch:1:1:explorer")
     );
     assert_eq!(
-        events[3]
+        events[4]
             .pointer("/payload/write_permission")
             .and_then(Value::as_str),
         Some("read_only")
@@ -780,21 +831,21 @@ fn trace_json_projects_agent_hook_observations_as_hook_events() {
         .get("event_stream")
         .and_then(Value::as_array)
         .expect("event_stream");
+    let event = events
+        .iter()
+        .find(|event| event.get("event_type").and_then(Value::as_str) == Some("agent_hook"))
+        .expect("agent_hook event");
 
     assert_eq!(
-        events[0].get("event_type").and_then(Value::as_str),
+        event.get("event_type").and_then(Value::as_str),
         Some("agent_hook")
     );
     assert_eq!(
-        events[0]
-            .pointer("/payload/decision")
-            .and_then(Value::as_str),
+        event.pointer("/payload/decision").and_then(Value::as_str),
         Some("allow")
     );
     assert_eq!(
-        events[0]
-            .pointer("/payload/action_ref")
-            .and_then(Value::as_str),
+        event.pointer("/payload/action_ref").and_then(Value::as_str),
         Some("fs_basic.list_dir")
     );
 }
