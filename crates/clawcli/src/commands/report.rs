@@ -1208,11 +1208,98 @@ fn collect_diff_summary_fields(map: &Map<String, Value>, signals: &mut CodingRep
         signals.diff_summaries.push(json!({
             "field": key,
             "value": value,
+            "normalized": normalized_diff_summary_json(&value, map),
         }));
         if signals.diff_summaries.len() >= 16 {
             return;
         }
     }
+}
+
+fn normalized_diff_summary_json(value: &Value, parent: &Map<String, Value>) -> Value {
+    let file_path = first_string_from_value(value, &["file_path", "path", "file", "resolved_path"])
+        .or_else(|| first_path_from_parent(parent));
+    let change_kind = first_string_from_value(value, &["change_kind", "kind", "status"])
+        .or_else(|| file_path.as_ref().map(|_| "modified".to_string()));
+    let bounded_hunk_summary = first_string_from_value(
+        value,
+        &[
+            "bounded_hunk_summary",
+            "hunk_summary",
+            "summary",
+            "summary_code",
+            "description",
+        ],
+    )
+    .or_else(|| match value {
+        Value::String(text) => bounded_text(text, 500),
+        _ => None,
+    });
+    json!({
+        "schema_version": 1,
+        "file_path": file_path,
+        "change_kind": change_kind,
+        "bounded_hunk_summary": bounded_hunk_summary,
+        "verification_evidence_refs": first_string_array_from_value(value, &[
+            "verification_evidence_refs",
+            "verification_refs",
+            "evidence_refs",
+        ]),
+        "rollback_refs": first_string_array_from_value(value, &[
+            "rollback_refs",
+            "side_effect_refs",
+            "completed_side_effect_refs",
+        ]),
+    })
+}
+
+fn first_path_from_parent(parent: &Map<String, Value>) -> Option<String> {
+    for key in [
+        "changed_files",
+        "files_changed",
+        "modified_files",
+        "created_files",
+        "deleted_files",
+        "touched_files",
+    ] {
+        let mut paths = BTreeSet::new();
+        collect_path_tokens(parent.get(key), &mut paths);
+        if let Some(path) = paths.into_iter().next() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn first_string_from_value(value: &Value, keys: &[&str]) -> Option<String> {
+    let map = value.as_object()?;
+    keys.iter().find_map(|key| {
+        map.get(*key)
+            .and_then(Value::as_str)
+            .and_then(|text| bounded_text(text, 500))
+    })
+}
+
+fn first_string_array_from_value(value: &Value, keys: &[&str]) -> Vec<String> {
+    let Some(map) = value.as_object() else {
+        return Vec::new();
+    };
+    for key in keys {
+        let mut out = BTreeSet::new();
+        collect_string_tokens(map.get(*key), &mut out);
+        if !out.is_empty() {
+            return out.into_iter().take(16).collect();
+        }
+    }
+    Vec::new()
+}
+
+fn bounded_text(text: &str, max_chars: usize) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.chars().take(max_chars).collect())
 }
 
 fn bounded_diff_summary_value(value: &Value) -> Option<Value> {

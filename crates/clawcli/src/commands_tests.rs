@@ -152,7 +152,9 @@ fn task_report_json_exposes_stable_machine_fields() {
                 "changed_files": ["src/lib.rs"],
                 "final_diff_summary": {
                     "file_count": 1,
-                    "summary_code": "update_lib_api"
+                    "summary_code": "update_lib_api",
+                    "verification_evidence_refs": ["step:step_1"],
+                    "rollback_refs": ["write_file:src/lib.rs"]
                 },
                 "step_results": [
                     {
@@ -235,6 +237,26 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(
         report["coding"]["diff_summaries"][0]["value"]["summary_code"],
         "update_lib_api"
+    );
+    assert_eq!(
+        report["coding"]["diff_summaries"][0]["normalized"]["file_path"],
+        "src/lib.rs"
+    );
+    assert_eq!(
+        report["coding"]["diff_summaries"][0]["normalized"]["change_kind"],
+        "modified"
+    );
+    assert_eq!(
+        report["coding"]["diff_summaries"][0]["normalized"]["bounded_hunk_summary"],
+        "update_lib_api"
+    );
+    assert_eq!(
+        report["coding"]["diff_summaries"][0]["normalized"]["verification_evidence_refs"][0],
+        "step:step_1"
+    );
+    assert_eq!(
+        report["coding"]["diff_summaries"][0]["normalized"]["rollback_refs"][0],
+        "write_file:src/lib.rs"
     );
     assert_eq!(report["coding"]["unverified_risk"], serde_json::Value::Null);
     assert_eq!(report["outcome"]["state"], "done");
