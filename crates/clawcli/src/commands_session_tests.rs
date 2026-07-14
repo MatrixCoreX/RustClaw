@@ -1,4 +1,7 @@
-use super::{session_list_json, session_resume_json, session_show_json};
+use super::{
+    session_list_json, session_resume_json, session_show_json, session_store_archive_json,
+    session_store_delete_json, session_store_fork_json, session_store_upsert_summary, SessionStore,
+};
 
 #[test]
 fn session_list_json_indexes_active_task_machine_fields() {
@@ -93,4 +96,39 @@ fn session_resume_json_extracts_machine_resume_fields() {
     assert_eq!(summary["checkpoint_id"], "ckpt-resume");
     assert_eq!(summary["resume_due"], true);
     assert_eq!(summary["next_action_kind"], "resume_checkpoint");
+}
+
+#[test]
+fn session_store_archive_delete_and_fork_use_machine_metadata() {
+    let mut store = SessionStore::default();
+    let summary = serde_json::json!({
+        "session_id": "task-session-store",
+        "task_ids": ["task-session-store"],
+        "active_goal_id": "goal-store",
+        "workspace_root": "/tmp/rustclaw",
+        "latest_checkpoint_id": "ckpt-store",
+        "latest_event_seq": "77",
+        "archived": false
+    });
+
+    let upsert = session_store_upsert_summary(&mut store, &summary);
+    assert_eq!(upsert["operation"], "session_store_upsert");
+    assert_eq!(upsert["status"], "ok");
+
+    let archive = session_store_archive_json(&mut store, "task-session-store");
+    assert_eq!(archive["operation"], "session_archive");
+    assert_eq!(archive["archived"], true);
+    assert_eq!(archive["store_session_count"], 1);
+
+    let fork = session_store_fork_json(&mut store, "task-session-store", "task-session-fork")
+        .expect("fork session metadata");
+    assert_eq!(fork["operation"], "session_fork");
+    assert_eq!(fork["session_id"], "task-session-fork");
+    assert_eq!(fork["forked_from"], "task-session-store");
+    assert_eq!(fork["store_session_count"], 2);
+
+    let delete = session_store_delete_json(&mut store, "task-session-store");
+    assert_eq!(delete["operation"], "session_delete");
+    assert_eq!(delete["deleted"], true);
+    assert_eq!(delete["store_session_count"], 1);
 }

@@ -542,6 +542,25 @@ enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Mark a locally saved task session archived.
+    Archive {
+        session_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete a locally saved task session.
+    Delete {
+        session_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Fork local session metadata under a new session id.
+    Fork {
+        session_id: String,
+        new_session_id: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 impl WaitUntil {
@@ -864,6 +883,17 @@ fn main() -> Result<()> {
                 let message = (!message.is_empty()).then(|| message.join(" "));
                 commands::run_session_resume(base_url, k, session_id, message.as_deref(), *json)
             }
+            SessionCommand::Archive { session_id, json } => {
+                commands::run_session_archive(session_id, *json)
+            }
+            SessionCommand::Delete { session_id, json } => {
+                commands::run_session_delete(session_id, *json)
+            }
+            SessionCommand::Fork {
+                session_id,
+                new_session_id,
+                json,
+            } => commands::run_session_fork(session_id, new_session_id, *json),
         },
         Command::RunSkill {
             skill_name,
@@ -1324,7 +1354,7 @@ mod tests {
             .get_subcommands()
             .map(|subcommand| subcommand.get_name().to_string())
             .collect::<std::collections::BTreeSet<_>>();
-        for required in ["list", "show", "resume"] {
+        for required in ["list", "show", "resume", "archive", "delete", "fork"] {
             assert!(session_names.contains(required), "missing {required}");
         }
 
@@ -1468,6 +1498,51 @@ mod tests {
                 assert!(json);
             }
             _ => panic!("expected session resume"),
+        }
+
+        match Cli::try_parse_from(["clawcli", "session", "archive", "task-1", "--json"])
+            .expect("parse session archive")
+            .cmd
+        {
+            Some(Command::Session {
+                command: SessionCommand::Archive { session_id, json },
+            }) => {
+                assert_eq!(session_id, "task-1");
+                assert!(json);
+            }
+            _ => panic!("expected session archive"),
+        }
+
+        match Cli::try_parse_from(["clawcli", "session", "delete", "task-1", "--json"])
+            .expect("parse session delete")
+            .cmd
+        {
+            Some(Command::Session {
+                command: SessionCommand::Delete { session_id, json },
+            }) => {
+                assert_eq!(session_id, "task-1");
+                assert!(json);
+            }
+            _ => panic!("expected session delete"),
+        }
+
+        match Cli::try_parse_from(["clawcli", "session", "fork", "task-1", "task-2", "--json"])
+            .expect("parse session fork")
+            .cmd
+        {
+            Some(Command::Session {
+                command:
+                    SessionCommand::Fork {
+                        session_id,
+                        new_session_id,
+                        json,
+                    },
+            }) => {
+                assert_eq!(session_id, "task-1");
+                assert_eq!(new_session_id, "task-2");
+                assert!(json);
+            }
+            _ => panic!("expected session fork"),
         }
     }
 }

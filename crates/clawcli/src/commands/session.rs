@@ -1,4 +1,10 @@
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+
 use serde_json::{json, Value};
 
 use crate::{client, output, task};
@@ -13,7 +19,9 @@ pub(crate) fn run_session_list(
     json_output: bool,
 ) -> Result<()> {
     let active = active_tasks(base_url, key, user_id, chat_id)?;
-    let summary = session_list_json(user_id, chat_id, &active);
+    let mut summary = session_list_json(user_id, chat_id, &active);
+    let store = upsert_session_summary(&summary)?;
+    attach_store_projection(&mut summary, &store);
     if json_output {
         output::print_json_pretty(&summary);
     } else {
@@ -31,7 +39,9 @@ pub(crate) fn run_session_show(
     json_output: bool,
 ) -> Result<()> {
     let task = task::get_task_status(base_url, key, session_id)?;
-    let summary = session_show_json(&task);
+    let mut summary = session_show_json(&task);
+    let store = upsert_session_summary(&summary)?;
+    attach_store_projection(&mut summary, &store);
     if json_output {
         output::print_json_pretty(&summary);
     } else {
@@ -66,6 +76,34 @@ pub(crate) fn run_session_resume(
             println!("{line}");
         }
     }
+    Ok(())
+}
+
+pub(crate) fn run_session_archive(session_id: &str, json_output: bool) -> Result<()> {
+    let mut store = load_session_store()?;
+    let summary = session_store_archive_json(&mut store, session_id);
+    save_session_store(&store)?;
+    print_session_store_operation(&summary, json_output);
+    Ok(())
+}
+
+pub(crate) fn run_session_delete(session_id: &str, json_output: bool) -> Result<()> {
+    let mut store = load_session_store()?;
+    let summary = session_store_delete_json(&mut store, session_id);
+    save_session_store(&store)?;
+    print_session_store_operation(&summary, json_output);
+    Ok(())
+}
+
+pub(crate) fn run_session_fork(
+    session_id: &str,
+    new_session_id: &str,
+    json_output: bool,
+) -> Result<()> {
+    let mut store = load_session_store()?;
+    let summary = session_store_fork_json(&mut store, session_id, new_session_id)?;
+    save_session_store(&store)?;
+    print_session_store_operation(&summary, json_output);
     Ok(())
 }
 
@@ -152,6 +190,121 @@ pub(super) fn session_resume_json(session_id: &str, body: &Value) -> Value {
     })
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub(super) struct SessionStore {
+    #[serde(default)]
+    sessions: BTreeMap<String, StoredSession>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub(super) struct StoredSession {
+    session_id: String,
+    #[serde(default)]
+    task_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    active_goal_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    workspace_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    latest_checkpoint_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    latest_event_seq: Option<String>,
+    #[serde(default)]
+    archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    forked_from: Option<String>,
+}
+
+pub(super) fn session_store_upsert_summary(store: &mut SessionStore, summary: &Value) -> Value {
+    let session_id = string_at(summary, "/session_id").unwrap_or_default();
+    if session_id.is_empty() {
+        return json!({
+            "operation": "session_store_upsert",
+            "status": "skipped",
+            "reason_code": "missing_session_id",
+        });
+    }
+    let previous_archived = store
+        .sessions
+        .get(&session_id)
+        .map(|session| session.archived)
+        .unwrap_or(false);
+    let previous_forked_from = store
+        .sessions
+        .get(&session_id)
+        .and_then(|session| session.forked_from.clone());
+    let session = StoredSession {
+        session_id: session_id.clone(),
+        task_ids: string_array_at(summary, "/task_ids"),
+        active_goal_id: string_at(summary, "/active_goal_id"),
+        workspace_root: string_at(summary, "/workspace_root"),
+        latest_checkpoint_id: string_at(summary, "/latest_checkpoint_id"),
+        latest_event_seq: string_at(summary, "/latest_event_seq"),
+        archived: summary
+            .get("archived")
+            .and_then(Value::as_bool)
+            .unwrap_or(previous_archived),
+        forked_from: previous_forked_from,
+    };
+    store.sessions.insert(session_id.clone(), session);
+    json!({
+        "operation": "session_store_upsert",
+        "status": "ok",
+        "session_id": session_id,
+    })
+}
+
+pub(super) fn session_store_archive_json(store: &mut SessionStore, session_id: &str) -> Value {
+    let entry = store
+        .sessions
+        .entry(session_id.to_string())
+        .or_insert_with(|| StoredSession {
+            session_id: session_id.to_string(),
+            task_ids: vec![session_id.to_string()],
+            ..StoredSession::default()
+        });
+    entry.archived = true;
+    json!({
+        "operation": "session_archive",
+        "session_id": session_id,
+        "archived": true,
+        "store_session_count": store.sessions.len(),
+    })
+}
+
+pub(super) fn session_store_delete_json(store: &mut SessionStore, session_id: &str) -> Value {
+    let existed = store.sessions.remove(session_id).is_some();
+    json!({
+        "operation": "session_delete",
+        "session_id": session_id,
+        "deleted": existed,
+        "store_session_count": store.sessions.len(),
+    })
+}
+
+pub(super) fn session_store_fork_json(
+    store: &mut SessionStore,
+    session_id: &str,
+    new_session_id: &str,
+) -> Result<Value> {
+    let Some(source) = store.sessions.get(session_id).cloned() else {
+        anyhow::bail!("session_store_source_missing");
+    };
+    let mut forked = source;
+    forked.session_id = new_session_id.to_string();
+    forked.task_ids = forked.task_ids.clone();
+    forked.archived = false;
+    forked.forked_from = Some(session_id.to_string());
+    store.sessions.insert(new_session_id.to_string(), forked);
+    Ok(json!({
+        "operation": "session_fork",
+        "session_id": new_session_id,
+        "forked_from": session_id,
+        "archived": false,
+        "store_session_count": store.sessions.len(),
+    }))
+}
+
 fn session_task_summary_json(task: &Value) -> Value {
     json!({
         "task_id": string_at(task, "/task_id"),
@@ -198,6 +351,12 @@ fn session_list_text_lines(summary: &Value) -> Vec<String> {
         "session_latest_checkpoint_id",
         summary,
         "/latest_checkpoint_id",
+    );
+    push_optional_line(
+        &mut lines,
+        "session_store_session_count",
+        summary,
+        "/store/session_count",
     );
     if let Some(tasks) = summary.get("tasks").and_then(Value::as_array) {
         for task in tasks {
@@ -254,7 +413,30 @@ fn session_show_text_lines(summary: &Value) -> Vec<String> {
         summary,
         "/workspace_root",
     );
+    push_optional_line(
+        &mut lines,
+        "session_store_session_count",
+        summary,
+        "/store/session_count",
+    );
     lines
+}
+
+fn print_session_store_operation(summary: &Value, json_output: bool) {
+    if json_output {
+        output::print_json_pretty(summary);
+    } else {
+        let operation = summary
+            .get("operation")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let session_id = summary
+            .get("session_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        println!("session_operation={operation}");
+        println!("session_id={session_id}");
+    }
 }
 
 fn session_resume_text_lines(summary: &Value) -> Vec<String> {
@@ -301,6 +483,101 @@ fn string_at(value: &Value, pointer: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn string_array_at(value: &Value, pointer: &str) -> Vec<String> {
+    value
+        .pointer(pointer)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn upsert_session_summary(summary: &Value) -> Result<SessionStore> {
+    let mut store = load_session_store()?;
+    session_store_upsert_summary(&mut store, summary);
+    save_session_store(&store)?;
+    Ok(store)
+}
+
+fn attach_store_projection(summary: &mut Value, store: &SessionStore) {
+    let Some(map) = summary.as_object_mut() else {
+        return;
+    };
+    map.insert("store".to_string(), session_store_projection(store));
+}
+
+fn session_store_projection(store: &SessionStore) -> Value {
+    let sessions = store
+        .sessions
+        .values()
+        .map(stored_session_json)
+        .collect::<Vec<_>>();
+    json!({
+        "session_count": sessions.len(),
+        "sessions": sessions,
+    })
+}
+
+fn stored_session_json(session: &StoredSession) -> Value {
+    json!({
+        "session_id": session.session_id.clone(),
+        "task_ids": session.task_ids.clone(),
+        "active_goal_id": session.active_goal_id.clone(),
+        "workspace_root": session.workspace_root.clone(),
+        "latest_checkpoint_id": session.latest_checkpoint_id.clone(),
+        "latest_event_seq": session.latest_event_seq.clone(),
+        "archived": session.archived,
+        "forked_from": session.forked_from.clone(),
+    })
+}
+
+fn load_session_store() -> Result<SessionStore> {
+    load_session_store_from_path(&session_store_path())
+}
+
+fn save_session_store(store: &SessionStore) -> Result<()> {
+    save_session_store_to_path(&session_store_path(), store)
+}
+
+fn load_session_store_from_path(path: &Path) -> Result<SessionStore> {
+    if !path.exists() {
+        return Ok(SessionStore::default());
+    }
+    let body = fs::read_to_string(path).context("session_store_read_failed")?;
+    serde_json::from_str(&body).context("session_store_parse_failed")
+}
+
+fn save_session_store_to_path(path: &Path, store: &SessionStore) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).context("session_store_dir_create_failed")?;
+    }
+    let body = serde_json::to_string_pretty(store).context("session_store_serialize_failed")?;
+    fs::write(path, body).context("session_store_write_failed")
+}
+
+fn session_store_path() -> PathBuf {
+    if let Some(path) = env::var_os("RUSTCLAW_CLAWCLI_SESSION_STORE") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = env::var_os("XDG_STATE_HOME") {
+        return PathBuf::from(path)
+            .join("rustclaw")
+            .join("clawcli_sessions.json");
+    }
+    if let Some(path) = env::var_os("HOME") {
+        return PathBuf::from(path)
+            .join(".local")
+            .join("state")
+            .join("rustclaw")
+            .join("clawcli_sessions.json");
+    }
+    PathBuf::from(".rustclaw_clawcli_sessions.json")
 }
 
 fn active_tasks(base_url: &str, key: &str, user_id: i64, chat_id: i64) -> Result<Value> {
