@@ -546,9 +546,7 @@ export function useChatRuntime({
     const threadAtSubmit = activeChatThreadRef.current;
     const submitThreadId = threadAtSubmit.id;
     const teachingModeAtSubmit = threadAtSubmit.teachingMode;
-    const teachingRunId = teachingModeAtSubmit
-      ? `teach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-      : null;
+    const teachingRunId = `teach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     chatSendingValueRef.current = true;
     setChatSending(true);
     setChatError(null);
@@ -571,26 +569,24 @@ export function useChatRuntime({
       ...thread,
       title: titleForThreadAfterUserMessage(thread, userMsg, t),
       messages: appendThreadMessages(thread.messages, userMsg),
-      ...(teachingRunId
-        ? {
-            activeTeachingRunId: teachingRunId,
-            teachingRuns: appendTeachingRun(thread.teachingRuns, {
-              id: teachingRunId,
-              taskId: null,
-              userMessageId: userMsg.id,
-              assistantMessageId: null,
-              userText: userMsg.text,
-              assistantText: null,
-              status: "running",
-              startedAt: userMsg.ts,
-              completedAt: null,
-              taskResult: null,
-              llmDebug: null,
-              llmDebugError: null,
-              callCount: null,
-            }),
-          }
-        : {}),
+      activeTeachingRunId: teachingModeAtSubmit
+        ? teachingRunId
+        : thread.activeTeachingRunId ?? null,
+      teachingRuns: appendTeachingRun(thread.teachingRuns, {
+        id: teachingRunId,
+        taskId: null,
+        userMessageId: userMsg.id,
+        assistantMessageId: null,
+        userText: userMsg.text,
+        assistantText: null,
+        status: "running",
+        startedAt: userMsg.ts,
+        completedAt: null,
+        taskResult: null,
+        llmDebug: null,
+        llmDebugError: null,
+        callCount: null,
+      }),
       input: options.clearInput ? "" : thread.input,
       updatedAt: Date.now(),
     }));
@@ -669,7 +665,9 @@ export function useChatRuntime({
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
         lastTaskId: submittedTaskId,
-        activeTeachingRunId: teachingRunId ?? thread.activeTeachingRunId ?? null,
+        activeTeachingRunId: teachingModeAtSubmit
+          ? teachingRunId
+          : thread.activeTeachingRunId ?? null,
         teachingTaskResult: teachingModeAtSubmit
           ? {
               task_id: submittedTaskId,
@@ -680,21 +678,19 @@ export function useChatRuntime({
           : thread.teachingTaskResult,
         teachingLlmDebug: teachingModeAtSubmit ? null : thread.teachingLlmDebug,
         teachingLlmDebugError: teachingModeAtSubmit ? null : thread.teachingLlmDebugError,
-        teachingRuns: teachingRunId
-          ? updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
-              ...run,
-              taskId: submittedTaskId,
-              status: "running",
-              taskResult: {
-                task_id: submittedTaskId,
-                status: "running",
-                result_json: null,
-                error_text: null,
-              },
-              llmDebug: null,
-              llmDebugError: null,
-            }))
-          : thread.teachingRuns,
+        teachingRuns: updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
+          ...run,
+          taskId: submittedTaskId,
+          status: "running",
+          taskResult: {
+            task_id: submittedTaskId,
+            status: "running",
+            result_json: null,
+            error_text: null,
+          },
+          llmDebug: null,
+          llmDebugError: null,
+        })),
         updatedAt: Date.now(),
       }));
 
@@ -715,15 +711,13 @@ export function useChatRuntime({
         ...thread,
         lastTaskId: submittedTaskId,
         teachingTaskResult: teachingModeAtSubmit ? finalResult : thread.teachingTaskResult,
-        teachingRuns: teachingRunId
-          ? updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
-              ...run,
-              taskId: submittedTaskId,
-              status: finalResult.status,
-              completedAt: Date.now(),
-              taskResult: finalResult,
-            }))
-          : thread.teachingRuns,
+        teachingRuns: updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
+          ...run,
+          taskId: submittedTaskId,
+          status: finalResult.status,
+          completedAt: Date.now(),
+          taskResult: finalResult,
+        })),
         updatedAt: Date.now(),
       }));
       if (teachingModeAtSubmit && activeChatThreadRef.current.id === submitThreadId) {
@@ -739,14 +733,12 @@ export function useChatRuntime({
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
         messages: appendThreadMessages(thread.messages, assistantMsg),
-        teachingRuns: teachingRunId
-          ? updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
-              ...run,
-              assistantMessageId: assistantMsg.id,
-              assistantText: assistantMsg.text,
-              completedAt: run.completedAt ?? assistantMsg.ts,
-            }))
-          : thread.teachingRuns,
+        teachingRuns: updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
+          ...run,
+          assistantMessageId: assistantMsg.id,
+          assistantText: assistantMsg.text,
+          completedAt: run.completedAt ?? assistantMsg.ts,
+        })),
         updatedAt: Date.now(),
       }));
     } catch (err) {
@@ -761,24 +753,22 @@ export function useChatRuntime({
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
         messages: appendThreadMessages(thread.messages, systemErrMsg),
-        teachingRuns: teachingRunId
-          ? updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
-              ...run,
-              status: "failed",
-              assistantMessageId: systemErrMsg.id,
-              assistantText: systemErrMsg.text,
-              completedAt: Date.now(),
-              taskResult: run.taskId
-                ? {
-                    task_id: run.taskId,
-                    status: "failed",
-                    result_json: null,
-                    error_text: message,
-                  }
-                : run.taskResult ?? null,
-              llmDebugError: run.llmDebugError,
-            }))
-          : thread.teachingRuns,
+        teachingRuns: updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
+          ...run,
+          status: "failed",
+          assistantMessageId: systemErrMsg.id,
+          assistantText: systemErrMsg.text,
+          completedAt: Date.now(),
+          taskResult: run.taskId
+            ? {
+                task_id: run.taskId,
+                status: "failed",
+                result_json: null,
+                error_text: message,
+              }
+            : run.taskResult ?? null,
+          llmDebugError: run.llmDebugError,
+        })),
         updatedAt: Date.now(),
       }));
     } finally {
@@ -1117,7 +1107,9 @@ function selectedTeachingRun(thread: ChatThreadRecord): ChatTeachingRunRecord | 
   const runs = thread.teachingRuns ?? [];
   if (runs.length === 0) return null;
   const activeId = thread.activeTeachingRunId;
-  return runs.find((run) => run.id === activeId) ?? runs[runs.length - 1] ?? null;
+  const activeRun = runs.find((run) => run.id === activeId);
+  if (activeRun) return activeRun;
+  return thread.teachingMode ? (runs[runs.length - 1] ?? null) : null;
 }
 
 function latestTeachingRun(thread: ChatThreadRecord): ChatTeachingRunRecord | null {

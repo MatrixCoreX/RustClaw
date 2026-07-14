@@ -570,7 +570,18 @@ fn subagent_report_json_collects_child_results_and_events() {
                         "finding_refs": ["finding:1"],
                         "evidence_refs": ["evidence:1"]
                     }
-                ]
+                ],
+                "team_spec": {
+                    "team_id": "subagent-batch:1:2",
+                    "parent_task_id": "task-subagents",
+                    "max_parallel": 2,
+                    "write_permission": "read_only",
+                    "conflict_policy": "parent_loop_resolution_required",
+                    "child_task_ids": ["subagent:1:2:explorer"],
+                    "children": [
+                        {"child_task_id": "subagent:1:2:explorer"}
+                    ]
+                }
             }
         }),
         result_text: None,
@@ -601,6 +612,13 @@ fn subagent_report_json_collects_child_results_and_events() {
 
     assert_eq!(report["report_kind"], "rustclaw_subagent_report");
     assert_eq!(report["task_id"], "task-subagents");
+    assert_eq!(report["team_count"], 1);
+    assert_eq!(report["teams"][0]["team_id"], "subagent-batch:1:2");
+    assert_eq!(report["teams"][0]["child_count"], 1);
+    assert_eq!(
+        report["teams"][0]["child_task_ids"][0],
+        "subagent:1:2:explorer"
+    );
     assert_eq!(report["subagent_count"], 2);
     assert_eq!(
         report["subagents"][0]["child_run_id"],

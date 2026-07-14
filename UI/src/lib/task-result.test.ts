@@ -336,6 +336,40 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
                 unverified_risk: "tests_not_observed",
               },
             },
+            {
+              seq: 8,
+              event_type: "agent_team_started",
+              payload: {
+                team_id: "subagent-batch:1:1",
+                max_parallel: 2,
+                write_permission: "read_only",
+                conflict_policy: "parent_loop_resolution_required",
+                status: "started",
+              },
+            },
+            {
+              seq: 9,
+              event_type: "subagent_finished",
+              payload: {
+                team_id: "subagent-batch:1:1",
+                child_task_id: "subagent-batch:1:1:explorer",
+                child_run_id: "subagent-batch:1:1:explorer",
+                role: "explorer",
+                required: true,
+                status: "completed",
+                write_permission: "read_only",
+              },
+            },
+            {
+              seq: 10,
+              event_type: "agent_team_conflict_detected",
+              payload: {
+                team_id: "subagent-batch:1:1",
+                status: "needs_conflict_resolution",
+                reason_code: "subagent_conflict_detected",
+                recommended_next_action: "resolve_child_conflicts",
+              },
+            },
           ],
         },
       },
@@ -368,6 +402,13 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
   assert.ok(traceEventMeta(events[6]).includes("verification_failure_kind_count=1"));
   assert.ok(traceEventMeta(events[6]).includes("retry_count=1"));
   assert.ok(traceEventMeta(events[6]).includes("unverified_risk=tests_not_observed"));
+  assert.ok(traceEventMeta(events[7]).includes("team_id=subagent-batch:1:1"));
+  assert.ok(traceEventMeta(events[7]).includes("max_parallel=2"));
+  assert.ok(traceEventMeta(events[7]).includes("write_permission=read_only"));
+  assert.ok(traceEventMeta(events[8]).includes("child_run_id=subagent-batch:1:1:explorer"));
+  assert.ok(traceEventMeta(events[8]).includes("role=explorer"));
+  assert.ok(traceEventMeta(events[8]).includes("required=true"));
+  assert.ok(traceEventMeta(events[9]).includes("recommended_next_action=resolve_child_conflicts"));
   assert.equal(buildTaskTraceEventView(events[1], "en").title, "Checkpoint saved");
   assert.equal(buildTaskTraceEventView(events[1], "en").tone, "attention");
   assert.equal(buildTaskTraceEventView(events[2], "en").detail, "run_cmd is running.");
@@ -387,6 +428,10 @@ test("extracts task lifecycle event meta for UI progress cards", () => {
     "1 changed file(s), 2 verification command(s), 1 test record(s).",
   );
   assert.equal(buildTaskTraceEventView(events[6], "en").tone, "failed");
+  assert.equal(buildTaskTraceEventView(events[7], "en").title, "Agent team started");
+  assert.equal(buildTaskTraceEventView(events[8], "en").title, "Subagent finished");
+  assert.equal(buildTaskTraceEventView(events[9], "en").title, "Agent team conflict");
+  assert.equal(buildTaskTraceEventView(events[9], "en").tone, "attention");
 });
 
 test("collects artifact refs recursively without duplicate mirrored arrays", () => {
