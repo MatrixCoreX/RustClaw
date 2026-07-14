@@ -1898,5 +1898,8 @@ fn subagent_review_boundary_surface_action_allowed(
 }
 
 #[cfg(test)]
+#[path = "verifier_permission_tests.rs"]
+mod permission_tests;
+#[cfg(test)]
 #[path = "verifier_tests.rs"]
-mod tests;
+pub(super) mod tests;
