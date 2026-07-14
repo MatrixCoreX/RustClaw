@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::{Component, Path, PathBuf};
 
 use crate::memory;
@@ -65,14 +65,23 @@ impl TaskContextBundle {
     }
 
     pub(crate) fn memory_trace(&self) -> Option<Value> {
-        self.route_view
+        let route_trace = self
+            .route_view
             .as_ref()
-            .and_then(|view| view.memory_trace.clone())
-            .or_else(|| {
-                self.execution_view
-                    .as_ref()
-                    .and_then(|view| view.memory_ctx.memory_trace.clone())
-            })
+            .and_then(|view| view.memory_trace.clone());
+        let execution_trace = self
+            .execution_view
+            .as_ref()
+            .and_then(|view| view.memory_ctx.memory_trace.clone());
+        match (route_trace, execution_trace) {
+            (Some(route), Some(execution)) => Some(json!({
+                "trace_kind": "task_memory_context",
+                "stage_count": 2,
+                "stages": [route, execution],
+            })),
+            (Some(trace), None) | (None, Some(trace)) => Some(trace),
+            (None, None) => None,
+        }
     }
 }
 
