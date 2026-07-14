@@ -124,6 +124,8 @@ fn context_slot_present(value: &str) -> bool {
     !trimmed.is_empty() && trimmed != "<none>"
 }
 
+const LONG_SESSION_CONTEXT_CHARS: usize = 4096;
+
 fn context_budget_slots(view: &ExecutionContextView) -> [(&'static str, &str); 11] {
     [
         (
@@ -240,6 +242,19 @@ fn context_input_inventory_json(view: &ExecutionContextView) -> Value {
     })
 }
 
+fn execution_context_compaction_triggers(view: &ExecutionContextView) -> Vec<&'static str> {
+    let mut triggers = Vec::new();
+    if matches!(view.budget_tier, ExecutionContextBudgetTier::Light) {
+        triggers.push("over_budget");
+    }
+    let transcript_chars =
+        view.recent_turns_full.chars().count() + view.last_turn_full.chars().count();
+    if transcript_chars > LONG_SESSION_CONTEXT_CHARS {
+        triggers.push("long_session");
+    }
+    triggers
+}
+
 pub(super) fn execution_context_budget_report_json(view: &ExecutionContextView) -> Value {
     let slots = context_budget_slots(view);
     let included_refs = slots
@@ -270,11 +285,7 @@ pub(super) fn execution_context_budget_report_json(view: &ExecutionContextView) 
         } else {
             "none"
         },
-        "compaction_triggers": if matches!(view.budget_tier, ExecutionContextBudgetTier::Light) {
-            vec!["over_budget"]
-        } else {
-            Vec::<&str>::new()
-        },
+        "compaction_triggers": execution_context_compaction_triggers(view),
         "safety_reason": "context_budget_policy",
         "compaction_source": "deterministic_context_builder",
         "context_input_inventory": context_input_inventory_json(view),

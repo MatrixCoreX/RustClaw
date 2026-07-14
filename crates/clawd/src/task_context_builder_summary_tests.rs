@@ -73,3 +73,38 @@ fn summary_emits_transcript_compaction_record_for_light_execution_budget() {
         "old_assistant_output_not_instruction"
     );
 }
+
+#[test]
+fn summary_marks_long_session_context_compaction_trigger() {
+    let bundle = TaskContextBundle {
+        raw_sources: TaskContextRawSources::default(),
+        planner_view: PlannerContextView::default(),
+        route_view: None,
+        execution_view: Some(ExecutionContextView {
+            budget_tier: ExecutionContextBudgetTier::Full,
+            memory_ctx: empty_prompt_memory_context(),
+            runtime_context: "runtime".to_string(),
+            goal_context: "<none>".to_string(),
+            active_task_context: "<none>".to_string(),
+            active_execution_anchor_context: "<none>".to_string(),
+            session_alias_context: "<none>".to_string(),
+            recent_turns_full: "x".repeat(4097),
+            last_turn_full: "<none>".to_string(),
+            recent_execution_anchor: "<none>".to_string(),
+            recent_execution_context: "<none>".to_string(),
+            image_context: None,
+        }),
+    };
+
+    let summary = bundle.summary();
+    let (_, budget_tail) = summary
+        .split_once("context_budget_report=")
+        .expect("summary should include context budget report");
+    let (budget_json, _) = budget_tail
+        .split_once(" transcript_compaction_records=")
+        .expect("context budget should precede compaction records");
+    let budget: serde_json::Value = serde_json::from_str(budget_json).unwrap();
+
+    assert_eq!(budget["compaction_triggers"][0], "long_session");
+    assert_eq!(budget["budget_tier"], "full");
+}
