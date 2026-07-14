@@ -312,6 +312,10 @@ fn task_report_json_prefers_journal_coding_workflow_contract() {
                             "schema_version": 1,
                             "current_phase_hint": "summarize",
                             "next_step": "summarize",
+                            "planned_change_count": 1,
+                            "planned_changes": ["add library entrypoint"],
+                            "diff_ref_count": 1,
+                            "diff_refs": ["diff:src/lib.rs:step_1"],
                             "changed_file_count": 1,
                             "changed_files": ["src/lib.rs"],
                             "verification_command_count": 1,
@@ -364,6 +368,13 @@ fn task_report_json_prefers_journal_coding_workflow_contract() {
     let report = task_report_json(&task, false);
 
     assert_eq!(report["coding"]["source"], "task_journal_coding_workflow");
+    assert_eq!(report["coding"]["planned_change_count"], 1);
+    assert_eq!(
+        report["coding"]["planned_changes"][0],
+        "add library entrypoint"
+    );
+    assert_eq!(report["coding"]["diff_ref_count"], 1);
+    assert_eq!(report["coding"]["diff_refs"][0], "diff:src/lib.rs:step_1");
     assert_eq!(report["coding"]["changed_file_count"], 1);
     assert_eq!(report["coding"]["changed_files"][0], "src/lib.rs");
     assert_eq!(report["coding"]["verification_command_count"], 1);

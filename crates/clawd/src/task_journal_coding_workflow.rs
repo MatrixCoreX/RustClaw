@@ -8,6 +8,8 @@ const MAX_CODING_ITEMS: usize = 24;
 
 #[derive(Default)]
 struct CodingWorkflowSignals {
+    planned_changes: BTreeSet<String>,
+    diff_refs: BTreeSet<String>,
     changed_files: BTreeSet<String>,
     verification_commands: BTreeSet<String>,
     checkpoint_refs: BTreeSet<String>,
@@ -27,6 +29,10 @@ pub(super) fn coding_workflow_summary_json(journal: &TaskJournal) -> Value {
         "source": "task_journal_observations",
         "current_phase_hint": current_phase_hint(&signals),
         "next_step": next_step(&signals, verification_status),
+        "planned_change_count": signals.planned_changes.len(),
+        "planned_changes": bounded_set_values(&signals.planned_changes),
+        "diff_ref_count": signals.diff_refs.len(),
+        "diff_refs": bounded_set_values(&signals.diff_refs),
         "changed_file_count": changed_files.len(),
         "changed_files": changed_files,
         "verification_command_count": signals.verification_commands.len(),
@@ -62,6 +68,8 @@ fn coding_workflow_signals(journal: &TaskJournal) -> CodingWorkflowSignals {
 }
 
 fn collect_transition(map: &Map<String, Value>, signals: &mut CodingWorkflowSignals) {
+    collect_string_array(map.get("planned_changes"), &mut signals.planned_changes);
+    collect_string_array(map.get("diff_refs"), &mut signals.diff_refs);
     collect_string_array(map.get("changed_files"), &mut signals.changed_files);
     collect_string_field(
         map.get("verification_command"),
@@ -81,6 +89,8 @@ fn collect_transition(map: &Map<String, Value>, signals: &mut CodingWorkflowSign
 }
 
 fn collect_checkpoint(map: &Map<String, Value>, signals: &mut CodingWorkflowSignals) {
+    collect_string_array(map.get("planned_changes"), &mut signals.planned_changes);
+    collect_string_array(map.get("diff_refs"), &mut signals.diff_refs);
     collect_string_array(map.get("changed_files"), &mut signals.changed_files);
     collect_string_field(
         map.get("verification_command"),

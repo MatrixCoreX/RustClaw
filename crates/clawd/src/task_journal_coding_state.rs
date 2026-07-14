@@ -54,6 +54,8 @@ pub(super) fn coding_state_transition_observation(
         signals.checkpoint_kind.as_deref(),
     );
     insert_optional_string(object, "checkpoint_ref", signals.checkpoint_ref.as_deref());
+    insert_string_array(object, "planned_changes", &signals.planned_changes);
+    insert_string_array(object, "diff_refs", &signals.diff_refs);
     insert_string_array(object, "changed_files", &signals.changed_files);
     insert_string_array(object, "files_read", &signals.files_read);
     insert_string_array(
@@ -98,6 +100,8 @@ pub(super) fn coding_milestone_checkpoint_observation(
     copy_transition_field(object, transition, "command");
     copy_transition_field(object, transition, "verification_command");
     copy_transition_field(object, transition, "failure_kind");
+    copy_transition_field(object, transition, "planned_changes");
+    copy_transition_field(object, transition, "diff_refs");
     copy_transition_field(object, transition, "changed_files");
     copy_transition_field(object, transition, "files_read");
     copy_transition_field(object, transition, "completed_side_effect_refs");
@@ -109,6 +113,8 @@ struct CodingTransitionSignals {
     action: Option<String>,
     command: Option<String>,
     verification_command: Option<String>,
+    planned_changes: Vec<String>,
+    diff_refs: Vec<String>,
     changed_files: Vec<String>,
     files_read: Vec<String>,
     checkpoint_kind: Option<String>,
@@ -122,6 +128,8 @@ impl CodingTransitionSignals {
         self.skill_signal
             || self.command.is_some()
             || self.verification_command.is_some()
+            || !self.planned_changes.is_empty()
+            || !self.diff_refs.is_empty()
             || !self.changed_files.is_empty()
             || !self.files_read.is_empty()
             || self.checkpoint_kind.is_some()
@@ -226,6 +234,13 @@ fn collect_map_signals(map: &Map<String, Value>, signals: &mut CodingTransitionS
         signals.checkpoint_ref =
             string_field(map, "checkpoint_ref").or_else(|| string_field(map, "evidence_ref"));
     }
+    collect_string_field(map, "planned_change", &mut signals.planned_changes);
+    collect_string_list_field(map, "planned_changes", &mut signals.planned_changes);
+    collect_string_field(map, "change_plan", &mut signals.planned_changes);
+    collect_string_field(map, "diff_ref", &mut signals.diff_refs);
+    collect_string_list_field(map, "diff_refs", &mut signals.diff_refs);
+    collect_string_field(map, "patch_ref", &mut signals.diff_refs);
+    collect_string_list_field(map, "patch_refs", &mut signals.diff_refs);
     collect_string_list_field(
         map,
         "completed_side_effect_refs",
@@ -257,6 +272,11 @@ fn collect_machine_line_signals(text: &str, signals: &mut CodingTransitionSignal
         }
         if let Some(checkpoint_ref) = line.strip_prefix("checkpoint_ref=") {
             signals.checkpoint_ref = bounded_token(checkpoint_ref);
+        }
+        if let Some(diff_ref) = line.strip_prefix("diff_ref=") {
+            if let Some(diff_ref) = bounded_token(diff_ref) {
+                push_unique(&mut signals.diff_refs, diff_ref);
+            }
         }
     }
 }
