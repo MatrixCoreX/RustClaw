@@ -16,6 +16,8 @@ const DEFAULT_MAX_PARALLEL_READONLY: u64 = 4;
 mod subagent_runtime_batch;
 #[path = "subagent_runtime_context.rs"]
 mod subagent_runtime_context;
+#[path = "subagent_runtime_model.rs"]
+mod subagent_runtime_model;
 
 use subagent_runtime_context::{
     context_evidence_action, context_evidence_combined_excerpt,
@@ -365,6 +367,40 @@ pub(super) fn record_subagent_action_from_args_with_config(
         &context_refs,
         options,
         config,
+    )
+}
+
+pub(super) async fn maybe_run_model_assisted_subagent(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    args: &Value,
+) {
+    subagent_runtime_model::maybe_run_model_assisted_subagent(
+        state,
+        task,
+        loop_state,
+        global_step,
+        step_in_round,
+        args,
+    )
+    .await;
+}
+
+#[cfg(test)]
+pub(super) fn apply_model_assisted_child_result_for_test(
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    child_result: Value,
+) -> bool {
+    subagent_runtime_model::apply_model_assisted_child_result(
+        loop_state,
+        global_step,
+        step_in_round,
+        child_result,
     )
 }
 

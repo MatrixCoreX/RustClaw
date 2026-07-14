@@ -268,6 +268,49 @@ fn subagent_action_projects_workspace_context_evidence() {
 }
 
 #[test]
+fn subagent_model_child_result_merges_into_runtime_observation() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 3;
+    let args = serde_json::json!({
+        "role": "review",
+        "objective": "machine_boundary_review",
+        "context_refs": [],
+    });
+
+    let stop_signal = record_subagent_action_from_args(&mut loop_state, 4, 1, &args);
+    assert!(stop_signal.is_none());
+    let merged = apply_model_assisted_child_result_for_test(
+        &mut loop_state,
+        4,
+        1,
+        serde_json::json!({
+            "schema_version": 1,
+            "owner_layer": "subagent_model_child",
+            "output_format": "machine_json",
+            "status": "completed",
+            "findings": [{"code": "boundary_consistent"}],
+            "evidence_refs": ["AGENTS.md"],
+            "confidence": 0.77
+        }),
+    );
+
+    assert!(merged);
+    let observation = &loop_state.task_observations[0];
+    assert_eq!(
+        observation["execution_mode"],
+        "model_assisted_readonly_child_run"
+    );
+    assert_eq!(observation["action"], "subagent_model_child");
+    assert_eq!(observation["model_assisted"], true);
+    assert_eq!(observation["child_result"]["model_assisted"], true);
+    assert_eq!(observation["child_result"]["result_status"], "completed");
+    assert_eq!(
+        observation["child_model_result"]["findings"][0]["code"],
+        "boundary_consistent"
+    );
+}
+
+#[test]
 fn subagent_new_role_tokens_preserve_readonly_policy() {
     let mut loop_state = LoopState::new(2);
 
