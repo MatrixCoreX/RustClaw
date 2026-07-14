@@ -532,6 +532,28 @@ pub(crate) fn seed_loop_state_from_task_checkpoint(
     if !checkpoint.observations.is_empty() {
         loop_state.has_tool_or_skill_output = true;
     }
+    let changed_files = checkpoint
+        .artifact_refs
+        .iter()
+        .filter_map(|artifact_ref| artifact_ref.trim().strip_prefix("changed_file:"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    if let Some(last) = changed_files.last() {
+        loop_state.last_written_file_path = Some(last.clone());
+        loop_state
+            .output_vars
+            .insert("last_written_file_path".to_string(), last.clone());
+    }
+    if !changed_files.is_empty() {
+        if let Ok(serialized) = serde_json::to_string(&changed_files) {
+            loop_state.output_vars.insert(
+                "agent_loop.resume_changed_files_json".to_string(),
+                serialized,
+            );
+        }
+    }
     loop_state.task_checkpoint = Some(checkpoint.to_machine_json());
     let resume_entrypoint = checkpoint_resume_entrypoint_token(&checkpoint.resume_entrypoint);
     loop_state.output_vars.insert(

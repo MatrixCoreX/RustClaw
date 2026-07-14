@@ -615,6 +615,38 @@ fn completed_side_effect_refs(loop_state: &super::LoopState) -> Vec<String> {
     refs
 }
 
+fn push_changed_file_artifact_ref(refs: &mut Vec<String>, path: Option<&str>) {
+    let Some(path) = path.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    refs.push(format!("changed_file:{path}"));
+}
+
+fn checkpoint_artifact_refs(loop_state: &super::LoopState) -> Vec<String> {
+    let mut refs = Vec::new();
+    push_changed_file_artifact_ref(&mut refs, loop_state.last_written_file_path.as_deref());
+    push_changed_file_artifact_ref(
+        &mut refs,
+        loop_state
+            .output_vars
+            .get("last_written_file_path")
+            .map(String::as_str),
+    );
+    push_changed_file_artifact_ref(
+        &mut refs,
+        loop_state
+            .output_vars
+            .get("last_file_path")
+            .map(String::as_str),
+    );
+    for path in loop_state.written_file_aliases.values() {
+        push_changed_file_artifact_ref(&mut refs, Some(path));
+    }
+    refs.sort();
+    refs.dedup();
+    refs
+}
+
 fn checkpoint_resume_message_key(resume_reason: &str) -> Option<&'static str> {
     match resume_reason {
         "agent_loop_max_rounds" => Some("clawd.task.agent_loop_max_rounds"),
@@ -683,7 +715,7 @@ fn build_agent_loop_checkpoint_progress_payload_with_budget(
         pending_action: None,
         observations: checkpoint_step_observations(loop_state),
         evidence_refs,
-        artifact_refs: Vec::new(),
+        artifact_refs: checkpoint_artifact_refs(loop_state),
         completed_side_effect_refs: completed_side_effect_refs(loop_state),
         budget: budget.clone(),
         attempt_ledger: super::attempt_ledger::build_attempt_ledger_snapshot(loop_state),
@@ -809,7 +841,7 @@ fn build_agent_loop_user_input_checkpoint_progress_payload_with_budget(
             .filter(|step| step.is_ok())
             .map(|step| step.step_id.clone())
             .collect::<Vec<_>>(),
-        artifact_refs: Vec::new(),
+        artifact_refs: checkpoint_artifact_refs(loop_state),
         completed_side_effect_refs: completed_side_effect_refs(loop_state),
         budget: budget.clone(),
         attempt_ledger: super::attempt_ledger::build_attempt_ledger_snapshot(loop_state),
