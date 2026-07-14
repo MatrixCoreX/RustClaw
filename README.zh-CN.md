@@ -318,7 +318,7 @@ POST   /v1/memory/settings
 
 ### 追踪与排障
 
-Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use policy、召回 source refs、纳入原因和字符预算，但不复制原始记忆文本，便于排查“为什么这次任务用了记忆”，同时降低敏感内容泄露风险。浏览器教学模式的 trace 面板和 `/v1/debug/tasks/{task_id}` 也会在编号 LLM 调用旁展示这份结构化 memory/KB 策略。
+Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use policy、召回 source refs、纳入原因和字符预算，但不复制原始记忆文本，便于排查“为什么这次任务用了记忆”，同时降低敏感内容泄露风险。浏览器教学模式的 trace 面板和 `/v1/debug/tasks/{task_id}` 还会在编号 LLM 调用上方展示紧凑的 `flow_summary`，包含 stage、module、retry、verifier、finalizer、provider-error 等机器计数，并把结构化 memory/KB 策略放在原始请求/响应细节旁边。
 
 常用代码和配置入口：
 
@@ -401,10 +401,12 @@ flowchart TD
 - `clawcli get` 和 `clawcli watch` 渲染 lifecycle 机器字段；`clawcli cancel-task <task_id>` 使用直接 task-id 取消 API，`clawcli cancel-index` 只保留给 active-list index 兼容。
 - `clawcli resume-task <task_id>` 会把已有 checkpoint 标记为到期恢复；`clawcli pause-task <task_id> --pause-seconds N` 只延迟已有 waiting/background checkpoint，不会重启没有 checkpoint 的任务。
 - `clawcli submit --detach` 快速返回 `task_id`；`clawcli submit --wait` 轮询到终态；`--json` 保持 submit/watch 输出适合脚本消费。
+- `clawcli exec` 是面向 CI/脚本的执行入口：提交或恢复 ask 任务，默认等待，返回稳定 exit class/code，支持 `--profile quick|coding|release-gate|long-tail`，可在后台 checkpoint 停下，非 JSON 输出会用 `exec_compact_*` 机器行展示预算、代码变更、验证、resume 与残余风险；artifact 目录会写 `summary.json`、`task.json`、`events.jsonl`、`verification.json`、`diff_summary.json`、`llm_summary.json`、`resume.json` 和 `index.json`。`clawcli code` 是 `exec --profile coding` 的简写。
 - `clawcli active` 默认打印紧凑任务表，也支持 `--json`；`clawcli events <task_id>` 支持 `--jsonl` 和 `--event-type`、`--checkpoint-id`、`--policy-decision`、`--subagent-id`、`--async-job-id` 等机器过滤器。
-- task event stream 包含状态迁移、checkpoint、工具生命周期、coding checkpoint/evidence、provider、hook、subagent 和 final 事件。`clawcli events/watch`、`clawcli report` 与浏览器任务详情会渲染 `evidence_ref`、`checkpoint_ref`、`checkpoint_kind`、`pending_async_job_id`、`step_ref`、`changed_file_count`、`test_count`、`verification_command_count`、`verification_command`、`verification_commands`、`verification_status`、`verification_failure_kinds`、`unverified_risk`、`started_at`、`finished_at` 等机器字段；原始 event JSON 放在二级详情。
+- task event stream 包含状态迁移、checkpoint、工具生命周期、coding checkpoint/evidence、provider、hook、subagent 和 final 事件。`clawcli events/watch`、`clawcli report`、`clawcli review`、`clawcli subagents`、`clawcli permission inspect` 与浏览器任务详情会渲染 `evidence_ref`、`checkpoint_ref`、`checkpoint_kind`、`pending_async_job_id`、`step_ref`、`changed_file_count`、`test_count`、`verification_command_count`、`verification_command`、`verification_commands`、`verification_status`、`verification_failure_kinds`、`unverified_risk`、`llm_budget_status`、`child_run_id`、`tool_permission_profile`、`read_only_enforced`、`write_isolation_status`、`isolation_profile`、`sandbox_source`、`started_at`、`finished_at` 等机器字段；原始 event JSON 放在二级详情。
 - `clawcli run-skill <skill_name> --args-json '{...}'` 提交显式 `kind=run_skill` 任务，不走自然语言路由；加 `--wait` 可轮询同一个 `task_id`。
 - `clawcli skills` 读取 registry-backed 技能元数据；`clawcli capabilities` 读取扁平化 `/v1/capabilities` 机器端点。脚本消费时请加 `--json`。
+- `clawcli replay export/run/diff` 使用脱敏的 recorded-only bundle 调试和 CI 对比，不调用 live 模型或工具；`replay run --coverage` 查看记录覆盖，`replay run --view llm|tools|checkpoints|summary` 只看指定类型证据，`replay diff` 输出 `route_changed`、`plan_changed`、`permission_changed`、`final_status_changed` 等分类 token。
 - 普通 stale `running` 任务会变成 `timeout`；处于 `waiting` 或 `background` 的 paused checkpoint 仍保留 `running`，以便恢复逻辑按 checkpoint id 认领。
 - async 长尾工具应启动外部 job、写入 `pending_async_job`、建立 checkpoint，并先发布包含 `checkpoint_id`、`poll_ref`、`next_check_after` 的 accepted 机器回复；当 provider 或 dry-run adapter 支持时，poll 和 cancel 也应作为结构化 capability 暴露。后续由 worker recovery 通过 `poll_async_job` 继续轮询。
 - terminal async poll projection 会保留已有 ask 可见回复；如果 ask 任务只有机器 executor 输出，则补一个包含 `checkpoint_id`、`poll_ref`、`task_id` 和 `final_result_json` 的机器 JSON 回复。
@@ -420,7 +422,8 @@ flowchart LR
     B --> C[task_id]
     C --> D[watch / wait / get]
     D --> E{task_lifecycle}
-    E -->|terminal| F[report / review / replay export]
+    E -->|terminal| F[report / review<br/>exec artifact index]
+    F --> R[replay export / run --view]
     E -->|waiting/background| G[resume.json + resume_hint]
     G --> H[continue / resume-task / pause-task / cancel-task]
     D --> I[events / logs / subagents / permission inspect]
