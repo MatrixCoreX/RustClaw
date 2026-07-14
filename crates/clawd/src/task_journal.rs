@@ -23,7 +23,9 @@ mod task_journal_trace_storage;
 #[path = "task_journal_validation_result.rs"]
 mod task_journal_validation_result;
 
-use task_journal_coding_state::coding_state_transition_observation;
+use task_journal_coding_state::{
+    coding_milestone_checkpoint_observation, coding_state_transition_observation,
+};
 use task_journal_event_stream::task_event_stream_json;
 use task_journal_evidence_collect::*;
 use task_journal_evidence_coverage::*;
@@ -1492,7 +1494,12 @@ impl TaskJournal {
             finished_at: step_result.finished_at,
         });
         if let Some(observation) = coding_state_transition_observation(step_result) {
+            let checkpoint =
+                coding_milestone_checkpoint_observation(&observation, &self.task_observations);
             self.task_observations.push(observation);
+            if let Some(checkpoint) = checkpoint {
+                self.task_observations.push(checkpoint);
+            }
         }
     }
 
