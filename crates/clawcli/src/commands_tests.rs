@@ -525,8 +525,25 @@ fn task_report_json_summarizes_coding_verification_gaps() {
                     {"file_path": "crates/clawd/src/lib.rs"}
                 ],
                 "repair_count": 2,
+                "task_checkpoint": {
+                    "checkpoint_id": "ckpt-coding",
+                    "resume_entrypoint": "next_planner_round",
+                    "completed_side_effect_refs": [
+                        "write_file:crates/clawd/src/main.rs"
+                    ]
+                },
                 "task_journal": {
                     "trace": {
+                        "event_stream": [
+                            {
+                                "event_type": "coding_checkpoint",
+                                "payload": {
+                                    "checkpoint_kind": "verification_command",
+                                    "checkpoint_ref": "coding_checkpoint:verification_command:1",
+                                    "evidence_ref": "coding_checkpoint:verification_command:1"
+                                }
+                            }
+                        ],
                         "step_results": [
                             {
                                 "step_id": "step_1",
@@ -575,11 +592,38 @@ fn task_report_json_summarizes_coding_verification_gaps() {
     assert_eq!(report["coding"]["verification_failure_kind_count"], 1);
     assert_eq!(report["coding"]["verification_failure_kinds"][0], "test");
     assert_eq!(report["coding"]["retry_count"], 2);
+    assert_eq!(report["coding"]["state"]["current_phase_hint"], "repair");
+    assert_eq!(report["coding"]["state"]["has_changes"], true);
+    assert_eq!(report["coding"]["state"]["has_verification"], true);
+    assert_eq!(report["coding"]["state"]["has_failed_verification"], true);
+    assert_eq!(report["coding"]["state"]["repair_observed"], true);
+    assert_eq!(report["coding"]["state"]["checkpointed"], true);
+    assert_eq!(report["coding"]["state"]["resumable"], true);
+    assert_eq!(
+        report["coding"]["state"]["requires_idempotency_guard"],
+        true
+    );
+    assert_eq!(
+        report["coding"]["state"]["checkpoint_kinds"][0],
+        "verification_command"
+    );
+    assert_eq!(
+        report["coding"]["state"]["completed_side_effect_refs"][0],
+        "write_file:crates/clawd/src/main.rs"
+    );
+    assert!(report["coding"]["state"]["observed_phases"]
+        .as_array()
+        .expect("observed phases")
+        .iter()
+        .any(|value| value == "repair"));
     assert_eq!(report["coding"]["unverified_risk"], serde_json::Value::Null);
 
     let lines = task_report_text_lines(&task, &report);
     assert!(lines.contains(&"coding_verification_failure_kind_count: 1".to_string()));
     assert!(lines.contains(&"verification_failure_kind: test".to_string()));
+    assert!(lines.contains(&"coding_current_phase_hint: repair".to_string()));
+    assert!(lines.contains(&"coding_checkpoint_ref_count: 1".to_string()));
+    assert!(lines.contains(&"coding_completed_side_effect_count: 1".to_string()));
 }
 
 #[test]
@@ -808,6 +852,8 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
     );
     assert!(verification_file.contains("\"artifact_kind\": \"rustclaw_exec_verification\""));
     assert!(verification_file.contains("\"verification_status\": \"verified\""));
+    assert!(verification_file.contains("\"coding_state\""));
+    assert!(verification_file.contains("\"completed_side_effect_count\": 1"));
     assert!(verification_file.contains("\"cargo test -p clawcli\""));
     assert!(diff_summary_file.contains("\"artifact_kind\": \"rustclaw_exec_diff_summary\""));
     assert!(diff_summary_file.contains("\"summary_code\": \"clawcli_exec_artifacts\""));
