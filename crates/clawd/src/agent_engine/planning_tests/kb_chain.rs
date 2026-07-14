@@ -138,3 +138,56 @@ fn kb_live_cycle_boundary_keeps_scope_open_and_registry_capability_visible() {
     assert!(quick_index.contains("kb.search"), "{quick_index}");
     assert!(quick_index.contains("kb.stats"), "{quick_index}");
 }
+
+#[test]
+fn open_scope_lightweight_skill_notes_use_compact_registry_index() {
+    let state = test_state_with_registry();
+    let registry = state.get_skills_registry().expect("registry loaded");
+    *state
+        .core
+        .skill_views_snapshot
+        .write()
+        .expect("skill snapshot lock") = Arc::new(SkillViewsSnapshot {
+        registry: Some(registry),
+        skills_list: Arc::new(HashSet::from([
+            "archive_basic".to_string(),
+            "browser_web".to_string(),
+            "config_basic".to_string(),
+            "config_edit".to_string(),
+            "db_basic".to_string(),
+            "doc_parse".to_string(),
+            "fs_basic".to_string(),
+            "git_basic".to_string(),
+            "health_check".to_string(),
+            "http_basic".to_string(),
+            "kb".to_string(),
+            "log_analyze".to_string(),
+            "package_manager".to_string(),
+            "process_basic".to_string(),
+            "system_basic".to_string(),
+            "task_control".to_string(),
+        ])),
+    });
+    let state = state.with_prompt_layers_installed();
+    let task = test_task();
+
+    let playbooks = build_lightweight_skill_playbooks_text(&state, &task, None);
+
+    assert!(
+        playbooks.starts_with("open_scope_lightweight_skill_index_v1"),
+        "{playbooks}"
+    );
+    assert!(playbooks.contains("skill=kb"), "{playbooks}");
+    assert!(playbooks.contains("kb.ingest"), "{playbooks}");
+    assert!(playbooks.contains("kb.search"), "{playbooks}");
+    assert!(playbooks.contains("kb.stats"), "{playbooks}");
+    assert!(
+        !playbooks.contains("Requests that semantically mean"),
+        "{playbooks}"
+    );
+    assert!(
+        playbooks.chars().count() < 30_000,
+        "compact index should stay bounded, got {} chars",
+        playbooks.chars().count()
+    );
+}
