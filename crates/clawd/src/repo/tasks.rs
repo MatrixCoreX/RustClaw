@@ -1772,7 +1772,7 @@ pub(crate) fn get_task_query_record(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
     let mut stmt = db.prepare(
-        "SELECT status, result_json, error_text, user_key, channel,
+        "SELECT status, payload_json, result_json, error_text, user_key, channel,
                 CAST(COALESCE(NULLIF(updated_at, ''), '0') AS INTEGER) AS updated_ts,
                 lease_owner,
                 lease_expires_at,
@@ -1786,15 +1786,16 @@ pub(crate) fn get_task_query_record(
     let row = stmt
         .query_row(params![task_id.to_string()], |row| {
             let status_str: String = row.get(0)?;
-            let result_json_str: Option<String> = row.get(1)?;
-            let error_text: Option<String> = row.get(2)?;
-            let task_user_key: Option<String> = row.get(3)?;
-            let channel: String = row.get(4)?;
-            let updated_ts: i64 = row.get(5)?;
-            let lease_owner: Option<String> = row.get(6)?;
-            let lease_expires_at: i64 = row.get(7)?;
-            let claim_attempt: i64 = row.get(8)?;
-            let claimed_at: i64 = row.get(9)?;
+            let payload_json: String = row.get(1)?;
+            let result_json_str: Option<String> = row.get(2)?;
+            let error_text: Option<String> = row.get(3)?;
+            let task_user_key: Option<String> = row.get(4)?;
+            let channel: String = row.get(5)?;
+            let updated_ts: i64 = row.get(6)?;
+            let lease_owner: Option<String> = row.get(7)?;
+            let lease_expires_at: i64 = row.get(8)?;
+            let claim_attempt: i64 = row.get(9)?;
+            let claimed_at: i64 = row.get(10)?;
 
             let status = parse_task_status(&status_str);
 
@@ -1819,12 +1820,19 @@ pub(crate) fn get_task_query_record(
             );
             let execution_state =
                 crate::task_lifecycle::task_execution_state_from_lifecycle(&lifecycle);
+            let goal = crate::repo::task_goal::task_goal_projection(
+                task_id,
+                &payload_json,
+                result_json.as_ref(),
+                &lifecycle,
+            );
 
             Ok((
                 TaskQueryResponse {
                     task_id,
                     status,
                     execution_state: Some(execution_state),
+                    goal,
                     result_json,
                     error_text,
                     lifecycle: Some(lifecycle),

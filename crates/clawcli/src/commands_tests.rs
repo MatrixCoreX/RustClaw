@@ -1,12 +1,12 @@
 use super::{
     automation_runs_request_payload, coding_review_json, exec_artifact_index_json,
     exec_compact_text_lines, exec_effective_options, exec_exit_class,
-    exec_failure_class_from_machine_tokens, exec_summary_json, llm_trace_text_lines,
-    permission_report_json, run_exec, subagent_report_json, task_event_output_lines,
-    task_report_json, task_report_text_lines, task_resume_control_summary_json,
-    tui_command_from_input, tui_export_json, tui_selected_task_lines, tui_snapshot_json,
-    wait_until_matches, watch_progress_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
-    TuiCommand,
+    exec_failure_class_from_machine_tokens, exec_summary_json, goal_request_payload,
+    goal_status_summary_json, goal_status_text_lines, llm_trace_text_lines, permission_report_json,
+    run_exec, subagent_report_json, task_event_output_lines, task_report_json,
+    task_report_text_lines, task_resume_control_summary_json, tui_command_from_input,
+    tui_export_json, tui_selected_task_lines, tui_snapshot_json, wait_until_matches,
+    watch_progress_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome, TuiCommand,
 };
 
 #[test]
@@ -1689,6 +1689,79 @@ fn automation_runs_payload_clamps_limit_and_trims_job_id() {
     let without_job = automation_runs_request_payload(7, 11, Some("  ".to_string()), 0);
     assert!(without_job["job_id"].is_null());
     assert_eq!(without_job["limit"], 1);
+}
+
+#[test]
+fn goal_request_payload_preserves_structured_goal_fields() {
+    let done_conditions = vec![" tests_pass ".to_string(), String::new()];
+    let verification_commands = vec!["cargo test -p clawcli".to_string()];
+    let constraints = vec!["scope=workspace".to_string()];
+
+    let payload = goal_request_payload(
+        "implement task",
+        Some(" ship feature "),
+        &done_conditions,
+        &verification_commands,
+        &constraints,
+    );
+
+    assert_eq!(payload["text"], "implement task");
+    assert_eq!(payload["goal"]["schema_version"], 1);
+    assert_eq!(payload["goal"]["objective"], "ship feature");
+    assert_eq!(payload["goal"]["done_conditions"][0], "tests_pass");
+    assert_eq!(
+        payload["goal"]["verification_commands"][0],
+        "cargo test -p clawcli"
+    );
+    assert_eq!(payload["goal"]["constraints"][0], "scope=workspace");
+    assert_eq!(payload["goal"]["goal_status"], "created");
+    assert_eq!(
+        payload["goal"]["done_conditions"]
+            .as_array()
+            .expect("done conditions")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn goal_status_summary_and_text_lines_use_goal_projection() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-goal".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "background",
+            "goal": {
+                "goal_id": "task:task-goal",
+                "goal_status": "background",
+                "goal_status_source": "lifecycle",
+                "objective": "ship feature",
+                "done_conditions": ["tests_pass"],
+                "verification_commands": ["cargo test -p clawcli"],
+                "constraints": ["scope=workspace"],
+                "current_progress": ["changed_file_count=1"]
+            },
+            "task_lifecycle": {
+                "state": "background"
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let summary = goal_status_summary_json(&task);
+    assert_eq!(summary["report_kind"], "rustclaw_goal_status");
+    assert_eq!(summary["task_id"], "task-goal");
+    assert_eq!(summary["goal"]["goal_status"], "background");
+    assert_eq!(summary["goal"]["objective"], "ship feature");
+
+    let lines = goal_status_text_lines(&summary);
+    assert!(lines.contains(&"goal_task_id: task-goal".to_string()));
+    assert!(lines.contains(&"goal_status: background".to_string()));
+    assert!(lines.contains(&"goal_done_condition_count: 1".to_string()));
+    assert!(lines.contains(&"goal_verification_command_count: 1".to_string()));
+    assert!(lines.contains(&"goal_current_progress_count: 1".to_string()));
 }
 
 fn unique_suffix() -> u128 {

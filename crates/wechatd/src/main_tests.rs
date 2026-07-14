@@ -296,6 +296,7 @@ fn wechat_task_success_fallback_uses_i18n() {
         task_id: Default::default(),
         status: TaskStatus::Succeeded,
         execution_state: None,
+        goal: None,
         result_json: None,
         error_text: None,
         lifecycle: None,
