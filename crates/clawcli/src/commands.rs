@@ -41,7 +41,7 @@ use permission::permission_report_json;
 #[cfg(test)]
 use report::{coding_review_json, subagent_report_json, task_report_json, task_report_text_lines};
 #[cfg(test)]
-use task_control::automation_runs_request_payload;
+use task_control::{automation_runs_request_payload, task_resume_control_summary_json};
 #[cfg(test)]
 use task_query::wait_until_matches;
 #[cfg(test)]

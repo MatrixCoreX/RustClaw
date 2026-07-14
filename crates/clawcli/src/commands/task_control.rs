@@ -145,7 +145,7 @@ pub(crate) fn run_resume_task(
         user_message,
         new_constraints,
     )?;
-    output::print_json_pretty(&body);
+    output::print_json_pretty(&body_with_resume_summary(body, task_id, "resume_task"));
     Ok(())
 }
 
@@ -168,13 +168,81 @@ pub(crate) fn run_continue_task(
     if json_output {
         output::print_json_pretty(&body);
     } else {
+        let resume_summary = task_resume_control_summary_json(task_id, "continue", &body);
         output::print_json_pretty(&json!({
             "task_id": task_id,
             "operation": "continue",
+            "resume_summary": resume_summary,
             "response": body,
         }));
     }
     Ok(())
+}
+
+fn body_with_resume_summary(mut body: Value, task_id: &str, operation: &str) -> Value {
+    let summary = task_resume_control_summary_json(task_id, operation, &body);
+    if let Some(map) = body.as_object_mut() {
+        map.insert("resume_summary".to_string(), summary);
+        body
+    } else {
+        json!({
+            "response": body,
+            "resume_summary": summary,
+        })
+    }
+}
+
+pub(super) fn task_resume_control_summary_json(
+    requested_task_id: &str,
+    operation: &str,
+    body: &Value,
+) -> Value {
+    let data = body.get("data").unwrap_or(body);
+    let lifecycle = data
+        .get("task_lifecycle")
+        .or_else(|| data.get("lifecycle"))
+        .unwrap_or(&Value::Null);
+    json!({
+        "schema_version": 1,
+        "operation": operation,
+        "task_id": string_field(data, "task_id").unwrap_or(requested_task_id),
+        "status": string_field(data, "status"),
+        "checkpoint_id": string_field(data, "checkpoint_id")
+            .or_else(|| string_field(lifecycle, "checkpoint_id")),
+        "lifecycle_state": string_field(lifecycle, "state"),
+        "execution_state": string_field(lifecycle, "execution_state"),
+        "resume_due": lifecycle.get("resume_due").and_then(Value::as_bool),
+        "resume_wait_seconds": lifecycle.get("resume_wait_seconds").and_then(Value::as_i64),
+        "resume_entrypoint": string_field(lifecycle, "resume_entrypoint"),
+        "resume_directive": string_field(lifecycle, "resume_directive"),
+        "resume_reason": string_field(lifecycle, "resume_reason"),
+        "resume_owner": string_field(lifecycle, "resume_owner")
+            .or_else(|| nested_string_field(lifecycle, &["resume_claim", "owner"]))
+            .or_else(|| nested_string_field(lifecycle, &["resume_executor_claim", "owner"])),
+        "next_action_kind": string_field(lifecycle, "next_action_kind"),
+        "last_successful_evidence_ref": string_field(lifecycle, "last_successful_evidence_ref"),
+        "evidence_ref_count": lifecycle.get("evidence_ref_count").and_then(Value::as_u64),
+        "budget": lifecycle.get("budget").cloned().unwrap_or(Value::Null),
+    })
+}
+
+fn string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn nested_string_field<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
+    let mut cursor = value;
+    for key in path {
+        cursor = cursor.get(*key)?;
+    }
+    cursor
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 pub(crate) fn run_pause_task(
