@@ -599,8 +599,21 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
             "task_id": "task-exec-artifact",
             "status": "succeeded",
             "result_json": {
+                "changed_files": ["crates/clawcli/src/main.rs"],
+                "final_diff_summary": {
+                    "file_count": 1,
+                    "summary_code": "clawcli_exec_artifacts"
+                },
                 "task_journal": {
                     "trace": {
+                        "step_results": [
+                            {
+                                "step_id": "step_1",
+                                "status": "ok",
+                                "skill": "run_cmd",
+                                "command": "cargo test -p clawcli"
+                            }
+                        ],
                         "event_stream": [
                             {
                                 "seq": 1,
@@ -639,11 +652,21 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
         std::fs::read_to_string(artifact_dir.join("events.jsonl")).expect("read event artifact");
     let resume_file =
         std::fs::read_to_string(artifact_dir.join("resume.json")).expect("read resume artifact");
+    let verification_file = std::fs::read_to_string(artifact_dir.join("verification.json"))
+        .expect("read verification artifact");
+    let diff_summary_file = std::fs::read_to_string(artifact_dir.join("diff_summary.json"))
+        .expect("read diff summary artifact");
 
     assert!(summary_file.contains("\"exit_class\": \"success\""));
     assert!(task_file.contains("\"task-exec-artifact\""));
     assert!(events_file.contains("type=task_completed"));
     assert!(resume_file.contains("\"task-exec-artifact\""));
+    assert!(verification_file.contains("\"artifact_kind\": \"rustclaw_exec_verification\""));
+    assert!(verification_file.contains("\"verification_status\": \"verified\""));
+    assert!(verification_file.contains("\"cargo test -p clawcli\""));
+    assert!(diff_summary_file.contains("\"artifact_kind\": \"rustclaw_exec_diff_summary\""));
+    assert!(diff_summary_file.contains("\"summary_code\": \"clawcli_exec_artifacts\""));
+    assert!(diff_summary_file.contains("\"crates/clawcli/src/main.rs\""));
 
     std::fs::remove_dir_all(artifact_dir).ok();
 }
