@@ -19,6 +19,7 @@ DEFAULT_CASE_FILES = [
     ROOT / "scripts/nl_tests/cases/nl_cases_task_execution_async_lifecycle_20260626.txt",
     ROOT / "scripts/nl_tests/cases/nl_cases_media_dry_run_capability_20260623.txt",
     ROOT / "scripts/nl_tests/cases/nl_cases_codex_cli_continuous_dev_20260711.txt",
+    ROOT / "scripts/nl_tests/cases/nl_cases_chinese_model_adapter_20260715.txt",
     ROOT / "scripts/nl_tests/cases/nl_cases_client_like_typical_coverage_20260605.txt",
 ]
 
@@ -127,6 +128,19 @@ REQUIRED_AGENT_PARITY = {
     "web_search_extract",
 }
 
+REQUIRED_CHINESE_MODEL_ADAPTER = {
+    "chinese_provider",
+    "deepseek",
+    "large_context",
+    "minimax",
+    "mimo",
+    "multimodal_understanding",
+    "openai_compatible",
+    "qwen",
+    "strict_json",
+    "vendor_patch",
+}
+
 FORBIDDEN_LIVE_PUBLISH_TAGS = {
     "x",
     "twitter",
@@ -207,6 +221,7 @@ def coverage_for(paths: Iterable[Path]) -> dict[str, object]:
         "media_dry_run": REQUIRED_MEDIA_DRY_RUN,
         "codex_boundary": REQUIRED_CODEX_BOUNDARY,
         "agent_parity": REQUIRED_AGENT_PARITY,
+        "chinese_model_adapter": REQUIRED_CHINESE_MODEL_ADAPTER,
     }
     missing = {
         group: sorted(required - all_tags)
@@ -258,6 +273,7 @@ def run_self_test() -> int:
         | REQUIRED_MEDIA_DRY_RUN
         | REQUIRED_CODEX_BOUNDARY
         | REQUIRED_AGENT_PARITY
+        | REQUIRED_CHINESE_MODEL_ADAPTER
         | {"dry_run"}
     )
     tmp_parent = ROOT / "tmp"
