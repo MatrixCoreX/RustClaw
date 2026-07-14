@@ -124,8 +124,12 @@ fn context_slot_present(value: &str) -> bool {
     !trimmed.is_empty() && trimmed != "<none>"
 }
 
-fn context_budget_slots(view: &ExecutionContextView) -> [(&'static str, &str); 10] {
+fn context_budget_slots(view: &ExecutionContextView) -> [(&'static str, &str); 11] {
     [
+        (
+            "prompt_memory_context",
+            view.memory_ctx.prompt_with_memory.as_str(),
+        ),
         ("runtime_context", view.runtime_context.as_str()),
         ("goal_context", view.goal_context.as_str()),
         ("active_task_context", view.active_task_context.as_str()),
@@ -149,6 +153,91 @@ fn context_budget_slots(view: &ExecutionContextView) -> [(&'static str, &str); 1
             view.image_context.as_deref().unwrap_or("<none>"),
         ),
     ]
+}
+
+fn context_input_inventory_item(
+    input_kind: &'static str,
+    source_refs: &[&'static str],
+    slots: &[(&'static str, &str)],
+) -> Value {
+    let included_source_refs = source_refs
+        .iter()
+        .filter(|source_ref| {
+            slots
+                .iter()
+                .any(|(slot, value)| slot == *source_ref && context_slot_present(value))
+        })
+        .map(|source_ref| Value::String((*source_ref).to_string()))
+        .collect::<Vec<_>>();
+    let excluded_source_refs = source_refs
+        .iter()
+        .filter(|source_ref| {
+            !slots
+                .iter()
+                .any(|(slot, value)| slot == *source_ref && context_slot_present(value))
+        })
+        .map(|source_ref| Value::String((*source_ref).to_string()))
+        .collect::<Vec<_>>();
+    let status = if included_source_refs.is_empty() {
+        "not_attached"
+    } else if excluded_source_refs.is_empty() {
+        "attached"
+    } else {
+        "partially_attached"
+    };
+    json!({
+        "input_kind": input_kind,
+        "status": status,
+        "source_refs": source_refs,
+        "included_source_refs": included_source_refs,
+        "excluded_source_refs": excluded_source_refs,
+    })
+}
+
+fn context_input_inventory_json(view: &ExecutionContextView) -> Value {
+    let slots = context_budget_slots(view);
+    let inputs = vec![
+        context_input_inventory_item(
+            "conversation_state",
+            &[
+                "active_task_context",
+                "active_execution_anchor_context",
+                "session_alias_context",
+                "recent_turns_full",
+                "last_turn_full",
+            ],
+            &slots,
+        ),
+        context_input_inventory_item("memory_recent_records", &["prompt_memory_context"], &slots),
+        context_input_inventory_item("goal_fields", &["goal_context"], &slots),
+        context_input_inventory_item(
+            "task_journal",
+            &["recent_execution_anchor", "recent_execution_context"],
+            &slots,
+        ),
+        context_input_inventory_item("artifact_refs", &["image_context"], &slots),
+        context_input_inventory_item(
+            "previous_task_results",
+            &["recent_execution_context"],
+            &slots,
+        ),
+        context_input_inventory_item("llm_trace_debug_data", &[], &slots),
+        context_input_inventory_item(
+            "coding_evidence",
+            &["recent_execution_anchor", "recent_execution_context"],
+            &slots,
+        ),
+    ];
+    let present_input_count = inputs
+        .iter()
+        .filter(|item| item.get("status").and_then(Value::as_str) != Some("not_attached"))
+        .count();
+    json!({
+        "schema_version": 1,
+        "input_count": inputs.len(),
+        "present_input_count": present_input_count,
+        "inputs": inputs,
+    })
 }
 
 pub(super) fn execution_context_budget_report_json(view: &ExecutionContextView) -> Value {
@@ -183,6 +272,7 @@ pub(super) fn execution_context_budget_report_json(view: &ExecutionContextView) 
         },
         "safety_reason": "context_budget_policy",
         "compaction_source": "deterministic_context_builder",
+        "context_input_inventory": context_input_inventory_json(view),
     })
 }
 
