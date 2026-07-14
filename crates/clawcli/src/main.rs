@@ -912,3 +912,57 @@ fn run_exec_command(
         std::process::exit(i32::from(exit_code));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clawcli_exposes_coding_workflow_command_surface() {
+        let cmd = Cli::command();
+        let command_names = cmd
+            .get_subcommands()
+            .map(|subcommand| subcommand.get_name().to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        for required in [
+            "submit",
+            "exec",
+            "code",
+            "get",
+            "watch",
+            "events",
+            "report",
+            "review",
+            "continue",
+            "resume-task",
+            "cancel-task",
+            "permission",
+            "subagents",
+            "replay",
+            "wait",
+        ] {
+            assert!(command_names.contains(required), "missing {required}");
+        }
+
+        let permission = cmd
+            .find_subcommand("permission")
+            .expect("permission command");
+        let permission_names = permission
+            .get_subcommands()
+            .map(|subcommand| subcommand.get_name().to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        for required in ["inspect", "explain", "capability"] {
+            assert!(permission_names.contains(required), "missing {required}");
+        }
+
+        let replay = cmd.find_subcommand("replay").expect("replay command");
+        let replay_names = replay
+            .get_subcommands()
+            .map(|subcommand| subcommand.get_name().to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        for required in ["export", "run", "diff"] {
+            assert!(replay_names.contains(required), "missing {required}");
+        }
+    }
+}
