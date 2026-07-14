@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildReplaySummary,
+  buildTaskGoalView,
   buildTaskOutcome,
   buildTaskPermissionView,
   buildTaskTraceEventView,
@@ -78,6 +79,40 @@ test("builds completed task outcome from machine task_outcome fields", () => {
   assert.ok(view.verification.includes("verification_status=verified"));
   assert.ok(view.currentProgress.includes("changed_file_count=1"));
   assert.ok(view.remainingWork.includes("summarize"));
+});
+
+test("builds task goal view from query goal projection", () => {
+  const result: TaskQueryResponse = {
+    task_id: "task-goal-view",
+    status: "running",
+    goal: {
+      schema_version: 1,
+      task_id: "task-goal-view",
+      goal_id: "task:task-goal-view",
+      objective: "ship feature",
+      goal_status: "background",
+      goal_status_source: "lifecycle",
+      done_conditions: ["tests_pass"],
+      constraints: [{ scope: "workspace" }],
+      verification_commands: ["cargo test -p clawcli"],
+      current_progress: ["changed_file_count=1"],
+      remaining_work: ["summarize"],
+    },
+  };
+
+  const view = buildTaskGoalView(result, "en");
+
+  assert.equal(view?.title, "Goal progress");
+  assert.equal(view?.tone, "running");
+  assert.equal(view?.status, "background");
+  assert.equal(view?.objective, "ship feature");
+  assert.ok(view?.meta.includes("goal_id=task:task-goal-view"));
+  assert.ok(view?.meta.includes("goal_status_source=lifecycle"));
+  assert.deepEqual(view?.doneConditions, ["tests_pass"]);
+  assert.ok(view?.constraints.includes("scope=workspace"));
+  assert.deepEqual(view?.verificationCommands, ["cargo test -p clawcli"]);
+  assert.deepEqual(view?.currentProgress, ["changed_file_count=1"]);
+  assert.deepEqual(view?.remainingWork, ["summarize"]);
 });
 
 test("builds permission view from structured decision fields", () => {
