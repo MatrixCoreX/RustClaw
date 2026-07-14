@@ -161,6 +161,14 @@ clawcli tui --user-id 1 --chat-id 1
 clawcli tui --user-id 1 --chat-id 1 --task-id "$TASK_ID" --once --json
 ```
 
+When a task is selected, TUI snapshots keep the raw `selected_task` payload for
+compatibility and also expose `selected_progress` and `selected_summary`.
+These are derived from existing lifecycle/report machine fields: checkpoint id,
+resume due/wait state, next action, async poll refs, LLM call/budget counts,
+coding verification, changed files, completed side effects, artifact refs, and
+unverified-risk tokens. TUI observes and exports task state; it does not route
+natural language or choose capabilities.
+
 ## CI Examples
 
 Read-only audit:

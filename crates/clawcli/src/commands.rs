@@ -48,7 +48,9 @@ use task_query::wait_until_matches;
 #[cfg(test)]
 use task_query::{task_event_output_lines, watch_progress_json};
 #[cfg(test)]
-use tui::{tui_command_from_input, tui_export_json, tui_snapshot_json, TuiCommand};
+use tui::{
+    tui_command_from_input, tui_export_json, tui_selected_task_lines, tui_snapshot_json, TuiCommand,
+};
 
 #[cfg(test)]
 #[path = "commands_tests.rs"]

@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use crate::{client, events::EventFilters, output, task};
 
+use super::{report::task_report_json, task_query::watch_progress_json};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TuiCommand {
     Refresh,
@@ -45,6 +47,9 @@ pub(crate) fn run_tui(
             if let Some(selected) = selected.as_ref() {
                 println!();
                 output::print_task_status(selected, include_events, &EventFilters::default());
+                for line in tui_selected_task_lines(selected) {
+                    println!("{line}");
+                }
             }
             if interactive {
                 print_tui_command_help();
@@ -98,6 +103,8 @@ pub(super) fn tui_snapshot_json(active: &Value, selected: Option<&task::TaskStat
         "snapshot_kind": "rustclaw_cli_tui",
         "active": active,
         "selected_task": selected.map(|task| task.raw_data.clone()).unwrap_or(Value::Null),
+        "selected_progress": selected.map(watch_progress_json).unwrap_or(Value::Null),
+        "selected_summary": selected.map(|task| task_report_json(task, false)).unwrap_or(Value::Null),
     })
 }
 
@@ -119,6 +126,126 @@ pub(super) fn tui_command_from_input(input: &str) -> Option<TuiCommand> {
         "q" => Some(TuiCommand::Quit),
         _ => None,
     }
+}
+
+pub(super) fn tui_selected_task_lines(task: &task::TaskStatusView) -> Vec<String> {
+    let progress = watch_progress_json(task);
+    let summary = task_report_json(task, false);
+    let mut lines = Vec::new();
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_checkpoint_id",
+        &progress,
+        "/checkpoint_id",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_resume_due",
+        &progress,
+        "/resume_due",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_resume_wait_seconds",
+        &progress,
+        "/resume_wait_seconds",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_next_action_kind",
+        &progress,
+        "/next_action_kind",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_pending_async_job_id",
+        &progress,
+        "/pending_async_job_id",
+    );
+    push_tui_machine_line(&mut lines, "tui_selected_poll_ref", &progress, "/poll_ref");
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_lease_owner",
+        &progress,
+        "/lease_owner",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_heartbeat_at",
+        &progress,
+        "/heartbeat_at",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_last_heartbeat_ts",
+        &progress,
+        "/last_heartbeat_ts",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_llm_call_count",
+        &summary,
+        "/llm/llm_call_count",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_llm_budget_status",
+        &summary,
+        "/llm/budget_health/status",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_changed_file_count",
+        &summary,
+        "/coding/changed_file_count",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_verification_command_count",
+        &summary,
+        "/coding/verification_command_count",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_verification_status",
+        &summary,
+        "/coding/state/verification_status",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_completed_side_effect_count",
+        &summary,
+        "/coding/state/completed_side_effect_count",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_unverified_risk",
+        &summary,
+        "/coding/unverified_risk",
+    );
+    push_tui_machine_line(
+        &mut lines,
+        "tui_selected_artifact_ref_count",
+        &summary,
+        "/artifacts/ref_count",
+    );
+    lines
+}
+
+fn push_tui_machine_line(lines: &mut Vec<String>, key: &str, source: &Value, pointer: &str) {
+    let Some(value) = source.pointer(pointer) else {
+        return;
+    };
+    let text = match value {
+        Value::String(value) => value.trim().to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Null | Value::Array(_) | Value::Object(_) => String::new(),
+    };
+    if text.is_empty() {
+        return;
+    }
+    lines.push(format!("{key}: {text}"));
 }
 
 fn print_tui_command_help() {

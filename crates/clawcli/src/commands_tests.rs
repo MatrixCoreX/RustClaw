@@ -3,9 +3,9 @@ use super::{
     exec_compact_text_lines, exec_effective_options, exec_exit_class,
     exec_failure_class_from_machine_tokens, exec_summary_json, permission_report_json, run_exec,
     subagent_report_json, task_event_output_lines, task_report_json, task_report_text_lines,
-    task_resume_control_summary_json, tui_command_from_input, tui_export_json, tui_snapshot_json,
-    wait_until_matches, watch_progress_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
-    TuiCommand,
+    task_resume_control_summary_json, tui_command_from_input, tui_export_json,
+    tui_selected_task_lines, tui_snapshot_json, wait_until_matches, watch_progress_json,
+    write_exec_artifacts, ExecExitClass, ExecWaitOutcome, TuiCommand,
 };
 
 #[test]
@@ -554,14 +554,41 @@ fn tui_snapshot_json_wraps_active_and_selected_task() {
         raw_data: serde_json::json!({
             "task_id": "task-tui",
             "status": "running",
+            "execution_state": "background",
             "task_lifecycle": {
                 "state": "background",
-                "checkpoint_id": "ckpt-tui"
+                "checkpoint_id": "ckpt-tui",
+                "resume_due": true,
+                "resume_wait_seconds": 0,
+                "next_action_kind": "resume_checkpoint"
+            },
+            "result_json": {
+                "changed_files": ["src/lib.rs"],
+                "task_journal": {
+                    "trace": {
+                        "step_results": [
+                            {
+                                "artifact_refs": [
+                                    {
+                                        "ref": "artifact:tui"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
             }
         }),
         result_text: None,
         error_text: None,
-        events: Vec::new(),
+        events: vec![crate::events::TaskEventLine {
+            event_type: "provider_call".to_string(),
+            line: "type=provider_call prompt_label=planner llm_call_count=2".to_string(),
+            fields: std::collections::BTreeMap::from([
+                ("prompt_label".to_string(), "planner".to_string()),
+                ("llm_call_count".to_string(), "2".to_string()),
+            ]),
+        }],
     };
 
     let snapshot = tui_snapshot_json(&active, Some(&selected));
@@ -576,6 +603,18 @@ fn tui_snapshot_json_wraps_active_and_selected_task() {
         snapshot["selected_task"]["task_lifecycle"]["checkpoint_id"],
         "ckpt-tui"
     );
+    assert_eq!(snapshot["selected_progress"]["checkpoint_id"], "ckpt-tui");
+    assert_eq!(snapshot["selected_progress"]["resume_due"], true);
+    assert_eq!(
+        snapshot["selected_progress"]["next_action_kind"],
+        "resume_checkpoint"
+    );
+    assert_eq!(snapshot["selected_summary"]["llm"]["llm_call_count"], 2);
+    assert_eq!(
+        snapshot["selected_summary"]["coding"]["changed_file_count"],
+        1
+    );
+    assert_eq!(snapshot["selected_summary"]["artifacts"]["ref_count"], 1);
 }
 
 #[test]
@@ -626,6 +665,78 @@ fn tui_export_json_wraps_snapshot_and_selected_task_id() {
         export["snapshot"]["selected_task"]["task_lifecycle"]["can_cancel"],
         true
     );
+    assert_eq!(export["snapshot"]["selected_progress"]["can_cancel"], true);
+    assert_eq!(
+        export["snapshot"]["selected_summary"]["task_id"],
+        "task-tui-export"
+    );
+}
+
+#[test]
+fn tui_selected_task_lines_expose_resume_llm_and_coding_tokens() {
+    let selected = crate::task::TaskStatusView {
+        task_id: "task-tui-lines".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "background",
+            "task_lifecycle": {
+                "state": "background",
+                "checkpoint_id": "ckpt-lines",
+                "resume_due": true,
+                "resume_wait_seconds": 9,
+                "next_action_kind": "resume_checkpoint",
+                "pending_async_job_id": "job-lines",
+                "poll_ref": "poll-lines",
+                "lease_owner": "worker-lines",
+                "heartbeat_at": 1781800000
+            },
+            "result_json": {
+                "changed_files": ["src/lib.rs"],
+                "task_checkpoint": {
+                    "completed_side_effect_refs": ["write_file:src/lib.rs"]
+                },
+                "task_journal": {
+                    "trace": {
+                        "step_results": [
+                            {
+                                "step_id": "step_1",
+                                "status": "ok",
+                                "skill": "run_cmd",
+                                "command": "cargo check -p clawcli"
+                            }
+                        ]
+                    }
+                }
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: vec![crate::events::TaskEventLine {
+            event_type: "provider_call".to_string(),
+            line: "type=provider_call prompt_label=planner llm_call_count=3".to_string(),
+            fields: std::collections::BTreeMap::from([
+                ("prompt_label".to_string(), "planner".to_string()),
+                ("llm_call_count".to_string(), "3".to_string()),
+            ]),
+        }],
+    };
+
+    let lines = tui_selected_task_lines(&selected);
+
+    assert!(lines.contains(&"tui_selected_checkpoint_id: ckpt-lines".to_string()));
+    assert!(lines.contains(&"tui_selected_resume_due: true".to_string()));
+    assert!(lines.contains(&"tui_selected_resume_wait_seconds: 9".to_string()));
+    assert!(lines.contains(&"tui_selected_next_action_kind: resume_checkpoint".to_string()));
+    assert!(lines.contains(&"tui_selected_pending_async_job_id: job-lines".to_string()));
+    assert!(lines.contains(&"tui_selected_poll_ref: poll-lines".to_string()));
+    assert!(lines.contains(&"tui_selected_lease_owner: worker-lines".to_string()));
+    assert!(lines.contains(&"tui_selected_heartbeat_at: 1781800000".to_string()));
+    assert!(lines.contains(&"tui_selected_llm_call_count: 3".to_string()));
+    assert!(lines.contains(&"tui_selected_changed_file_count: 1".to_string()));
+    assert!(lines.contains(&"tui_selected_verification_command_count: 1".to_string()));
+    assert!(lines.contains(&"tui_selected_verification_status: verified".to_string()));
+    assert!(lines.contains(&"tui_selected_completed_side_effect_count: 1".to_string()));
+    assert!(lines.contains(&"tui_selected_unverified_risk: tests_not_observed".to_string()));
 }
 
 #[test]
