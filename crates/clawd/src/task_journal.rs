@@ -12,6 +12,10 @@ mod task_journal_coding_state;
 mod task_journal_coding_workflow;
 #[path = "task_journal_context_budget.rs"]
 mod task_journal_context_budget;
+#[path = "task_journal_context_compaction.rs"]
+mod task_journal_context_compaction;
+#[path = "task_journal_context_summary_parse.rs"]
+mod task_journal_context_summary_parse;
 #[path = "task_journal_event_stream.rs"]
 mod task_journal_event_stream;
 #[path = "task_journal_evidence_collect.rs"]
@@ -1762,6 +1766,7 @@ impl TaskJournal {
             "input_text": crate::truncate_for_log(&self.input_text),
             "context_bundle_summary": self.context_bundle_summary.as_deref().map(crate::truncate_for_log),
             "context_budget_report": task_journal_context_budget::context_budget_report_json(self.context_bundle_summary.as_deref()),
+            "transcript_compaction_records": task_journal_context_compaction::transcript_compaction_records_json(self.context_bundle_summary.as_deref()),
             "memory_trace": self.memory_trace.clone(),
             "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
             "route_result": self.route_result.as_ref().map(route_result_json),
@@ -1803,6 +1808,7 @@ impl TaskJournal {
                 .map(rollout_attribution_json)
                 .collect::<Vec<_>>(),
             "memory_trace": self.memory_trace.clone(),
+            "transcript_compaction_records": task_journal_context_compaction::transcript_compaction_records_json(self.context_bundle_summary.as_deref()),
             "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
             "route_result": self.route_result.as_ref().map(route_result_json),
             "evidence_policy": self
@@ -1939,6 +1945,10 @@ mod coding_state_tests;
 #[cfg(test)]
 #[path = "task_journal_coding_workflow_tests.rs"]
 mod coding_workflow_tests;
+
+#[cfg(test)]
+#[path = "task_journal_context_compaction_tests.rs"]
+mod context_compaction_tests;
 
 #[cfg(test)]
 #[path = "task_journal_goal_tests.rs"]

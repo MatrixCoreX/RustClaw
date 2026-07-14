@@ -1601,5 +1601,9 @@ Use this block only as supporting evidence for genuinely short follow-up request
 }
 
 #[cfg(test)]
+#[path = "task_context_builder_summary_tests.rs"]
+mod summary_tests;
+
+#[cfg(test)]
 #[path = "task_context_builder_tests.rs"]
 mod tests;
