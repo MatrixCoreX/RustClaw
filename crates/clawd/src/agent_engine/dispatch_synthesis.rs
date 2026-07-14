@@ -14,9 +14,9 @@ mod dispatch_synthesis_local_code_writes;
 #[path = "dispatch_synthesis_markdown.rs"]
 mod dispatch_synthesis_markdown;
 use dispatch_synthesis_local_code_fields::{
-    diff_summary_projection_value, local_code_json_projection_field_value_supported,
-    machine_error_code_token, path_size_bytes_by_path, run_cmd_commands_from_task_observations,
-    run_cmd_failure_projection,
+    current_request_surface, diff_summary_projection_value,
+    local_code_json_projection_field_value_supported, machine_error_code_token,
+    path_size_bytes_by_path, run_cmd_commands_from_task_observations, run_cmd_failure_projection,
 };
 use dispatch_synthesis_local_code_readbacks::readbacks_for_local_code_projection;
 use dispatch_synthesis_local_code_writes::{
@@ -901,20 +901,30 @@ fn requested_local_code_json_fields(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Vec<String> {
     let mut fields = Vec::new();
-    if let Some(context) = agent_run_context {
-        for marker in requested_local_code_json_fields_from_state_patch(context) {
-            if local_code_json_projection_field_supported(&marker)
-                && !fields.iter().any(|field| field == &marker)
-            {
-                fields.push(marker);
+    if let Some(state_patch) = agent_run_context
+        .and_then(|context| context.turn_analysis.as_ref())
+        .and_then(|analysis| analysis.state_patch.as_ref())
+    {
+        let mut structured_surfaces = Vec::new();
+        crate::machine_kv_projection::collect_requested_machine_kv_surfaces_from_state_patch(
+            state_patch,
+            &mut structured_surfaces,
+        );
+        for surface in structured_surfaces {
+            for marker in requested_local_code_json_fields_from_surface(&surface) {
+                if local_code_json_projection_field_supported(&marker)
+                    && !fields.iter().any(|field| field == &marker)
+                {
+                    fields.push(marker);
+                }
             }
         }
-    }
-    if !fields.is_empty() {
-        return fields;
+        if !fields.is_empty() {
+            return fields;
+        }
     }
 
-    let mut surfaces = vec![user_text.to_string()];
+    let mut surfaces = Vec::new();
     if let Some(context) = agent_run_context {
         for value in [
             context.original_user_request.as_deref(),
@@ -929,44 +939,11 @@ fn requested_local_code_json_fields(
         {
             crate::machine_kv_projection::push_unique_machine_kv_surface(&mut surfaces, value);
         }
-        if let Some(state_patch) = context
-            .turn_analysis
-            .as_ref()
-            .and_then(|analysis| analysis.state_patch.as_ref())
-        {
-            crate::machine_kv_projection::collect_requested_machine_kv_surfaces_from_state_patch(
-                state_patch,
-                &mut surfaces,
-            );
-        }
     }
-
-    for surface in surfaces {
-        for marker in requested_local_code_json_fields_from_surface(&surface) {
-            if local_code_json_projection_field_supported(&marker)
-                && !fields.iter().any(|field| field == &marker)
-            {
-                fields.push(marker);
-            }
-        }
-    }
-    fields
-}
-
-fn requested_local_code_json_fields_from_state_patch(context: &AgentRunContext) -> Vec<String> {
-    let Some(state_patch) = context
-        .turn_analysis
-        .as_ref()
-        .and_then(|analysis| analysis.state_patch.as_ref())
-    else {
-        return Vec::new();
-    };
-    let mut surfaces = Vec::new();
-    crate::machine_kv_projection::collect_requested_machine_kv_surfaces_from_state_patch(
-        state_patch,
+    crate::machine_kv_projection::push_unique_machine_kv_surface(
         &mut surfaces,
+        current_request_surface(user_text),
     );
-    let mut fields = Vec::new();
     for surface in surfaces {
         for marker in requested_local_code_json_fields_from_surface(&surface) {
             if local_code_json_projection_field_supported(&marker)

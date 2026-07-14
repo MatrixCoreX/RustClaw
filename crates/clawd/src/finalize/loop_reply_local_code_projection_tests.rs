@@ -474,7 +474,7 @@ fn latest_synthesis_local_code_projection_replaces_file_read_delivery() {
 }
 
 #[test]
-fn local_code_request_fields_merge_state_patch_and_user_machine_tokens() {
+fn local_code_request_fields_prefer_structured_state_patch_over_user_surface() {
     let context =
         context_with_required_machine_fields(json!(["functions", "error_codes", "test_status"]));
     let user_text =
@@ -484,14 +484,14 @@ fn local_code_request_fields_merge_state_patch_and_user_machine_tokens() {
     let complete = r#"{"project_dir":"/workspace","functions":["safe_div"],"error_codes":["division_by_zero"],"test_status":"passed","evidence_files":["/workspace/calc_core.py","/workspace/test_calc_core.py"]}"#;
 
     assert!(
-        !crate::agent_engine::local_code_strict_json_answer_satisfies_request(
+        crate::agent_engine::local_code_strict_json_answer_satisfies_request(
             user_text,
             partial,
             Some(&context),
         )
     );
     assert!(
-        crate::agent_engine::local_code_strict_json_answer_satisfies_request(
+        !crate::agent_engine::local_code_strict_json_answer_satisfies_request(
             user_text,
             complete,
             Some(&context),
@@ -717,4 +717,54 @@ fn local_code_projection_replaces_unresolved_existing_json_delivery() {
         serde_json::from_str(loop_state.delivery_messages[0].as_str()).expect("strict json");
     assert_eq!(value["test_status"], "passed");
     assert!(summary.is_some());
+}
+
+#[test]
+fn local_code_projection_replaces_file_delivery_for_current_json_request() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.delivery_messages.push(
+        "FILE:/workspace/project/test_calc_core.py\nfrom calc_core import safe_div".to_string(),
+    );
+    loop_state.output_vars.insert(
+        "agent_loop.latest_run_cmd_command".to_string(),
+        "cd /workspace/project && python3 test_calc_core.py".to_string(),
+    );
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","path":"/workspace/project/calc_core.py","resolved_path":"/workspace/project/calc_core.py","excerpt":"1|def add(a, b):\n2|    return a + b\n3|def safe_div(a, b):\n4|    if b == 0:\n5|        return {\"ok\": False, \"error_code\": \"division_by_zero\"}\n6|    return {\"ok\": True, \"value\": a / b}"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","path":"/workspace/project/test_calc_core.py","resolved_path":"/workspace/project/test_calc_core.py","excerpt":"1|from calc_core import add, safe_div\n2|assert safe_div(1, 0) == {\"ok\": False, \"error_code\": \"division_by_zero\"}"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_3",
+        "run_cmd",
+        "Ran 2 tests in 0.001s\nOK\n",
+    ));
+    let mut summary = None;
+    let user_text = "读取刚才项目的 calc_core.py 和 test_calc_core.py，确认当前有哪些函数、safe_div 的除零错误码是什么，并重新运行 python3 test_calc_core.py。最后只输出 JSON，包含 project_dir、functions、error_codes、test_status、evidence_files。\n\n### ACTIVE_TASK_CONTEXT\nlast_primary_task_output:\n{\"changed_files\":[\"/workspace/project/calc_core.py\"],\"test_command\":\"python3 test_calc_core.py\"}";
+
+    assert!(attach_local_code_strict_json_projection(
+        &task(),
+        user_text,
+        &mut loop_state,
+        None,
+        &mut summary,
+    ));
+
+    assert_eq!(loop_state.delivery_messages.len(), 1);
+    assert!(!loop_state.delivery_messages[0].contains("FILE:"));
+    let value: serde_json::Value =
+        serde_json::from_str(&loop_state.delivery_messages[0]).expect("strict json");
+    assert!(value.get("changed_files").is_none());
+    assert!(value.get("test_command").is_none());
+    assert_eq!(value["functions"], serde_json::json!(["add", "safe_div"]));
+    assert_eq!(
+        value["error_codes"],
+        serde_json::json!(["division_by_zero"])
+    );
+    assert_eq!(value["test_status"], "passed");
 }

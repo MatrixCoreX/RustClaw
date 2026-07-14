@@ -397,12 +397,21 @@ summary = journal.get("summary") or {}
 route_result = summary.get("route_result") or {}
 needs_clarify = bool(route_result.get("needs_clarify"))
 texts = [str(data.get("error_text") or ""), str(result.get("text") or "")]
+visible_items = []
+if str(result.get("text") or "").strip():
+    visible_items.append(str(result.get("text") or "").strip())
 for item in result.get("messages") or []:
     if isinstance(item, str):
         texts.append(item)
+        if item.strip():
+            visible_items.append(item.strip())
     elif isinstance(item, dict):
-        texts.append(str(item.get("text") or ""))
+        text_item = str(item.get("text") or "")
+        texts.append(text_item)
+        if text_item.strip():
+            visible_items.append(text_item.strip())
 joined = "\n".join(texts)
+visible_joined = "\n".join(visible_items)
 def normalize_text(value: str) -> str:
     return unicodedata.normalize("NFKC", value).replace("\u00a0", " ").replace("\u202f", " ")
 
@@ -454,6 +463,21 @@ for raw in [part.strip() for part in expected.split(";") if part.strip()]:
         pointer, sep, wanted = expr.partition("=")
         actual = compare_text(json_pointer_get(obj, pointer))
         part_ok = bool(sep) and actual == wanted
+    elif raw.startswith("visible_json_fields:"):
+        wanted_fields = [
+            field.strip()
+            for field in raw[len("visible_json_fields:"):].split(",")
+            if field.strip()
+        ]
+        try:
+            visible_obj = json.loads(visible_joined)
+        except Exception:
+            visible_obj = None
+        part_ok = (
+            isinstance(visible_obj, dict)
+            and bool(wanted_fields)
+            and all(field in visible_obj for field in wanted_fields)
+        )
     else:
         part_ok = normalize_text(raw) in normalize_text(joined)
     ok = ok and part_ok

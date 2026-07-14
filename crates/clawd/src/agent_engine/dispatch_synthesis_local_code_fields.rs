@@ -49,6 +49,13 @@ pub(super) fn run_cmd_commands_from_task_observations(loop_state: &LoopState) ->
     commands
 }
 
+pub(super) fn current_request_surface(user_text: &str) -> &str {
+    user_text
+        .split_once("\n\n### ")
+        .map(|(current, _)| current)
+        .unwrap_or(user_text)
+}
+
 pub(super) fn run_cmd_failure_projection(
     loop_state: &LoopState,
     commands: &[String],

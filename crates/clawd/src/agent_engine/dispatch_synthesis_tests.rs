@@ -724,6 +724,73 @@ fn local_code_task_projection_allows_strict_json_despite_delivery_hint() {
 }
 
 #[test]
+fn local_code_task_projection_uses_current_request_fields_before_context_blocks() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_vars.insert(
+        "agent_loop.latest_run_cmd_command".to_string(),
+        "cd /workspace/project && python3 test_calc_core.py".to_string(),
+    );
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","path":"/workspace/project/calc_core.py","resolved_path":"/workspace/project/calc_core.py","excerpt":"1|def add(a, b):\n2|    return a + b\n3|def sub(a, b):\n4|    return a - b\n5|def mul(a, b):\n6|    return a * b\n7|def safe_div(a, b):\n8|    if b == 0:\n9|        return {\"ok\": False, \"error_code\": \"division_by_zero\"}\n10|    return {\"ok\": True, \"value\": a / b}"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","path":"/workspace/project/test_calc_core.py","resolved_path":"/workspace/project/test_calc_core.py","excerpt":"1|from calc_core import add, sub, mul, safe_div\n2|assert safe_div(1, 0) == {\"ok\": False, \"error_code\": \"division_by_zero\"}"}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_3",
+        "run_cmd",
+        "Ran 5 tests in 0.001s\nOK\n",
+    ));
+    let mut route = route_result_with_contract(OutputResponseShape::FileToken, true);
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    let context = agent_context_for_route(route);
+    let augmented_user_text = "读取刚才项目的 calc_core.py 和 test_calc_core.py，确认当前有哪些函数、safe_div 的除零错误码是什么，并重新运行 python3 test_calc_core.py。最后只输出 JSON，包含 project_dir、functions、error_codes、test_status、evidence_files。\n\n### ACTIVE_TASK_CONTEXT\nlast_primary_task_output:\n{\"changed_files\":[\"/workspace/project/calc_core.py\"],\"test_command\":\"python3 test_calc_core.py\",\"test_status\":\"passed\"}";
+
+    let answer =
+        local_code_task_strict_json_projection(augmented_user_text, &loop_state, Some(&context))
+            .expect("inspect-only local code request should project strict JSON from readbacks");
+    let value: serde_json::Value = serde_json::from_str(&answer).expect("json");
+    let keys = value
+        .as_object()
+        .expect("object")
+        .keys()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert_eq!(
+        keys,
+        [
+            "error_codes".to_string(),
+            "evidence_files".to_string(),
+            "functions".to_string(),
+            "project_dir".to_string(),
+            "test_status".to_string(),
+        ]
+        .into_iter()
+        .collect()
+    );
+    assert_eq!(
+        value["functions"],
+        serde_json::json!(["add", "sub", "mul", "safe_div"])
+    );
+    assert_eq!(
+        value["error_codes"],
+        serde_json::json!(["division_by_zero"])
+    );
+    assert_eq!(value["test_status"], "passed");
+    assert!(strict_json_projection_answer_satisfies_request(
+        augmented_user_text,
+        &answer,
+        Some(&context),
+    ));
+}
+
+#[test]
 fn local_code_task_projection_uses_successful_write_plan_content_for_code_fields() {
     let mut loop_state = LoopState::new(2);
     loop_state.output_vars.insert(
