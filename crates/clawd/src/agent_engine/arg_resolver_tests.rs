@@ -307,6 +307,30 @@ fn fs_search_aliases_normalize_to_supported_contract() {
 }
 
 #[test]
+fn fs_basic_make_dir_create_parents_alias_normalizes_to_parents() {
+    let mut args = json!({
+        "action": "make_dir",
+        "path": "/tmp/project",
+        "create_parents": true
+    });
+
+    assert!(normalize_skill_arg_aliases("fs_basic", &mut args));
+    assert_eq!(args.get("parents").and_then(|v| v.as_bool()), Some(true));
+    assert!(args.get("create_parents").is_none());
+}
+
+#[test]
+fn standalone_make_dir_create_parents_alias_drops_unsupported_key() {
+    let mut args = json!({
+        "path": "/tmp/project",
+        "create_parents": true
+    });
+
+    assert!(normalize_skill_arg_aliases("make_dir", &mut args));
+    assert_eq!(args, json!({"path": "/tmp/project", "parents": true}));
+}
+
+#[test]
 fn run_cmd_shell_command_alias_normalizes_to_command() {
     let mut args = json!({
         "shell_command": "python3 test_calc_core.py",

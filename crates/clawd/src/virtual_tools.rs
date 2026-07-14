@@ -466,6 +466,8 @@ fn normalize_fs_basic_args(args: &mut Value) -> bool {
         changed |= normalize_read_text_range_args(obj);
     } else if matches!(action.as_deref(), Some("write_text" | "append_text")) {
         changed |= normalize_fs_write_text_args(obj);
+    } else if action.as_deref() == Some("make_dir") {
+        changed |= normalize_make_dir_args(obj);
     } else {
         changed |= move_value_alias_if_missing(obj, "max_entries", &["limit"]);
     }
@@ -484,6 +486,17 @@ fn normalize_fs_write_text_args(obj: &mut serde_json::Map<String, Value>) -> boo
     changed |= move_value_alias_if_missing(obj, "path", &["file", "file_path", "target"]);
     changed |= move_value_alias_if_missing(obj, "content", &["text", "data", "body"]);
     changed |= move_value_alias_if_missing(obj, "mode", &["write_mode", "writeMode"]);
+    changed
+}
+
+fn normalize_make_dir_args(obj: &mut serde_json::Map<String, Value>) -> bool {
+    let mut changed = false;
+    changed |= move_value_alias_if_missing(obj, "path", &["dir", "directory", "target"]);
+    changed |= move_value_alias_if_missing(
+        obj,
+        "parents",
+        &["create_parents", "create_parent_dirs", "mkdir_parents"],
+    );
     changed
 }
 

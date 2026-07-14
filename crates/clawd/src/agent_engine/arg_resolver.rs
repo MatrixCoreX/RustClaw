@@ -189,6 +189,7 @@ pub(super) fn normalize_skill_arg_aliases(normalized_skill: &str, args: &mut Val
         "image_generate" => normalize_image_generate_arg_aliases(args),
         "image_edit" => normalize_image_edit_arg_aliases(args),
         "kb" => normalize_kb_arg_aliases(args),
+        "make_dir" => normalize_make_dir_arg_aliases(args),
         "music_generate" => normalize_music_generate_arg_aliases(args),
         "run_cmd" => normalize_run_cmd_arg_aliases(args),
         "service_control" => normalize_service_control_arg_aliases(args),
@@ -209,6 +210,17 @@ fn normalize_config_edit_arg_aliases(args: &mut Value) -> bool {
         return false;
     };
     move_value_alias_if_missing(obj, "value", &["new_value", "target_value"])
+}
+
+fn normalize_make_dir_arg_aliases(args: &mut Value) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    move_value_alias_and_drop_aliases(
+        obj,
+        "parents",
+        &["create_parents", "create_parent_dirs", "mkdir_parents"],
+    )
 }
 
 fn move_string_alias_if_missing(
@@ -250,6 +262,26 @@ fn move_value_alias_if_missing(
     };
     obj.insert(canonical.to_string(), value);
     true
+}
+
+fn move_value_alias_and_drop_aliases(
+    obj: &mut serde_json::Map<String, Value>,
+    canonical: &str,
+    aliases: &[&str],
+) -> bool {
+    let mut changed = false;
+    if obj.get(canonical).is_none() {
+        if let Some(value) = aliases.iter().find_map(|alias| obj.get(*alias).cloned()) {
+            obj.insert(canonical.to_string(), value);
+            changed = true;
+        }
+    }
+    for alias in aliases {
+        if obj.remove(*alias).is_some() {
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn normalize_image_edit_arg_aliases(args: &mut Value) -> bool {
