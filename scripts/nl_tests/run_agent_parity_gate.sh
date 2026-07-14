@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
+OUT_DIR="${ROOT_DIR}/logs/agent_parity_gate/${RUN_STAMP}"
+RUN_DIRS=()
+SKIP_COVERAGE=0
+SKIP_CODING_FIXTURE=0
+SKIP_METRICS=0
+DEDUPE_LATEST_CASE=0
+EXPECT_CASE_COUNT=0
+
+MIN_PASS_RATE="${MIN_PASS_RATE:-1.0}"
+MAX_AVG_LLM_CALLS="${MAX_AVG_LLM_CALLS:-4}"
+MAX_PROMPT_TRUNCATIONS="${MAX_PROMPT_TRUNCATIONS:-0}"
+MAX_PROVIDER_FINAL_ERRORS="${MAX_PROVIDER_FINAL_ERRORS:-0}"
+MAX_PROVIDER_RETRYABLE_ERRORS="${MAX_PROVIDER_RETRYABLE_ERRORS:-}"
+MAX_VERIFIER_CALLS="${MAX_VERIFIER_CALLS:-}"
+MAX_PROMPT_BYTES_BEFORE="${MAX_PROMPT_BYTES_BEFORE:-}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  bash scripts/nl_tests/run_agent_parity_gate.sh [options] [run-dir ...]
+
+What it gates:
+  - Static compact NL metadata coverage, including agent parity, async, media dry-run, and no X/Twitter live publish rows.
+  - Offline coding-loop repair fixture expectations and bounded metrics.
+  - Optional real client-like run metrics when one or more run directories are provided.
+
+Options:
+  --run-dir PATH                  Add a client-like run directory to summarize.
+  --out-dir PATH                  Gate artifact directory. Default: logs/agent_parity_gate/<timestamp>
+  --skip-coverage                 Skip compact metadata coverage.
+  --skip-coding-fixture           Skip offline coding-loop repair fixture.
+  --skip-metrics                  Skip metrics gates for provided run dirs.
+  --dedupe-latest-case            For rerun shards, keep latest valid turn per numeric case id.
+  --expect-case-count N           Require at least N unique case ids when deduping.
+  --min-pass-rate N               Metrics gate. Default: MIN_PASS_RATE or 1.0.
+  --max-avg-llm-calls N           Metrics gate. Default: MAX_AVG_LLM_CALLS or 4.
+  --max-prompt-truncations N      Metrics gate. Default: MAX_PROMPT_TRUNCATIONS or 0.
+  --max-provider-final-errors N   Metrics gate. Default: MAX_PROVIDER_FINAL_ERRORS or 0.
+  --max-provider-retryable-errors N
+  --max-verifier-calls N
+  --max-prompt-bytes-before N
+  -h, --help
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --run-dir)
+      RUN_DIRS+=("${2:-}")
+      shift 2
+      ;;
+    --out-dir)
+      OUT_DIR="${2:-}"
+      shift 2
+      ;;
+    --skip-coverage)
+      SKIP_COVERAGE=1
+      shift
+      ;;
+    --skip-coding-fixture)
+      SKIP_CODING_FIXTURE=1
+      shift
+      ;;
+    --skip-metrics)
+      SKIP_METRICS=1
+      shift
+      ;;
+    --dedupe-latest-case)
+      DEDUPE_LATEST_CASE=1
+      shift
+      ;;
+    --expect-case-count)
+      EXPECT_CASE_COUNT="${2:-}"
+      shift 2
+      ;;
+    --min-pass-rate)
+      MIN_PASS_RATE="${2:-}"
+      shift 2
+      ;;
+    --max-avg-llm-calls)
+      MAX_AVG_LLM_CALLS="${2:-}"
+      shift 2
+      ;;
+    --max-prompt-truncations)
+      MAX_PROMPT_TRUNCATIONS="${2:-}"
+      shift 2
+      ;;
+    --max-provider-final-errors)
+      MAX_PROVIDER_FINAL_ERRORS="${2:-}"
+      shift 2
+      ;;
+    --max-provider-retryable-errors)
+      MAX_PROVIDER_RETRYABLE_ERRORS="${2:-}"
+      shift 2
+      ;;
+    --max-verifier-calls)
+      MAX_VERIFIER_CALLS="${2:-}"
+      shift 2
+      ;;
+    --max-prompt-bytes-before)
+      MAX_PROMPT_BYTES_BEFORE="${2:-}"
+      shift 2
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+    *)
+      RUN_DIRS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+mkdir -p "$OUT_DIR"
+
+metrics_args() {
+  local out_path="$1"
+  shift
+  local args=(
+    "$@"
+    --output "$out_path"
+    --min-pass-rate "$MIN_PASS_RATE"
+    --max-avg-llm-calls "$MAX_AVG_LLM_CALLS"
+    --max-prompt-truncations "$MAX_PROMPT_TRUNCATIONS"
+    --max-provider-final-errors "$MAX_PROVIDER_FINAL_ERRORS"
+  )
+  if [[ -n "$MAX_PROVIDER_RETRYABLE_ERRORS" ]]; then
+    args+=(--max-provider-retryable-errors "$MAX_PROVIDER_RETRYABLE_ERRORS")
+  fi
+  if [[ -n "$MAX_VERIFIER_CALLS" ]]; then
+    args+=(--max-verifier-calls "$MAX_VERIFIER_CALLS")
+  fi
+  if [[ -n "$MAX_PROMPT_BYTES_BEFORE" ]]; then
+    args+=(--max-prompt-bytes-before "$MAX_PROMPT_BYTES_BEFORE")
+  fi
+  if [[ "$DEDUPE_LATEST_CASE" -eq 1 ]]; then
+    args+=(--dedupe-latest-case)
+    if [[ "$EXPECT_CASE_COUNT" != "0" ]]; then
+      args+=(--expect-case-count "$EXPECT_CASE_COUNT")
+    fi
+  fi
+  printf '%s\n' "${args[@]}"
+}
+
+run_metrics_gate() {
+  local out_path="$1"
+  shift
+  mapfile -t args < <(metrics_args "$out_path" "$@")
+  python3 "${SCRIPT_DIR}/summarize_rollout_metrics.py" "${args[@]}"
+}
+
+echo "AGENT_PARITY_GATE out_dir=${OUT_DIR}"
+
+if [[ "$SKIP_COVERAGE" -eq 0 ]]; then
+  echo "AGENT_PARITY_GATE_STEP compact_coverage"
+  python3 "${SCRIPT_DIR}/check_compact_coverage.py" --report \
+    > "${OUT_DIR}/compact_coverage.json"
+fi
+
+if [[ "$SKIP_CODING_FIXTURE" -eq 0 ]]; then
+  echo "AGENT_PARITY_GATE_STEP coding_loop_repair_fixture"
+  python3 "${SCRIPT_DIR}/evaluate_client_like_run.py" \
+    "${SCRIPT_DIR}/fixtures/client_like_runs/coding_loop_repair" \
+    --expectations "${SCRIPT_DIR}/expectations/coding_loop_repair_fixture.jsonl" \
+    > "${OUT_DIR}/coding_loop_repair_eval.txt"
+
+  run_metrics_gate \
+    "${OUT_DIR}/coding_loop_repair_metrics.json" \
+    "${SCRIPT_DIR}/fixtures/client_like_runs/coding_loop_repair" \
+    > "${OUT_DIR}/coding_loop_repair_metrics.txt"
+fi
+
+if [[ "${#RUN_DIRS[@]}" -gt 0 && "$SKIP_METRICS" -eq 0 ]]; then
+  echo "AGENT_PARITY_GATE_STEP live_run_metrics count=${#RUN_DIRS[@]}"
+  run_metrics_gate "${OUT_DIR}/run_metrics.json" "${RUN_DIRS[@]}" \
+    > "${OUT_DIR}/run_metrics.txt"
+elif [[ "${#RUN_DIRS[@]}" -eq 0 ]]; then
+  echo "AGENT_PARITY_GATE_NO_RUN_DIR live metrics skipped"
+fi
+
+{
+  echo "out_dir=${OUT_DIR}"
+  echo "coverage=$((1 - SKIP_COVERAGE))"
+  echo "coding_fixture=$((1 - SKIP_CODING_FIXTURE))"
+  echo "run_dir_count=${#RUN_DIRS[@]}"
+  echo "metrics=$((1 - SKIP_METRICS))"
+  echo "min_pass_rate=${MIN_PASS_RATE}"
+  echo "max_avg_llm_calls=${MAX_AVG_LLM_CALLS}"
+  echo "max_prompt_truncations=${MAX_PROMPT_TRUNCATIONS}"
+  echo "max_provider_final_errors=${MAX_PROVIDER_FINAL_ERRORS}"
+} > "${OUT_DIR}/gate_summary.env"
+
+echo "AGENT_PARITY_GATE_OK out_dir=${OUT_DIR}"

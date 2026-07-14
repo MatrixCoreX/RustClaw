@@ -66,6 +66,36 @@ dry-run classes, including clarify/direct-answer/act/recover control-trace and
 repair-envelope cases, that default compact media rows are dry-run only, and
 that X/Twitter live publish tags are not part of the compact gate.
 
+Agent parity gate:
+
+- `bash scripts/nl_tests/run_suite.sh agent_parity_gate`
+- `bash scripts/nl_tests/run_agent_parity_gate.sh`
+- `bash scripts/nl_tests/run_agent_parity_gate.sh scripts/nl_suite_logs/client_like_continuous/<run_id>`
+
+This is the default lightweight gate after a Codex/Claude-style agent-loop
+implementation batch. It runs the static compact coverage check, the offline
+coding-loop repair fixture expectations, and bounded rollout metrics for that
+fixture. When you pass one or more finished client-like run directories, it also
+applies the same metrics gates to the real NL run. The defaults require
+`pass_rate=1.0`, `avg_llm_calls_per_turn<=4`, no prompt truncation, and no final
+provider errors. Override with `--min-pass-rate`, `--max-avg-llm-calls`,
+`--max-prompt-truncations`, `--max-provider-final-errors`, or environment
+variables with the same uppercase names.
+
+For rerun shards, use:
+
+```bash
+bash scripts/nl_tests/run_agent_parity_gate.sh \
+  --dedupe-latest-case --expect-case-count 285 \
+  scripts/nl_suite_logs/client_like_continuous/<run_id_1> \
+  scripts/nl_suite_logs/client_like_continuous/<run_id_2>
+```
+
+This gate does not replace live affected-case NL/coding tests. It provides the
+fast required preflight; after changing runtime planner, resolver, verifier,
+CLI coding, or prompt layering, run the smallest affected live case file listed
+below with LLM traces enabled, then feed that run directory into this gate.
+
 Client-like continuous regression:
 
 - Run the offline contract-matrix regression suite, including generator checks and attribution fixtures:
