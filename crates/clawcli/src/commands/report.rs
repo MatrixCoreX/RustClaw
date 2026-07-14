@@ -835,11 +835,36 @@ fn collect_command_fields(map: &Map<String, Value>, signals: &mut CodingReportSi
     if let Some(command) = map.get("command").and_then(Value::as_str) {
         collect_command_token(command, signals);
     }
+    if let Some(command) = map
+        .get("args")
+        .and_then(Value::as_object)
+        .and_then(|args| args.get("command"))
+        .and_then(Value::as_str)
+    {
+        collect_command_token(command, signals);
+    }
+    if let Some(command) = map.get("verification_command").and_then(Value::as_str) {
+        collect_command_token(command, signals);
+    }
     if let Some(summary) = map.get("sanitized_args_summary").and_then(Value::as_str) {
         if let Some(command) = summary.trim().strip_prefix("command=") {
             collect_command_token(command, signals);
         }
     }
+    if let Some(output_excerpt) = map.get("output_excerpt").and_then(Value::as_str) {
+        collect_command_from_machine_excerpt(output_excerpt, signals);
+    }
+}
+
+fn collect_command_from_machine_excerpt(excerpt: &str, signals: &mut CodingReportSignals) {
+    let excerpt = excerpt.trim();
+    if excerpt.chars().any(|ch| matches!(ch, '\n' | '\r')) {
+        return;
+    }
+    let Some(index) = excerpt.find("command=") else {
+        return;
+    };
+    collect_command_token(&excerpt[index + "command=".len()..], signals);
 }
 
 fn collect_command_token(command: &str, signals: &mut CodingReportSignals) {
@@ -867,6 +892,7 @@ fn is_test_command_token(command: &str) -> bool {
         || command.starts_with("pnpm test")
         || command.starts_with("yarn test")
         || command.starts_with("pytest")
+        || is_python_test_command_token(&command)
         || command.starts_with("go test")
 }
 
@@ -883,9 +909,28 @@ fn is_verification_command_token(command: &str) -> bool {
         || command.starts_with("yarn lint")
         || command.starts_with("yarn build")
         || command.starts_with("pytest")
+        || is_python_test_command_token(&command)
         || command.starts_with("ruff check")
         || command.starts_with("go vet")
         || command.starts_with("go test")
+}
+
+fn is_python_test_command_token(command: &str) -> bool {
+    let mut parts = command.split_whitespace();
+    let Some(program) = parts.next() else {
+        return false;
+    };
+    if !matches!(program, "python" | "python3") {
+        return false;
+    }
+    let args = parts.collect::<Vec<_>>();
+    if args.starts_with(&["-m", "pytest"]) || args.starts_with(&["-m", "unittest"]) {
+        return true;
+    }
+    args.iter().any(|arg| {
+        let arg = arg.trim_matches('"').trim_matches('\'');
+        arg.starts_with("test_") || arg.ends_with("_test.py") || arg.contains("/test_")
+    })
 }
 
 fn collect_verification_failure_kind_fields(
