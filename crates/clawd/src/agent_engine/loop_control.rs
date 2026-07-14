@@ -25,6 +25,8 @@ mod loop_control_filesystem_mutation_recovery;
 mod loop_control_finalization_gate;
 #[path = "loop_control_local_health_recovery.rs"]
 mod loop_control_local_health_recovery;
+#[path = "loop_control_machine_status_gap.rs"]
+mod loop_control_machine_status_gap;
 #[path = "loop_control_post_write_evidence_guard.rs"]
 mod loop_control_post_write_evidence_guard;
 #[path = "loop_control_pre_loop_clarify.rs"]
@@ -45,6 +47,7 @@ use loop_control_executable_contract_observe::{
 use loop_control_filesystem_mutation_recovery::*;
 use loop_control_finalization_gate::*;
 use loop_control_local_health_recovery::*;
+use loop_control_machine_status_gap::*;
 use loop_control_post_write_evidence_guard::*;
 use loop_control_pre_loop_clarify::*;
 use loop_control_recent_artifacts_recovery::*;
@@ -62,172 +65,6 @@ fn has_authoritative_delivery(loop_state: &LoopState) -> bool {
             .as_deref()
             .map(str::trim)
             .is_some_and(|text| !text.is_empty())
-}
-
-fn answer_verifier_output_format_machine_payload_gap(
-    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
-    reply_text: &str,
-) -> bool {
-    if !verifier.high_confidence_retry_gap()
-        || !verifier
-            .missing_evidence_fields
-            .iter()
-            .any(|field| field == "output_format")
-        || verifier
-            .missing_evidence_fields
-            .iter()
-            .any(|field| field != "output_format")
-    {
-        return false;
-    }
-    if verifier.answer_incomplete_reason == "machine_status_token_visible" {
-        return true;
-    }
-    if visible_answer_is_machine_field_projection(reply_text) {
-        return true;
-    }
-    serde_json::from_str::<Value>(reply_text.trim())
-        .ok()
-        .and_then(|value| value.as_object().cloned())
-        .is_some_and(|object| {
-            object.contains_key("message_key")
-                || object.contains_key("reason_code")
-                || object.contains_key("candidates")
-                || object.contains_key("risks")
-                || object.contains_key("contract_marker")
-                || object
-                    .get("output_format")
-                    .and_then(Value::as_str)
-                    .is_some_and(|format| format == "machine_json")
-                || (object.contains_key("status") && object.contains_key("steps"))
-        })
-}
-
-fn visible_answer_is_machine_field_projection(reply_text: &str) -> bool {
-    let mut field_count = 0usize;
-    for token in reply_text.split_whitespace() {
-        let Some((key, value)) = token.split_once('=') else {
-            continue;
-        };
-        let key = key.trim();
-        let value = value.trim();
-        if machine_projection_field_key(key) && !value.is_empty() {
-            field_count += 1;
-            if field_count >= 2 {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-fn machine_projection_field_key(key: &str) -> bool {
-    !key.is_empty()
-        && key.chars().all(|ch| {
-            ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '_' | '.' | '-')
-        })
-        && key.chars().any(|ch| ch.is_ascii_lowercase())
-}
-
-fn visible_answer_is_observed_machine_status_token(
-    route_result: &RouteResult,
-    journal: &crate::task_journal::TaskJournal,
-    reply_text: &str,
-) -> bool {
-    if matches!(
-        route_result.output_contract.response_shape,
-        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
-    ) {
-        return false;
-    }
-    if !route_requires_direct_candidate_for_observed_stop(route_result) {
-        return false;
-    }
-    let token = reply_text.trim();
-    if !single_machine_token_answer(token) {
-        return false;
-    }
-    journal
-        .step_results
-        .iter()
-        .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
-        .filter_map(|step| step.output_excerpt.as_deref())
-        .filter_map(|output| serde_json::from_str::<Value>(output.trim()).ok())
-        .any(|value| {
-            observed_machine_status_tokens(&value)
-                .iter()
-                .any(|candidate| candidate == token)
-        })
-}
-
-fn single_machine_token_answer(token: &str) -> bool {
-    !token.is_empty()
-        && token.len() <= 80
-        && !token.starts_with('{')
-        && !token.starts_with('[')
-        && !token.chars().any(char::is_whitespace)
-        && token
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '/'))
-}
-
-fn observed_machine_status_tokens(value: &Value) -> Vec<String> {
-    let mut tokens = Vec::new();
-    collect_observed_machine_status_tokens(value, &mut tokens);
-    tokens
-}
-
-fn collect_observed_machine_status_tokens(value: &Value, tokens: &mut Vec<String>) {
-    match value {
-        Value::Object(object) => {
-            for (key, child) in object {
-                if matches!(key.as_str(), "text" | "error_text") {
-                    continue;
-                }
-                if machine_status_field_key(key) {
-                    if let Some(token) = child
-                        .as_str()
-                        .map(str::trim)
-                        .filter(|token| !token.is_empty() && single_machine_token_answer(token))
-                    {
-                        tokens.push(token.to_string());
-                    }
-                }
-                collect_observed_machine_status_tokens(child, tokens);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect_observed_machine_status_tokens(item, tokens);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn machine_status_field_key(key: &str) -> bool {
-    matches!(
-        key,
-        "status" | "status_code" | "state" | "reason_code" | "message_key"
-    )
-}
-
-fn machine_status_visible_output_format_gap(
-    route_result: &RouteResult,
-    journal: &crate::task_journal::TaskJournal,
-    reply_text: &str,
-) -> Option<crate::answer_verifier::AnswerVerifierOut> {
-    visible_answer_is_observed_machine_status_token(route_result, journal, reply_text).then(|| {
-        crate::answer_verifier::AnswerVerifierOut {
-            pass: false,
-            missing_evidence_fields: vec!["output_format".to_string()],
-            answer_incomplete_reason: "machine_status_token_visible".to_string(),
-            should_retry: true,
-            retry_instruction: "render_observed_machine_status_as_user_visible_answer".to_string(),
-            confidence: 0.9,
-        }
-        .normalized()
-    })
 }
 
 fn answer_verifier_summary_to_out(
