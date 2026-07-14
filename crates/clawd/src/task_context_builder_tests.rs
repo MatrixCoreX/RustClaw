@@ -13,6 +13,7 @@ use super::{
     ExecutionContextView, PlannerContextView, RouteContextBudgetTier, RouteContextView,
     TaskContextBundle, TaskContextRawSources,
 };
+use serde_json::json;
 
 fn empty_prompt_memory_context() -> crate::memory::service::PromptMemoryContext {
     crate::memory::service::PromptMemoryContext {
@@ -1111,6 +1112,58 @@ fn context_bundle_summary_exposes_route_anchor_only_profile() {
     assert!(summary.contains("route_profile=route_anchor_only"));
     assert!(summary.contains("context_profile=route_anchor_only"));
     assert!(summary.contains("binding_context=true"));
+}
+
+#[test]
+fn memory_trace_combines_route_and_execution_stages() {
+    let mut execution_memory = empty_prompt_memory_context();
+    execution_memory.memory_trace = Some(json!({
+        "stage": "execution",
+        "use_policy": "planner_scoped",
+        "recalled": [],
+    }));
+    let bundle = TaskContextBundle {
+        raw_sources: TaskContextRawSources::default(),
+        planner_view: PlannerContextView::default(),
+        route_view: Some(RouteContextView {
+            budget_tier: RouteContextBudgetTier::Full,
+            active_task_context: "<none>".to_string(),
+            active_execution_anchor_context: "<none>".to_string(),
+            session_alias_context: "<none>".to_string(),
+            request_surface_hints: "<none>".to_string(),
+            recent_execution_context: "<none>".to_string(),
+            capability_map: "<none>".to_string(),
+            recent_assistant_replies: "<none>".to_string(),
+            recent_turns_full: "<none>".to_string(),
+            memory_context: "<none>".to_string(),
+            memory_trace: Some(json!({
+                "stage": "route",
+                "use_policy": "route_minimal",
+                "recalled": [],
+            })),
+            last_turn_full: "<none>".to_string(),
+        }),
+        execution_view: Some(ExecutionContextView {
+            budget_tier: crate::task_context_builder::ExecutionContextBudgetTier::Light,
+            memory_ctx: execution_memory,
+            runtime_context: "<none>".to_string(),
+            active_task_context: "<none>".to_string(),
+            active_execution_anchor_context: "<none>".to_string(),
+            session_alias_context: "<none>".to_string(),
+            recent_turns_full: "<none>".to_string(),
+            last_turn_full: "<none>".to_string(),
+            recent_execution_anchor: "<none>".to_string(),
+            recent_execution_context: "<none>".to_string(),
+            image_context: None,
+        }),
+    };
+
+    let trace = bundle.memory_trace().expect("combined trace");
+    assert_eq!(trace["trace_kind"], "task_memory_context");
+    assert_eq!(trace["stage_count"], 2);
+    let stages = trace["stages"].as_array().expect("trace stages");
+    assert_eq!(stages[0]["stage"], "route");
+    assert_eq!(stages[1]["stage"], "execution");
 }
 
 #[test]
