@@ -50,6 +50,8 @@ Artifact files:
 | `summary.json` | Stable exec summary with `task_id`, status, lifecycle, exit class, event summary, `effective_config`, `resume_hint`, and artifact refs. |
 | `task.json` | Full task query payload returned by `GET /v1/tasks/{task_id}`. |
 | `events.jsonl` | Raw task event lines for later filtering or replay export. |
+| `verification.json` | Machine-readable coding verification summary: commands, tests, failure-kind tokens, verification status, and residual unverified risk. |
+| `diff_summary.json` | Machine-readable coding change summary: changed files and bounded diff summary fields collected from task evidence. |
 | `resume.json` | Stable recovery fields such as `task_id`, `checkpoint_id`, `resume_due`, `poll_ref`, `next_poll_after`, and `recommended_command_tokens`. |
 
 ## Exec Profiles

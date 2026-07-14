@@ -6,7 +6,10 @@ use std::time::{Duration, Instant};
 
 use crate::{events::EventFilters, output, task};
 
-use super::report::{async_final_result_json, exec_artifact_refs};
+use super::report::{
+    async_final_result_json, coding_diff_summary_artifact_json, coding_verification_artifact_json,
+    exec_artifact_refs,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ExecWaitOutcome {
@@ -552,6 +555,14 @@ pub(super) fn write_exec_artifacts(
         .with_context(|| format!("create artifact dir {}", artifact_dir.display()))?;
     write_json_file(&artifact_dir.join("summary.json"), summary)?;
     write_json_file(&artifact_dir.join("task.json"), &task.raw_data)?;
+    write_json_file(
+        &artifact_dir.join("verification.json"),
+        &coding_verification_artifact_json(task),
+    )?;
+    write_json_file(
+        &artifact_dir.join("diff_summary.json"),
+        &coding_diff_summary_artifact_json(task),
+    )?;
     write_json_file(
         &artifact_dir.join("resume.json"),
         &exec_resume_artifact_json(task),

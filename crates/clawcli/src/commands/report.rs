@@ -192,6 +192,53 @@ pub(super) fn coding_review_text_lines(task: &task::TaskStatusView, review: &Val
     lines
 }
 
+pub(super) fn coding_verification_artifact_json(task: &task::TaskStatusView) -> Value {
+    let report = task_report_json(task, false);
+    json!({
+        "schema_version": 1,
+        "artifact_kind": "rustclaw_exec_verification",
+        "task_id": task.task_id,
+        "status": task.status,
+        "execution_state": task.execution_state(),
+        "lifecycle_state": task.lifecycle_state(),
+        "verification_status": coding_verification_status(&report),
+        "verification_command_count": report_u64(&report, "/coding/verification_command_count"),
+        "verification_commands": report_value_or_empty_array(&report, "/coding/verification_commands"),
+        "test_count": report_u64(&report, "/coding/test_count"),
+        "tests": report_value_or_empty_array(&report, "/coding/tests"),
+        "failure_count": report_u64(&report, "/coding/failure_count"),
+        "failures": report_value_or_empty_array(&report, "/coding/failures"),
+        "verification_failure_kind_count": report_u64(
+            &report,
+            "/coding/verification_failure_kind_count"
+        ),
+        "verification_failure_kinds": report_value_or_empty_array(
+            &report,
+            "/coding/verification_failure_kinds"
+        ),
+        "unverified_risk": report
+            .pointer("/coding/unverified_risk")
+            .cloned()
+            .unwrap_or(Value::Null),
+    })
+}
+
+pub(super) fn coding_diff_summary_artifact_json(task: &task::TaskStatusView) -> Value {
+    let report = task_report_json(task, false);
+    json!({
+        "schema_version": 1,
+        "artifact_kind": "rustclaw_exec_diff_summary",
+        "task_id": task.task_id,
+        "status": task.status,
+        "execution_state": task.execution_state(),
+        "lifecycle_state": task.lifecycle_state(),
+        "changed_file_count": report_u64(&report, "/coding/changed_file_count"),
+        "changed_files": report_value_or_empty_array(&report, "/coding/changed_files"),
+        "diff_summary_count": report_u64(&report, "/coding/diff_summary_count"),
+        "diff_summaries": report_value_or_empty_array(&report, "/coding/diff_summaries"),
+    })
+}
+
 pub(super) fn subagent_report_json(task: &task::TaskStatusView) -> Value {
     let mut signals = SubagentReportSignals::default();
     collect_subagent_report_signals(&task.raw_data, &mut signals, 0);
@@ -263,6 +310,14 @@ fn report_string_array(report: &Value, pointer: &str) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .collect()
+}
+
+fn report_value_or_empty_array(report: &Value, pointer: &str) -> Value {
+    report
+        .pointer(pointer)
+        .filter(|value| value.is_array())
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()))
 }
 
 fn coding_verification_status(report: &Value) -> &'static str {
