@@ -64,6 +64,7 @@ fn summary_emits_transcript_compaction_record_for_light_execution_budget() {
         budget["context_input_inventory"]["inputs"][2]["input_kind"],
         "goal_fields"
     );
+    assert_eq!(budget["compaction_triggers"][0], "over_budget");
     assert_eq!(records[0]["summary_kind"], "deterministic_context_budget");
     assert_eq!(records[0]["active_goal_refs"][0], "goal_context");
     assert_eq!(records[0]["source_refs"][0]["ref"], "recent_turns_full");

@@ -656,6 +656,15 @@ fn checkpoint_resume_message_key(resume_reason: &str) -> Option<&'static str> {
     }
 }
 
+fn context_compaction_checkpoint_trigger_json(resume_reason: &str) -> Value {
+    json!({
+        "schema_version": 1,
+        "trigger_kind": "before_background_checkpoint",
+        "source": "agent_loop_checkpoint",
+        "resume_reason": resume_reason,
+    })
+}
+
 #[cfg(test)]
 pub(super) fn build_agent_loop_checkpoint_progress_payload(
     task: &ClaimedTask,
@@ -701,6 +710,7 @@ fn build_agent_loop_checkpoint_progress_payload_with_budget(
         "source": "agent_loop_soft_budget",
         "task_id": task.task_id,
         "resume_reason": resume_reason,
+        "context_compaction_trigger": context_compaction_checkpoint_trigger_json(resume_reason),
     });
     if let (Some(obj), Some(message_key)) = (boundary_context.as_object_mut(), message_key) {
         obj.insert("message_key".to_string(), json!(message_key));
@@ -748,6 +758,7 @@ fn build_agent_loop_checkpoint_progress_payload_with_budget(
         "can_cancel": true,
         "last_heartbeat_ts": now_ts,
         "budget": budget,
+        "context_compaction_trigger": context_compaction_checkpoint_trigger_json(resume_reason),
     });
     if let (Some(obj), Some(message_key)) = (lifecycle.as_object_mut(), message_key) {
         obj.insert("message_key".to_string(), json!(message_key));
