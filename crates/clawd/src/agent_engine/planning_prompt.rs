@@ -596,10 +596,13 @@ pub(super) fn contract_scoped_lightweight_planner_skill_scope(
 }
 
 fn bounded_local_machine_boundary_skill_scope(route: &RouteResult) -> Option<BTreeSet<String>> {
-    if route.needs_clarify
-        || route.output_contract.delivery_required
-        || route.wants_file_delivery
-        || !matches!(route.schedule_kind, crate::ScheduleKind::None)
+    let executable_agent_loop_boundary =
+        route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop");
+    if route.needs_clarify || !matches!(route.schedule_kind, crate::ScheduleKind::None) {
+        return None;
+    }
+    if !executable_agent_loop_boundary
+        && (route.output_contract.delivery_required || route.wants_file_delivery)
     {
         return None;
     }
@@ -609,8 +612,9 @@ fn bounded_local_machine_boundary_skill_scope(route: &RouteResult) -> Option<BTr
     {
         return Some(BTreeSet::from(["run_cmd".to_string()]));
     }
-    let executable_agent_loop_boundary =
-        route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop");
+    if executable_agent_loop_boundary {
+        return local_workspace_execution_core_skill_scope(route);
+    }
     if route.has_route_reason_machine_marker("inline_structured_payload_context_execute")
         || route.has_route_reason_machine_marker("executionless_finalize_trace_plain")
     {
@@ -627,6 +631,41 @@ fn bounded_local_machine_boundary_skill_scope(route: &RouteResult) -> Option<BTr
         ]));
     }
     None
+}
+
+fn local_workspace_execution_core_skill_scope(route: &RouteResult) -> Option<BTreeSet<String>> {
+    let contract = route.effective_output_contract();
+    let has_local_workspace_boundary = route.wants_file_delivery
+        || contract.delivery_required
+        || !contract.locator_hint.trim().is_empty()
+        || matches!(
+            contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        || route.has_route_reason_machine_marker("auto_locator_suppressed_multiple_explicit_paths")
+        || route.has_route_reason_machine_marker("current_turn_locator_overrides_contextual_path")
+        || route.has_route_reason_machine_marker(
+            "execution_recipe_target_locator_preserved_for_agent_loop",
+        )
+        || route.has_route_reason_machine_marker("generated_file_delivery_allows_runtime_target")
+        || route.has_route_reason_machine_marker("workspace_filename_targets_contract_repair");
+    if !has_local_workspace_boundary {
+        return None;
+    }
+    Some(BTreeSet::from([
+        "archive_basic".to_string(),
+        "config_basic".to_string(),
+        "db_basic".to_string(),
+        "doc_parse".to_string(),
+        "fs_basic".to_string(),
+        "git_basic".to_string(),
+        "package_manager".to_string(),
+        "process_basic".to_string(),
+        "run_cmd".to_string(),
+        "system_basic".to_string(),
+    ]))
 }
 
 fn generic_local_content_contract_skill_scope(route: &RouteResult) -> Option<BTreeSet<String>> {
