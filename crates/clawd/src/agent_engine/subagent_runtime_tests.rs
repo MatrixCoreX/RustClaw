@@ -292,6 +292,7 @@ fn subagent_batch_records_bounded_parallel_aggregation() {
                         "kind": "file_ref",
                         "status": "found",
                         "message_key": "subagent.file_ref_found",
+                        "confidence": 0.82,
                         "evidence_refs": ["step_1:evidence"],
                         "text": "ignored user-visible prose"
                     }
@@ -301,6 +302,9 @@ fn subagent_batch_records_bounded_parallel_aggregation() {
                 "role": "verifier",
                 "objective": "verify_contract",
                 "required": true,
+                "budget": {
+                    "timeout_ms": 3200
+                },
                 "context_slice": {
                     "refs": ["step_2:evidence"],
                     "max_context_chars": 2048
@@ -348,9 +352,27 @@ fn subagent_batch_records_bounded_parallel_aggregation() {
             .len(),
         2
     );
+    assert_eq!(observation["aggregation"]["finding_count"], 2);
+    assert_eq!(
+        observation["aggregation"]["confidence_summary"]["reported_count"],
+        1
+    );
+    assert_eq!(
+        observation["aggregation"]["confidence_summary"]["missing_count"],
+        1
+    );
+    assert_eq!(observation["aggregation"]["conflict_count"], 0);
+    assert_eq!(
+        observation["aggregation"]["main_thread_decision"]["decision_status"],
+        "ready_to_synthesize"
+    );
     assert_eq!(
         observation["child_results"][0]["findings"][0]["kind"],
         "file_ref"
+    );
+    assert_eq!(
+        observation["child_results"][0]["findings"][0]["confidence"],
+        0.82
     );
     assert_eq!(
         observation["child_results"][0]["findings"][0]["message_key"],
@@ -377,11 +399,97 @@ fn subagent_batch_records_bounded_parallel_aggregation() {
         false
     );
     assert_eq!(
+        observation["child_requests"][1]["timeout_policy"]["timeout_ms"],
+        3200
+    );
+    assert_eq!(
+        observation["child_requests"][1]["timeout_policy"]["terminal_status_on_timeout"],
+        "timeout"
+    );
+    assert_eq!(
         observation["child_result"]["outcome_code"],
         "subagent_parallel_readonly_completed"
     );
     assert_eq!(observation["write_enabled"], false);
     assert_eq!(observation["external_publish_enabled"], false);
+}
+
+#[test]
+fn subagent_batch_records_conflicting_findings_for_parent_decision() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 6;
+    let args = serde_json::json!({
+        "children": [
+            {
+                "role": "explorer",
+                "objective": "inspect_policy_a",
+                "findings": [
+                    {
+                        "kind": "risk_review",
+                        "status": "pass",
+                        "code": "policy_state",
+                        "conflict_group": "policy_state",
+                        "confidence": 0.91,
+                        "evidence_refs": ["step_1:evidence"]
+                    }
+                ]
+            },
+            {
+                "role": "review",
+                "objective": "inspect_policy_b",
+                "findings": [
+                    {
+                        "kind": "risk_review",
+                        "status": "fail",
+                        "code": "policy_state",
+                        "conflict_group": "policy_state",
+                        "confidence": 0.73,
+                        "evidence_refs": ["step_2:evidence"]
+                    }
+                ]
+            }
+        ]
+    });
+
+    let stop_signal = record_subagent_action_from_args(&mut loop_state, 11, 4, &args);
+
+    assert!(stop_signal.is_none());
+    let observation = &loop_state.task_observations[0];
+    assert_eq!(observation["aggregation"]["status"], "completed");
+    assert_eq!(observation["aggregation"]["conflict_count"], 1);
+    assert_eq!(
+        observation["aggregation"]["conflict_summary"]["conflict_groups"][0]["group_ref"],
+        "policy_state"
+    );
+    assert_eq!(
+        observation["aggregation"]["conflict_summary"]["conflict_groups"][0]["status_count"],
+        2
+    );
+    assert_eq!(
+        observation["aggregation"]["confidence_summary"]["reported_count"],
+        2
+    );
+    assert_eq!(
+        observation["aggregation"]["confidence_summary"]["min"],
+        0.73
+    );
+    assert_eq!(
+        observation["aggregation"]["confidence_summary"]["max"],
+        0.91
+    );
+    assert_eq!(
+        observation["aggregation"]["main_thread_decision"]["decision_owner"],
+        "parent_agent_loop"
+    );
+    assert_eq!(
+        observation["aggregation"]["main_thread_decision"]["decision_required"],
+        true
+    );
+    assert_eq!(
+        observation["aggregation"]["main_thread_decision"]["decision_status"],
+        "needs_conflict_resolution"
+    );
+    assert_eq!(observation["child_run_summary"]["conflict_count"], 1);
 }
 
 #[test]

@@ -256,6 +256,17 @@ fn subagent_report_json_collects_child_results_and_events() {
                         "child_run_id": "subagent:1:2:explorer",
                         "subagent_id": "explorer",
                         "status": "succeeded",
+                        "result_status": "completed",
+                        "outcome_code": "subagent_parallel_readonly_completed",
+                        "conflict_count": 1,
+                        "failure_isolated": true,
+                        "confidence_summary": {
+                            "min": 0.72,
+                            "max": 0.93
+                        },
+                        "main_thread_decision": {
+                            "decision_status": "needs_conflict_resolution"
+                        },
                         "finding_refs": ["finding:1"],
                         "evidence_refs": ["evidence:1"]
                     }
@@ -287,6 +298,19 @@ fn subagent_report_json_collects_child_results_and_events() {
         report["subagents"][0]["child_run_id"],
         "subagent:1:2:explorer"
     );
+    assert_eq!(report["subagents"][0]["result_status"], "completed");
+    assert_eq!(
+        report["subagents"][0]["outcome_code"],
+        "subagent_parallel_readonly_completed"
+    );
+    assert_eq!(report["subagents"][0]["conflict_count"], 1);
+    assert_eq!(
+        report["subagents"][0]["decision_status"],
+        "needs_conflict_resolution"
+    );
+    assert_eq!(report["subagents"][0]["confidence_min"], 0.72);
+    assert_eq!(report["subagents"][0]["confidence_max"], 0.93);
+    assert_eq!(report["subagents"][0]["failure_isolated"], true);
     assert_eq!(report["subagents"][0]["finding_refs"][0], "finding:1");
     assert_eq!(
         report["subagents"][1]["child_run_id"],
