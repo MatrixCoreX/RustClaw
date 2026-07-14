@@ -357,6 +357,72 @@ fn provider_blocker_checkpoint_payload_records_background_resume_contract() {
 }
 
 #[test]
+fn verification_failure_checkpoint_payload_records_structured_attempt_evidence() {
+    let task = support_test_task();
+    let mut loop_state = LoopState::new(4);
+    loop_state.round_no = 2;
+    loop_state.total_steps_executed = 5;
+    loop_state.tool_calls_total = 3;
+    loop_state.last_stop_signal = Some("recoverable_failure_continue_round".to_string());
+    let err = crate::skills::structured_skill_error_from_parts(
+        "run_cmd",
+        "exit_status",
+        "verification command failed",
+        None,
+        Some(serde_json::json!({
+            "error_code": "exit_status",
+            "exit_code": 101,
+            "message_key": "clawd.run_cmd.exit_status",
+            "command": "cargo test -p fixture"
+        })),
+    );
+    crate::agent_engine::attempt_ledger::record_attempt(
+        &mut loop_state,
+        "run_cmd",
+        "command=cargo test -p fixture",
+        crate::executor::StepExecutionStatus::Error,
+        "",
+        None,
+        &err,
+    );
+
+    let payload = build_agent_loop_checkpoint_progress_payload(
+        &task,
+        &loop_state,
+        "agent_loop_max_rounds",
+        1_781_800_000,
+        1_781_800_060,
+    );
+
+    let attempt = &payload["task_checkpoint"]["attempt_ledger"][0];
+    assert_eq!(attempt["tool_or_skill"], "run_cmd");
+    assert_eq!(attempt["status"], "error");
+    assert_eq!(attempt["error_kind"], "exit_status");
+    assert_eq!(attempt["error_code"], "exit_status");
+    assert_eq!(attempt["exit_code"], 101);
+    assert_eq!(attempt["retryable"], true);
+    assert_eq!(attempt["recovery_action"], "replan_changed_action_or_args");
+    assert_eq!(attempt["repair_signal"]["status_code"], "exit_status");
+    assert_eq!(
+        attempt["repair_signal"]["message_key"],
+        "clawd.run_cmd.exit_status"
+    );
+    assert_eq!(
+        attempt["repair_signal"]["repair_envelope"]["repair_class"],
+        "loop_bounded_recovery"
+    );
+    assert_eq!(attempt["repair_signal"]["owner_layer"], "execution_loop");
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["resume_entrypoint"],
+        "next_planner_round"
+    );
+    assert_eq!(
+        payload["task_checkpoint"]["repair_signal"]["repair_envelope"]["stop_reason_code"],
+        "recoverable_failure_continue_round"
+    );
+}
+
+#[test]
 fn user_input_checkpoint_payload_records_hook_confirmation_state() {
     let task = support_test_task();
     let mut loop_state = LoopState::new(2);
