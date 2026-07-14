@@ -14,6 +14,15 @@ export interface TaskPermissionView {
   tone: "ok" | "attention" | "failed";
   title: string;
   meta: string[];
+  steps: TaskPermissionStepView[];
+}
+
+export interface TaskPermissionStepView {
+  title: string;
+  meta: string[];
+  sandbox: string[];
+  workspace: string[];
+  registryPolicy: string[];
 }
 
 export interface TaskArtifactRefView {
@@ -85,6 +94,15 @@ function primitiveKeyValue(value: unknown): string | null {
     return String(value);
   }
   return null;
+}
+
+function objectMeta(root: unknown, keys: string[]): string[] {
+  const record = asRecord(root);
+  if (!record) return [];
+  return keys.flatMap((key) => {
+    const value = primitiveKeyValue(record[key]);
+    return value ? [`${key}=${value}`] : [];
+  });
 }
 
 function findFirstValueByKey(root: unknown, key: string, depth = 0): unknown {
@@ -625,7 +643,8 @@ export function buildTaskPermissionView(
   lang: TaskLifecycleLang,
 ): TaskPermissionView | null {
   const permission = taskPermissionRoot(result);
-  if (!asRecord(permission)) return null;
+  const permissionRecord = asRecord(permission);
+  if (!permissionRecord) return null;
   const tLocal = (zh: string, en: string) => (lang === "zh" ? zh : en);
   const allowed = boolAt(permission, ["allowed"]);
   const needsConfirmation = boolAt(permission, ["needs_confirmation"]);
@@ -654,5 +673,84 @@ export function buildTaskPermissionView(
     tone,
     title: tLocal("权限决策", "Permission decision"),
     meta,
+    steps: buildTaskPermissionSteps(permissionRecord, lang),
+  };
+}
+
+function buildTaskPermissionSteps(
+  permission: Record<string, unknown>,
+  lang: TaskLifecycleLang,
+): TaskPermissionStepView[] {
+  const rawSteps = Array.isArray(permission.steps) ? permission.steps : [];
+  const stepRecords = rawSteps.filter(
+    (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item),
+  );
+  const records = stepRecords.length > 0 ? stepRecords : [permission].filter(hasPermissionDetailFields);
+  return records.map((step, index) => buildTaskPermissionStepView(step, index, lang));
+}
+
+function hasPermissionDetailFields(value: Record<string, unknown>): boolean {
+  return Boolean(asRecord(value.sandbox) || asRecord(value.workspace_scope) || asRecord(value.registry_policy));
+}
+
+function buildTaskPermissionStepView(
+  step: Record<string, unknown>,
+  index: number,
+  lang: TaskLifecycleLang,
+): TaskPermissionStepView {
+  const tLocal = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const stepId = primitiveKeyValue(step.step_id);
+  const skill = primitiveKeyValue(step.skill);
+  const action = primitiveKeyValue(step.action);
+  const title = stepId
+    ? tLocal(`步骤 ${index + 1}: ${stepId}`, `Step ${index + 1}: ${stepId}`)
+    : tLocal(`步骤 ${index + 1}`, `Step ${index + 1}`);
+  const meta = objectMeta(step, [
+    "action_type",
+    "executable",
+    "decision",
+    "risk_level",
+    "requires_confirmation",
+    "sandbox_profile",
+  ]);
+  if (skill) meta.push(`skill=${skill}`);
+  if (action) meta.push(`action=${action}`);
+
+  const actionEffect = asRecord(step.action_effect);
+  if (actionEffect) {
+    meta.push(...objectMeta(actionEffect, ["observes", "mutates", "validates"]).map((item) => `effect.${item}`));
+  }
+
+  return {
+    title,
+    meta,
+    sandbox: objectMeta(step.sandbox, [
+      "profile",
+      "source",
+      "filesystem_write",
+      "network_access",
+      "external_publish",
+      "credential_access",
+    ]),
+    workspace: objectMeta(step.workspace_scope, [
+      "scope",
+      "path_arg_count",
+      "cwd_present",
+      "untrusted_path_present",
+      "external_workspace",
+    ]),
+    registryPolicy: objectMeta(step.registry_policy, [
+      "capability",
+      "effect",
+      "risk_level",
+      "isolation_profile",
+      "network_access",
+      "filesystem_write",
+      "external_publish",
+      "credential_access",
+      "once_per_task",
+      "dedup_scope",
+      "idempotent",
+    ]),
   };
 }

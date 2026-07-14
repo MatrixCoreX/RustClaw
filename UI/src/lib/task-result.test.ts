@@ -69,6 +69,50 @@ test("builds permission view from structured decision fields", () => {
         owner_layer: "plan_verifier",
         status_code: "risk_budget_exceeded",
         message_key: "clawd.verify.risk_budget_exceeded",
+        steps: [
+          {
+            step_id: "step_1",
+            action_type: "call_skill",
+            executable: true,
+            decision: "require_confirmation",
+            skill: "run_cmd",
+            action: "execute",
+            action_effect: {
+              observes: false,
+              mutates: true,
+              validates: true,
+            },
+            risk_level: "high",
+            requires_confirmation: true,
+            sandbox_profile: "local_temp_workspace",
+            sandbox: {
+              profile: "local_temp_workspace",
+              source: "registry_capability_policy",
+              filesystem_write: true,
+              network_access: false,
+              external_publish: false,
+              credential_access: false,
+            },
+            workspace_scope: {
+              scope: "workspace_scoped",
+              path_arg_count: 1,
+              cwd_present: true,
+              untrusted_path_present: false,
+              external_workspace: false,
+            },
+            registry_policy: {
+              capability: "terminal.run_command",
+              effect: "mutate",
+              risk_level: "high",
+              isolation_profile: "local_temp_workspace",
+              filesystem_write: true,
+              network_access: false,
+              once_per_task: true,
+              dedup_scope: "args",
+              idempotent: false,
+            },
+          },
+        ],
       },
     },
   };
@@ -80,6 +124,12 @@ test("builds permission view from structured decision fields", () => {
   assert.ok(view?.meta.includes("allowed=false"));
   assert.ok(view?.meta.includes("external_provider_blocked=true"));
   assert.ok(view?.meta.includes("message_key=clawd.verify.risk_budget_exceeded"));
+  assert.equal(view?.steps.length, 1);
+  assert.ok(view?.steps[0].meta.includes("skill=run_cmd"));
+  assert.ok(view?.steps[0].meta.includes("effect.mutates=true"));
+  assert.ok(view?.steps[0].sandbox.includes("profile=local_temp_workspace"));
+  assert.ok(view?.steps[0].workspace.includes("scope=workspace_scoped"));
+  assert.ok(view?.steps[0].registryPolicy.includes("capability=terminal.run_command"));
 });
 
 test("extracts trace events and stable machine meta", () => {
