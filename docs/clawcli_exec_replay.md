@@ -60,6 +60,14 @@ Artifact files:
 | `diff_summary.json` | Machine-readable coding change summary: changed files and bounded diff summary fields collected from task evidence. |
 | `llm_summary.json` | Machine-readable provider-call summary: LLM call count, prompt buckets, prompt bytes, truncation count, retries, elapsed time, and per-prompt attribution. |
 | `resume.json` | Stable recovery fields such as `task_id`, `checkpoint_id`, `resume_due`, `poll_ref`, `next_poll_after`, `recommended_command_tokens`, coding evidence, completed side-effect refs, and idempotency guard state. |
+| `index.json` | Artifact index with stable file kinds and paths for summary, task, events, verification, diff summary, LLM summary, resume, and the index itself. |
+
+Non-JSON `exec` output includes compact machine lines when those fields are
+present: `exec_compact_budget_status`, `exec_compact_checkpoint_id`,
+`exec_compact_changed_file_count`, `exec_compact_verification_status`,
+`exec_compact_next_step`, `exec_compact_completed_side_effect_count`, and
+`exec_compact_artifact_index`. These are diagnostics for humans and scripts;
+they do not choose capabilities or route natural language.
 
 ## Exec Profiles
 
@@ -209,6 +217,9 @@ Inspect a bundle without live providers or tools:
 ```bash
 clawcli replay run artifacts/replay/task.json --json
 clawcli replay run artifacts/replay/task.json --coverage
+clawcli replay run artifacts/replay/task.json --view llm --json
+clawcli replay run artifacts/replay/task.json --view tools --json
+clawcli replay run artifacts/replay/task.json --view checkpoints --json
 ```
 
 Compare two bundles:
@@ -243,8 +254,8 @@ flowchart TD
     D -->|terminal| E[report / review]
     D -->|background| F[resume_hint / resume.json]
     F --> G[continue / resume-task]
-    E --> H[replay export]
-    H --> I[replay run --coverage]
+    E --> H[artifact index / replay export]
+    H --> I[replay run --coverage / --view]
     H --> J[replay diff + diff_classes]
     C --> K[permission inspect / subagents]
 ```
@@ -267,7 +278,8 @@ admin key.
 - `clawcli exec` and `clawcli replay` must consume machine fields such as
   `status`, `lifecycle_state`, `exit_class`, `message_key`, `error_code`,
   `event_type`, `permission_decision`, `command_policy`, `child_run_id`,
-  `finding_refs`, and artifact refs.
+  `finding_refs`, `write_isolation_status`, `isolation_profile`,
+  `sandbox_source`, and artifact refs.
 - Scripts must not parse `result_text` or `error_text` to decide success,
   retry, routing, or policy.
 - Example natural-language prompts in this document are operator examples only;
