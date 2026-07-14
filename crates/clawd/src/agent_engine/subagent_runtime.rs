@@ -1,5 +1,5 @@
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{AppState, LoopState};
 use crate::agent_runtime_contract::SubagentRole;
@@ -14,12 +14,21 @@ const DEFAULT_MAX_PARALLEL_READONLY: u64 = 4;
 
 #[path = "subagent_runtime_batch.rs"]
 mod subagent_runtime_batch;
+#[path = "subagent_runtime_context.rs"]
+mod subagent_runtime_context;
+
+use subagent_runtime_context::{
+    context_evidence_action, context_evidence_combined_excerpt,
+    context_evidence_has_available_excerpt, context_evidence_paths, context_evidence_summary,
+    context_evidence_summary_from_items,
+};
 
 #[derive(Debug, Clone)]
 pub(super) struct SubagentRuntimeConfig {
     allowed_roles: Vec<String>,
     max_parallel_readonly: u64,
     default_timeout_ms: Option<u64>,
+    context_evidence_root: Option<PathBuf>,
 }
 
 impl Default for SubagentRuntimeConfig {
@@ -31,6 +40,7 @@ impl Default for SubagentRuntimeConfig {
                 .collect(),
             max_parallel_readonly: DEFAULT_MAX_PARALLEL_READONLY,
             default_timeout_ms: None,
+            context_evidence_root: None,
         }
     }
 }
@@ -48,6 +58,7 @@ impl SubagentRuntimeConfig {
             "allowed_roles": self.allowed_roles,
             "max_parallel_readonly": self.max_parallel_readonly,
             "default_timeout_ms": self.default_timeout_ms,
+            "context_evidence_enabled": self.context_evidence_root.is_some(),
             "write_enabled": false,
             "external_publish_enabled": false,
         })
@@ -63,7 +74,9 @@ pub(super) fn load_subagent_runtime_config(state: &AppState) -> SubagentRuntimeC
         .skill_rt
         .workspace_root
         .join("configs/agent_guard.toml");
-    load_subagent_runtime_config_from_path(&path)
+    let mut config = load_subagent_runtime_config_from_path(&path);
+    config.context_evidence_root = Some(state.skill_rt.workspace_root.clone());
+    config
 }
 
 fn load_subagent_runtime_config_from_path(path: &Path) -> SubagentRuntimeConfig {
@@ -190,7 +203,11 @@ pub(super) fn record_subagent_action_with_config(
     let budget_summary = subagent_budget_summary(options.budget.as_ref(), config);
     let timeout_policy = subagent_timeout_policy(&budget_summary);
     let cancellation_policy = subagent_cancellation_policy(&timeout_policy);
-    loop_state.task_observations.push(json!({
+    let context_evidence = context_evidence_summary(&context_refs, &options, config);
+    let content_excerpt = context_evidence_combined_excerpt(&context_evidence);
+    let content_paths = context_evidence_paths(&context_evidence);
+    let content_excerpt_present = context_evidence_has_available_excerpt(&context_evidence);
+    let mut observation = json!({
         "schema_version": 1,
         "owner_layer": "subagent_runtime",
         "status": "accepted",
@@ -268,7 +285,39 @@ pub(super) fn record_subagent_action_with_config(
         "global_step": global_step,
         "step_in_round": step_in_round,
         "round_no": loop_state.round_no,
-    }));
+    });
+    if let Some(object) = observation.as_object_mut() {
+        object.insert("output_format".to_string(), json!("machine_json"));
+        object.insert(
+            "action".to_string(),
+            json!(context_evidence_action(&context_evidence)),
+        );
+        object.insert(
+            "path".to_string(),
+            json!(content_paths
+                .first()
+                .map(String::as_str)
+                .unwrap_or_default()),
+        );
+        object.insert("paths".to_string(), json!(content_paths));
+        object.insert("excerpt".to_string(), json!(content_excerpt.as_str()));
+        object.insert(
+            "content_excerpt".to_string(),
+            json!(content_excerpt.as_str()),
+        );
+        object.insert("context_evidence".to_string(), context_evidence);
+        if let Some(child_result) = object
+            .get_mut("child_result")
+            .and_then(Value::as_object_mut)
+        {
+            child_result.insert("output_format".to_string(), json!("machine_json"));
+            child_result.insert(
+                "content_excerpt_present".to_string(),
+                json!(content_excerpt_present),
+            );
+        }
+    }
+    loop_state.task_observations.push(observation);
     None
 }
 
