@@ -137,6 +137,20 @@ pub(super) fn task_report_text_lines(task: &task::TaskStatusView, report: &Value
         report_u64(report, "/coding/failure_count")
     ));
     lines.push(format!("coding_verification_status: {verification_status}"));
+    if let Some(phase) = report
+        .pointer("/coding/state/current_phase_hint")
+        .and_then(Value::as_str)
+    {
+        lines.push(format!("coding_current_phase_hint: {phase}"));
+    }
+    lines.push(format!(
+        "coding_checkpoint_ref_count: {}",
+        report_u64(report, "/coding/state/checkpoint_ref_count")
+    ));
+    lines.push(format!(
+        "coding_completed_side_effect_count: {}",
+        report_u64(report, "/coding/state/completed_side_effect_count")
+    ));
     lines.push(format!(
         "coding_verification_failure_kind_count: {}",
         report_u64(report, "/coding/verification_failure_kind_count")
@@ -209,6 +223,20 @@ pub(super) fn coding_review_text_lines(task: &task::TaskStatusView, review: &Val
         "coding_verification_status: {}",
         coding_verification_status(review)
     ));
+    if let Some(phase) = review
+        .pointer("/coding/state/current_phase_hint")
+        .and_then(Value::as_str)
+    {
+        lines.push(format!("coding_current_phase_hint: {phase}"));
+    }
+    lines.push(format!(
+        "coding_checkpoint_ref_count: {}",
+        report_u64(review, "/coding/state/checkpoint_ref_count")
+    ));
+    lines.push(format!(
+        "coding_completed_side_effect_count: {}",
+        report_u64(review, "/coding/state/completed_side_effect_count")
+    ));
     for path in report_string_array(review, "/coding/changed_files")
         .into_iter()
         .take(32)
@@ -280,6 +308,20 @@ pub(super) fn coding_exec_text_lines(coding: &Value) -> Vec<String> {
             report_u64(coding, "/verification_failure_kind_count")
         ),
     ];
+    if let Some(phase) = coding
+        .pointer("/state/current_phase_hint")
+        .and_then(Value::as_str)
+    {
+        lines.push(format!("coding_current_phase_hint: {phase}"));
+    }
+    lines.push(format!(
+        "coding_checkpoint_ref_count: {}",
+        report_u64(coding, "/state/checkpoint_ref_count")
+    ));
+    lines.push(format!(
+        "coding_completed_side_effect_count: {}",
+        report_u64(coding, "/state/completed_side_effect_count")
+    ));
     for path in report_string_array(coding, "/changed_files")
         .into_iter()
         .take(32)
@@ -319,6 +361,10 @@ pub(super) fn coding_verification_artifact_json(task: &task::TaskStatusView) -> 
         "execution_state": task.execution_state(),
         "lifecycle_state": task.lifecycle_state(),
         "verification_status": coding_verification_status(&report),
+        "coding_state": report
+            .pointer("/coding/state")
+            .cloned()
+            .unwrap_or(Value::Null),
         "verification_command_count": report_u64(&report, "/coding/verification_command_count"),
         "verification_commands": report_value_or_empty_array(&report, "/coding/verification_commands"),
         "test_count": report_u64(&report, "/coding/test_count"),
@@ -688,6 +734,10 @@ struct CodingReportSignals {
     verification_commands: BTreeSet<String>,
     tests: BTreeSet<String>,
     verification_failure_kinds: BTreeSet<String>,
+    checkpoint_kinds: BTreeSet<String>,
+    checkpoint_refs: BTreeSet<String>,
+    completed_side_effect_refs: BTreeSet<String>,
+    resume_entrypoints: BTreeSet<String>,
     diff_summaries: Vec<Value>,
     failures: Vec<Value>,
     retry_count: u64,
@@ -696,6 +746,7 @@ struct CodingReportSignals {
 fn coding_report_json(data: &Value) -> Value {
     let mut signals = CodingReportSignals::default();
     collect_coding_report_signals(data, &mut signals, 0);
+    let state = coding_state_json(&signals);
     let unverified_risk = if !signals.changed_files.is_empty() && signals.tests.is_empty() {
         Value::String("tests_not_observed".to_string())
     } else {
@@ -713,6 +764,7 @@ fn coding_report_json(data: &Value) -> Value {
         "tests": signals.tests.into_iter().collect::<Vec<_>>(),
         "verification_failure_kind_count": signals.verification_failure_kinds.len(),
         "verification_failure_kinds": signals.verification_failure_kinds.into_iter().collect::<Vec<_>>(),
+        "state": state,
         "diff_summary_count": signals.diff_summaries.len(),
         "diff_summaries": signals.diff_summaries,
         "failure_count": signals.failures.len(),
@@ -720,6 +772,90 @@ fn coding_report_json(data: &Value) -> Value {
         "retry_count": signals.retry_count,
         "unverified_risk": unverified_risk,
     })
+}
+
+fn coding_state_json(signals: &CodingReportSignals) -> Value {
+    let observed_phases = coding_observed_phases(signals);
+    json!({
+        "schema_version": 1,
+        "current_phase_hint": coding_current_phase_hint(signals),
+        "observed_phases": observed_phases,
+        "has_changes": !signals.changed_files.is_empty(),
+        "has_commands": !signals.commands.is_empty(),
+        "has_verification": !signals.verification_commands.is_empty(),
+        "has_tests": !signals.tests.is_empty(),
+        "has_failed_step": !signals.failures.is_empty(),
+        "has_failed_verification": !signals.verification_failure_kinds.is_empty(),
+        "repair_observed": signals.retry_count > 0
+            || (!signals.failures.is_empty() && !signals.verification_commands.is_empty()),
+        "checkpointed": !signals.checkpoint_refs.is_empty() || !signals.checkpoint_kinds.is_empty(),
+        "resumable": !signals.resume_entrypoints.is_empty() || !signals.completed_side_effect_refs.is_empty(),
+        "requires_idempotency_guard": !signals.completed_side_effect_refs.is_empty(),
+        "checkpoint_kind_count": signals.checkpoint_kinds.len(),
+        "checkpoint_kinds": signals.checkpoint_kinds.iter().cloned().collect::<Vec<_>>(),
+        "checkpoint_ref_count": signals.checkpoint_refs.len(),
+        "checkpoint_refs": signals.checkpoint_refs.iter().cloned().collect::<Vec<_>>(),
+        "completed_side_effect_count": signals.completed_side_effect_refs.len(),
+        "completed_side_effect_refs": signals
+            .completed_side_effect_refs
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        "resume_entrypoint_count": signals.resume_entrypoints.len(),
+        "resume_entrypoints": signals.resume_entrypoints.iter().cloned().collect::<Vec<_>>(),
+        "verification_status": coding_verification_status_from_signals(signals),
+    })
+}
+
+fn coding_observed_phases(signals: &CodingReportSignals) -> Vec<&'static str> {
+    let mut phases = Vec::new();
+    if !signals.commands.is_empty() || !signals.changed_files.is_empty() {
+        phases.push("inspect_or_plan");
+    }
+    if !signals.changed_files.is_empty() {
+        phases.push("edit");
+    }
+    if !signals.verification_commands.is_empty() {
+        phases.push("verify");
+    }
+    if signals.retry_count > 0 || !signals.verification_failure_kinds.is_empty() {
+        phases.push("repair");
+    }
+    if !signals.checkpoint_refs.is_empty() || !signals.checkpoint_kinds.is_empty() {
+        phases.push("checkpoint");
+    }
+    if !signals.changed_files.is_empty() || !signals.verification_commands.is_empty() {
+        phases.push("summarize");
+    }
+    phases
+}
+
+fn coding_current_phase_hint(signals: &CodingReportSignals) -> &'static str {
+    if signals.retry_count > 0 || !signals.verification_failure_kinds.is_empty() {
+        "repair"
+    } else if !signals.resume_entrypoints.is_empty() {
+        "background"
+    } else if !signals.verification_commands.is_empty() {
+        "summarize"
+    } else if !signals.changed_files.is_empty() {
+        "verify"
+    } else if !signals.commands.is_empty() {
+        "inspect"
+    } else {
+        "idle"
+    }
+}
+
+fn coding_verification_status_from_signals(signals: &CodingReportSignals) -> &'static str {
+    if !signals.failures.is_empty() {
+        "failed"
+    } else if !signals.verification_commands.is_empty() {
+        "verified"
+    } else if !signals.changed_files.is_empty() {
+        "unverified"
+    } else {
+        "not_applicable"
+    }
 }
 
 fn collect_coding_report_signals(value: &Value, signals: &mut CodingReportSignals, depth: usize) {
@@ -734,6 +870,7 @@ fn collect_coding_report_signals(value: &Value, signals: &mut CodingReportSignal
             collect_verification_failure_kind_fields(map, signals);
             collect_failure_fields(map, signals);
             collect_retry_fields(map, signals);
+            collect_coding_checkpoint_fields(map, signals);
             for value in map.values() {
                 collect_coding_report_signals(value, signals, depth + 1);
             }
@@ -745,6 +882,20 @@ fn collect_coding_report_signals(value: &Value, signals: &mut CodingReportSignal
         }
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
     }
+}
+
+fn collect_coding_checkpoint_fields(map: &Map<String, Value>, signals: &mut CodingReportSignals) {
+    collect_string_tokens(map.get("checkpoint_kind"), &mut signals.checkpoint_kinds);
+    collect_string_tokens(map.get("checkpoint_ref"), &mut signals.checkpoint_refs);
+    collect_string_tokens(map.get("evidence_ref"), &mut signals.checkpoint_refs);
+    collect_string_tokens(
+        map.get("completed_side_effect_refs"),
+        &mut signals.completed_side_effect_refs,
+    );
+    collect_string_tokens(
+        map.get("resume_entrypoint"),
+        &mut signals.resume_entrypoints,
+    );
 }
 
 fn collect_changed_file_fields(map: &Map<String, Value>, signals: &mut CodingReportSignals) {

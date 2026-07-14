@@ -56,7 +56,7 @@ Artifact files:
 | `summary.json` | Stable exec summary with `task_id`, status, lifecycle, exit class, event summary, LLM prompt/call attribution, coding evidence, `effective_config`, `resume_hint`, and artifact refs. |
 | `task.json` | Full task query payload returned by `GET /v1/tasks/{task_id}`. |
 | `events.jsonl` | Raw task event lines for later filtering or replay export. |
-| `verification.json` | Machine-readable coding verification summary: commands, tests, failure-kind tokens, verification status, and residual unverified risk. |
+| `verification.json` | Machine-readable coding verification summary: commands, tests, failure-kind tokens, verification status, coding state, checkpoint/resume evidence, and residual unverified risk. |
 | `diff_summary.json` | Machine-readable coding change summary: changed files and bounded diff summary fields collected from task evidence. |
 | `llm_summary.json` | Machine-readable provider-call summary: LLM call count, prompt buckets, prompt bytes, truncation count, retries, elapsed time, and per-prompt attribution. |
 | `resume.json` | Stable recovery fields such as `task_id`, `checkpoint_id`, `resume_due`, `poll_ref`, `next_poll_after`, `recommended_command_tokens`, coding evidence, completed side-effect refs, and idempotency guard state. |
