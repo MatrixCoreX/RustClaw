@@ -85,21 +85,6 @@ fn base_route_result() -> crate::RouteResult {
     }
 }
 
-fn local_workspace_core_scope() -> BTreeSet<String> {
-    BTreeSet::from([
-        "archive_basic".to_string(),
-        "config_basic".to_string(),
-        "db_basic".to_string(),
-        "doc_parse".to_string(),
-        "fs_basic".to_string(),
-        "git_basic".to_string(),
-        "package_manager".to_string(),
-        "process_basic".to_string(),
-        "run_cmd".to_string(),
-        "system_basic".to_string(),
-    ])
-}
-
 #[test]
 fn lightweight_scope_uses_local_data_skills_for_bounded_multi_locator_boundary() {
     let mut route = base_route_result();
@@ -119,7 +104,7 @@ fn lightweight_scope_uses_local_data_skills_for_bounded_multi_locator_boundary()
 }
 
 #[test]
-fn executable_agent_loop_boundary_uses_local_workspace_core_scope() {
+fn executable_agent_loop_boundary_leaves_lightweight_skill_scope_open() {
     let mut route = base_route_result();
     route.route_reason = "executionless_finalize_trace_plain; executable_contract_preserved_for_agent_loop; auto_locator_suppressed_multiple_explicit_paths".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
@@ -127,13 +112,13 @@ fn executable_agent_loop_boundary_uses_local_workspace_core_scope() {
 
     assert_eq!(
         contract_scoped_lightweight_planner_skill_scope(Some(&route)),
-        Some(local_workspace_core_scope()),
-        "executable agent-loop boundaries keep planner authority but use a compact local execution tool surface"
+        None,
+        "executable agent-loop boundaries leave ordinary capability choice inside the planner loop"
     );
 }
 
 #[test]
-fn executable_agent_loop_boundary_keeps_open_planning_scope_open_but_scopes_lightweight() {
+fn executable_agent_loop_boundary_keeps_open_and_lightweight_planning_scope_open() {
     let mut route = base_route_result();
     route.route_reason = "current_workspace_generic_contract_deferred_to_agent_loop; executable_contract_preserved_for_agent_loop".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
@@ -150,7 +135,7 @@ fn executable_agent_loop_boundary_keeps_open_planning_scope_open_but_scopes_ligh
     );
     assert_eq!(
         contract_scoped_lightweight_planner_skill_scope(Some(&route)),
-        Some(local_workspace_core_scope())
+        None
     );
 }
 
@@ -248,8 +233,8 @@ fn local_workspace_execution_uses_lightweight_prompt_without_semantic_skill_scop
     );
     assert_eq!(
         contract_scoped_lightweight_planner_skill_scope(Some(&route)),
-        Some(local_workspace_core_scope()),
-        "local execution stays planner-owned while the prompt tool surface is scoped to local workspace execution"
+        None,
+        "local execution stays planner-owned and keeps ordinary capability choice inside the planner loop"
     );
 }
 
@@ -274,7 +259,7 @@ fn local_workspace_execution_with_delivery_noise_uses_lightweight_prompt_without
     );
     assert_eq!(
         contract_scoped_lightweight_planner_skill_scope(Some(&route)),
-        Some(local_workspace_core_scope()),
-        "delivery repair noise should not reopen the full skill catalog for local workspace execution"
+        None,
+        "delivery repair noise must not reintroduce pre-planner semantic skill whitelists"
     );
 }
