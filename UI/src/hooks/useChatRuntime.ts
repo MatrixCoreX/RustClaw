@@ -132,7 +132,6 @@ export function useChatRuntime({
     createChatThread(t);
   const chatMessages = activeChatThread.messages;
   const chatInput = activeChatThread.input;
-  const chatAgentMode = activeChatThread.agentMode;
   const chatTeachingMode = activeChatThread.teachingMode;
   const activeTeachingRun = selectedTeachingRun(activeChatThread);
   const chatTeachingTaskResult = activeTeachingRun
@@ -197,14 +196,6 @@ export function useChatRuntime({
   const setChatInput = (value: string) => {
     chatInputValueRef.current = value;
     updateActiveChatThread((thread) => ({ ...thread, input: value, updatedAt: Date.now() }));
-  };
-
-  const setChatAgentMode = (value: boolean) => {
-    updateActiveChatThread((thread) => ({
-      ...thread,
-      agentMode: value,
-      updatedAt: Date.now(),
-    }));
   };
 
   const setChatTeachingMode = (value: boolean) => {
@@ -601,7 +592,7 @@ export function useChatRuntime({
         ...(effectiveExternalChatId ? { external_chat_id: effectiveExternalChatId } : {}),
         payload: {
           text: requestText,
-          agent_mode: threadAtSubmit.agentMode,
+          agent_mode: true,
           ...(audioOnly ? { source: "voice" } : {}),
           ...(adapterName ? { adapter: adapterName } : {}),
           ...(attached.length > 0
@@ -780,7 +771,6 @@ export function useChatRuntime({
     chatMessages,
     chatInput,
     chatAttachments,
-    chatAgentMode,
     chatTeachingMode,
     chatTeachingTaskResult,
     chatTeachingLlmDebug,
@@ -793,7 +783,6 @@ export function useChatRuntime({
     chatVoiceRecordingSupported,
     chatError,
     chatAttachmentInputRef,
-    setChatAgentMode,
     setChatTeachingMode,
     selectChatTeachingRun,
     clearChatMessages,

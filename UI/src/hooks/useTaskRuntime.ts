@@ -73,7 +73,6 @@ export function useTaskRuntime({
   const [interactionExternalChatId, setInteractionExternalChatId] = useState("");
   const [interactionAdapter, setInteractionAdapter] = useState("");
   const [interactionAskText, setInteractionAskText] = useState("你好，请汇报当前系统状态");
-  const [interactionAgentMode, setInteractionAgentMode] = useState(false);
   const [interactionSkillName, setInteractionSkillName] = useState("health_check");
   const [interactionSkillArgs, setInteractionSkillArgs] = useState("{\"target\":\"self\"}");
   const [interactionLoading, setInteractionLoading] = useState(false);
@@ -398,7 +397,7 @@ export function useTaskRuntime({
       if (interactionKind === "ask") {
         payload = {
           text: interactionAskText.trim(),
-          agent_mode: interactionAgentMode,
+          agent_mode: true,
         };
       } else {
         let parsedArgs: unknown = interactionSkillArgs;
@@ -523,8 +522,6 @@ export function useTaskRuntime({
     setInteractionAdapter,
     interactionAskText,
     setInteractionAskText,
-    interactionAgentMode,
-    setInteractionAgentMode,
     interactionSkillName,
     setInteractionSkillName,
     interactionSkillArgs,

@@ -535,8 +535,6 @@ export default function App() {
     setInteractionAdapter,
     interactionAskText,
     setInteractionAskText,
-    interactionAgentMode,
-    setInteractionAgentMode,
     interactionSkillName,
     setInteractionSkillName,
     interactionSkillArgs,
@@ -574,7 +572,6 @@ export default function App() {
     activeChatThreadId,
     chatInput,
     chatAttachments,
-    chatAgentMode,
     chatTeachingMode,
     chatTeachingTaskResult,
     chatTeachingLlmDebug,
@@ -587,7 +584,6 @@ export default function App() {
     chatVoiceRecordingSupported,
     chatError,
     chatAttachmentInputRef,
-    setChatAgentMode,
     setChatTeachingMode,
     selectChatTeachingRun,
     createNewChatThread,
@@ -1346,7 +1342,6 @@ export default function App() {
               activeChatThreadId={activeChatThreadId}
               chatInput={chatInput}
               chatAttachments={chatAttachments}
-              chatAgentMode={chatAgentMode}
               chatTeachingMode={chatTeachingMode}
               chatTeachingTaskResult={chatTeachingTaskResult}
               chatTeachingLlmDebug={chatTeachingLlmDebug}
@@ -1360,7 +1355,6 @@ export default function App() {
               chatError={chatError}
               chatAttachmentInputRef={chatAttachmentInputRef}
               toLocalTime={toLocalTime}
-              onChatAgentModeChange={setChatAgentMode}
               onChatTeachingModeChange={setChatTeachingMode}
               onSelectChatTeachingRun={selectChatTeachingRun}
               onCreateNewChatThread={createNewChatThread}
@@ -1695,7 +1689,6 @@ export default function App() {
               localContextLoading={localContextLoading}
               localContextError={localContextError}
               interactionAskText={interactionAskText}
-              interactionAgentMode={interactionAgentMode}
               interactionSkillName={interactionSkillName}
               interactionSkillArgs={interactionSkillArgs}
               interactionLoading={interactionLoading}
@@ -1708,7 +1701,6 @@ export default function App() {
               onInteractionExternalUserIdChange={setInteractionExternalUserId}
               onInteractionExternalChatIdChange={setInteractionExternalChatId}
               onInteractionAskTextChange={setInteractionAskText}
-              onInteractionAgentModeChange={setInteractionAgentMode}
               onInteractionSkillNameChange={setInteractionSkillName}
               onInteractionSkillArgsChange={setInteractionSkillArgs}
               onSubmitInteractionTask={submitInteractionTask}

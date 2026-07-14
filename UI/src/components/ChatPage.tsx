@@ -60,7 +60,6 @@ export interface ChatPageProps {
   activeChatThreadId: string;
   chatInput: string;
   chatAttachments: ChatAttachment[];
-  chatAgentMode: boolean;
   chatTeachingMode: boolean;
   chatTeachingTaskResult: TaskQueryResponse | null;
   chatTeachingLlmDebug: TaskLlmDebugResponse | null;
@@ -74,7 +73,6 @@ export interface ChatPageProps {
   chatError: string | null;
   chatAttachmentInputRef: RefObject<HTMLInputElement | null>;
   toLocalTime: (value: number | null | undefined) => string;
-  onChatAgentModeChange: (value: boolean) => void;
   onChatTeachingModeChange: (value: boolean) => void;
   onSelectChatTeachingRun: (runId: string) => void;
   onCreateNewChatThread: () => void;
@@ -99,7 +97,6 @@ export function ChatPage({
   activeChatThreadId,
   chatInput,
   chatAttachments,
-  chatAgentMode,
   chatTeachingMode,
   chatTeachingTaskResult,
   chatTeachingLlmDebug,
@@ -113,7 +110,6 @@ export function ChatPage({
   chatError,
   chatAttachmentInputRef,
   toLocalTime,
-  onChatAgentModeChange,
   onChatTeachingModeChange,
   onSelectChatTeachingRun,
   onCreateNewChatThread,
@@ -139,7 +135,6 @@ export function ChatPage({
         thread.preview,
         thread.taskId ?? "",
         thread.taskStatus ?? "",
-        thread.agentMode ? "agent" : "",
         thread.teachingMode ? "teaching" : "",
       ]
         .join(" ")
@@ -213,11 +208,6 @@ export function ChatPage({
                         {chatStatusLabel(thread.taskStatus, t)}
                       </span>
                     ) : null}
-                    {thread.agentMode ? (
-                      <span className="rounded-full border border-white/10 px-1.5 py-0.5">
-                        {t("自动执行", "Agent")}
-                      </span>
-                    ) : null}
                     {thread.teachingMode ? (
                       <span className="rounded-full border border-white/10 px-1.5 py-0.5">
                         {t("教学", "Teach")}
@@ -253,10 +243,6 @@ export function ChatPage({
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-base font-semibold">{t("和 RustClaw 对话", "Chat with RustClaw")}</h3>
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <label className="inline-flex items-center gap-2 text-white/80">
-            <input type="checkbox" checked={chatAgentMode} onChange={(event) => onChatAgentModeChange(event.target.checked)} />
-            agent_mode
-          </label>
           <label className="inline-flex items-center gap-2 text-white/80">
             <input
               type="checkbox"
