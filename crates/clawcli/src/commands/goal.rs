@@ -66,6 +66,44 @@ pub(crate) fn run_goal_status(
     Ok(())
 }
 
+pub(crate) fn run_goal_pause(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    pause_seconds: u64,
+) -> Result<()> {
+    let body = task::pause_task_by_id(base_url, key, task_id, pause_seconds)?;
+    output::print_json_pretty(&goal_control_summary_json("goal_pause", task_id, &body));
+    Ok(())
+}
+
+pub(crate) fn run_goal_resume(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    checkpoint_id: Option<&str>,
+    user_message: Option<&str>,
+    constraints_json: Option<&str>,
+) -> Result<()> {
+    let new_constraints = constraints_json
+        .map(|raw| serde_json::from_str::<Value>(raw))
+        .transpose()
+        .map_err(|err| {
+            anyhow::anyhow!("{}={}", "goal_resume_constraints_json_parse_failed", err)
+        })?;
+    let body = task::resume_task_by_id(
+        base_url,
+        key,
+        task_id,
+        checkpoint_id,
+        Some("goal_resume"),
+        user_message,
+        new_constraints,
+    )?;
+    output::print_json_pretty(&goal_control_summary_json("goal_resume", task_id, &body));
+    Ok(())
+}
+
 pub(super) fn goal_request_payload(
     prompt: &str,
     objective: Option<&str>,
@@ -154,6 +192,35 @@ pub(super) fn goal_status_text_lines(summary: &Value) -> Vec<String> {
     lines
 }
 
+pub(super) fn goal_control_summary_json(
+    operation: &str,
+    requested_task_id: &str,
+    body: &Value,
+) -> Value {
+    let data = body.get("data").unwrap_or(body);
+    let lifecycle = data
+        .get("task_lifecycle")
+        .or_else(|| data.get("lifecycle"))
+        .unwrap_or(&Value::Null);
+    json!({
+        "schema_version": 1,
+        "operation": operation,
+        "task_id": scalar_string(data, "task_id").unwrap_or(requested_task_id),
+        "status": scalar_string(data, "status"),
+        "checkpoint_id": scalar_string(data, "checkpoint_id")
+            .or_else(|| scalar_string(lifecycle, "checkpoint_id")),
+        "lifecycle_state": scalar_string(lifecycle, "state"),
+        "execution_state": scalar_string(lifecycle, "execution_state"),
+        "resume_due": lifecycle.get("resume_due").and_then(Value::as_bool),
+        "resume_wait_seconds": lifecycle.get("resume_wait_seconds").and_then(Value::as_i64),
+        "resume_entrypoint": scalar_string(lifecycle, "resume_entrypoint"),
+        "resume_directive": scalar_string(lifecycle, "resume_directive"),
+        "resume_reason": scalar_string(lifecycle, "resume_reason"),
+        "next_action_kind": scalar_string(lifecycle, "next_action_kind"),
+        "response": body,
+    })
+}
+
 fn insert_string_array(map: &mut serde_json::Map<String, Value>, key: &str, values: &[String]) {
     let values = values
         .iter()
@@ -184,4 +251,12 @@ fn push_scalar_line(lines: &mut Vec<String>, key: &str, value: Option<&Value>) {
 fn push_array_count_line(lines: &mut Vec<String>, key: &str, value: Option<&Value>) {
     let count = value.and_then(Value::as_array).map_or(0, Vec::len);
     lines.push(format!("{key}: {count}"));
+}
+
+fn scalar_string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }

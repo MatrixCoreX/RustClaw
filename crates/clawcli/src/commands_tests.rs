@@ -1,12 +1,13 @@
 use super::{
     automation_runs_request_payload, coding_review_json, exec_artifact_index_json,
     exec_compact_text_lines, exec_effective_options, exec_exit_class,
-    exec_failure_class_from_machine_tokens, exec_summary_json, goal_request_payload,
-    goal_status_summary_json, goal_status_text_lines, llm_trace_text_lines, permission_report_json,
-    run_exec, subagent_report_json, task_event_output_lines, task_report_json,
-    task_report_text_lines, task_resume_control_summary_json, tui_command_from_input,
-    tui_export_json, tui_selected_task_lines, tui_snapshot_json, wait_until_matches,
-    watch_progress_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome, TuiCommand,
+    exec_failure_class_from_machine_tokens, exec_summary_json, goal_control_summary_json,
+    goal_request_payload, goal_status_summary_json, goal_status_text_lines, llm_trace_text_lines,
+    permission_report_json, run_exec, subagent_report_json, task_event_output_lines,
+    task_report_json, task_report_text_lines, task_resume_control_summary_json,
+    tui_command_from_input, tui_export_json, tui_selected_task_lines, tui_snapshot_json,
+    wait_until_matches, watch_progress_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
+    TuiCommand,
 };
 
 #[test]
@@ -1762,6 +1763,43 @@ fn goal_status_summary_and_text_lines_use_goal_projection() {
     assert!(lines.contains(&"goal_done_condition_count: 1".to_string()));
     assert!(lines.contains(&"goal_verification_command_count: 1".to_string()));
     assert!(lines.contains(&"goal_current_progress_count: 1".to_string()));
+}
+
+#[test]
+fn goal_control_summary_json_extracts_resume_machine_fields() {
+    let body = serde_json::json!({
+        "data": {
+            "task_id": "task-goal-control",
+            "status": "task_resume_requested",
+            "task_lifecycle": {
+                "state": "background",
+                "execution_state": "background",
+                "checkpoint_id": "ckpt-goal",
+                "resume_due": true,
+                "resume_wait_seconds": 0,
+                "resume_entrypoint": "next_planner_round",
+                "resume_directive": "run_next_planner_round",
+                "resume_reason": "goal_resume",
+                "next_action_kind": "resume_checkpoint"
+            }
+        }
+    });
+
+    let summary = goal_control_summary_json("goal_resume", "task-requested", &body);
+
+    assert_eq!(summary["schema_version"], 1);
+    assert_eq!(summary["operation"], "goal_resume");
+    assert_eq!(summary["task_id"], "task-goal-control");
+    assert_eq!(summary["status"], "task_resume_requested");
+    assert_eq!(summary["checkpoint_id"], "ckpt-goal");
+    assert_eq!(summary["lifecycle_state"], "background");
+    assert_eq!(summary["execution_state"], "background");
+    assert_eq!(summary["resume_due"], true);
+    assert_eq!(summary["resume_wait_seconds"], 0);
+    assert_eq!(summary["resume_entrypoint"], "next_planner_round");
+    assert_eq!(summary["resume_directive"], "run_next_planner_round");
+    assert_eq!(summary["resume_reason"], "goal_resume");
+    assert_eq!(summary["next_action_kind"], "resume_checkpoint");
 }
 
 fn unique_suffix() -> u128 {

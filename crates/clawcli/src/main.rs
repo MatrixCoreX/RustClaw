@@ -435,6 +435,22 @@ enum GoalCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Pause a goal task through the existing checkpoint pause control.
+    Pause {
+        task_id: String,
+        #[arg(long, default_value_t = 3600)]
+        pause_seconds: u64,
+    },
+    /// Resume a goal task through the existing checkpoint resume control.
+    Resume {
+        task_id: String,
+        #[arg(long = "checkpoint-id")]
+        checkpoint_id: Option<String>,
+        #[arg(long = "message")]
+        user_message: Option<String>,
+        #[arg(long = "constraints-json")]
+        constraints_json: Option<String>,
+    },
 }
 
 impl WaitUntil {
@@ -633,6 +649,29 @@ fn main() -> Result<()> {
             GoalCommand::Status { task_id, json } => {
                 let k = key.as_deref().ok_or_else(auth::key_required_error)?;
                 commands::run_goal_status(base_url, k, task_id, *json)
+            }
+            GoalCommand::Pause {
+                task_id,
+                pause_seconds,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_goal_pause(base_url, k, task_id, *pause_seconds)
+            }
+            GoalCommand::Resume {
+                task_id,
+                checkpoint_id,
+                user_message,
+                constraints_json,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_goal_resume(
+                    base_url,
+                    k,
+                    task_id,
+                    checkpoint_id.as_deref(),
+                    user_message.as_deref(),
+                    constraints_json.as_deref(),
+                )
             }
         },
         Command::RunSkill {
@@ -1075,7 +1114,7 @@ mod tests {
             .get_subcommands()
             .map(|subcommand| subcommand.get_name().to_string())
             .collect::<std::collections::BTreeSet<_>>();
-        for required in ["start", "status"] {
+        for required in ["start", "status", "pause", "resume"] {
             assert!(goal_names.contains(required), "missing {required}");
         }
 
