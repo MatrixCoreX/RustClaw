@@ -228,6 +228,8 @@ pub struct TaskQueryResponse {
     pub status: TaskStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_state: Option<TaskExecutionState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<Value>,
     pub result_json: Option<Value>,
     pub error_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

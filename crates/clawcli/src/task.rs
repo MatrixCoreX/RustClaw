@@ -158,6 +158,14 @@ pub(crate) fn submit_resume_ask(
     )
 }
 
+pub(crate) fn submit_goal_ask(
+    base_url: &str,
+    key: &str,
+    payload: serde_json::Value,
+) -> Result<String> {
+    submit_ask_with_payload(base_url, key, payload)
+}
+
 pub(crate) fn submit_run_skill(
     base_url: &str,
     key: &str,

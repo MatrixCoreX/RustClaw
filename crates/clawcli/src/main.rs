@@ -108,6 +108,12 @@ enum Command {
         print_effective_config: bool,
     },
 
+    /// Submit and inspect tasks with structured goal metadata.
+    Goal {
+        #[command(subcommand)]
+        command: GoalCommand,
+    },
+
     /// POST /v1/tasks with kind=run_skill.
     RunSkill {
         skill_name: String,
@@ -400,6 +406,37 @@ enum PermissionCommand {
     },
 }
 
+#[derive(Subcommand)]
+enum GoalCommand {
+    /// Submit an ask task with a structured goal contract.
+    Start {
+        #[arg(required = true, num_args = 1.., trailing_var_arg = true)]
+        prompt: Vec<String>,
+        #[arg(long)]
+        objective: Option<String>,
+        #[arg(long = "done")]
+        done_conditions: Vec<String>,
+        #[arg(long = "verify")]
+        verification_commands: Vec<String>,
+        #[arg(long = "constraint")]
+        constraints: Vec<String>,
+        #[arg(long)]
+        wait: bool,
+        #[arg(long)]
+        detach: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long, default_value_t = 1000)]
+        interval_ms: u64,
+    },
+    /// Print the structured goal projection for a task.
+    Status {
+        task_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 impl WaitUntil {
     fn as_str(self) -> &'static str {
         match self {
@@ -565,6 +602,39 @@ fn main() -> Result<()> {
                 *print_effective_config,
             )
         }
+        Command::Goal { command } => match command {
+            GoalCommand::Start {
+                prompt,
+                objective,
+                done_conditions,
+                verification_commands,
+                constraints,
+                wait,
+                detach,
+                json,
+                interval_ms,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                let prompt = prompt.join(" ");
+                commands::run_goal_start(
+                    base_url,
+                    k,
+                    &prompt,
+                    objective.as_deref(),
+                    done_conditions,
+                    verification_commands,
+                    constraints,
+                    *wait,
+                    *detach,
+                    *json,
+                    *interval_ms,
+                )
+            }
+            GoalCommand::Status { task_id, json } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_goal_status(base_url, k, task_id, *json)
+            }
+        },
         Command::RunSkill {
             skill_name,
             args_json,
@@ -971,6 +1041,7 @@ mod tests {
             "submit",
             "exec",
             "code",
+            "goal",
             "get",
             "watch",
             "events",
@@ -997,6 +1068,15 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
         for required in ["inspect", "explain", "capability"] {
             assert!(permission_names.contains(required), "missing {required}");
+        }
+
+        let goal = cmd.find_subcommand("goal").expect("goal command");
+        let goal_names = goal
+            .get_subcommands()
+            .map(|subcommand| subcommand.get_name().to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        for required in ["start", "status"] {
+            assert!(goal_names.contains(required), "missing {required}");
         }
 
         let replay = cmd.find_subcommand("replay").expect("replay command");

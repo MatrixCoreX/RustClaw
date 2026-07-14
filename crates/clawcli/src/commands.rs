@@ -2,6 +2,7 @@
 
 mod common;
 mod exec;
+mod goal;
 mod health;
 mod llm_trace;
 mod permission;
@@ -16,6 +17,7 @@ mod task_query;
 mod tui;
 
 pub(crate) use exec::run_exec;
+pub(crate) use goal::{run_goal_start, run_goal_status};
 pub(crate) use health::run_health;
 pub(crate) use llm_trace::run_llm_trace;
 pub(crate) use permission::{
@@ -39,6 +41,8 @@ use exec::{
     exec_failure_class_from_machine_tokens, exec_summary_json, write_exec_artifacts, ExecExitClass,
     ExecWaitOutcome,
 };
+#[cfg(test)]
+use goal::{goal_request_payload, goal_status_summary_json, goal_status_text_lines};
 #[cfg(test)]
 use llm_trace::llm_trace_text_lines;
 #[cfg(test)]
