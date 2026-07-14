@@ -1,6 +1,11 @@
-import { Database, Loader2, RefreshCw } from "lucide-react";
+import { Database, Loader2, RefreshCw, Workflow } from "lucide-react";
 
-import { flowStageMachineTokens, flowSummaryMachineTokens } from "../lib/task-llm-trace";
+import {
+  agentFlowTimelineRows,
+  flowStageMachineTokens,
+  flowSummaryMachineTokens,
+  type AgentFlowTimelineRow,
+} from "../lib/task-llm-trace";
 import type { TaskLlmDebugCall, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
 
 type Translate = (zh: string, en: string) => string;
@@ -85,6 +90,40 @@ function flowMeta(call: TaskLlmDebugCall): string[] {
   ].filter((item): item is string => Boolean(item));
 }
 
+function phaseLabel(phaseToken: string, t: Translate): string {
+  const labels: Record<string, string> = {
+    boundary: t("边界解析", "Boundary"),
+    memory: t("记忆上下文", "Memory"),
+    planner: t("规划决策", "Planner"),
+    repair: t("循环修复", "Recovery"),
+    tool: t("工具意图", "Tool intent"),
+    observed_synthesis: t("观测合成", "Observed synthesis"),
+    answer_verifier: t("答案验证", "Answer verifier"),
+    finalizer: t("最终表达", "Finalizer"),
+    scheduler: t("定时任务", "Scheduler"),
+    policy: t("策略判断", "Policy"),
+    provider: t("模型调用", "Provider"),
+  };
+  return labels[phaseToken] ?? labels.provider;
+}
+
+function timelineMachineTokens(row: AgentFlowTimelineRow): string[] {
+  const counterTokens = (prefix: string, counters: Record<string, number>) =>
+    Object.entries(counters)
+      .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+      .slice(0, 2)
+      .map(([key, value]) => `${prefix}=${key}:${value}`);
+  return [
+    `stage_order=${row.stageOrder}`,
+    `flow_stage=${row.flowStage}`,
+    `call_count=${row.callCount}`,
+    row.callIndexes.length > 0 ? `llm_calls=${row.callIndexes.join(",")}` : null,
+    row.providerErrorCount > 0 ? `provider_error_count=${row.providerErrorCount}` : null,
+    ...counterTokens("status", row.statusCounts),
+    ...counterTokens("trigger", row.triggerCounts),
+  ].filter((item): item is string => Boolean(item));
+}
+
 function memoryTraceMeta(memoryTrace: unknown): string[] {
   if (!memoryTrace || typeof memoryTrace !== "object") return [];
   const record = memoryTrace as Record<string, unknown>;
@@ -137,6 +176,7 @@ export function TaskLlmTracePanel({
       ? taskLlmDebug.calls
       : taskLlmDebug?.entries ?? [];
   const callCount = taskLlmDebug?.call_count ?? calls.length;
+  const timelineRows = agentFlowTimelineRows(taskLlmDebug);
 
   return (
     <div className="mt-4 rounded-xl border border-white/10 bg-[#12151f] p-3">
@@ -187,6 +227,47 @@ export function TaskLlmTracePanel({
                   </span>
                 ))}
               </div>
+              {timelineRows.length > 0 ? (
+                <div className="mt-3 border-t border-white/10 pt-3">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-medium text-sky-100">
+                    <Workflow className="h-3.5 w-3.5" />
+                    {t("Agent 过程时间线", "Agent process timeline")}
+                  </div>
+                  <div className="overflow-hidden rounded-md border border-white/10">
+                    {timelineRows.map((row, index) => (
+                      <div
+                        key={row.flowStage}
+                        className={
+                          index === 0
+                            ? "grid gap-2 bg-black/15 px-3 py-2 text-[11px] md:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1.2fr)]"
+                            : "grid gap-2 border-t border-white/10 bg-black/15 px-3 py-2 text-[11px] md:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1.2fr)]"
+                        }
+                      >
+                        <div className="font-medium text-sky-100">
+                          {phaseLabel(row.phaseToken, t)}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap gap-1.5">
+                            {timelineMachineTokens(row).map((item) => (
+                              <span key={item} className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-white/60">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="min-w-0 font-mono text-white/55">
+                          <div className="truncate" title={row.codeModules[0] ?? "--"}>
+                            module={row.codeModules[0] ?? "--"}
+                          </div>
+                          <div className="truncate" title={row.codeEntrypoints[0] ?? "--"}>
+                            entrypoint={row.codeEntrypoints[0] ?? "--"}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {taskLlmDebug.flow_summary.stages.length > 0 ? (
                 <div className="mt-3 grid gap-2 lg:grid-cols-2">
                   {taskLlmDebug.flow_summary.stages.map((stage) => (

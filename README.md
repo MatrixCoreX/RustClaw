@@ -351,7 +351,7 @@ Recent records with safety flags are hidden by default in the UI. Fact-card deta
 
 ### Trace And Troubleshooting
 
-Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content. The browser teaching-mode trace and `/v1/debug/tasks/{task_id}` also show a compact `flow_summary` above numbered LLM calls, with stage/module/retry/verifier/finalizer/provider-error machine counts and the structured memory/KB policy next to raw request/response details.
+Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content. The browser teaching-mode trace and `/v1/debug/tasks/{task_id}` also show a compact `flow_summary` above numbered LLM calls, with stage/module/retry/verifier/finalizer/provider-error machine counts and the structured memory/KB policy next to raw request/response details. In teaching mode, the selected chat turn shows its task id, status, LLM call count, stage count, verifier/finalizer counts, and an agent-process timeline derived from `flow_stage`, `flow_node`, `code_module`, `code_entrypoint`, and call indexes.
 
 When debugging memory behavior, check these questions in order:
 

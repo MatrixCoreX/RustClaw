@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { flowStageMachineTokens, flowSummaryMachineTokens } from "./task-llm-trace";
+import {
+  agentFlowPhaseToken,
+  agentFlowTimelineRows,
+  flowStageMachineTokens,
+  flowSummaryMachineTokens,
+} from "./task-llm-trace";
 
 test("builds task flow summary machine tokens", () => {
   const tokens = flowSummaryMachineTokens({
@@ -52,4 +57,95 @@ test("builds stage-level flow machine tokens", () => {
   ]);
   assert.ok(tokens.includes("flow_node=planner_round"));
   assert.ok(tokens.includes("trigger=json_retry:1"));
+});
+
+test("builds classroom timeline rows in agent-loop order", () => {
+  const rows = agentFlowTimelineRows({
+    task_id: "task-1",
+    flow_summary: {
+      call_count: 4,
+      stage_count: 4,
+      retry_count: 0,
+      verifier_call_count: 1,
+      finalizer_call_count: 1,
+      provider_error_count: 0,
+      modules: [],
+      status_counts: {},
+      trigger_counts: {},
+      stages: [
+        {
+          flow_stage: "finalizer.response_composer",
+          call_count: 1,
+          prompt_labels: ["user_response_composer"],
+          flow_nodes: ["user_response_composer"],
+          code_modules: ["crates/clawd/src/fallback.rs"],
+          code_entrypoints: ["compose_user_response_from_contract_impl"],
+          trigger_counts: { normal: 1 },
+          status_counts: { ok: 1 },
+          provider_error_count: 0,
+        },
+        {
+          flow_stage: "agent_loop.planner",
+          call_count: 1,
+          prompt_labels: ["plan"],
+          flow_nodes: ["planner_round"],
+          code_modules: ["crates/clawd/src/agent_engine/planning.rs"],
+          code_entrypoints: ["plan_round_actions"],
+          trigger_counts: { normal: 1 },
+          status_counts: { ok: 1 },
+          provider_error_count: 0,
+        },
+        {
+          flow_stage: "boundary.normalizer",
+          call_count: 1,
+          prompt_labels: ["normalizer"],
+          flow_nodes: ["intent_normalizer"],
+          code_modules: ["crates/clawd/src/intent_router_normalizer_model.rs"],
+          code_entrypoints: ["run_intent_normalizer_model_step"],
+          trigger_counts: { normal: 1 },
+          status_counts: { ok: 1 },
+          provider_error_count: 0,
+        },
+        {
+          flow_stage: "agent_loop.answer_verifier",
+          call_count: 1,
+          prompt_labels: ["verifier"],
+          flow_nodes: ["answer_verifier"],
+          code_modules: ["crates/clawd/src/answer_verifier_runtime.rs"],
+          code_entrypoints: ["verify_answer_observe_only"],
+          trigger_counts: { normal: 1 },
+          status_counts: { ok: 1 },
+          provider_error_count: 0,
+        },
+      ],
+    },
+    calls: [
+      { call_index: 1, flow: { flow_stage: "boundary.normalizer" } },
+      { call_index: 2, flow: { flow_stage: "agent_loop.planner" } },
+      { call_index: 3, flow: { flow_stage: "agent_loop.answer_verifier" } },
+      { call_index: 4, flow: { flow_stage: "finalizer.response_composer" } },
+    ],
+  });
+
+  assert.deepEqual(
+    rows.map((row) => row.flowStage),
+    [
+      "boundary.normalizer",
+      "agent_loop.planner",
+      "agent_loop.answer_verifier",
+      "finalizer.response_composer",
+    ],
+  );
+  assert.deepEqual(rows.map((row) => row.callIndexes), [[1], [2], [3], [4]]);
+  assert.deepEqual(rows.map((row) => row.phaseToken), [
+    "boundary",
+    "planner",
+    "answer_verifier",
+    "finalizer",
+  ]);
+});
+
+test("classifies unknown flow stages as provider fallback phase", () => {
+  assert.equal(agentFlowPhaseToken("provider.llm_call"), "provider");
+  assert.equal(agentFlowPhaseToken("custom.future_stage"), "provider");
 });
