@@ -116,6 +116,61 @@ function memoryTraceMeta(memoryTrace: unknown): string[] {
   ].filter((item): item is string => Boolean(item));
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function taskJournalSummary(result: TaskQueryResponse): Record<string, unknown> | null {
+  const resultJson = asRecord(result.result_json);
+  const journal = asRecord(resultJson?.task_journal);
+  return asRecord(journal?.summary);
+}
+
+function contextBudgetReport(result: TaskQueryResponse): Record<string, unknown> | null {
+  return asRecord(taskJournalSummary(result)?.context_budget_report);
+}
+
+function transcriptCompactionRecords(result: TaskQueryResponse): unknown[] {
+  const records = taskJournalSummary(result)?.transcript_compaction_records;
+  return Array.isArray(records) ? records : [];
+}
+
+function contextBudgetMeta(report: Record<string, unknown> | null): string[] {
+  if (!report) return [];
+  return [
+    compactMetaValue(report.budget_tier as string | number | null | undefined)
+      ? `budget_tier=${report.budget_tier}`
+      : null,
+    compactMetaValue(report.included_ref_count as string | number | null | undefined)
+      ? `included_ref_count=${report.included_ref_count}`
+      : null,
+    compactMetaValue(report.excluded_ref_count as string | number | null | undefined)
+      ? `excluded_ref_count=${report.excluded_ref_count}`
+      : null,
+    compactMetaValue(report.token_estimate as string | number | null | undefined)
+      ? `token_estimate=${report.token_estimate}`
+      : null,
+    compactMetaValue(report.compaction_source as string | number | null | undefined)
+      ? `compaction_source=${report.compaction_source}`
+      : null,
+  ].filter((item): item is string => Boolean(item));
+}
+
+function compactionRecordMeta(records: unknown[]): string[] {
+  const first = asRecord(records[0]);
+  return [
+    `record_count=${records.length}`,
+    compactMetaValue(first?.summary_kind as string | number | null | undefined)
+      ? `summary_kind=${first?.summary_kind}`
+      : null,
+    compactMetaValue(first?.compaction_id as string | number | null | undefined)
+      ? `compaction_id=${first?.compaction_id}`
+      : null,
+  ].filter((item): item is string => Boolean(item));
+}
+
 function FlowField({
   label,
   value,
@@ -150,6 +205,9 @@ export function TaskLlmTracePanel({
       : taskLlmDebug?.entries ?? [];
   const callCount = taskLlmDebug?.call_count ?? calls.length;
   const timelineRows = agentFlowTimelineRows(taskLlmDebug);
+  const budgetReport = contextBudgetReport(taskResult);
+  const compactionRecords = transcriptCompactionRecords(taskResult);
+  const showContextBudgetPanel = budgetReport || compactionRecords.length > 0;
 
   return (
     <div className="mt-4 rounded-xl border border-white/10 bg-[#12151f] p-3">
@@ -281,6 +339,42 @@ export function TaskLlmTracePanel({
               <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-black/40 p-3 text-[11px] leading-relaxed text-white/70">
                 {formatJsonish(taskLlmDebug.memory_trace)}
               </pre>
+            </details>
+          ) : null}
+
+          {showContextBudgetPanel ? (
+            <details className="mb-3 rounded-lg border border-amber-300/15 bg-amber-400/5 p-3">
+              <summary className="cursor-pointer text-xs font-medium text-amber-100">
+                {t("上下文预算与压缩记录", "Context budget and compaction")}
+              </summary>
+              {budgetReport ? (
+                <div className="mt-2">
+                  <div className="flex flex-wrap gap-2">
+                    {contextBudgetMeta(budgetReport).map((item) => (
+                      <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-[11px] text-amber-50/75">
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                  <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-black/40 p-3 text-[11px] leading-relaxed text-white/70">
+                    {formatJsonish(budgetReport)}
+                  </pre>
+                </div>
+              ) : null}
+              {compactionRecords.length > 0 ? (
+                <div className="mt-3 border-t border-white/10 pt-3">
+                  <div className="flex flex-wrap gap-2">
+                    {compactionRecordMeta(compactionRecords).map((item) => (
+                      <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-[11px] text-amber-50/75">
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                  <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-black/40 p-3 text-[11px] leading-relaxed text-white/70">
+                    {formatJsonish(compactionRecords)}
+                  </pre>
+                </div>
+              ) : null}
             </details>
           ) : null}
 
