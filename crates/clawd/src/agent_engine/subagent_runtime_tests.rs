@@ -204,11 +204,11 @@ fn subagent_action_from_args_records_child_summary_and_machine_contract() {
 fn subagent_action_projects_workspace_context_evidence() {
     let temp = TempDirGuard::new("context-evidence");
     std::fs::create_dir_all(temp.path().join("plan")).expect("create plan dir");
-    std::fs::write(
-        temp.path().join("AGENTS.md"),
-        "runtime boundary\napi_key = should_not_leak\nagent loop owns semantic routing\n",
-    )
-    .expect("write agents");
+    let long_agents = format!(
+        "runtime boundary\napi_key = should_not_leak\n{}\nlate runtime boundary\nsecret = should_not_leak_late\n",
+        "filler line\n".repeat(300)
+    );
+    std::fs::write(temp.path().join("AGENTS.md"), long_agents).expect("write agents");
     std::fs::write(
         temp.path().join("plan/current.md"),
         "plan boundary\nsubagent review stays read only\n",
@@ -255,9 +255,15 @@ fn subagent_action_projects_workspace_context_evidence() {
     );
     let excerpt = observation["content_excerpt"].as_str().unwrap();
     assert!(excerpt.contains("runtime boundary"));
+    assert!(excerpt.contains("late runtime boundary"));
     assert!(excerpt.contains("plan boundary"));
     assert!(excerpt.contains("[REDACTED_SENSITIVE_LINE]"));
     assert!(!excerpt.contains("should_not_leak"));
+    assert!(!excerpt.contains("should_not_leak_late"));
+    assert_eq!(
+        observation["context_evidence"]["items"][0]["excerpt_strategy"],
+        "head_tail"
+    );
     assert_eq!(observation["child_result"]["content_excerpt_present"], true);
 }
 
