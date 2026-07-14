@@ -220,7 +220,8 @@ fn context_evidence_item(
         });
     };
     let redacted_excerpt = redact_sensitive_excerpt_lines(&raw_excerpt);
-    let content_excerpt = take_chars(&redacted_excerpt, max_chars);
+    let (content_excerpt, excerpt_strategy) =
+        bounded_head_tail_excerpt(&redacted_excerpt, max_chars);
     let excerpt_char_count = content_excerpt.chars().count();
     let observed_char_count = redacted_excerpt.chars().count();
     json!({
@@ -229,6 +230,7 @@ fn context_evidence_item(
         "status": "available",
         "path": safe_path,
         "content_excerpt": content_excerpt,
+        "excerpt_strategy": excerpt_strategy,
         "excerpt_char_count": excerpt_char_count,
         "observed_char_count": observed_char_count,
         "file_size_bytes": file_size_bytes,
@@ -260,7 +262,7 @@ fn context_evidence_max_chars(options: &SubagentActionOptions) -> usize {
 }
 
 fn read_bounded_utf8_text(path: &Path, max_chars: usize) -> Option<String> {
-    let byte_limit = ((max_chars as u64).saturating_mul(4).saturating_add(1024))
+    let byte_limit = ((max_chars as u64).saturating_mul(16).saturating_add(4096))
         .min(MAX_SUBAGENT_CONTEXT_EVIDENCE_BYTES);
     let mut file = File::open(path).ok()?;
     let mut bytes = Vec::new();
@@ -302,4 +304,29 @@ fn line_has_sensitive_marker(line: &str) -> bool {
 
 fn take_chars(text: &str, max_chars: usize) -> String {
     text.chars().take(max_chars).collect()
+}
+
+fn bounded_head_tail_excerpt(text: &str, max_chars: usize) -> (String, &'static str) {
+    let observed_chars = text.chars().count();
+    if observed_chars <= max_chars {
+        return (text.to_string(), "full");
+    }
+    if max_chars < 512 {
+        return (take_chars(text, max_chars), "head");
+    }
+    let separator = "\n...\n";
+    let separator_chars = separator.chars().count();
+    let body_budget = max_chars.saturating_sub(separator_chars);
+    let head_chars = body_budget / 2;
+    let tail_chars = body_budget.saturating_sub(head_chars);
+    let head = text.chars().take(head_chars).collect::<String>();
+    let tail = text
+        .chars()
+        .rev()
+        .take(tail_chars)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    (format!("{head}{separator}{tail}"), "head_tail")
 }
