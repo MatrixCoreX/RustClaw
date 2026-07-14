@@ -204,6 +204,30 @@ fn transform_action_alias_and_sort_args_normalize_to_transform_data_ops() {
     assert!(args.get("sort_by").is_none());
 }
 
+#[test]
+fn transform_markdown_output_format_alias_normalizes_to_md_table() {
+    let actions = vec![AgentAction::CallSkill {
+        skill: "transform".to_string(),
+        args: json!({
+            "action": "transform_data",
+            "records": [
+                {"name": "alpha", "score": 7},
+                {"name": "beta", "score": 12}
+            ],
+            "ops": [{"op": "sort", "by": "score", "order": "desc"}],
+            "output_format": "markdown"
+        }),
+    }];
+
+    let normalized = normalize_transform_schema_aliases(actions);
+
+    let args = expect_planned_call(&normalized[0], "transform", "transform_data");
+    assert_eq!(
+        args.get("output_format").and_then(Value::as_str),
+        Some("md_table")
+    );
+}
+
 #[tokio::test]
 async fn inline_json_transform_reaches_planner_path() {
     let state = test_state_with_enabled_skills(&["transform"]);

@@ -438,7 +438,39 @@ pub(super) fn normalize_transform_args(mut args: Value) -> Value {
         }
     }
     normalize_transform_ops(obj);
+    normalize_transform_output_format(obj);
     args
+}
+
+fn normalize_transform_output_format(obj: &mut serde_json::Map<String, Value>) {
+    let Some(output_format) = obj
+        .get("output_format")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return;
+    };
+    let normalized = match output_format
+        .trim()
+        .to_ascii_lowercase()
+        .replace('-', "_")
+        .as_str()
+    {
+        "md" | "markdown" | "markdown_table" | "md_table" => "md_table",
+        "csv" => "csv",
+        "json" => "json",
+        _ => return,
+    };
+    if output_format != normalized {
+        obj.insert(
+            "output_format".to_string(),
+            Value::String(normalized.to_string()),
+        );
+        info!(
+            "plan_normalize_transform_output_format_alias output_format={} normalized={}",
+            output_format, normalized
+        );
+    }
 }
 
 pub(super) fn normalize_transform_ops(obj: &mut serde_json::Map<String, Value>) {
