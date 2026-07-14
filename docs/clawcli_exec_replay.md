@@ -47,7 +47,7 @@ Artifact files:
 
 | File | Contents |
 | --- | --- |
-| `summary.json` | Stable exec summary with `task_id`, status, lifecycle, exit class, event summary, `effective_config`, `resume_hint`, and artifact refs. |
+| `summary.json` | Stable exec summary with `task_id`, status, lifecycle, exit class, event summary, coding evidence, `effective_config`, `resume_hint`, and artifact refs. |
 | `task.json` | Full task query payload returned by `GET /v1/tasks/{task_id}`. |
 | `events.jsonl` | Raw task event lines for later filtering or replay export. |
 | `verification.json` | Machine-readable coding verification summary: commands, tests, failure-kind tokens, verification status, and residual unverified risk. |
