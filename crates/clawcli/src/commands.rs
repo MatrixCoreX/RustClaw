@@ -3,6 +3,7 @@
 mod common;
 mod exec;
 mod health;
+mod llm_trace;
 mod permission;
 mod report;
 mod report_budget_health;
@@ -16,6 +17,7 @@ mod tui;
 
 pub(crate) use exec::run_exec;
 pub(crate) use health::run_health;
+pub(crate) use llm_trace::run_llm_trace;
 pub(crate) use permission::{
     run_permission_capability, run_permission_explain, run_permission_inspect,
 };
@@ -37,6 +39,8 @@ use exec::{
     exec_failure_class_from_machine_tokens, exec_summary_json, write_exec_artifacts, ExecExitClass,
     ExecWaitOutcome,
 };
+#[cfg(test)]
+use llm_trace::llm_trace_text_lines;
 #[cfg(test)]
 use permission::permission_report_json;
 #[cfg(test)]

@@ -144,7 +144,16 @@ Inspect prompt and provider-call cost attribution:
 
 ```bash
 clawcli report "$TASK_ID" --json
+clawcli llm-trace "$TASK_ID"
+clawcli llm-trace "$TASK_ID" --raw --limit 3
 ```
+
+`llm-trace` reads `/v1/debug/tasks/{task_id}` and prints numbered model calls.
+Text output includes stable call indexes, flow stage/node, code module/entrypoint,
+provider/model/status, and usage tokens. `--raw` additionally prints the request
+payload, response, clean response, raw response, and provider error fields for
+each selected call. It is an observation command over recorded debug data; it
+does not call a model, route natural language, or decide capabilities.
 
 Inspect permission and capability policy machine fields:
 
