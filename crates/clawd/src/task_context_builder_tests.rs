@@ -10,9 +10,23 @@ use super::{
     should_prefer_light_execution_memory_from_session, should_suppress_active_task_context,
     should_suppress_boundary_only_execution_anchor_context,
     should_suppress_execution_anchor_context, uses_light_execution_context_budget,
-    ExecutionContextView, PlannerContextView, RouteContextBudgetTier, TaskContextBundle,
-    TaskContextRawSources,
+    ExecutionContextView, PlannerContextView, RouteContextBudgetTier, RouteContextView,
+    TaskContextBundle, TaskContextRawSources,
 };
+
+fn empty_prompt_memory_context() -> crate::memory::service::PromptMemoryContext {
+    crate::memory::service::PromptMemoryContext {
+        prompt_with_memory: String::new(),
+        chat_prompt_context: String::new(),
+        memory_trace: None,
+        long_term_summary: None,
+        preferences: Vec::new(),
+        recalled: Vec::new(),
+        similar_triggers: Vec::new(),
+        relevant_facts: Vec::new(),
+        recent_related_events: Vec::new(),
+    }
+}
 
 #[test]
 fn active_task_context_is_empty_without_primary_task_state() {
@@ -996,6 +1010,73 @@ fn light_execution_budget_keeps_high_risk_scalar_boundary_full() {
         &route,
         &route.resolved_intent
     ));
+}
+
+#[test]
+fn context_bundle_summary_exposes_execution_light_profile() {
+    let bundle = TaskContextBundle {
+        raw_sources: TaskContextRawSources::default(),
+        planner_view: PlannerContextView {
+            visible_skills: vec!["fs_basic".to_string(), "run_cmd".to_string()],
+        },
+        route_view: None,
+        execution_view: Some(ExecutionContextView {
+            budget_tier: crate::task_context_builder::ExecutionContextBudgetTier::Light,
+            memory_ctx: empty_prompt_memory_context(),
+            runtime_context: "<none>".to_string(),
+            active_task_context: "<none>".to_string(),
+            active_execution_anchor_context: "<none>".to_string(),
+            session_alias_context: "<none>".to_string(),
+            recent_turns_full: "<none>".to_string(),
+            last_turn_full: "<none>".to_string(),
+            recent_execution_anchor: "<none>".to_string(),
+            recent_execution_context: "<none>".to_string(),
+            image_context: None,
+        }),
+    };
+
+    let summary = bundle.summary();
+
+    assert!(summary.contains("execution_budget=light"));
+    assert!(summary.contains("execution_profile=execution_light_bounded"));
+    assert!(summary.contains("context_profile=execution_light_bounded"));
+    assert!(summary.contains("visible_skills=2"));
+}
+
+#[test]
+fn context_bundle_summary_exposes_route_anchor_only_profile() {
+    let bundle = TaskContextBundle {
+        raw_sources: TaskContextRawSources {
+            resume_context: "<none>".to_string(),
+            binding_context: "{\"channel\":\"telegram\"}".to_string(),
+            now_iso: String::new(),
+            timezone: String::new(),
+            schedule_rules: String::new(),
+        },
+        planner_view: PlannerContextView::default(),
+        route_view: Some(RouteContextView {
+            budget_tier: RouteContextBudgetTier::AnchorOnly,
+            active_task_context: "<none>".to_string(),
+            active_execution_anchor_context: "<none>".to_string(),
+            session_alias_context: "<none>".to_string(),
+            request_surface_hints: "<none>".to_string(),
+            recent_execution_context: "### RECENT_EXECUTION_ANCHOR".to_string(),
+            capability_map: "<none>".to_string(),
+            recent_assistant_replies: "<none>".to_string(),
+            recent_turns_full: "<none>".to_string(),
+            memory_context: "<none>".to_string(),
+            memory_trace: None,
+            last_turn_full: "<none>".to_string(),
+        }),
+        execution_view: None,
+    };
+
+    let summary = bundle.summary();
+
+    assert!(summary.contains("route_budget=anchor_only"));
+    assert!(summary.contains("route_profile=route_anchor_only"));
+    assert!(summary.contains("context_profile=route_anchor_only"));
+    assert!(summary.contains("binding_context=true"));
 }
 
 #[test]

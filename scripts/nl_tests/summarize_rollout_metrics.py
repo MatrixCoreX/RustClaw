@@ -557,7 +557,8 @@ def detected_budget_profile(
             return value.strip()
     context_summary = summary.get("context_bundle_summary")
     return (
-        machine_token_value(context_summary, "budget_profile")
+        machine_token_value(context_summary, "context_profile")
+        or machine_token_value(context_summary, "budget_profile")
         or machine_token_value(context_summary, "execution_budget")
         or machine_token_value(context_summary, "route_budget")
         or fallback
