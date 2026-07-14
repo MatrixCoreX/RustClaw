@@ -1,5 +1,32 @@
 use super::*;
 use crate::agent_engine::LoopState;
+use std::path::{Path, PathBuf};
+
+struct TempDirGuard {
+    path: PathBuf,
+}
+
+impl TempDirGuard {
+    fn new(label: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "rustclaw-subagent-runtime-{label}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).expect("create temp dir");
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
 
 #[test]
 fn subagent_action_records_safe_machine_observation() {
@@ -174,6 +201,67 @@ fn subagent_action_from_args_records_child_summary_and_machine_contract() {
 }
 
 #[test]
+fn subagent_action_projects_workspace_context_evidence() {
+    let temp = TempDirGuard::new("context-evidence");
+    std::fs::create_dir_all(temp.path().join("plan")).expect("create plan dir");
+    std::fs::write(
+        temp.path().join("AGENTS.md"),
+        "runtime boundary\napi_key = should_not_leak\nagent loop owns semantic routing\n",
+    )
+    .expect("write agents");
+    std::fs::write(
+        temp.path().join("plan/current.md"),
+        "plan boundary\nsubagent review stays read only\n",
+    )
+    .expect("write plan");
+
+    let mut loop_state = LoopState::new(2);
+    loop_state.round_no = 8;
+    let config = SubagentRuntimeConfig {
+        context_evidence_root: Some(temp.path().to_path_buf()),
+        ..SubagentRuntimeConfig::default()
+    };
+    let args = serde_json::json!({
+        "role": "review",
+        "objective": "runtime_boundary_alignment_audit",
+        "context_refs": ["AGENTS.md", "plan/current.md"],
+        "context_slice": {
+            "max_context_chars": 1024
+        },
+        "result_contract": {
+            "output_format": "machine_json",
+            "content_excerpt": "string"
+        }
+    });
+
+    let stop_signal =
+        record_subagent_action_from_args_with_config(&mut loop_state, 10, 1, &args, &config);
+
+    assert!(stop_signal.is_none());
+    let observation = &loop_state.task_observations[0];
+    assert_eq!(observation["output_format"], "machine_json");
+    assert_eq!(observation["action"], "read_text_range");
+    assert_eq!(observation["path"], "AGENTS.md");
+    assert_eq!(observation["paths"].as_array().unwrap().len(), 2);
+    assert_eq!(observation["context_evidence"]["present"], true);
+    assert_eq!(observation["context_evidence"]["available_count"], 2);
+    assert_eq!(
+        observation["context_evidence"]["items"][0]["path"],
+        "AGENTS.md"
+    );
+    assert_eq!(
+        observation["context_evidence"]["items"][1]["path"],
+        "plan/current.md"
+    );
+    let excerpt = observation["content_excerpt"].as_str().unwrap();
+    assert!(excerpt.contains("runtime boundary"));
+    assert!(excerpt.contains("plan boundary"));
+    assert!(excerpt.contains("[REDACTED_SENSITIVE_LINE]"));
+    assert!(!excerpt.contains("should_not_leak"));
+    assert_eq!(observation["child_result"]["content_excerpt_present"], true);
+}
+
+#[test]
 fn subagent_new_role_tokens_preserve_readonly_policy() {
     let mut loop_state = LoopState::new(2);
 
@@ -213,6 +301,7 @@ fn subagent_runtime_config_supplies_default_timeout_and_parallel_budget() {
             .collect(),
         max_parallel_readonly: 3,
         default_timeout_ms: Some(15_000),
+        context_evidence_root: None,
     };
 
     let stop_signal = record_subagent_action_with_config(
@@ -250,6 +339,7 @@ fn subagent_runtime_config_rejects_disabled_role_as_machine_state() {
         allowed_roles: vec!["observe".to_string()],
         max_parallel_readonly: 1,
         default_timeout_ms: Some(5_000),
+        context_evidence_root: None,
     };
 
     let stop_signal = record_subagent_action_with_config(
@@ -551,6 +641,7 @@ fn subagent_batch_isolates_optional_child_failures_and_parallel_limit() {
             .collect(),
         max_parallel_readonly: 1,
         default_timeout_ms: Some(10_000),
+        context_evidence_root: None,
     };
     let args = serde_json::json!({
         "children": [

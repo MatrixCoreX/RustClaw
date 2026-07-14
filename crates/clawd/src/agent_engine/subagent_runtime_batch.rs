@@ -55,6 +55,7 @@ fn record_subagent_batch_action_with_config(
     let mut optional_failed_count = 0usize;
     let mut aggregated_evidence_refs = Vec::new();
     let mut aggregated_finding_refs = Vec::new();
+    let mut aggregated_context_evidence_items = Vec::new();
     let mut finding_signals = AggregatedFindingSignals::default();
 
     for (child_index, child) in children.into_iter().enumerate() {
@@ -185,6 +186,14 @@ fn record_subagent_batch_action_with_config(
         let timeout_policy = subagent_timeout_policy(&budget_summary);
         let cancellation_policy = subagent_cancellation_policy(&timeout_policy);
         let timeout_ms = timeout_policy.get("timeout_ms").and_then(Value::as_u64);
+        let context_evidence = context_evidence_summary(&context_refs, &child.options, config);
+        let content_excerpt = context_evidence_combined_excerpt(&context_evidence);
+        let content_paths = context_evidence_paths(&context_evidence);
+        let primary_content_path = content_paths.first().cloned().unwrap_or_default();
+        let content_excerpt_present = context_evidence_has_available_excerpt(&context_evidence);
+        if let Some(items) = context_evidence.get("items").and_then(Value::as_array) {
+            aggregated_context_evidence_items.extend(items.iter().cloned());
+        }
         let findings = sanitized_findings(child.findings.as_ref());
         let finding_count = findings.len();
         finding_signals.observe_child_findings(child_run_id.as_str(), &findings);
@@ -198,6 +207,7 @@ fn record_subagent_batch_action_with_config(
         );
         let child_result = json!({
             "schema_version": 1,
+            "output_format": "machine_json",
             "child_run_id": child_run_id.as_str(),
             "status": "completed",
             "result_status": "completed",
@@ -209,6 +219,7 @@ fn record_subagent_batch_action_with_config(
             "allowed_capability_count": allowed_capability_count,
             "result_contract_present": child.options.result_contract.is_some(),
             "result_contract_required": role.result_contract_required(),
+            "content_excerpt_present": content_excerpt_present,
             "findings": findings,
             "finding_count": finding_count,
             "write_enabled": false,
@@ -241,6 +252,11 @@ fn record_subagent_batch_action_with_config(
             "child_run_id": child_run_id.as_str(),
             "request": child_request,
             "context_refs": context_refs,
+            "path": primary_content_path.as_str(),
+            "paths": content_paths,
+            "excerpt": content_excerpt.as_str(),
+            "content_excerpt": content_excerpt.as_str(),
+            "context_evidence": context_evidence,
             "allowed_capabilities": allowed_capabilities,
             "budget": budget_summary,
             "timeout_policy": timeout_policy,
@@ -340,8 +356,14 @@ fn record_subagent_batch_action_with_config(
         config.max_parallel_readonly,
         &team_children,
     );
+    let parent_context_evidence =
+        context_evidence_summary_from_items(aggregated_context_evidence_items);
+    let parent_content_excerpt = context_evidence_combined_excerpt(&parent_context_evidence);
+    let parent_content_paths = context_evidence_paths(&parent_context_evidence);
+    let parent_primary_content_path = parent_content_paths.first().cloned().unwrap_or_default();
     let child_result = json!({
         "schema_version": 1,
+        "output_format": "machine_json",
         "status": aggregate_status,
         "result_status": aggregate_status,
         "outcome_code": if required_failed_count > 0 {
@@ -359,11 +381,12 @@ fn record_subagent_batch_action_with_config(
         "required_failed_count": required_failed_count,
         "optional_failed_count": optional_failed_count,
         "conflict_count": conflict_count,
+        "content_excerpt_present": context_evidence_has_available_excerpt(&parent_context_evidence),
         "write_enabled": false,
         "external_publish_enabled": false,
         "failure_isolated": required_failed_count == 0,
     });
-    loop_state.task_observations.push(json!({
+    let mut observation = json!({
         "schema_version": 1,
         "owner_layer": "subagent_runtime",
         "status": parent_status,
@@ -447,7 +470,29 @@ fn record_subagent_batch_action_with_config(
         "global_step": global_step,
         "step_in_round": step_in_round,
         "round_no": loop_state.round_no,
-    }));
+    });
+    if let Some(object) = observation.as_object_mut() {
+        object.insert("output_format".to_string(), json!("machine_json"));
+        object.insert(
+            "action".to_string(),
+            json!(context_evidence_action(&parent_context_evidence)),
+        );
+        object.insert(
+            "path".to_string(),
+            json!(parent_primary_content_path.as_str()),
+        );
+        object.insert("paths".to_string(), json!(parent_content_paths));
+        object.insert(
+            "excerpt".to_string(),
+            json!(parent_content_excerpt.as_str()),
+        );
+        object.insert(
+            "content_excerpt".to_string(),
+            json!(parent_content_excerpt.as_str()),
+        );
+        object.insert("context_evidence".to_string(), parent_context_evidence);
+    }
+    loop_state.task_observations.push(observation);
 
     (required_failed_count > 0 && !expected_failure_delivery)
         .then_some(SUBAGENT_STOP_SIGNAL_REQUIRED_CHILD_FAILED)
