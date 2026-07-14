@@ -710,6 +710,7 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
 Use the smallest affected NL set while code is still moving, then widen coverage only at phase or release gates:
 
 1. Static compact coverage: `python3 scripts/nl_tests/check_compact_coverage.py --report` verifies that the compact source-controlled case files cover basic skills, route/lifecycle classes, and media dry-run cases without calling a provider.
+   The compact gate also requires Codex-style agent parity tags for coding, continuous development, shell/git/config/DB/web/KB, async, permission, subagent, memory, multilingual behavior, and failure recovery.
 2. Focused affected suite: 10-30 hand-picked cases for the code path being changed.
 3. Typical aggregate: compressed representative coverage after a phase batch.
 4. Canary: 500 client-like cases before changing default authority or deleting old gates.

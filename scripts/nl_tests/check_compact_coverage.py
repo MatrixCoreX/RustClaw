@@ -18,6 +18,7 @@ DEFAULT_CASE_FILES = [
     ROOT / "scripts/nl_tests/cases/nl_cases_codex_parity_runtime_smoke_20260623.txt",
     ROOT / "scripts/nl_tests/cases/nl_cases_task_execution_async_lifecycle_20260626.txt",
     ROOT / "scripts/nl_tests/cases/nl_cases_media_dry_run_capability_20260623.txt",
+    ROOT / "scripts/nl_tests/cases/nl_cases_codex_cli_continuous_dev_20260711.txt",
     ROOT / "scripts/nl_tests/cases/nl_cases_client_like_typical_coverage_20260605.txt",
 ]
 
@@ -106,6 +107,26 @@ REQUIRED_CODEX_BOUNDARY = {
     "resume",
 }
 
+REQUIRED_AGENT_PARITY = {
+    "async_start",
+    "browser_web",
+    "coding",
+    "config_basic",
+    "continuous_dev",
+    "db_basic",
+    "dry_run",
+    "git_basic",
+    "kb",
+    "media",
+    "memory",
+    "multilingual",
+    "permission_boundary",
+    "retryable_failure",
+    "run_cmd",
+    "subagent",
+    "web_search_extract",
+}
+
 FORBIDDEN_LIVE_PUBLISH_TAGS = {
     "x",
     "twitter",
@@ -185,6 +206,7 @@ def coverage_for(paths: Iterable[Path]) -> dict[str, object]:
         "async_lifecycle": REQUIRED_ASYNC_LIFECYCLE,
         "media_dry_run": REQUIRED_MEDIA_DRY_RUN,
         "codex_boundary": REQUIRED_CODEX_BOUNDARY,
+        "agent_parity": REQUIRED_AGENT_PARITY,
     }
     missing = {
         group: sorted(required - all_tags)
@@ -235,6 +257,7 @@ def run_self_test() -> int:
         | REQUIRED_ASYNC_LIFECYCLE
         | REQUIRED_MEDIA_DRY_RUN
         | REQUIRED_CODEX_BOUNDARY
+        | REQUIRED_AGENT_PARITY
         | {"dry_run"}
     )
     tmp_parent = ROOT / "tmp"
