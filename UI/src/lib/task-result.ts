@@ -8,6 +8,11 @@ export interface TaskOutcomeView {
   finalShape?: string;
   missingEvidence: string[];
   failureLabel?: string;
+  doneConditions: string[];
+  constraints: string[];
+  verification: string[];
+  currentProgress: string[];
+  remainingWork: string[];
 }
 
 export interface TaskPermissionView {
@@ -103,6 +108,22 @@ function objectMeta(root: unknown, keys: string[]): string[] {
     const value = primitiveKeyValue(record[key]);
     return value ? [`${key}=${value}`] : [];
   });
+}
+
+function valueMetaList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => valueMetaList(item));
+  }
+  const primitive = primitiveKeyValue(value);
+  if (primitive) return [primitive];
+  const record = asRecord(value);
+  if (!record) return [];
+  return Object.keys(record)
+    .sort()
+    .flatMap((key) => {
+      const value = primitiveKeyValue(record[key]);
+      return value ? [`${key}=${value}`] : [];
+    });
 }
 
 function findFirstValueByKey(root: unknown, key: string, depth = 0): unknown {
@@ -570,6 +591,7 @@ export function buildTaskOutcome(result: TaskQueryResponse, lang: TaskLifecycleL
   const summary = taskSummaryRoot(result);
   const trace = taskTraceRoot(result);
   const outcome = getPathValue(summary, ["task_outcome"]);
+  const codingSummary = latestCodingSummary(result);
   const outcomeState = stringAt(outcome, ["state"]);
   const outcomeMessage =
     stringAt(outcome, [lang === "zh" ? "message_zh" : "message_en"]) ??
@@ -587,6 +609,37 @@ export function buildTaskOutcome(result: TaskQueryResponse, lang: TaskLifecycleL
     stringAt(trace, ["contract_matrix", "final_answer_shape"]) ??
     stringAt(summary, ["finalizer_summary", "final_answer_shape"]);
   const tLocal = (zh: string, en: string) => (lang === "zh" ? zh : en);
+  const doneConditions = [
+    ...valueMetaList(getPathValue(outcome, ["done_conditions"])),
+    ...valueMetaList(getPathValue(outcome, ["acceptance"])),
+  ];
+  const constraints = valueMetaList(getPathValue(outcome, ["constraints"]));
+  const verification = [
+    ...valueMetaList(getPathValue(outcome, ["verification"])),
+    ...codingOutcomeMeta(codingSummary, [
+      "verification_status",
+      "verification_command_count",
+      "verification_failure_kind_count",
+      "unverified_risk",
+    ]),
+  ];
+  const currentProgress = [
+    ...valueMetaList(getPathValue(outcome, ["current_progress"])),
+    ...valueMetaList(getPathValue(outcome, ["progress"])),
+    ...codingOutcomeMeta(codingSummary, [
+      "current_phase_hint",
+      "changed_file_count",
+      "command_count",
+      "test_count",
+      "checkpoint_ref_count",
+      "completed_side_effect_count",
+    ]),
+  ];
+  const remainingWork = [
+    ...valueMetaList(getPathValue(outcome, ["remaining_work"])),
+    ...codingOutcomeMeta(codingSummary, ["next_step"]),
+    ...missingEvidence.map((item) => `missing_evidence=${item}`),
+  ];
 
   if (result.status === "queued" || result.status === "running") {
     return {
@@ -598,6 +651,11 @@ export function buildTaskOutcome(result: TaskQueryResponse, lang: TaskLifecycleL
       ),
       finalShape,
       missingEvidence,
+      doneConditions,
+      constraints,
+      verification,
+      currentProgress,
+      remainingWork,
     };
   }
 
@@ -615,6 +673,11 @@ export function buildTaskOutcome(result: TaskQueryResponse, lang: TaskLifecycleL
           : tLocal("任务已经完成，可以直接查看结果。", "The task completed. You can review the result.")),
       finalShape,
       missingEvidence,
+      doneConditions,
+      constraints,
+      verification,
+      currentProgress,
+      remainingWork,
     };
   }
 
@@ -635,7 +698,35 @@ export function buildTaskOutcome(result: TaskQueryResponse, lang: TaskLifecycleL
     finalShape,
     missingEvidence,
     failureLabel: humanFailureLabel(failureKind, lang),
+    doneConditions,
+    constraints,
+    verification,
+    currentProgress,
+    remainingWork,
   };
+}
+
+function latestCodingSummary(result: TaskQueryResponse): Record<string, unknown> | null {
+  const events = taskTraceEvents(result);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const eventType = typeof event.event_type === "string" ? event.event_type : "";
+    if (eventType !== "coding_evidence" && eventType !== "coding_task_contract") continue;
+    const payload = traceEventPayload(event);
+    if (payload) return payload;
+  }
+  return null;
+}
+
+function codingOutcomeMeta(
+  payload: Record<string, unknown> | null,
+  keys: string[],
+): string[] {
+  if (!payload) return [];
+  return keys.flatMap((key) => {
+    const value = primitiveKeyValue(payload[key]);
+    return value ? [`${key}=${value}`] : [];
+  });
 }
 
 export function buildTaskPermissionView(

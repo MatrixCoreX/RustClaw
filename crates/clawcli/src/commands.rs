@@ -5,6 +5,7 @@ mod exec;
 mod health;
 mod permission;
 mod report;
+mod report_outcome;
 mod run_skill;
 mod skills;
 mod submit;
