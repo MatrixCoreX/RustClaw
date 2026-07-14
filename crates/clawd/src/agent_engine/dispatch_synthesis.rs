@@ -900,10 +900,14 @@ fn requested_local_code_json_fields(
     user_text: &str,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Vec<String> {
+    let mut fields = Vec::new();
     if let Some(context) = agent_run_context {
-        let structured_fields = requested_local_code_json_fields_from_state_patch(context);
-        if !structured_fields.is_empty() {
-            return structured_fields;
+        for marker in requested_local_code_json_fields_from_state_patch(context) {
+            if local_code_json_projection_field_supported(&marker)
+                && !fields.iter().any(|field| field == &marker)
+            {
+                fields.push(marker);
+            }
         }
     }
 
@@ -934,7 +938,6 @@ fn requested_local_code_json_fields(
         }
     }
 
-    let mut fields = Vec::new();
     for surface in surfaces {
         for marker in requested_local_code_json_fields_from_surface(&surface) {
             if local_code_json_projection_field_supported(&marker)
