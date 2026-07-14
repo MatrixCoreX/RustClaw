@@ -33,6 +33,36 @@ export interface ChatThreadSummary {
   teachingMode: boolean;
 }
 
+export interface ChatTeachingRunSummary {
+  id: string;
+  taskId: string | null;
+  userText: string;
+  assistantText: string | null;
+  status: TaskQueryResponse["status"] | "running";
+  startedAt: number;
+  completedAt: number | null;
+  callCount: number | null;
+  hasTrace: boolean;
+  traceError: string | null;
+  selected: boolean;
+}
+
+interface ChatTeachingRunRecord {
+  id: string;
+  taskId: string | null;
+  userMessageId: string;
+  assistantMessageId?: string | null;
+  userText: string;
+  assistantText?: string | null;
+  status: TaskQueryResponse["status"] | "running";
+  startedAt: number;
+  completedAt?: number | null;
+  taskResult?: TaskQueryResponse | null;
+  llmDebug?: TaskLlmDebugResponse | null;
+  llmDebugError?: string | null;
+  callCount?: number | null;
+}
+
 interface ChatThreadRecord {
   id: string;
   title: string;
@@ -47,6 +77,8 @@ interface ChatThreadRecord {
   teachingTaskResult?: TaskQueryResponse | null;
   teachingLlmDebug?: TaskLlmDebugResponse | null;
   teachingLlmDebugError?: string | null;
+  activeTeachingRunId?: string | null;
+  teachingRuns?: ChatTeachingRunRecord[];
 }
 
 interface ChatThreadState {
@@ -57,6 +89,7 @@ interface ChatThreadState {
 const CHAT_THREAD_STORAGE_KEY = "rustclaw.ui.chatThreads.v1";
 const MAX_CHAT_THREADS = 30;
 const MAX_PERSISTED_MESSAGES_PER_THREAD = 120;
+const MAX_TEACHING_RUNS_PER_THREAD = 80;
 
 export interface UseChatRuntimeParams {
   apiFetch: ApiFetch;
@@ -98,9 +131,19 @@ export function useChatRuntime({
   const chatInput = activeChatThread.input;
   const chatAgentMode = activeChatThread.agentMode;
   const chatTeachingMode = activeChatThread.teachingMode;
-  const chatTeachingTaskResult = activeChatThread.teachingTaskResult ?? null;
-  const chatTeachingLlmDebug = activeChatThread.teachingLlmDebug ?? null;
-  const chatTeachingLlmDebugError = activeChatThread.teachingLlmDebugError ?? null;
+  const activeTeachingRun = selectedTeachingRun(activeChatThread);
+  const chatTeachingTaskResult = activeTeachingRun
+    ? (activeTeachingRun.taskResult ?? null)
+    : (activeChatThread.teachingTaskResult ?? null);
+  const chatTeachingLlmDebug = activeTeachingRun
+    ? (activeTeachingRun.llmDebug ?? null)
+    : (activeChatThread.teachingLlmDebug ?? null);
+  const chatTeachingLlmDebugError =
+    activeTeachingRun
+      ? (activeTeachingRun.llmDebugError ?? null)
+      : (activeChatThread.teachingLlmDebugError ?? null);
+  const chatTeachingRuns = buildChatTeachingRunSummaries(activeChatThread);
+  const activeChatTeachingRunId = activeTeachingRun?.id ?? null;
   const chatThreadSummaries = buildChatThreadSummaries(chatThreadState.threads, t);
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [chatTeachingLlmDebugLoading, setChatTeachingLlmDebugLoading] = useState(false);
@@ -166,15 +209,23 @@ export function useChatRuntime({
     updateActiveChatThread((thread) => ({
       ...thread,
       teachingMode: value,
-      ...(value
-        ? {}
-        : {
-            teachingTaskResult: null,
-            teachingLlmDebug: null,
-            teachingLlmDebugError: null,
-          }),
       updatedAt: Date.now(),
     }));
+  };
+
+  const selectChatTeachingRun = (runId: string) => {
+    updateActiveChatThread((thread) => {
+      const run = (thread.teachingRuns ?? []).find((item) => item.id === runId);
+      if (!run) return thread;
+      return {
+        ...thread,
+        activeTeachingRunId: run.id,
+        teachingTaskResult: run.taskResult ?? thread.teachingTaskResult ?? null,
+        teachingLlmDebug: run.llmDebug ?? null,
+        teachingLlmDebugError: run.llmDebugError ?? null,
+        updatedAt: Date.now(),
+      };
+    });
   };
 
   const selectChatThread = (threadId: string) => {
@@ -227,6 +278,8 @@ export function useChatRuntime({
       teachingTaskResult: null,
       teachingLlmDebug: null,
       teachingLlmDebugError: null,
+      activeTeachingRunId: null,
+      teachingRuns: [],
     }));
     chatInputValueRef.current = "";
     setChatTeachingLlmDebugLoading(false);
@@ -263,6 +316,12 @@ export function useChatRuntime({
         lastTaskId: targetTaskId,
         teachingLlmDebug: result,
         teachingLlmDebugError: null,
+        teachingRuns: updateTeachingRunsByTaskId(thread.teachingRuns, targetTaskId, (run) => ({
+          ...run,
+          llmDebug: result,
+          llmDebugError: null,
+          callCount: debugCallCount(result),
+        })),
         updatedAt: Date.now(),
       }));
       return result;
@@ -273,6 +332,11 @@ export function useChatRuntime({
         lastTaskId: targetTaskId,
         teachingLlmDebug: null,
         teachingLlmDebugError: message,
+        teachingRuns: updateTeachingRunsByTaskId(thread.teachingRuns, targetTaskId, (run) => ({
+          ...run,
+          llmDebug: null,
+          llmDebugError: message,
+        })),
         updatedAt: Date.now(),
       }));
       return null;
@@ -453,6 +517,9 @@ export function useChatRuntime({
     const threadAtSubmit = activeChatThreadRef.current;
     const submitThreadId = threadAtSubmit.id;
     const teachingModeAtSubmit = threadAtSubmit.teachingMode;
+    const teachingRunId = teachingModeAtSubmit
+      ? `teach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      : null;
     chatSendingValueRef.current = true;
     setChatSending(true);
     setChatError(null);
@@ -475,6 +542,26 @@ export function useChatRuntime({
       ...thread,
       title: titleForThreadAfterUserMessage(thread, userMsg, t),
       messages: appendThreadMessages(thread.messages, userMsg),
+      ...(teachingRunId
+        ? {
+            activeTeachingRunId: teachingRunId,
+            teachingRuns: appendTeachingRun(thread.teachingRuns, {
+              id: teachingRunId,
+              taskId: null,
+              userMessageId: userMsg.id,
+              assistantMessageId: null,
+              userText: userMsg.text,
+              assistantText: null,
+              status: "running",
+              startedAt: userMsg.ts,
+              completedAt: null,
+              taskResult: null,
+              llmDebug: null,
+              llmDebugError: null,
+              callCount: null,
+            }),
+          }
+        : {}),
       input: options.clearInput ? "" : thread.input,
       updatedAt: Date.now(),
     }));
@@ -553,6 +640,7 @@ export function useChatRuntime({
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
         lastTaskId: submittedTaskId,
+        activeTeachingRunId: teachingRunId ?? thread.activeTeachingRunId ?? null,
         teachingTaskResult: teachingModeAtSubmit
           ? {
               task_id: submittedTaskId,
@@ -563,6 +651,21 @@ export function useChatRuntime({
           : thread.teachingTaskResult,
         teachingLlmDebug: teachingModeAtSubmit ? null : thread.teachingLlmDebug,
         teachingLlmDebugError: teachingModeAtSubmit ? null : thread.teachingLlmDebugError,
+        teachingRuns: teachingRunId
+          ? updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
+              ...run,
+              taskId: submittedTaskId,
+              status: "running",
+              taskResult: {
+                task_id: submittedTaskId,
+                status: "running",
+                result_json: null,
+                error_text: null,
+              },
+              llmDebug: null,
+              llmDebugError: null,
+            }))
+          : thread.teachingRuns,
         updatedAt: Date.now(),
       }));
 
@@ -583,6 +686,15 @@ export function useChatRuntime({
         ...thread,
         lastTaskId: submittedTaskId,
         teachingTaskResult: teachingModeAtSubmit ? finalResult : thread.teachingTaskResult,
+        teachingRuns: teachingRunId
+          ? updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
+              ...run,
+              taskId: submittedTaskId,
+              status: finalResult.status,
+              completedAt: Date.now(),
+              taskResult: finalResult,
+            }))
+          : thread.teachingRuns,
         updatedAt: Date.now(),
       }));
       if (teachingModeAtSubmit && activeChatThreadRef.current.id === submitThreadId) {
@@ -598,6 +710,14 @@ export function useChatRuntime({
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
         messages: appendThreadMessages(thread.messages, assistantMsg),
+        teachingRuns: teachingRunId
+          ? updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
+              ...run,
+              assistantMessageId: assistantMsg.id,
+              assistantText: assistantMsg.text,
+              completedAt: run.completedAt ?? assistantMsg.ts,
+            }))
+          : thread.teachingRuns,
         updatedAt: Date.now(),
       }));
     } catch (err) {
@@ -612,6 +732,24 @@ export function useChatRuntime({
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,
         messages: appendThreadMessages(thread.messages, systemErrMsg),
+        teachingRuns: teachingRunId
+          ? updateTeachingRunById(thread.teachingRuns, teachingRunId, (run) => ({
+              ...run,
+              status: "failed",
+              assistantMessageId: systemErrMsg.id,
+              assistantText: systemErrMsg.text,
+              completedAt: Date.now(),
+              taskResult: run.taskId
+                ? {
+                    task_id: run.taskId,
+                    status: "failed",
+                    result_json: null,
+                    error_text: message,
+                  }
+                : run.taskResult ?? null,
+              llmDebugError: run.llmDebugError,
+            }))
+          : thread.teachingRuns,
         updatedAt: Date.now(),
       }));
     } finally {
@@ -645,6 +783,8 @@ export function useChatRuntime({
     chatTeachingLlmDebug,
     chatTeachingLlmDebugLoading,
     chatTeachingLlmDebugError,
+    chatTeachingRuns,
+    activeChatTeachingRunId,
     chatSending,
     chatRecording,
     chatVoiceRecordingSupported,
@@ -652,6 +792,7 @@ export function useChatRuntime({
     chatAttachmentInputRef,
     setChatAgentMode,
     setChatTeachingMode,
+    selectChatTeachingRun,
     clearChatMessages,
     setChatInput,
     handleChatInputKeyDown,
@@ -711,6 +852,10 @@ function persistChatThreadState(state: ChatThreadState) {
           ? compactTaskResultForChatStorage(thread.teachingTaskResult)
           : null,
         teachingLlmDebug: null,
+        activeTeachingRunId: thread.activeTeachingRunId ?? null,
+        teachingRuns: (thread.teachingRuns ?? [])
+          .slice(-MAX_TEACHING_RUNS_PER_THREAD)
+          .map(compactTeachingRunForChatStorage),
         messages: thread.messages
           .slice(-MAX_PERSISTED_MESSAGES_PER_THREAD)
           .map(stripAttachmentPayloadsFromMessage),
@@ -754,6 +899,32 @@ function normalizeStoredChatThread(raw: unknown, t: Translate): ChatThreadRecord
     teachingLlmDebug: null,
     teachingLlmDebugError:
       typeof record.teachingLlmDebugError === "string" ? record.teachingLlmDebugError : null,
+    activeTeachingRunId:
+      typeof record.activeTeachingRunId === "string" ? record.activeTeachingRunId : null,
+    teachingRuns: Array.isArray(record.teachingRuns)
+      ? record.teachingRuns
+          .map(normalizeStoredTeachingRun)
+          .filter((run): run is ChatTeachingRunRecord => Boolean(run))
+          .slice(-MAX_TEACHING_RUNS_PER_THREAD)
+      : [],
+  };
+}
+
+function compactTeachingRunForChatStorage(run: ChatTeachingRunRecord): ChatTeachingRunRecord {
+  return {
+    id: run.id,
+    taskId: run.taskId ?? null,
+    userMessageId: run.userMessageId,
+    assistantMessageId: run.assistantMessageId ?? null,
+    userText: run.userText,
+    assistantText: run.assistantText ?? null,
+    status: run.status,
+    startedAt: run.startedAt,
+    completedAt: run.completedAt ?? null,
+    taskResult: run.taskResult ? compactTaskResultForChatStorage(run.taskResult) : null,
+    llmDebug: null,
+    llmDebugError: run.llmDebugError ?? null,
+    callCount: run.callCount ?? debugCallCount(run.llmDebug),
   };
 }
 
@@ -764,6 +935,40 @@ function compactTaskResultForChatStorage(result: TaskQueryResponse): TaskQueryRe
     result_json: null,
     error_text: result.error_text ?? null,
   };
+}
+
+function normalizeStoredTeachingRun(raw: unknown): ChatTeachingRunRecord | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Partial<ChatTeachingRunRecord>;
+  if (
+    typeof record.id !== "string" ||
+    typeof record.userMessageId !== "string" ||
+    typeof record.userText !== "string" ||
+    typeof record.startedAt !== "number"
+  ) {
+    return null;
+  }
+  const status = isTaskStatusOrRunning(record.status) ? record.status : "running";
+  return {
+    id: record.id,
+    taskId: typeof record.taskId === "string" && record.taskId.trim() ? record.taskId : null,
+    userMessageId: record.userMessageId,
+    assistantMessageId:
+      typeof record.assistantMessageId === "string" ? record.assistantMessageId : null,
+    userText: record.userText,
+    assistantText: typeof record.assistantText === "string" ? record.assistantText : null,
+    status,
+    startedAt: record.startedAt,
+    completedAt: typeof record.completedAt === "number" ? record.completedAt : null,
+    taskResult: normalizeStoredTaskResult(record.taskResult),
+    llmDebug: null,
+    llmDebugError: typeof record.llmDebugError === "string" ? record.llmDebugError : null,
+    callCount: typeof record.callCount === "number" ? record.callCount : null,
+  };
+}
+
+function isTaskStatusOrRunning(value: unknown): value is ChatTeachingRunRecord["status"] {
+  return ["queued", "running", "succeeded", "failed", "canceled", "timeout"].includes(String(value));
 }
 
 function normalizeStoredTaskResult(raw: unknown): TaskQueryResponse | null {
@@ -822,6 +1027,8 @@ function createChatThread(t: Translate): ChatThreadRecord {
     teachingTaskResult: null,
     teachingLlmDebug: null,
     teachingLlmDebugError: null,
+    activeTeachingRunId: null,
+    teachingRuns: [],
   };
 }
 
@@ -865,6 +1072,61 @@ function buildChatThreadSummaries(
       agentMode: thread.agentMode,
       teachingMode: thread.teachingMode,
     }));
+}
+
+function selectedTeachingRun(thread: ChatThreadRecord): ChatTeachingRunRecord | null {
+  const runs = thread.teachingRuns ?? [];
+  if (runs.length === 0) return null;
+  const activeId = thread.activeTeachingRunId;
+  return runs.find((run) => run.id === activeId) ?? runs[runs.length - 1] ?? null;
+}
+
+function buildChatTeachingRunSummaries(thread: ChatThreadRecord): ChatTeachingRunSummary[] {
+  const activeId = selectedTeachingRun(thread)?.id ?? null;
+  return [...(thread.teachingRuns ?? [])]
+    .sort((left, right) => right.startedAt - left.startedAt)
+    .map((run) => ({
+      id: run.id,
+      taskId: run.taskId ?? null,
+      userText: run.userText,
+      assistantText: run.assistantText ?? null,
+      status: run.status,
+      startedAt: run.startedAt,
+      completedAt: run.completedAt ?? null,
+      callCount: run.callCount ?? debugCallCount(run.llmDebug),
+      hasTrace: Boolean(run.llmDebug),
+      traceError: run.llmDebugError ?? null,
+      selected: run.id === activeId,
+    }));
+}
+
+function appendTeachingRun(
+  runs: ChatTeachingRunRecord[] | undefined,
+  run: ChatTeachingRunRecord,
+): ChatTeachingRunRecord[] {
+  return [...(runs ?? []), run].slice(-MAX_TEACHING_RUNS_PER_THREAD);
+}
+
+function updateTeachingRunById(
+  runs: ChatTeachingRunRecord[] | undefined,
+  runId: string,
+  updater: (run: ChatTeachingRunRecord) => ChatTeachingRunRecord,
+): ChatTeachingRunRecord[] {
+  return (runs ?? []).map((run) => (run.id === runId ? updater(run) : run));
+}
+
+function updateTeachingRunsByTaskId(
+  runs: ChatTeachingRunRecord[] | undefined,
+  taskId: string,
+  updater: (run: ChatTeachingRunRecord) => ChatTeachingRunRecord,
+): ChatTeachingRunRecord[] {
+  return (runs ?? []).map((run) => (run.taskId === taskId ? updater(run) : run));
+}
+
+function debugCallCount(debug: TaskLlmDebugResponse | null | undefined): number | null {
+  if (!debug) return null;
+  if (typeof debug.call_count === "number") return debug.call_count;
+  return debug.calls?.length ?? debug.entries?.length ?? null;
 }
 
 function threadPreview(thread: ChatThreadRecord, t: Translate): string {

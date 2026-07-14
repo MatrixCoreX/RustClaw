@@ -34,6 +34,20 @@ interface ChatThreadSummary {
   teachingMode: boolean;
 }
 
+interface ChatTeachingRunSummary {
+  id: string;
+  taskId: string | null;
+  userText: string;
+  assistantText: string | null;
+  status: TaskQueryResponse["status"] | "running";
+  startedAt: number;
+  completedAt: number | null;
+  callCount: number | null;
+  hasTrace: boolean;
+  traceError: string | null;
+  selected: boolean;
+}
+
 export interface ChatPageProps {
   t: Translate;
   tSlash: TranslateSlash;
@@ -48,6 +62,8 @@ export interface ChatPageProps {
   chatTeachingLlmDebug: TaskLlmDebugResponse | null;
   chatTeachingLlmDebugLoading: boolean;
   chatTeachingLlmDebugError: string | null;
+  chatTeachingRuns: ChatTeachingRunSummary[];
+  activeChatTeachingRunId: string | null;
   chatSending: boolean;
   chatRecording: boolean;
   chatVoiceRecordingSupported: boolean;
@@ -56,6 +72,7 @@ export interface ChatPageProps {
   toLocalTime: (value: number | null | undefined) => string;
   onChatAgentModeChange: (value: boolean) => void;
   onChatTeachingModeChange: (value: boolean) => void;
+  onSelectChatTeachingRun: (runId: string) => void;
   onCreateNewChatThread: () => void;
   onSelectChatThread: (threadId: string) => void;
   onDeleteChatThread: (threadId: string) => void;
@@ -84,6 +101,8 @@ export function ChatPage({
   chatTeachingLlmDebug,
   chatTeachingLlmDebugLoading,
   chatTeachingLlmDebugError,
+  chatTeachingRuns,
+  activeChatTeachingRunId,
   chatSending,
   chatRecording,
   chatVoiceRecordingSupported,
@@ -92,6 +111,7 @@ export function ChatPage({
   toLocalTime,
   onChatAgentModeChange,
   onChatTeachingModeChange,
+  onSelectChatTeachingRun,
   onCreateNewChatThread,
   onSelectChatThread,
   onDeleteChatThread,
@@ -240,24 +260,33 @@ export function ChatPage({
       </div>
 
       {chatTeachingMode ? (
-        chatTeachingTaskResult ? (
-          <TaskLlmTracePanel
+        <div className="mt-4 space-y-3">
+          <TeachingRunHistory
             t={t}
-            tSlash={tSlash}
-            taskResult={chatTeachingTaskResult}
-            taskLlmDebug={chatTeachingLlmDebug}
-            taskLlmDebugLoading={chatTeachingLlmDebugLoading}
-            taskLlmDebugError={chatTeachingLlmDebugError}
-            onQueryTaskLlmDebug={onQueryChatTeachingLlmDebug}
+            runs={chatTeachingRuns}
+            activeRunId={activeChatTeachingRunId}
+            toLocalTime={toLocalTime}
+            onSelectRun={onSelectChatTeachingRun}
           />
-        ) : (
-          <div className="mt-4 rounded-xl border border-white/10 bg-[#12151f] p-3 text-xs text-white/55">
-            {t(
-              "教学模式已开启。发送一条消息后，这里会按 LLM #1、LLM #2 展示请求数据和返回数据。",
-              "Teaching mode is on. After you send a message, this area will show request and response data as LLM #1, LLM #2, and so on.",
-            )}
-          </div>
-        )
+          {chatTeachingTaskResult ? (
+            <TaskLlmTracePanel
+              t={t}
+              tSlash={tSlash}
+              taskResult={chatTeachingTaskResult}
+              taskLlmDebug={chatTeachingLlmDebug}
+              taskLlmDebugLoading={chatTeachingLlmDebugLoading}
+              taskLlmDebugError={chatTeachingLlmDebugError}
+              onQueryTaskLlmDebug={onQueryChatTeachingLlmDebug}
+            />
+          ) : (
+            <div className="rounded-xl border border-white/10 bg-[#12151f] p-3 text-xs text-white/55">
+              {t(
+                "教学模式已开启。发送一条消息后，这里会保留本轮对话，并按 LLM #1、LLM #2 展示请求数据和返回数据。",
+                "Teaching mode is on. After you send a message, this area will keep that turn and show request and response data as LLM #1, LLM #2, and so on.",
+              )}
+            </div>
+          )}
+        </div>
       ) : null}
 
       <div className="mt-4 grid shrink-0 gap-3 md:grid-cols-[1fr_auto]">
@@ -382,6 +411,102 @@ export function ChatPage({
       ) : null}
       </div>
     </section>
+  );
+}
+
+function TeachingRunHistory({
+  t,
+  runs,
+  activeRunId,
+  toLocalTime,
+  onSelectRun,
+}: {
+  t: Translate;
+  runs: ChatTeachingRunSummary[];
+  activeRunId: string | null;
+  toLocalTime: (value: number | null | undefined) => string;
+  onSelectRun: (runId: string) => void;
+}) {
+  if (runs.length === 0) {
+    return (
+      <div className="rounded-xl border border-white/10 bg-[#12151f] p-3 text-xs text-white/55">
+        {t(
+          "教学历史会保留每一次对话的任务、回复和模型调用入口。",
+          "Teaching history keeps each turn's task, response, and model-call trace entry point.",
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-[#12151f] p-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold">{t("教学历史", "Teaching history")}</p>
+          <p className="mt-1 text-xs text-white/50">
+            {t(
+              "每条记录对应一次对话。切换后可查看该任务的完整 LLM 请求和返回。",
+              "Each record maps to one turn. Switch records to inspect that task's full LLM request and response trace.",
+            )}
+          </p>
+        </div>
+        <span className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-xs text-white/60">
+          {runs.length}
+        </span>
+      </div>
+      <div className="grid max-h-64 gap-2 overflow-auto pr-1 md:grid-cols-2">
+        {runs.map((run) => {
+          const active = run.id === activeRunId || run.selected;
+          return (
+            <button
+              type="button"
+              key={run.id}
+              onClick={() => onSelectRun(run.id)}
+              className={
+                active
+                  ? "min-w-0 rounded-lg border border-sky-300/40 bg-sky-500/15 p-3 text-left"
+                  : "min-w-0 rounded-lg border border-white/10 bg-black/20 p-3 text-left hover:bg-white/5"
+              }
+            >
+              <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[10px] text-white/55">
+                <span>{toLocalTime(run.startedAt)}</span>
+                <span className="rounded border border-white/10 px-1.5 py-0.5 font-mono">
+                  {run.status}
+                </span>
+                {run.callCount != null ? (
+                  <span className="rounded border border-white/10 px-1.5 py-0.5 font-mono">
+                    LLM={run.callCount}
+                  </span>
+                ) : null}
+                {run.hasTrace ? (
+                  <span className="rounded border border-emerald-300/25 px-1.5 py-0.5 text-emerald-100">
+                    {t("已加载", "Loaded")}
+                  </span>
+                ) : null}
+                {run.traceError ? (
+                  <span className="rounded border border-red-300/25 px-1.5 py-0.5 text-red-100">
+                    {t("查询失败", "Trace error")}
+                  </span>
+                ) : null}
+              </div>
+              <p className="line-clamp-2 min-h-9 break-words text-xs text-white/85">
+                {run.userText}
+              </p>
+              {run.assistantText ? (
+                <p className="mt-2 line-clamp-2 min-h-8 break-words text-[11px] text-white/50">
+                  {run.assistantText}
+                </p>
+              ) : null}
+              {run.taskId ? (
+                <p className="mt-2 truncate font-mono text-[10px] text-white/40" title={run.taskId}>
+                  task_id={run.taskId}
+                </p>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
