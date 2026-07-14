@@ -12,9 +12,9 @@ mod renderer_registry_tests;
 mod task_lifecycle_renderers;
 use task_lifecycle_renderers::run_task_lifecycle_renderer_registry;
 
-#[path = "loop_reply_compatibility_renderers.rs"]
-mod compatibility_renderers;
-use compatibility_renderers::run_compatibility_fallback_renderer_registry;
+#[path = "loop_reply_deterministic_fallback_renderers.rs"]
+mod deterministic_fallback_renderers;
+use deterministic_fallback_renderers::run_deterministic_fallback_renderer_registry;
 
 #[path = "loop_reply_capability_result_renderers.rs"]
 mod capability_result_renderers;
@@ -780,7 +780,7 @@ pub(crate) async fn finalize_loop_reply(
         }
     }
 
-    let replaced_scalar_placeholder_before_failure = run_compatibility_fallback_renderer_registry(
+    let replaced_scalar_placeholder_before_failure = run_deterministic_fallback_renderer_registry(
         state,
         task,
         &mut loop_state,
@@ -994,7 +994,7 @@ pub(crate) async fn finalize_loop_reply(
         &mut loop_state,
         agent_run_context,
         &mut finalizer_summary,
-    ) || run_compatibility_fallback_renderer_registry(
+    ) || run_deterministic_fallback_renderer_registry(
         state,
         task,
         &mut loop_state,

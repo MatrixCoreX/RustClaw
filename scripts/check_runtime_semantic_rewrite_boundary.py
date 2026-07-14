@@ -97,6 +97,9 @@ SCHEDULE_SERVICE_FILE = SRC_ROOT / "schedule_service.rs"
 VALUE_STRING_LIST_FILE = SRC_ROOT / "agent_engine/value_string_list.rs"
 RUNTIME_SURFACE_PLAN_FILE = SRC_ROOT / "agent_engine/runtime_surface_plan.rs"
 LOOP_CONTROL_FILE = SRC_ROOT / "agent_engine/loop_control.rs"
+LOOP_CONTROL_MACHINE_STATUS_GAP_FILE = (
+    SRC_ROOT / "agent_engine/loop_control_machine_status_gap.rs"
+)
 LOOP_CONTROL_FILESYSTEM_MUTATION_RECOVERY_FILE = (
     SRC_ROOT / "agent_engine/loop_control_filesystem_mutation_recovery.rs"
 )
@@ -2636,25 +2639,37 @@ def scan_loop_control_output_contract_marker_key() -> list[Finding]:
 
 def scan_loop_recovery_contract_marker_fields() -> list[Finding]:
     findings: list[Finding] = []
-    loop_text = LOOP_CONTROL_FILE.read_text(encoding="utf-8")
-    if 'object.contains_key("contract_marker")' not in loop_text:
+    machine_detection_files = (
+        LOOP_CONTROL_FILE,
+        LOOP_CONTROL_MACHINE_STATUS_GAP_FILE,
+    )
+    machine_detection_texts = [
+        (path, path.read_text(encoding="utf-8"))
+        for path in machine_detection_files
+        if path.exists()
+    ]
+    if not any(
+        'object.contains_key("contract_marker")' in text
+        for _, text in machine_detection_texts
+    ):
         findings.append(
             Finding(
-                rel(LOOP_CONTROL_FILE),
+                rel(LOOP_CONTROL_MACHINE_STATUS_GAP_FILE),
                 1,
                 "loop_control_contract_marker_reader_missing",
                 "loop control machine JSON detection should read contract_marker",
             )
         )
-    if 'object.contains_key("semantic_kind")' in loop_text:
-        findings.append(
-            Finding(
-                rel(LOOP_CONTROL_FILE),
-                1,
-                "loop_control_semantic_kind_reader",
-                "loop control machine JSON detection must not read legacy semantic_kind",
+    for path, text in machine_detection_texts:
+        if 'object.contains_key("semantic_kind")' in text:
+            findings.append(
+                Finding(
+                    rel(path),
+                    1,
+                    "loop_control_semantic_kind_reader",
+                    "loop control machine JSON detection must not read legacy semantic_kind",
+                )
             )
-        )
     fs_text = LOOP_CONTROL_FILESYSTEM_MUTATION_RECOVERY_FILE.read_text(encoding="utf-8")
     if '.get("contract_marker")' not in fs_text:
         findings.append(
