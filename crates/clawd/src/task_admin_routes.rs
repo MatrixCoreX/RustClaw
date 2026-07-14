@@ -504,3 +504,7 @@ pub(super) async fn cancel_one_task(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "task_admin_routes_tests.rs"]
+mod tests;
