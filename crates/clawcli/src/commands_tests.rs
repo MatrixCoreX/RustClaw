@@ -3,11 +3,11 @@ use super::{
     exec_compact_text_lines, exec_effective_options, exec_exit_class,
     exec_failure_class_from_machine_tokens, exec_summary_json, goal_control_summary_json,
     goal_edit_patch_json, goal_request_payload, goal_status_summary_json, goal_status_text_lines,
-    llm_trace_text_lines, permission_report_json, run_exec, subagent_report_json,
-    task_event_output_lines, task_report_json, task_report_text_lines,
-    task_resume_control_summary_json, tui_command_from_input, tui_export_json,
-    tui_selected_task_lines, tui_snapshot_json, wait_until_matches, watch_progress_json,
-    write_exec_artifacts, ExecExitClass, ExecWaitOutcome, TuiCommand,
+    permission_report_json, run_exec, subagent_report_json, task_event_output_lines,
+    task_report_json, task_report_text_lines, task_resume_control_summary_json,
+    tui_command_from_input, tui_export_json, tui_selected_task_lines, tui_snapshot_json,
+    wait_until_matches, watch_progress_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
+    TuiCommand,
 };
 
 #[test]
@@ -118,6 +118,11 @@ fn task_report_json_exposes_stable_machine_fields() {
         status: "succeeded".to_string(),
         raw_data: serde_json::json!({
             "execution_state": "completed",
+            "user_id": 7,
+            "chat_id": 9,
+            "task_goal": {
+                "goal_id": "goal-report"
+            },
             "task_lifecycle": {
                 "state": "completed",
                 "reason_code": "succeeded"
@@ -203,6 +208,11 @@ fn task_report_json_exposes_stable_machine_fields() {
 
     assert_eq!(report["report_kind"], "rustclaw_task_report");
     assert_eq!(report["task_id"], "task-report");
+    assert_eq!(report["goal_id"], "goal-report");
+    assert_eq!(report["session_id"], "user_chat:7:9");
+    assert_eq!(report["session"]["user_id"], "7");
+    assert_eq!(report["session"]["chat_id"], "9");
+    assert_eq!(report["session"]["active_goal_id"], "goal-report");
     assert_eq!(report["status"], "succeeded");
     assert_eq!(report["execution_state"], "completed");
     assert_eq!(report["lifecycle_state"], "completed");
@@ -883,131 +893,6 @@ fn tui_selected_task_lines_expose_resume_llm_and_coding_tokens() {
     assert!(lines.contains(&"tui_selected_done_condition_count: 1".to_string()));
     assert!(lines.contains(&"tui_selected_current_progress_count: 7".to_string()));
     assert!(lines.contains(&"tui_selected_remaining_work_count: 2".to_string()));
-}
-
-#[test]
-fn llm_trace_text_lines_number_calls_and_flow_tokens() {
-    let debug = serde_json::json!({
-        "task_id": "task-llm-trace",
-        "call_count": 2,
-        "flow_summary": {
-            "stage_count": 2,
-            "retry_count": 0,
-            "verifier_call_count": 1,
-            "finalizer_call_count": 0,
-            "provider_error_count": 0
-        },
-        "calls": [
-            {
-                "call_index": 1,
-                "flow": {
-                    "prompt_label": "plan",
-                    "flow_stage": "agent_loop.planner",
-                    "flow_node": "planner_round",
-                    "code_module": "crates/clawd/src/agent_engine/planning.rs",
-                    "code_entrypoint": "plan_round_actions",
-                    "trigger_kind": "normal"
-                },
-                "status": "ok",
-                "vendor": "minimax",
-                "provider": "minimax",
-                "model": "MiniMax-M3",
-                "usage": {
-                    "prompt_tokens": 11,
-                    "completion_tokens": 7,
-                    "total_tokens": 18
-                }
-            },
-            {
-                "call_index": 2,
-                "flow": {
-                    "prompt_label": "answer_verifier",
-                    "flow_stage": "agent_loop.answer_verifier",
-                    "flow_node": "answer_verifier",
-                    "code_module": "crates/clawd/src/answer_verifier_runtime.rs",
-                    "code_entrypoint": "verify_answer_observe_only",
-                    "trigger_kind": "normal"
-                },
-                "status": "ok",
-                "vendor": "minimax",
-                "provider": "minimax",
-                "model": "MiniMax-M3"
-            }
-        ]
-    });
-
-    let lines = llm_trace_text_lines(&debug, false, None);
-
-    assert!(lines.contains(&"llm_trace_task_id: task-llm-trace".to_string()));
-    assert!(lines.contains(&"llm_trace_call_count: 2".to_string()));
-    assert!(lines.contains(&"llm_trace_flow_stage_count: 2".to_string()));
-    assert!(lines.iter().any(|line| {
-        line == "llm_trace_call: index=1 status=ok vendor=minimax provider=minimax model=MiniMax-M3 prompt_label=plan flow_stage=agent_loop.planner flow_node=planner_round code_module=crates/clawd/src/agent_engine/planning.rs code_entrypoint=plan_round_actions trigger_kind=normal prompt_tokens=11 completion_tokens=7 total_tokens=18"
-    }));
-    assert!(lines.iter().any(|line| {
-        line.contains("index=2")
-            && line.contains("prompt_label=answer_verifier")
-            && line.contains("flow_stage=agent_loop.answer_verifier")
-    }));
-}
-
-#[test]
-fn llm_trace_text_lines_limit_and_raw_fields() {
-    let debug = serde_json::json!({
-        "task_id": "task-llm-raw",
-        "call_count": 2,
-        "calls": [
-            {
-                "call_index": 1,
-                "flow": {
-                    "prompt_label": "normalizer",
-                    "flow_stage": "boundary.normalizer",
-                    "flow_node": "intent_normalizer",
-                    "code_module": "normalizer.rs",
-                    "code_entrypoint": "run_intent_normalizer_model_step",
-                    "trigger_kind": "normal"
-                },
-                "status": "ok",
-                "request_payload": {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": "TRACE_INPUT_TOKEN"
-                        }
-                    ]
-                },
-                "response": "TRACE_RESPONSE_TOKEN",
-                "raw_response": "{\"content\":\"TRACE_RAW_TOKEN\"}"
-            },
-            {
-                "call_index": 2,
-                "flow": {
-                    "prompt_label": "plan",
-                    "flow_stage": "agent_loop.planner",
-                    "flow_node": "planner_round",
-                    "code_module": "planning.rs",
-                    "code_entrypoint": "plan_round_actions",
-                    "trigger_kind": "normal"
-                },
-                "status": "ok",
-                "response": "SHOULD_BE_LIMITED_OUT"
-            }
-        ]
-    });
-
-    let lines = llm_trace_text_lines(&debug, true, Some(1));
-
-    assert!(lines.iter().any(|line| line.contains("index=1")));
-    assert!(!lines.iter().any(|line| line.contains("index=2")));
-    assert!(lines.contains(&"llm_request_payload_1:".to_string()));
-    assert!(lines.iter().any(|line| line.contains("TRACE_INPUT_TOKEN")));
-    assert!(lines.contains(&"llm_response_1:".to_string()));
-    assert!(lines.contains(&"TRACE_RESPONSE_TOKEN".to_string()));
-    assert!(lines.contains(&"llm_raw_response_1:".to_string()));
-    assert!(lines.contains(&"{\"content\":\"TRACE_RAW_TOKEN\"}".to_string()));
-    assert!(!lines
-        .iter()
-        .any(|line| line.contains("SHOULD_BE_LIMITED_OUT")));
 }
 
 #[test]

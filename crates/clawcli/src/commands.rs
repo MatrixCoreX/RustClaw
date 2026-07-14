@@ -82,3 +82,7 @@ mod tests;
 #[cfg(test)]
 #[path = "commands_session_tests.rs"]
 mod session_tests;
+
+#[cfg(test)]
+#[path = "commands_llm_trace_tests.rs"]
+mod llm_trace_tests;

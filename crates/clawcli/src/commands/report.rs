@@ -24,9 +24,13 @@ pub(super) fn task_report_json(task: &task::TaskStatusView, include_events: bool
     let artifact_refs = exec_artifact_refs(&task.raw_data);
     let coding = coding_report_json(&task.raw_data);
     let outcome = super::report_outcome::task_outcome_report_json(&task.raw_data, &coding);
+    let session = task_session_projection_json(task);
     json!({
         "report_kind": "rustclaw_task_report",
         "task_id": task.task_id,
+        "goal_id": task_goal_id(&task.raw_data),
+        "session_id": session.get("session_id").cloned().unwrap_or(Value::Null),
+        "session": session,
         "status": task.status,
         "execution_state": task.execution_state(),
         "lifecycle_state": task.lifecycle_state(),
@@ -56,6 +60,12 @@ pub(super) fn task_report_text_lines(task: &task::TaskStatusView, report: &Value
         format!("task_id: {}", task.task_id),
         format!("status: {}", task.status),
     ];
+    if let Some(goal_id) = report.get("goal_id").and_then(Value::as_str) {
+        lines.push(format!("goal_id={goal_id}"));
+    }
+    if let Some(session_id) = report.get("session_id").and_then(Value::as_str) {
+        lines.push(format!("session_id={session_id}"));
+    }
     if let Some(state) = task.execution_state() {
         lines.push(format!("execution_state: {state}"));
     }
@@ -214,6 +224,42 @@ pub(super) fn task_report_text_lines(task: &task::TaskStatusView, report: &Value
         lines.push(text.to_string());
     }
     lines
+}
+
+fn task_goal_id(raw_data: &Value) -> Value {
+    first_string_at(
+        raw_data,
+        &[
+            "/goal/goal_id",
+            "/task_goal/goal_id",
+            "/result_json/task_goal/goal_id",
+            "/result_json/task_journal/summary/task_goal/goal_id",
+            "/task_journal/summary/task_goal/goal_id",
+        ],
+    )
+    .map(Value::String)
+    .unwrap_or(Value::Null)
+}
+
+fn task_session_projection_json(task: &task::TaskStatusView) -> Value {
+    let session_id = first_string_at(
+        &task.raw_data,
+        &[
+            "/session_id",
+            "/conversation_state/session_id",
+            "/result_json/session_id",
+            "/task_journal/summary/session_id",
+            "/result_json/task_journal/summary/session_id",
+        ],
+    )
+    .or_else(|| user_chat_session_id(&task.raw_data));
+    json!({
+        "session_id": session_id,
+        "user_id": scalar_string_at(&task.raw_data, "/user_id"),
+        "chat_id": scalar_string_at(&task.raw_data, "/chat_id"),
+        "task_ids": [task.task_id.clone()],
+        "active_goal_id": task_goal_id(&task.raw_data),
+    })
 }
 
 pub(super) fn coding_review_json(task: &task::TaskStatusView, include_events: bool) -> Value {
@@ -544,6 +590,30 @@ fn report_string_array(report: &Value, pointer: &str) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .collect()
+}
+
+fn first_string_at(value: &Value, pointers: &[&str]) -> Option<String> {
+    pointers
+        .iter()
+        .find_map(|pointer| scalar_string_at(value, pointer))
+}
+
+fn scalar_string_at(value: &Value, pointer: &str) -> Option<String> {
+    value.pointer(pointer).and_then(|item| match item {
+        Value::String(text) => {
+            let text = text.trim();
+            (!text.is_empty()).then(|| text.to_string())
+        }
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    })
+}
+
+fn user_chat_session_id(value: &Value) -> Option<String> {
+    let user_id = scalar_string_at(value, "/user_id")?;
+    let chat_id = scalar_string_at(value, "/chat_id")?;
+    Some(format!("user_chat:{user_id}:{chat_id}"))
 }
 
 fn report_value_or_empty_array(report: &Value, pointer: &str) -> Value {
