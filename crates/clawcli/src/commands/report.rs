@@ -143,6 +143,12 @@ pub(super) fn task_report_text_lines(task: &task::TaskStatusView, report: &Value
     {
         lines.push(format!("coding_current_phase_hint: {phase}"));
     }
+    if let Some(next_step) = report
+        .pointer("/coding/state/next_step")
+        .and_then(Value::as_str)
+    {
+        lines.push(format!("coding_next_step: {next_step}"));
+    }
     lines.push(format!(
         "coding_checkpoint_ref_count: {}",
         report_u64(report, "/coding/state/checkpoint_ref_count")
@@ -229,6 +235,12 @@ pub(super) fn coding_review_text_lines(task: &task::TaskStatusView, review: &Val
     {
         lines.push(format!("coding_current_phase_hint: {phase}"));
     }
+    if let Some(next_step) = review
+        .pointer("/coding/state/next_step")
+        .and_then(Value::as_str)
+    {
+        lines.push(format!("coding_next_step: {next_step}"));
+    }
     lines.push(format!(
         "coding_checkpoint_ref_count: {}",
         report_u64(review, "/coding/state/checkpoint_ref_count")
@@ -313,6 +325,9 @@ pub(super) fn coding_exec_text_lines(coding: &Value) -> Vec<String> {
         .and_then(Value::as_str)
     {
         lines.push(format!("coding_current_phase_hint: {phase}"));
+    }
+    if let Some(next_step) = coding.pointer("/state/next_step").and_then(Value::as_str) {
+        lines.push(format!("coding_next_step: {next_step}"));
     }
     lines.push(format!(
         "coding_checkpoint_ref_count: {}",
@@ -779,6 +794,7 @@ fn coding_state_json(signals: &CodingReportSignals) -> Value {
     json!({
         "schema_version": 1,
         "current_phase_hint": coding_current_phase_hint(signals),
+        "next_step": coding_next_step(signals),
         "observed_phases": observed_phases,
         "has_changes": !signals.changed_files.is_empty(),
         "has_commands": !signals.commands.is_empty(),
@@ -805,6 +821,22 @@ fn coding_state_json(signals: &CodingReportSignals) -> Value {
         "resume_entrypoints": signals.resume_entrypoints.iter().cloned().collect::<Vec<_>>(),
         "verification_status": coding_verification_status_from_signals(signals),
     })
+}
+
+fn coding_next_step(signals: &CodingReportSignals) -> &'static str {
+    if !signals.verification_failure_kinds.is_empty() || !signals.failures.is_empty() {
+        "repair_failed_verification"
+    } else if !signals.changed_files.is_empty() && signals.verification_commands.is_empty() {
+        "run_verification"
+    } else if !signals.resume_entrypoints.is_empty() {
+        "resume_from_checkpoint"
+    } else if !signals.verification_commands.is_empty() {
+        "summarize"
+    } else if !signals.commands.is_empty() {
+        "inspect_results"
+    } else {
+        "inspect"
+    }
 }
 
 fn coding_observed_phases(signals: &CodingReportSignals) -> Vec<&'static str> {

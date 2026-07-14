@@ -89,6 +89,11 @@ fn exec_summary_json_exposes_stable_machine_fields() {
     assert_eq!(summary["llm"]["by_prompt"][0]["prompt_label"], "planner");
     assert_eq!(summary["coding"]["changed_file_count"], 1);
     assert_eq!(
+        summary["coding"]["state"]["current_phase_hint"],
+        "summarize"
+    );
+    assert_eq!(summary["coding"]["state"]["next_step"], "summarize");
+    assert_eq!(
         summary["coding"]["changed_files"][0],
         "crates/clawcli/src/commands/exec.rs"
     );
@@ -593,6 +598,10 @@ fn task_report_json_summarizes_coding_verification_gaps() {
     assert_eq!(report["coding"]["verification_failure_kinds"][0], "test");
     assert_eq!(report["coding"]["retry_count"], 2);
     assert_eq!(report["coding"]["state"]["current_phase_hint"], "repair");
+    assert_eq!(
+        report["coding"]["state"]["next_step"],
+        "repair_failed_verification"
+    );
     assert_eq!(report["coding"]["state"]["has_changes"], true);
     assert_eq!(report["coding"]["state"]["has_verification"], true);
     assert_eq!(report["coding"]["state"]["has_failed_verification"], true);
@@ -622,6 +631,7 @@ fn task_report_json_summarizes_coding_verification_gaps() {
     assert!(lines.contains(&"coding_verification_failure_kind_count: 1".to_string()));
     assert!(lines.contains(&"verification_failure_kind: test".to_string()));
     assert!(lines.contains(&"coding_current_phase_hint: repair".to_string()));
+    assert!(lines.contains(&"coding_next_step: repair_failed_verification".to_string()));
     assert!(lines.contains(&"coding_checkpoint_ref_count: 1".to_string()));
     assert!(lines.contains(&"coding_completed_side_effect_count: 1".to_string()));
 }
