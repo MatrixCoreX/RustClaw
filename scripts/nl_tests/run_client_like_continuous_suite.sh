@@ -1402,8 +1402,11 @@ emitted = 0
 emitted_groups = set()
 row_sep = "\x1f"
 
+def split_tag_tokens(tags: str) -> list[str]:
+    return [token.strip() for token in re.split(r"[,;\s]+", tags) if token.strip()]
+
 def explicit_group_from_tags(tags: str) -> str:
-    for raw in tags.split(","):
+    for raw in split_tag_tokens(tags):
         token = raw.strip()
         if token.startswith("group:"):
             return token[len("group:") :].strip()
@@ -1412,7 +1415,7 @@ def explicit_group_from_tags(tags: str) -> str:
     return ""
 
 def tag_tokens(tags: str) -> set[str]:
-    return {token.strip() for token in tags.split(",") if token.strip()}
+    return set(split_tag_tokens(tags))
 
 def row_is_context_setup(tags: str) -> bool:
     tokens = tag_tokens(tags)
@@ -1568,8 +1571,11 @@ emitted = 0
 emitted_groups = set()
 row_sep = "\x1f"
 
+def split_tag_tokens(tags: str) -> list[str]:
+    return [token.strip() for token in re.split(r"[,;\s]+", tags) if token.strip()]
+
 def explicit_group_from_tags(tags: str) -> str:
-    for raw in tags.split(","):
+    for raw in split_tag_tokens(tags):
         token = raw.strip()
         if token.startswith("group:"):
             return token[len("group:") :].strip()
@@ -1578,7 +1584,7 @@ def explicit_group_from_tags(tags: str) -> str:
     return ""
 
 def tag_tokens(tags: str) -> set[str]:
-    return {token.strip() for token in tags.split(",") if token.strip()}
+    return set(split_tag_tokens(tags))
 
 def row_is_context_setup(tags: str) -> bool:
     tokens = tag_tokens(tags)
