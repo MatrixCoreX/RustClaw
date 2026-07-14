@@ -232,6 +232,89 @@ def compare_with_baseline(
     }
 
 
+def optional_threshold_result(
+    passed: bool,
+    observed: float,
+    threshold: float,
+) -> dict[str, Any]:
+    return {
+        "observed": observed,
+        "threshold": threshold,
+        "passed": passed,
+    }
+
+
+def compare_with_absolute_thresholds(
+    result: dict[str, Any],
+    min_pass_rate: float | None,
+    max_avg_llm_calls: float | None,
+    max_prompt_bytes_before: int | None,
+    max_prompt_truncations: int | None,
+    max_provider_final_errors: int | None,
+    max_provider_retryable_errors: int | None,
+    max_verifier_calls: int | None,
+) -> dict[str, Any]:
+    comparisons: dict[str, Any] = {}
+    if min_pass_rate is not None:
+        observed = float(result.get("pass_rate") or 0.0)
+        comparisons["min_pass_rate"] = optional_threshold_result(
+            observed >= min_pass_rate,
+            observed,
+            min_pass_rate,
+        )
+    if max_avg_llm_calls is not None:
+        observed = float(get_path(result, "llm", "avg_calls_per_turn") or 0.0)
+        comparisons["max_avg_llm_calls"] = optional_threshold_result(
+            observed <= max_avg_llm_calls,
+            observed,
+            max_avg_llm_calls,
+        )
+    if max_prompt_bytes_before is not None:
+        observed = safe_int(get_path(result, "llm", "prompt_bytes_before_max"))
+        comparisons["max_prompt_bytes_before"] = optional_threshold_result(
+            observed <= max_prompt_bytes_before,
+            float(observed),
+            float(max_prompt_bytes_before),
+        )
+    if max_prompt_truncations is not None:
+        observed = safe_int(get_path(result, "llm", "prompt_truncation_count"))
+        comparisons["max_prompt_truncations"] = optional_threshold_result(
+            observed <= max_prompt_truncations,
+            float(observed),
+            float(max_prompt_truncations),
+        )
+    if max_provider_final_errors is not None:
+        observed = safe_int(get_path(result, "llm", "provider_final_error_count"))
+        comparisons["max_provider_final_errors"] = optional_threshold_result(
+            observed <= max_provider_final_errors,
+            float(observed),
+            float(max_provider_final_errors),
+        )
+    if max_provider_retryable_errors is not None:
+        observed = safe_int(get_path(result, "llm", "provider_retryable_error_count"))
+        comparisons["max_provider_retryable_errors"] = optional_threshold_result(
+            observed <= max_provider_retryable_errors,
+            float(observed),
+            float(max_provider_retryable_errors),
+        )
+    if max_verifier_calls is not None:
+        observed = safe_int(get_path(result, "execution", "verifier_call_count"))
+        comparisons["max_verifier_calls"] = optional_threshold_result(
+            observed <= max_verifier_calls,
+            float(observed),
+            float(max_verifier_calls),
+        )
+    failures = [
+        key for key, value in comparisons.items() if value.get("passed") is not True
+    ]
+    return {
+        "configured": bool(comparisons),
+        "comparisons": comparisons,
+        "failures": failures,
+        "passed": not failures,
+    }
+
+
 def looks_like_language_neutral_artifact_token(token: str) -> bool:
     token = token.strip().strip("\"'`()[]{}<>")
     if not token or not any(ch.isalpha() for ch in token):
@@ -1339,6 +1422,41 @@ def main() -> int:
     parser.add_argument("--max-avg-llm-calls-rise", type=float, default=0.15)
     parser.add_argument("--max-avg-elapsed-rise", type=float, default=0.20)
     parser.add_argument(
+        "--min-pass-rate",
+        type=float,
+        help="Absolute gate: fail when pass_rate is below this value.",
+    )
+    parser.add_argument(
+        "--max-avg-llm-calls",
+        type=float,
+        help="Absolute gate: fail when average LLM calls per turn exceeds this value.",
+    )
+    parser.add_argument(
+        "--max-prompt-bytes-before",
+        type=int,
+        help="Absolute gate: fail when max prompt_bytes_before exceeds this value.",
+    )
+    parser.add_argument(
+        "--max-prompt-truncations",
+        type=int,
+        help="Absolute gate: fail when prompt truncation count exceeds this value.",
+    )
+    parser.add_argument(
+        "--max-provider-final-errors",
+        type=int,
+        help="Absolute gate: fail when provider final error count exceeds this value.",
+    )
+    parser.add_argument(
+        "--max-provider-retryable-errors",
+        type=int,
+        help="Absolute gate: fail when provider retryable error count exceeds this value.",
+    )
+    parser.add_argument(
+        "--max-verifier-calls",
+        type=int,
+        help="Absolute gate: fail when verifier-call count exceeds this value.",
+    )
+    parser.add_argument(
         "--dedupe-latest-case",
         action="store_true",
         help="For rerun shards, keep only the latest valid turn per numeric case id.",
@@ -1387,11 +1505,27 @@ def main() -> int:
             max_avg_llm_calls_rise=args.max_avg_llm_calls_rise,
             max_avg_elapsed_rise=args.max_avg_elapsed_rise,
         )
+    result["metric_gate"] = compare_with_absolute_thresholds(
+        result,
+        min_pass_rate=args.min_pass_rate,
+        max_avg_llm_calls=args.max_avg_llm_calls,
+        max_prompt_bytes_before=args.max_prompt_bytes_before,
+        max_prompt_truncations=args.max_prompt_truncations,
+        max_provider_final_errors=args.max_provider_final_errors,
+        max_provider_retryable_errors=args.max_provider_retryable_errors,
+        max_verifier_calls=args.max_verifier_calls,
+    )
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     if args.print_json:
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         print(f"ROLLOUT_METRICS_OK output={output} turns={result['turns_total']} pass_rate={result['pass_rate']}")
+    if result["metric_gate"]["configured"] and not result["metric_gate"]["passed"]:
+        print(
+            "ROLLOUT_METRICS_GATE_FAIL "
+            f"failures={','.join(result['metric_gate']['failures'])}",
+        )
+        return 1
     return 0
 
 
