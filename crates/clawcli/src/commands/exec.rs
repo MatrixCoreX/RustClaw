@@ -9,7 +9,7 @@ use crate::{events::EventFilters, output, task};
 use super::report::{
     async_final_result_json, coding_diff_summary_artifact_json, coding_exec_has_signals,
     coding_exec_summary_json, coding_exec_text_lines, coding_verification_artifact_json,
-    exec_artifact_refs,
+    exec_artifact_refs, llm_report_json,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +186,7 @@ pub(super) fn exec_summary_json(
 ) -> serde_json::Value {
     let artifact_refs = exec_artifact_refs(&task.raw_data);
     let coding = coding_exec_summary_json(task);
+    let llm = llm_report_json(task);
     json!({
         "task_id": task.task_id,
         "status": task.status,
@@ -200,6 +201,7 @@ pub(super) fn exec_summary_json(
         "async_result": async_final_result_json(&task.raw_data).unwrap_or(Value::Null),
         "error_text": task.error_text,
         "events": exec_event_summary(task),
+        "llm": llm,
         "coding": coding,
         "artifacts": {
             "ref_count": artifact_refs.len(),
@@ -571,6 +573,10 @@ pub(super) fn write_exec_artifacts(
     write_json_file(
         &artifact_dir.join("diff_summary.json"),
         &coding_diff_summary_artifact_json(task),
+    )?;
+    write_json_file(
+        &artifact_dir.join("llm_summary.json"),
+        &llm_report_json(task),
     )?;
     write_json_file(
         &artifact_dir.join("resume.json"),

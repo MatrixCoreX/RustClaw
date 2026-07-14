@@ -43,14 +43,27 @@ fn exec_summary_json_exposes_stable_machine_fields() {
         }),
         result_text: Some("result-token".to_string()),
         error_text: None,
-        events: vec![crate::events::TaskEventLine {
-            event_type: "checkpoint_created".to_string(),
-            line: "type=checkpoint_created checkpoint_id=ckpt-exec".to_string(),
-            fields: std::collections::BTreeMap::from([(
-                "checkpoint_id".to_string(),
-                "ckpt-exec".to_string(),
-            )]),
-        }],
+        events: vec![
+            crate::events::TaskEventLine {
+                event_type: "checkpoint_created".to_string(),
+                line: "type=checkpoint_created checkpoint_id=ckpt-exec".to_string(),
+                fields: std::collections::BTreeMap::from([(
+                    "checkpoint_id".to_string(),
+                    "ckpt-exec".to_string(),
+                )]),
+            },
+            crate::events::TaskEventLine {
+                event_type: "provider_call".to_string(),
+                line: "type=provider_call prompt_label=planner".to_string(),
+                fields: std::collections::BTreeMap::from([
+                    ("prompt_label".to_string(), "planner".to_string()),
+                    ("llm_call_count".to_string(), "1".to_string()),
+                    ("elapsed_ms".to_string(), "120".to_string()),
+                    ("prompt_bytes_before_max".to_string(), "4096".to_string()),
+                    ("prompt_bytes_after_max".to_string(), "4096".to_string()),
+                ]),
+            },
+        ],
     };
 
     let summary = exec_summary_json(
@@ -71,6 +84,9 @@ fn exec_summary_json_exposes_stable_machine_fields() {
     assert_eq!(summary["lifecycle"]["checkpoint_id"], "ckpt-exec");
     assert_eq!(summary["events"][0]["event_type"], "checkpoint_created");
     assert_eq!(summary["events"][0]["fields"]["checkpoint_id"], "ckpt-exec");
+    assert_eq!(summary["llm"]["llm_call_count"], 1);
+    assert_eq!(summary["llm"]["prompt_bytes_before_max"], 4096);
+    assert_eq!(summary["llm"]["by_prompt"][0]["prompt_label"], "planner");
     assert_eq!(summary["coding"]["changed_file_count"], 1);
     assert_eq!(
         summary["coding"]["changed_files"][0],
@@ -728,11 +744,23 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
         }),
         result_text: Some("machine-result-token".to_string()),
         error_text: None,
-        events: vec![crate::events::TaskEventLine {
-            event_type: "task_completed".to_string(),
-            line: "seq=1 type=task_completed status=succeeded".to_string(),
-            fields: std::collections::BTreeMap::new(),
-        }],
+        events: vec![
+            crate::events::TaskEventLine {
+                event_type: "task_completed".to_string(),
+                line: "seq=1 type=task_completed status=succeeded".to_string(),
+                fields: std::collections::BTreeMap::new(),
+            },
+            crate::events::TaskEventLine {
+                event_type: "provider_call".to_string(),
+                line: "seq=2 type=provider_call prompt_label=planner".to_string(),
+                fields: std::collections::BTreeMap::from([
+                    ("prompt_label".to_string(), "planner".to_string()),
+                    ("llm_call_count".to_string(), "2".to_string()),
+                    ("elapsed_ms".to_string(), "250".to_string()),
+                    ("prompt_bytes_before_max".to_string(), "8192".to_string()),
+                ]),
+            },
+        ],
     };
     let summary = exec_summary_json(
         &task,
@@ -757,8 +785,13 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
         .expect("read verification artifact");
     let diff_summary_file = std::fs::read_to_string(artifact_dir.join("diff_summary.json"))
         .expect("read diff summary artifact");
+    let llm_summary_file = std::fs::read_to_string(artifact_dir.join("llm_summary.json"))
+        .expect("read llm summary artifact");
+    let llm_summary: serde_json::Value =
+        serde_json::from_str(&llm_summary_file).expect("parse llm summary artifact");
 
     assert!(summary_file.contains("\"exit_class\": \"success\""));
+    assert!(summary_file.contains("\"llm_call_count\": 2"));
     assert!(task_file.contains("\"task-exec-artifact\""));
     assert!(events_file.contains("type=task_completed"));
     assert!(resume_file.contains("\"task-exec-artifact\""));
@@ -779,6 +812,8 @@ fn exec_artifact_writer_exports_summary_task_and_events() {
     assert!(diff_summary_file.contains("\"artifact_kind\": \"rustclaw_exec_diff_summary\""));
     assert!(diff_summary_file.contains("\"summary_code\": \"clawcli_exec_artifacts\""));
     assert!(diff_summary_file.contains("\"crates/clawcli/src/main.rs\""));
+    assert_eq!(llm_summary["llm_call_count"], 2);
+    assert_eq!(llm_summary["by_prompt"][0]["prompt_label"], "planner");
 
     std::fs::remove_dir_all(artifact_dir).ok();
 }

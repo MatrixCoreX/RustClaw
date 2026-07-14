@@ -457,7 +457,7 @@ struct LlmPromptSignals {
     prompt_truncated_bytes_total: u64,
 }
 
-fn llm_report_json(task: &task::TaskStatusView) -> Value {
+pub(super) fn llm_report_json(task: &task::TaskStatusView) -> Value {
     let mut signals = LlmReportSignals::default();
     for event in task
         .events
