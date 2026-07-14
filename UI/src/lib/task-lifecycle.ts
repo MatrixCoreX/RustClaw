@@ -38,6 +38,7 @@ export interface TaskLifecycleProjection {
   role?: string;
   required?: boolean;
   permission_profile?: string;
+  budget?: Record<string, string | number | boolean | null | undefined>;
 }
 
 export interface TaskLifecycleView {
@@ -121,6 +122,34 @@ function timestampLabel(lang: TaskLifecycleLang, ts: number | undefined): string
     minute: "2-digit",
     second: "2-digit",
   });
+}
+
+export function buildResumeLifecycleMachineTokens(
+  lifecycle: TaskLifecycleProjection | null | undefined,
+): string[] {
+  if (!lifecycle) return [];
+  const tokens: string[] = [];
+  pushMachineToken(tokens, "checkpoint_id", lifecycle.checkpoint_id);
+  pushMachineToken(tokens, "resume_due", lifecycle.resume_due);
+  pushMachineToken(tokens, "resume_wait_seconds", lifecycle.resume_wait_seconds);
+  pushMachineToken(tokens, "resume_owner", lifecycle.resume_owner);
+  pushMachineToken(tokens, "resume_entrypoint", lifecycle.resume_entrypoint);
+  pushMachineToken(tokens, "resume_directive", lifecycle.resume_directive);
+  pushMachineToken(tokens, "resume_reason", lifecycle.resume_reason);
+  pushMachineToken(tokens, "next_action_kind", lifecycle.next_action_kind);
+  pushMachineToken(tokens, "last_successful_evidence_ref", lifecycle.last_successful_evidence_ref);
+  pushMachineToken(tokens, "evidence_ref_count", lifecycle.evidence_ref_count);
+  for (const key of ["round", "step", "llm_calls", "tool_calls", "elapsed_ms", "llm_elapsed_ms", "tool_elapsed_ms"]) {
+    pushMachineToken(tokens, `budget.${key}`, lifecycle.budget?.[key]);
+  }
+  return tokens;
+}
+
+function pushMachineToken(tokens: string[], key: string, value: string | number | boolean | null | undefined): void {
+  if (value === null || value === undefined) return;
+  const token = String(value).trim();
+  if (!token) return;
+  tokens.push(`${key}=${token}`);
 }
 
 export function buildTaskLifecycleView(
