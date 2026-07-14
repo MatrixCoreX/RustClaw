@@ -203,6 +203,17 @@ enum Command {
         json: bool,
     },
 
+    /// Print numbered LLM request/response trace for a task.
+    LlmTrace {
+        task_id: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        raw: bool,
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+
     /// Terminal task console.
     Tui {
         #[arg(long)]
@@ -680,6 +691,15 @@ fn main() -> Result<()> {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_subagents(base_url, k, task_id, *json)
         }
+        Command::LlmTrace {
+            task_id,
+            json,
+            raw,
+            limit,
+        } => {
+            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+            commands::run_llm_trace(base_url, k, task_id, *json, *raw, *limit)
+        }
         Command::Tui {
             user_id,
             chat_id,
@@ -961,6 +981,7 @@ mod tests {
             "cancel-task",
             "permission",
             "subagents",
+            "llm-trace",
             "replay",
             "wait",
         ] {
