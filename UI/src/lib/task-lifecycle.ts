@@ -29,6 +29,8 @@ export interface TaskLifecycleProjection {
   resume_owner?: string;
   resume_entrypoint?: string;
   last_safe_step_id?: string;
+  last_successful_evidence_ref?: string;
+  evidence_ref_count?: number;
   state_source?: string;
   terminal_reason?: string;
   parent_task_id?: string;
@@ -158,6 +160,8 @@ export function buildTaskLifecycleView(
   if (lifecycle?.resume_entrypoint) meta.push(`${t(lang, "恢复入口", "Resume entrypoint")}: ${lifecycle.resume_entrypoint}`);
   if (lifecycle?.resume_directive) meta.push(`${t(lang, "恢复指令", "Resume directive")}: ${lifecycle.resume_directive}`);
   if (lifecycle?.last_safe_step_id) meta.push(`${t(lang, "安全步骤", "Safe step")}: ${lifecycle.last_safe_step_id}`);
+  if (lifecycle?.last_successful_evidence_ref) meta.push(`${t(lang, "最近证据", "Last evidence")}: ${lifecycle.last_successful_evidence_ref}`);
+  if (Number.isFinite(lifecycle?.evidence_ref_count)) meta.push(`${t(lang, "证据数量", "Evidence refs")}: ${Number(lifecycle?.evidence_ref_count)}`);
   if (lifecycle?.terminal_reason) meta.push(`${t(lang, "结束原因", "Terminal reason")}: ${lifecycle.terminal_reason}`);
 
   let detail = t(lang, "任务状态来自当前任务记录。", "Status comes from the current task record.");

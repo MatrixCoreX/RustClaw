@@ -14,6 +14,8 @@ fn lifecycle_summary_tokens_include_budget_snapshot() {
                 "heartbeat_at": 1781800000,
                 "attempt_id": 2,
                 "reason_code": "agent_loop_max_rounds",
+                "last_successful_evidence_ref": "step_3:evidence:1",
+                "evidence_ref_count": 2,
                 "budget": {
                     "round": 2,
                     "step": 3,
@@ -46,6 +48,10 @@ fn lifecycle_summary_tokens_include_budget_snapshot() {
     assert!(tokens
         .iter()
         .any(|token| token == "resume_directive=run_next_planner_round"));
+    assert!(tokens
+        .iter()
+        .any(|token| token == "last_successful_evidence_ref=step_3:evidence:1"));
+    assert!(tokens.iter().any(|token| token == "evidence_ref_count=2"));
     assert!(tokens.iter().any(|token| token == "budget.round=2"));
     assert!(tokens.iter().any(|token| token == "budget.llm_calls=4"));
     assert!(tokens

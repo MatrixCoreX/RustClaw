@@ -51,6 +51,8 @@ test("surfaces waiting checkpoint details without raw json", () => {
       resume_wait_seconds: 120,
       checkpoint_id: "ckpt-1",
       pending_job_ref: "job-1",
+      last_successful_evidence_ref: "step_3:evidence:1",
+      evidence_ref_count: 2,
     },
     "running",
     "zh",
@@ -63,6 +65,8 @@ test("surfaces waiting checkpoint details without raw json", () => {
   assert.ok(view.meta.some((item) => item === "恢复等待: 120s"));
   assert.ok(view.meta.some((item) => item === "检查点: ckpt-1"));
   assert.ok(view.meta.some((item) => item === "后台任务: job-1"));
+  assert.ok(view.meta.some((item) => item === "最近证据: step_3:evidence:1"));
+  assert.ok(view.meta.some((item) => item === "证据数量: 2"));
 });
 
 test("surfaces due resume window without exposing checkpoint json", () => {
