@@ -32,8 +32,12 @@ pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String 
     let visible_skills = bundle.planner_view.visible_skills.len();
     let has_resume_context = value_present(&bundle.raw_sources.resume_context);
     let has_binding_context = value_present(&bundle.raw_sources.binding_context);
+    let has_goal_context = bundle
+        .execution_view
+        .as_ref()
+        .is_some_and(|view| value_present(&view.goal_context));
     format!(
-        "route_view={} route_budget={} route_profile={} execution_view={} execution_budget={} execution_profile={} context_profile={} visible_skills={} resume_context={} binding_context={}",
+        "route_view={} route_budget={} route_profile={} execution_view={} execution_budget={} execution_profile={} context_profile={} visible_skills={} resume_context={} binding_context={} goal_context={}",
         route_attached,
         route_budget,
         route_profile,
@@ -43,7 +47,8 @@ pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String 
         context_profile,
         visible_skills,
         has_resume_context,
-        has_binding_context
+        has_binding_context,
+        has_goal_context
     )
 }
 
@@ -67,7 +72,9 @@ fn route_context_profile(view: &RouteContextView) -> &'static str {
 fn execution_context_profile(view: &ExecutionContextView) -> &'static str {
     match view.budget_tier {
         super::ExecutionContextBudgetTier::Light => {
-            if value_present(&view.active_task_context) {
+            if value_present(&view.goal_context) {
+                "execution_light_goal"
+            } else if value_present(&view.active_task_context) {
                 "execution_light_active_task"
             } else if value_present(&view.active_execution_anchor_context)
                 || value_present(&view.recent_execution_anchor)
@@ -79,7 +86,9 @@ fn execution_context_profile(view: &ExecutionContextView) -> &'static str {
             }
         }
         super::ExecutionContextBudgetTier::Full => {
-            if value_present(&view.recent_turns_full)
+            if value_present(&view.goal_context) {
+                "execution_full_goal"
+            } else if value_present(&view.recent_turns_full)
                 || value_present(&view.last_turn_full)
                 || value_present(&view.recent_execution_context)
             {
