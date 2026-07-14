@@ -82,30 +82,10 @@ enum Command {
         print_effective_config: bool,
     },
 
-    /// Coding-agent shortcut for exec --profile coding.
+    /// Coding-agent commands.
     Code {
-        #[arg(required = true, num_args = 1.., trailing_var_arg = true)]
-        prompt: Vec<String>,
-        #[arg(long)]
-        resume_task_id: Option<String>,
-        #[arg(long)]
-        detach: bool,
-        #[arg(long)]
-        json: bool,
-        #[arg(long)]
-        jsonl: bool,
-        #[arg(long)]
-        timeout_seconds: Option<u64>,
-        #[arg(long, default_value_t = 1000)]
-        poll_interval_ms: u64,
-        #[arg(long)]
-        continue_on_background: bool,
-        #[arg(long)]
-        fail_on_background: bool,
-        #[arg(long)]
-        artifact_dir: Option<PathBuf>,
-        #[arg(long)]
-        print_effective_config: bool,
+        #[command(subcommand)]
+        command: CodeCommand,
     },
 
     /// Submit and inspect tasks with structured goal metadata.
@@ -475,6 +455,62 @@ enum GoalCommand {
     Clear { task_id: String },
 }
 
+#[derive(Subcommand)]
+enum CodeCommand {
+    /// Run a coding-agent task with exec --profile coding.
+    Run {
+        #[arg(required = true, num_args = 1.., trailing_var_arg = true)]
+        prompt: Vec<String>,
+        #[arg(long)]
+        resume_task_id: Option<String>,
+        #[arg(long)]
+        detach: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        jsonl: bool,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
+        #[arg(long, default_value_t = 1000)]
+        poll_interval_ms: u64,
+        #[arg(long)]
+        continue_on_background: bool,
+        #[arg(long)]
+        fail_on_background: bool,
+        #[arg(long)]
+        artifact_dir: Option<PathBuf>,
+        #[arg(long)]
+        print_effective_config: bool,
+    },
+    /// Alias for report focused on coding task status.
+    Status {
+        task_id: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        events: bool,
+    },
+    /// Alias for the coding-oriented review summary.
+    Review {
+        task_id: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        events: bool,
+    },
+    /// Continue a coding task by task id.
+    Continue {
+        task_id: String,
+        #[arg(num_args = 0.., trailing_var_arg = true)]
+        message: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Compatibility fallback for `clawcli code <prompt...>`.
+    #[command(external_subcommand)]
+    Prompt(Vec<String>),
+}
+
 impl WaitUntil {
     fn as_str(self) -> &'static str {
         match self {
@@ -608,38 +644,85 @@ fn main() -> Result<()> {
                 *print_effective_config,
             )
         }
-        Command::Code {
-            prompt,
-            resume_task_id,
-            detach,
-            json,
-            jsonl,
-            timeout_seconds,
-            poll_interval_ms,
-            continue_on_background,
-            fail_on_background,
-            artifact_dir,
-            print_effective_config,
-        } => {
-            let k = key.as_deref().ok_or_else(auth::key_required_error)?;
-            let prompt = prompt.join(" ");
-            run_exec_command(
-                base_url,
-                k,
-                &prompt,
-                Some("coding"),
-                resume_task_id.as_deref(),
-                *detach,
-                *json,
-                *jsonl,
-                *timeout_seconds,
-                *poll_interval_ms,
-                *continue_on_background,
-                *fail_on_background,
-                artifact_dir.as_ref(),
-                *print_effective_config,
-            )
-        }
+        Command::Code { command } => match command {
+            CodeCommand::Run {
+                prompt,
+                resume_task_id,
+                detach,
+                json,
+                jsonl,
+                timeout_seconds,
+                poll_interval_ms,
+                continue_on_background,
+                fail_on_background,
+                artifact_dir,
+                print_effective_config,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                let prompt = prompt.join(" ");
+                run_exec_command(
+                    base_url,
+                    k,
+                    &prompt,
+                    Some("coding"),
+                    resume_task_id.as_deref(),
+                    *detach,
+                    *json,
+                    *jsonl,
+                    *timeout_seconds,
+                    *poll_interval_ms,
+                    *continue_on_background,
+                    *fail_on_background,
+                    artifact_dir.as_ref(),
+                    *print_effective_config,
+                )
+            }
+            CodeCommand::Status {
+                task_id,
+                json,
+                events,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_report(base_url, k, task_id, *json, *events)
+            }
+            CodeCommand::Review {
+                task_id,
+                json,
+                events,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_review(base_url, k, task_id, *json, *events)
+            }
+            CodeCommand::Continue {
+                task_id,
+                message,
+                json,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                let message = (!message.is_empty()).then(|| message.join(" "));
+                commands::run_continue_task(base_url, k, task_id, message.as_deref(), *json)
+            }
+            CodeCommand::Prompt(prompt) => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                let prompt = prompt.join(" ");
+                run_exec_command(
+                    base_url,
+                    k,
+                    &prompt,
+                    Some("coding"),
+                    None,
+                    false,
+                    false,
+                    false,
+                    None,
+                    1000,
+                    false,
+                    false,
+                    None,
+                    false,
+                )
+            }
+        },
         Command::Goal { command } => match command {
             GoalCommand::Start {
                 prompt,
@@ -1170,6 +1253,15 @@ mod tests {
             assert!(goal_names.contains(required), "missing {required}");
         }
 
+        let code = cmd.find_subcommand("code").expect("code command");
+        let code_names = code
+            .get_subcommands()
+            .map(|subcommand| subcommand.get_name().to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        for required in ["run", "status", "review", "continue"] {
+            assert!(code_names.contains(required), "missing {required}");
+        }
+
         let replay = cmd.find_subcommand("replay").expect("replay command");
         let replay_names = replay
             .get_subcommands()
@@ -1177,6 +1269,74 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
         for required in ["export", "run", "diff"] {
             assert!(replay_names.contains(required), "missing {required}");
+        }
+    }
+
+    #[test]
+    fn clawcli_parses_code_subcommands_and_prompt_fallback() {
+        match Cli::try_parse_from(["clawcli", "code", "status", "task-1"])
+            .expect("parse status")
+            .cmd
+        {
+            Some(Command::Code {
+                command: CodeCommand::Status { task_id, .. },
+            }) => assert_eq!(task_id, "task-1"),
+            _ => panic!("expected code status"),
+        }
+
+        match Cli::try_parse_from(["clawcli", "code", "review", "task-1", "--json"])
+            .expect("parse review")
+            .cmd
+        {
+            Some(Command::Code {
+                command: CodeCommand::Review { task_id, json, .. },
+            }) => {
+                assert_eq!(task_id, "task-1");
+                assert!(json);
+            }
+            _ => panic!("expected code review"),
+        }
+
+        match Cli::try_parse_from(["clawcli", "code", "continue", "task-1", "next", "step"])
+            .expect("parse continue")
+            .cmd
+        {
+            Some(Command::Code {
+                command:
+                    CodeCommand::Continue {
+                        task_id, message, ..
+                    },
+            }) => {
+                assert_eq!(task_id, "task-1");
+                assert_eq!(message, vec!["next".to_string(), "step".to_string()]);
+            }
+            _ => panic!("expected code continue"),
+        }
+
+        match Cli::try_parse_from(["clawcli", "code", "run", "fix", "the", "test"])
+            .expect("parse run")
+            .cmd
+        {
+            Some(Command::Code {
+                command: CodeCommand::Run { prompt, .. },
+            }) => assert_eq!(
+                prompt,
+                vec!["fix".to_string(), "the".to_string(), "test".to_string()]
+            ),
+            _ => panic!("expected code run"),
+        }
+
+        match Cli::try_parse_from(["clawcli", "code", "fix", "the", "test"])
+            .expect("parse prompt fallback")
+            .cmd
+        {
+            Some(Command::Code {
+                command: CodeCommand::Prompt(prompt),
+            }) => assert_eq!(
+                prompt,
+                vec!["fix".to_string(), "the".to_string(), "test".to_string()]
+            ),
+            _ => panic!("expected prompt fallback"),
         }
     }
 }
