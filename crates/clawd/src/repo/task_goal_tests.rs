@@ -112,6 +112,7 @@ fn update_task_goal_payload_edits_structured_goal_fields() {
                 "objective": "old",
                 "done_conditions": ["old_done"]
             },
+            "goal_cleared": true,
             "goal_spec": {
                 "objective": "legacy"
             }
@@ -138,6 +139,7 @@ fn update_task_goal_payload_edits_structured_goal_fields() {
         "cargo test -p clawcli"
     );
     assert!(update.payload_json.get("goal_spec").is_none());
+    assert!(update.payload_json.get("goal_cleared").is_none());
     assert_eq!(
         update.payload_json["goal"]["done_conditions"][0],
         "old_done"
@@ -222,6 +224,33 @@ fn task_goal_projection_ignores_invalid_result_goal_status() {
 }
 
 #[test]
+fn task_goal_projection_ignores_result_goal_after_payload_clear_marker() {
+    let task_id = Uuid::parse_str("00000000-0000-0000-0000-000000000125").unwrap();
+    let payload = json!({
+        "text": "work",
+        "goal_cleared": true
+    });
+    let result = json!({
+        "task_journal": {
+            "summary": {
+                "task_goal": {
+                    "goal_status": "completed",
+                    "objective": "old result goal"
+                }
+            }
+        }
+    });
+    let lifecycle = json!({
+        "state": "completed",
+        "execution_state": "completed"
+    });
+
+    assert!(
+        task_goal_projection(task_id, &payload.to_string(), Some(&result), &lifecycle).is_none()
+    );
+}
+
+#[test]
 fn update_task_goal_payload_clears_goal_keys() {
     let task_id = "task-goal-clear";
     let state = state_with_goal_task(
@@ -241,5 +270,6 @@ fn update_task_goal_payload_clears_goal_keys() {
     assert!(update.goal.is_none());
     assert!(update.payload_json.get("goal").is_none());
     assert!(update.payload_json.get("task_goal").is_none());
+    assert_eq!(update.payload_json["goal_cleared"], true);
     assert_eq!(update.payload_json["text"], "work");
 }

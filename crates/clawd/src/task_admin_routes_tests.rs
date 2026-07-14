@@ -90,9 +90,11 @@ async fn goal_by_task_id_edits_goal_payload_through_authorized_route() {
         task_id,
         json!({
             "text": "task",
+            "user_key": "rk-secret-in-payload",
             "goal_spec": {
                 "objective": "old",
-                "done_conditions": ["old_done"]
+                "done_conditions": ["old_done"],
+                "metadata": {"access_token": "tok-secret-in-goal"}
             }
         }),
     );
@@ -119,10 +121,20 @@ async fn goal_by_task_id_edits_goal_payload_through_authorized_route() {
     assert_eq!(data["goal"]["objective"], "updated");
     assert!(data["goal"].get("text").is_none());
     assert!(data["goal"].get("error_text").is_none());
+    assert_eq!(data["payload_json"]["user_key"], "[REDACTED]");
+    assert_eq!(
+        data["payload_json"]["goal"]["metadata"]["access_token"],
+        "[REDACTED]"
+    );
 
     let payload = stored_payload(&state, task_id);
     assert_eq!(payload["goal"]["objective"], "updated");
     assert_eq!(payload["goal"]["done_conditions"][0], "old_done");
+    assert_eq!(payload["user_key"], "rk-secret-in-payload");
+    assert_eq!(
+        payload["goal"]["metadata"]["access_token"],
+        "tok-secret-in-goal"
+    );
     assert!(payload.get("goal_spec").is_none());
 }
 
@@ -155,8 +167,10 @@ async fn goal_by_task_id_clears_goal_payload_through_authorized_route() {
     assert_eq!(data["status"], "task_goal_control_updated");
     assert_eq!(data["operation"], "clear");
     assert!(data["goal"].is_null());
+    assert_eq!(data["payload_json"]["goal_cleared"], true);
 
     let payload = stored_payload(&state, task_id);
     assert!(payload.get("goal").is_none());
     assert!(payload.get("task_goal").is_none());
+    assert_eq!(payload["goal_cleared"], true);
 }

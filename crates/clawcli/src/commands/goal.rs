@@ -271,7 +271,8 @@ pub(super) fn goal_control_summary_json(
     requested_task_id: &str,
     body: &Value,
 ) -> Value {
-    let data = body.get("data").unwrap_or(body);
+    let safe_body = goal_public_json(body);
+    let data = safe_body.get("data").unwrap_or(&safe_body);
     let lifecycle = data
         .get("task_lifecycle")
         .or_else(|| data.get("lifecycle"))
@@ -293,7 +294,7 @@ pub(super) fn goal_control_summary_json(
         "next_action_kind": scalar_string(lifecycle, "next_action_kind"),
         "goal": data.get("goal").cloned().unwrap_or(Value::Null),
         "payload_json": data.get("payload_json").cloned().unwrap_or(Value::Null),
-        "response": body,
+        "response": safe_body,
     })
 }
 
@@ -335,4 +336,39 @@ fn scalar_string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+fn goal_sensitive_field_name(field: &str) -> bool {
+    let normalized = field.trim().to_ascii_lowercase().replace(['-', '.'], "_");
+    normalized == "key"
+        || normalized == "auth"
+        || normalized.ends_with("_key")
+        || normalized.contains("token")
+        || normalized.contains("secret")
+        || normalized.contains("password")
+        || normalized.contains("passwd")
+        || normalized.contains("cookie")
+        || normalized.contains("credential")
+        || normalized.contains("ticket")
+        || normalized.contains("signature")
+        || normalized.contains("authorization")
+}
+
+fn goal_public_json(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (key, child) in map {
+                let value = if goal_sensitive_field_name(key) {
+                    json!("[REDACTED]")
+                } else {
+                    goal_public_json(child)
+                };
+                out.insert(key.clone(), value);
+            }
+            Value::Object(out)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(goal_public_json).collect()),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => value.clone(),
+    }
 }
