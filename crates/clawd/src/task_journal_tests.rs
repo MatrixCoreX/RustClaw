@@ -860,6 +860,29 @@ fn trace_json_includes_round_source_of_truth_machine_fields() {
     );
 }
 
+#[test]
+fn task_journal_summary_projects_context_budget_report() {
+    let mut journal = TaskJournal::for_task("task-context-budget", "ask", "inspect");
+    journal.record_context_bundle_summary(
+        r#"route_view=false execution_view=true context_budget_report={"schema_version":1,"budget_tier":"light","included_ref_count":1,"included_refs":[{"ref":"runtime_context","char_count":64}],"excluded_ref_count":1,"excluded_refs":[{"ref":"recent_turns_full","reason":"not_included"}],"char_estimate":64,"token_estimate":16,"truncation_reason":"light_execution_budget","safety_reason":"context_budget_policy","compaction_source":"deterministic_context_builder"}"#,
+    );
+
+    let summary = journal.to_summary_json();
+
+    assert_eq!(
+        summary
+            .pointer("/context_budget_report/budget_tier")
+            .and_then(Value::as_str),
+        Some("light")
+    );
+    assert_eq!(
+        summary
+            .pointer("/context_budget_report/included_refs/0/ref")
+            .and_then(Value::as_str),
+        Some("runtime_context")
+    );
+}
+
 fn test_plan_step(step_id: &str, action_type: &str, skill: &str, args: Value) -> crate::PlanStep {
     crate::PlanStep {
         step_id: step_id.to_string(),
