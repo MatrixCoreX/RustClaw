@@ -800,6 +800,133 @@ fn action_scoped_capability_policy(
     })
 }
 
+fn permission_path_arg_values(args: &Value) -> Vec<&str> {
+    let Some(obj) = args.as_object() else {
+        return Vec::new();
+    };
+    [
+        "path",
+        "root",
+        "cwd",
+        "output_path",
+        "file_path",
+        "target_path",
+        "source_path",
+        "destination_path",
+    ]
+    .into_iter()
+    .filter_map(|key| {
+        obj.get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    })
+    .collect()
+}
+
+fn permission_path_stays_in_workspace(workspace_root: &std::path::Path, raw_path: &str) -> bool {
+    let candidate = std::path::Path::new(raw_path);
+    if candidate.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir | std::path::Component::Prefix(_)
+        )
+    }) {
+        return false;
+    }
+    if !candidate.is_absolute() {
+        return true;
+    }
+    let root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let target = candidate
+        .canonicalize()
+        .unwrap_or_else(|_| candidate.to_path_buf());
+    target.starts_with(root)
+}
+
+fn permission_workspace_scope_summary(
+    state: &AppState,
+    canonical_skill: &str,
+    args: &Value,
+) -> Value {
+    let path_values = permission_path_arg_values(args);
+    let untrusted_path_present = path_values
+        .iter()
+        .any(|path| !permission_path_stays_in_workspace(&state.skill_rt.workspace_root, path));
+    let external_workspace =
+        crate::execution_recipe::action_targets_external_workspace(state, canonical_skill, args);
+    let scope = if untrusted_path_present || external_workspace {
+        "external_or_untrusted"
+    } else if path_values.is_empty() {
+        "unspecified"
+    } else {
+        "workspace_scoped"
+    };
+    json!({
+        "schema_version": 1,
+        "scope": scope,
+        "path_arg_count": path_values.len(),
+        "cwd_present": args
+            .get("cwd")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty()),
+        "untrusted_path_present": untrusted_path_present,
+        "external_workspace": external_workspace,
+    })
+}
+
+fn sandbox_profile_token(
+    capability_policy: &Value,
+    effect: crate::execution_recipe::ActionEffect,
+) -> String {
+    capability_policy
+        .get("isolation_profile")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| {
+            if effect.mutates {
+                "local_current_workspace".to_string()
+            } else {
+                "read_only_or_validation".to_string()
+            }
+        })
+}
+
+fn sandbox_policy_summary(
+    capability_policy: &Value,
+    sandbox_profile: &str,
+    effect: crate::execution_recipe::ActionEffect,
+) -> Value {
+    json!({
+        "schema_version": 1,
+        "profile": sandbox_profile,
+        "source": if capability_policy
+            .get("isolation_profile")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            "registry_capability_policy"
+        } else {
+            "effect_default"
+        },
+        "filesystem_write": capability_policy
+            .get("filesystem_write")
+            .and_then(Value::as_bool)
+            .unwrap_or(effect.mutates),
+        "network_access": capability_policy.get("network_access").and_then(Value::as_bool),
+        "external_publish": capability_policy
+            .get("external_publish")
+            .and_then(Value::as_bool),
+        "credential_access": capability_policy
+            .get("credential_access")
+            .and_then(Value::as_bool),
+    })
+}
+
 pub(super) fn capability_isolation_policy_error(
     state: &AppState,
     normalized_skill: &str,
@@ -936,7 +1063,19 @@ pub(super) fn preflight_permission_decision(
     };
     let command_policy = run_cmd_command_policy(&canonical_skill, args, effect);
     let capability_policy =
-        action_scoped_capability_policy(state, &canonical_skill, action.as_deref());
+        action_scoped_capability_policy(state, &canonical_skill, action.as_deref()).unwrap_or_else(
+            || {
+                json!({
+                    "isolation_profile": null,
+                    "network_access": null,
+                    "filesystem_write": null,
+                    "external_publish": null,
+                    "credential_access": null,
+                })
+            },
+        );
+    let sandbox_profile = sandbox_profile_token(&capability_policy, effect);
+    let workspace_scope = permission_workspace_scope_summary(state, &canonical_skill, args);
     let needs_confirmation = !dry_run_observe_only
         && state.skill_invocation_requires_confirmation_policy(&canonical_skill, Some(args));
     let decision = crate::policy_decision::PolicyDecision::from_permission_flags(
@@ -973,16 +1112,11 @@ pub(super) fn preflight_permission_decision(
         "observes": effect.observes,
         "mutates": effect.mutates,
         "validates": effect.validates,
+        "sandbox_profile": sandbox_profile.clone(),
+        "sandbox": sandbox_policy_summary(&capability_policy, &sandbox_profile, effect),
+        "workspace_scope": workspace_scope,
         "command_policy": command_policy,
-        "capability_policy": capability_policy.unwrap_or_else(|| {
-            json!({
-                "isolation_profile": null,
-                "network_access": null,
-                "filesystem_write": null,
-                "external_publish": null,
-                "credential_access": null,
-            })
-        }),
+        "capability_policy": capability_policy,
         "registry_policy": registry_policy.unwrap_or_else(|| {
             json!({
                 "available": false,
