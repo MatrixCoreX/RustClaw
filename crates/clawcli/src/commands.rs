@@ -10,6 +10,7 @@ mod report;
 mod report_budget_health;
 mod report_outcome;
 mod run_skill;
+mod session;
 mod skills;
 mod submit;
 mod task_control;
@@ -26,6 +27,7 @@ pub(crate) use permission::{
     run_permission_capability, run_permission_explain, run_permission_inspect,
 };
 pub(crate) use run_skill::run_skill;
+pub(crate) use session::{run_session_list, run_session_resume, run_session_show};
 pub(crate) use skills::{run_capabilities, run_reload_skills, run_skills};
 pub(crate) use submit::{run_resume, run_submit};
 pub(crate) use task_control::{
@@ -55,6 +57,8 @@ use permission::permission_report_json;
 #[cfg(test)]
 use report::{coding_review_json, subagent_report_json, task_report_json, task_report_text_lines};
 #[cfg(test)]
+use session::{session_list_json, session_resume_json, session_show_json};
+#[cfg(test)]
 use task_control::{automation_runs_request_payload, task_resume_control_summary_json};
 #[cfg(test)]
 use task_query::wait_until_matches;
@@ -68,3 +72,7 @@ use tui::{
 #[cfg(test)]
 #[path = "commands_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "commands_session_tests.rs"]
+mod session_tests;

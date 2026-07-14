@@ -94,6 +94,12 @@ enum Command {
         command: GoalCommand,
     },
 
+    /// Navigate and resume task sessions.
+    Session {
+        #[command(subcommand)]
+        command: SessionCommand,
+    },
+
     /// POST /v1/tasks with kind=run_skill.
     RunSkill {
         skill_name: String,
@@ -511,6 +517,33 @@ enum CodeCommand {
     Prompt(Vec<String>),
 }
 
+#[derive(Subcommand)]
+enum SessionCommand {
+    /// List active task sessions for a user/chat pair.
+    List {
+        #[arg(long)]
+        user_id: i64,
+        #[arg(long)]
+        chat_id: i64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a task session summary by task/session id.
+    Show {
+        session_id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resume a task session by task/session id.
+    Resume {
+        session_id: String,
+        #[arg(num_args = 0..)]
+        message: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 impl WaitUntil {
     fn as_str(self) -> &'static str {
         match self {
@@ -807,6 +840,29 @@ fn main() -> Result<()> {
             GoalCommand::Clear { task_id } => {
                 let k = key.as_deref().ok_or_else(auth::key_required_error)?;
                 commands::run_goal_clear(base_url, k, task_id)
+            }
+        },
+        Command::Session { command } => match command {
+            SessionCommand::List {
+                user_id,
+                chat_id,
+                json,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_session_list(base_url, k, *user_id, *chat_id, *json)
+            }
+            SessionCommand::Show { session_id, json } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_session_show(base_url, k, session_id, *json)
+            }
+            SessionCommand::Resume {
+                session_id,
+                message,
+                json,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                let message = (!message.is_empty()).then(|| message.join(" "));
+                commands::run_session_resume(base_url, k, session_id, message.as_deref(), *json)
             }
         },
         Command::RunSkill {
@@ -1216,6 +1272,7 @@ mod tests {
             "exec",
             "code",
             "goal",
+            "session",
             "get",
             "watch",
             "events",
@@ -1260,6 +1317,15 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
         for required in ["run", "status", "review", "continue"] {
             assert!(code_names.contains(required), "missing {required}");
+        }
+
+        let session = cmd.find_subcommand("session").expect("session command");
+        let session_names = session
+            .get_subcommands()
+            .map(|subcommand| subcommand.get_name().to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        for required in ["list", "show", "resume"] {
+            assert!(session_names.contains(required), "missing {required}");
         }
 
         let replay = cmd.find_subcommand("replay").expect("replay command");
@@ -1337,6 +1403,71 @@ mod tests {
                 vec!["fix".to_string(), "the".to_string(), "test".to_string()]
             ),
             _ => panic!("expected prompt fallback"),
+        }
+    }
+
+    #[test]
+    fn clawcli_parses_session_subcommands() {
+        match Cli::try_parse_from([
+            "clawcli",
+            "session",
+            "list",
+            "--user-id",
+            "7",
+            "--chat-id",
+            "9",
+            "--json",
+        ])
+        .expect("parse session list")
+        .cmd
+        {
+            Some(Command::Session {
+                command:
+                    SessionCommand::List {
+                        user_id,
+                        chat_id,
+                        json,
+                    },
+            }) => {
+                assert_eq!(user_id, 7);
+                assert_eq!(chat_id, 9);
+                assert!(json);
+            }
+            _ => panic!("expected session list"),
+        }
+
+        match Cli::try_parse_from(["clawcli", "session", "show", "task-1", "--json"])
+            .expect("parse session show")
+            .cmd
+        {
+            Some(Command::Session {
+                command: SessionCommand::Show { session_id, json },
+            }) => {
+                assert_eq!(session_id, "task-1");
+                assert!(json);
+            }
+            _ => panic!("expected session show"),
+        }
+
+        match Cli::try_parse_from([
+            "clawcli", "session", "resume", "task-1", "continue", "work", "--json",
+        ])
+        .expect("parse session resume")
+        .cmd
+        {
+            Some(Command::Session {
+                command:
+                    SessionCommand::Resume {
+                        session_id,
+                        message,
+                        json,
+                    },
+            }) => {
+                assert_eq!(session_id, "task-1");
+                assert_eq!(message, vec!["continue".to_string(), "work".to_string()]);
+                assert!(json);
+            }
+            _ => panic!("expected session resume"),
         }
     }
 }
