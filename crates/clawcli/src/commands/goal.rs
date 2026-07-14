@@ -104,6 +104,41 @@ pub(crate) fn run_goal_resume(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_goal_edit(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    goal_json: Option<&str>,
+    objective: Option<&str>,
+    done_conditions: &[String],
+    verification_commands: &[String],
+    constraints: &[String],
+    allowed_scopes: &[String],
+    forbidden_actions: &[String],
+    goal_status: Option<&str>,
+) -> Result<()> {
+    let goal = goal_edit_patch_json(
+        goal_json,
+        objective,
+        done_conditions,
+        verification_commands,
+        constraints,
+        allowed_scopes,
+        forbidden_actions,
+        goal_status,
+    )?;
+    let body = task::update_goal_by_task_id(base_url, key, task_id, "edit", Some(goal))?;
+    output::print_json_pretty(&goal_control_summary_json("goal_edit", task_id, &body));
+    Ok(())
+}
+
+pub(crate) fn run_goal_clear(base_url: &str, key: &str, task_id: &str) -> Result<()> {
+    let body = task::update_goal_by_task_id(base_url, key, task_id, "clear", None)?;
+    output::print_json_pretty(&goal_control_summary_json("goal_clear", task_id, &body));
+    Ok(())
+}
+
 pub(super) fn goal_request_payload(
     prompt: &str,
     objective: Option<&str>,
@@ -129,6 +164,45 @@ pub(super) fn goal_request_payload(
         "text": prompt,
         "goal": Value::Object(goal),
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn goal_edit_patch_json(
+    goal_json: Option<&str>,
+    objective: Option<&str>,
+    done_conditions: &[String],
+    verification_commands: &[String],
+    constraints: &[String],
+    allowed_scopes: &[String],
+    forbidden_actions: &[String],
+    goal_status: Option<&str>,
+) -> Result<Value> {
+    let mut patch = goal_json
+        .map(|raw| serde_json::from_str::<Value>(raw))
+        .transpose()
+        .map_err(|err| anyhow::anyhow!("{}={}", "goal_json_parse_failed", err))?
+        .unwrap_or_else(|| json!({}));
+    if !patch.is_object() {
+        anyhow::bail!("goal_json_must_be_object");
+    }
+    let Some(map) = patch.as_object_mut() else {
+        anyhow::bail!("goal_json_must_be_object");
+    };
+    if let Some(objective) = objective.map(str::trim).filter(|value| !value.is_empty()) {
+        map.insert("objective".to_string(), json!(objective));
+    }
+    insert_string_array(map, "done_conditions", done_conditions);
+    insert_string_array(map, "verification_commands", verification_commands);
+    insert_string_array(map, "constraints", constraints);
+    insert_string_array(map, "allowed_files_or_scopes", allowed_scopes);
+    insert_string_array(map, "forbidden_actions", forbidden_actions);
+    if let Some(goal_status) = goal_status.map(str::trim).filter(|value| !value.is_empty()) {
+        map.insert("goal_status".to_string(), json!(goal_status));
+    }
+    if map.is_empty() {
+        anyhow::bail!("goal_patch_empty");
+    }
+    Ok(patch)
 }
 
 pub(super) fn goal_status_summary_json(task: &task::TaskStatusView) -> Value {
@@ -217,6 +291,8 @@ pub(super) fn goal_control_summary_json(
         "resume_directive": scalar_string(lifecycle, "resume_directive"),
         "resume_reason": scalar_string(lifecycle, "resume_reason"),
         "next_action_kind": scalar_string(lifecycle, "next_action_kind"),
+        "goal": data.get("goal").cloned().unwrap_or(Value::Null),
+        "payload_json": data.get("payload_json").cloned().unwrap_or(Value::Null),
         "response": body,
     })
 }

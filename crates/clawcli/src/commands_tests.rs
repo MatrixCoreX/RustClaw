@@ -2,12 +2,12 @@ use super::{
     automation_runs_request_payload, coding_review_json, exec_artifact_index_json,
     exec_compact_text_lines, exec_effective_options, exec_exit_class,
     exec_failure_class_from_machine_tokens, exec_summary_json, goal_control_summary_json,
-    goal_request_payload, goal_status_summary_json, goal_status_text_lines, llm_trace_text_lines,
-    permission_report_json, run_exec, subagent_report_json, task_event_output_lines,
-    task_report_json, task_report_text_lines, task_resume_control_summary_json,
-    tui_command_from_input, tui_export_json, tui_selected_task_lines, tui_snapshot_json,
-    wait_until_matches, watch_progress_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
-    TuiCommand,
+    goal_edit_patch_json, goal_request_payload, goal_status_summary_json, goal_status_text_lines,
+    llm_trace_text_lines, permission_report_json, run_exec, subagent_report_json,
+    task_event_output_lines, task_report_json, task_report_text_lines,
+    task_resume_control_summary_json, tui_command_from_input, tui_export_json,
+    tui_selected_task_lines, tui_snapshot_json, wait_until_matches, watch_progress_json,
+    write_exec_artifacts, ExecExitClass, ExecWaitOutcome, TuiCommand,
 };
 
 #[test]
@@ -1723,6 +1723,36 @@ fn goal_request_payload_preserves_structured_goal_fields() {
             .len(),
         1
     );
+}
+
+#[test]
+fn goal_edit_patch_json_merges_flags_over_goal_json() {
+    let done_conditions = vec!["done_a".to_string()];
+    let verification_commands = vec!["cargo test -p clawcli".to_string()];
+    let constraints = vec!["scope=workspace".to_string()];
+    let allowed_scopes = vec!["crates/clawcli".to_string()];
+    let forbidden_actions = vec!["external_publish".to_string()];
+
+    let patch = goal_edit_patch_json(
+        Some(r#"{"objective":"from-json","goal_id":"goal-1"}"#),
+        Some(" from-flag "),
+        &done_conditions,
+        &verification_commands,
+        &constraints,
+        &allowed_scopes,
+        &forbidden_actions,
+        Some("background"),
+    )
+    .expect("goal edit patch");
+
+    assert_eq!(patch["goal_id"], "goal-1");
+    assert_eq!(patch["objective"], "from-flag");
+    assert_eq!(patch["done_conditions"][0], "done_a");
+    assert_eq!(patch["verification_commands"][0], "cargo test -p clawcli");
+    assert_eq!(patch["constraints"][0], "scope=workspace");
+    assert_eq!(patch["allowed_files_or_scopes"][0], "crates/clawcli");
+    assert_eq!(patch["forbidden_actions"][0], "external_publish");
+    assert_eq!(patch["goal_status"], "background");
 }
 
 #[test]

@@ -34,6 +34,7 @@ pub(crate) use task_admin::{
     get_task_admin_target, pause_task_by_id, resume_task_with_input, TaskAdminTarget,
     TaskResumeControlInput,
 };
+pub(crate) use task_goal::{update_task_goal_payload, TaskGoalControlOperation};
 pub(crate) use task_resume_execution::record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal;
 pub(crate) use task_resume_execution::{
     claim_dispatched_paused_checkpoint_resume_execution_internal,

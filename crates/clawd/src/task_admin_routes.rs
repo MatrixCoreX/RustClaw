@@ -58,6 +58,13 @@ pub(super) struct PauseTaskByIdRequest {
     pause_seconds: Option<u64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct GoalByTaskIdRequest {
+    task_id: String,
+    operation: String,
+    goal: Option<Value>,
+}
+
 fn authorize_task_admin_request(
     state: &AppState,
     headers: &HeaderMap,
@@ -346,6 +353,37 @@ pub(super) async fn pause_task_by_id(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "task_pause_failed",
             )
+        }
+    }
+}
+
+pub(super) async fn goal_by_task_id(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<GoalByTaskIdRequest>,
+) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
+    let target = match authorized_task_admin_target_by_id(&state, &headers, &req.task_id) {
+        Ok(target) => target,
+        Err(resp) => return resp,
+    };
+    let Some(operation) = crate::repo::TaskGoalControlOperation::parse(&req.operation) else {
+        return super::api_err::<serde_json::Value>(
+            StatusCode::BAD_REQUEST,
+            "task_goal_operation_invalid",
+        );
+    };
+    match crate::repo::update_task_goal_payload(&state, &target.task_id, operation, req.goal) {
+        Ok(Some(update)) => super::api_ok(json!({
+            "status": "task_goal_control_updated",
+            "task_id": update.task_id,
+            "operation": update.operation,
+            "goal": update.goal,
+            "payload_json": update.payload_json,
+        })),
+        Ok(None) => super::api_err::<serde_json::Value>(StatusCode::NOT_FOUND, "task_not_found"),
+        Err(err) => {
+            error!("task_goal_control_failed err={}", err);
+            super::api_err::<serde_json::Value>(StatusCode::BAD_REQUEST, "task_goal_control_failed")
         }
     }
 }

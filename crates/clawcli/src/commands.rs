@@ -17,7 +17,9 @@ mod task_query;
 mod tui;
 
 pub(crate) use exec::run_exec;
-pub(crate) use goal::{run_goal_pause, run_goal_resume, run_goal_start, run_goal_status};
+pub(crate) use goal::{
+    run_goal_clear, run_goal_edit, run_goal_pause, run_goal_resume, run_goal_start, run_goal_status,
+};
 pub(crate) use health::run_health;
 pub(crate) use llm_trace::run_llm_trace;
 pub(crate) use permission::{
@@ -43,8 +45,8 @@ use exec::{
 };
 #[cfg(test)]
 use goal::{
-    goal_control_summary_json, goal_request_payload, goal_status_summary_json,
-    goal_status_text_lines,
+    goal_control_summary_json, goal_edit_patch_json, goal_request_payload,
+    goal_status_summary_json, goal_status_text_lines,
 };
 #[cfg(test)]
 use llm_trace::llm_trace_text_lines;
