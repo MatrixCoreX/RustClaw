@@ -2,8 +2,9 @@ use super::{
     automation_runs_request_payload, coding_review_json, exec_effective_options, exec_exit_class,
     exec_failure_class_from_machine_tokens, exec_summary_json, permission_report_json, run_exec,
     subagent_report_json, task_event_output_lines, task_report_json, task_report_text_lines,
-    tui_command_from_input, tui_export_json, tui_snapshot_json, wait_until_matches,
-    watch_progress_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome, TuiCommand,
+    task_resume_control_summary_json, tui_command_from_input, tui_export_json, tui_snapshot_json,
+    wait_until_matches, watch_progress_json, write_exec_artifacts, ExecExitClass, ExecWaitOutcome,
+    TuiCommand,
 };
 
 #[test]
@@ -1187,6 +1188,58 @@ fn wait_until_matches_machine_lifecycle_states() {
     };
     assert!(wait_until_matches(&completed, "completed"));
     assert!(wait_until_matches(&completed, "terminal"));
+}
+
+#[test]
+fn resume_control_summary_projects_checkpoint_lifecycle_fields() {
+    let body = serde_json::json!({
+        "ok": true,
+        "data": {
+            "status": "task_resume_requested",
+            "task_id": "task-resume",
+            "checkpoint_id": "ckpt-1",
+            "task_lifecycle": {
+                "state": "background",
+                "execution_state": "background",
+                "resume_due": true,
+                "resume_wait_seconds": 0,
+                "resume_entrypoint": "next_planner_round",
+                "resume_directive": "run_next_planner_round",
+                "resume_reason": "agent_loop_soft_budget",
+                "resume_claim": {
+                    "owner": "worker-a"
+                },
+                "next_action_kind": "resume_checkpoint",
+                "last_successful_evidence_ref": "step_2:evidence:1",
+                "evidence_ref_count": 3,
+                "budget": {
+                    "round": 2,
+                    "llm_calls": 5,
+                    "tool_calls": 4
+                }
+            }
+        }
+    });
+
+    let summary = task_resume_control_summary_json("task-request", "continue", &body);
+
+    assert_eq!(summary["schema_version"], 1);
+    assert_eq!(summary["operation"], "continue");
+    assert_eq!(summary["task_id"], "task-resume");
+    assert_eq!(summary["status"], "task_resume_requested");
+    assert_eq!(summary["checkpoint_id"], "ckpt-1");
+    assert_eq!(summary["lifecycle_state"], "background");
+    assert_eq!(summary["execution_state"], "background");
+    assert_eq!(summary["resume_due"], true);
+    assert_eq!(summary["resume_wait_seconds"], 0);
+    assert_eq!(summary["resume_entrypoint"], "next_planner_round");
+    assert_eq!(summary["resume_directive"], "run_next_planner_round");
+    assert_eq!(summary["resume_reason"], "agent_loop_soft_budget");
+    assert_eq!(summary["resume_owner"], "worker-a");
+    assert_eq!(summary["next_action_kind"], "resume_checkpoint");
+    assert_eq!(summary["last_successful_evidence_ref"], "step_2:evidence:1");
+    assert_eq!(summary["evidence_ref_count"], 3);
+    assert_eq!(summary["budget"]["llm_calls"], 5);
 }
 
 #[test]
