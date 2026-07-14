@@ -105,9 +105,7 @@ export interface TaskLlmDebugFlowSummary {
   trigger_counts: Record<string, number>;
 }
 
-export interface TaskLlmDebugCall {
-  call_index?: number | null;
-  flow?: TaskLlmDebugFlow | null;
+export interface TaskLlmDebugEntry {
   ts?: number | null;
   task_id?: string | null;
   call_id?: string | null;
@@ -129,6 +127,12 @@ export interface TaskLlmDebugCall {
   sanitized?: boolean | null;
   error?: string | null;
   usage?: TaskLlmDebugUsage | null;
+}
+
+export interface TaskLlmDebugCall extends TaskLlmDebugEntry {
+  call_index?: number | null;
+  flow?: TaskLlmDebugFlow | null;
+  entry?: TaskLlmDebugEntry | null;
 }
 
 export interface TaskLlmDebugResponse {

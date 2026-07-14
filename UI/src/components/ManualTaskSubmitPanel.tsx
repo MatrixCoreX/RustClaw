@@ -18,7 +18,6 @@ export interface ManualTaskSubmitPanelProps {
   localContextLoading: boolean;
   localContextError: string | null;
   interactionAskText: string;
-  interactionAgentMode: boolean;
   interactionSkillName: string;
   interactionSkillArgs: string;
   interactionLoading: boolean;
@@ -31,7 +30,6 @@ export interface ManualTaskSubmitPanelProps {
   onInteractionExternalUserIdChange: (value: string) => void;
   onInteractionExternalChatIdChange: (value: string) => void;
   onInteractionAskTextChange: (value: string) => void;
-  onInteractionAgentModeChange: (value: boolean) => void;
   onInteractionSkillNameChange: (value: string) => void;
   onInteractionSkillArgsChange: (value: string) => void;
   onSubmitInteractionTask: () => unknown | Promise<unknown>;
@@ -49,7 +47,6 @@ export function ManualTaskSubmitPanel({
   localContextLoading,
   localContextError,
   interactionAskText,
-  interactionAgentMode,
   interactionSkillName,
   interactionSkillArgs,
   interactionLoading,
@@ -62,7 +59,6 @@ export function ManualTaskSubmitPanel({
   onInteractionExternalUserIdChange,
   onInteractionExternalChatIdChange,
   onInteractionAskTextChange,
-  onInteractionAgentModeChange,
   onInteractionSkillNameChange,
   onInteractionSkillArgsChange,
   onSubmitInteractionTask,
@@ -143,10 +139,6 @@ export function ManualTaskSubmitPanel({
               onChange={(event) => onInteractionAskTextChange(event.target.value)}
               placeholder={t("例如：请汇报当前系统状态", "For example: Please summarize the current system status")}
             />
-          </label>
-          <label className="inline-flex items-center gap-2 text-sm text-white/80">
-            <input type="checkbox" checked={interactionAgentMode} onChange={(event) => onInteractionAgentModeChange(event.target.checked)} />
-            agent_mode
           </label>
         </div>
       ) : (
