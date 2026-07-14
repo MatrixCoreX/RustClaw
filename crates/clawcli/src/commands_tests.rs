@@ -704,6 +704,7 @@ fn tui_command_parser_accepts_basic_key_tokens() {
     assert_eq!(tui_command_from_input(""), Some(TuiCommand::Refresh));
     assert_eq!(tui_command_from_input(" r "), Some(TuiCommand::Refresh));
     assert_eq!(tui_command_from_input("W"), Some(TuiCommand::Watch));
+    assert_eq!(tui_command_from_input("p"), Some(TuiCommand::Pause));
     assert_eq!(tui_command_from_input("c"), Some(TuiCommand::Cancel));
     assert_eq!(tui_command_from_input("u"), Some(TuiCommand::Resume));
     assert_eq!(tui_command_from_input("n"), Some(TuiCommand::Continue));

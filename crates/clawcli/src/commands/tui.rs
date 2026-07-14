@@ -9,10 +9,13 @@ use crate::{client, events::EventFilters, output, task};
 
 use super::{report::task_report_json, task_query::watch_progress_json};
 
+const TUI_DEFAULT_PAUSE_SECONDS: u64 = 3600;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TuiCommand {
     Refresh,
     Watch,
+    Pause,
     Cancel,
     Resume,
     Continue,
@@ -66,6 +69,15 @@ pub(crate) fn run_tui(
                 TuiCommand::Watch => {
                     let task_id = selected_task_id.context("selected_task_required_for_watch")?;
                     watch_selected_task(base_url, key, task_id, include_events, interval)?;
+                }
+                TuiCommand::Pause => {
+                    let task_id = selected_task_id.context("selected_task_required_for_pause")?;
+                    output::print_json_pretty(&task::pause_task_by_id(
+                        base_url,
+                        key,
+                        task_id,
+                        TUI_DEFAULT_PAUSE_SECONDS,
+                    )?);
                 }
                 TuiCommand::Cancel => {
                     let task_id = selected_task_id.context("selected_task_required_for_cancel")?;
@@ -136,6 +148,7 @@ pub(super) fn tui_command_from_input(input: &str) -> Option<TuiCommand> {
     match input.trim().to_ascii_lowercase().as_str() {
         "" | "r" => Some(TuiCommand::Refresh),
         "w" => Some(TuiCommand::Watch),
+        "p" => Some(TuiCommand::Pause),
         "c" => Some(TuiCommand::Cancel),
         "u" => Some(TuiCommand::Resume),
         "n" => Some(TuiCommand::Continue),
@@ -338,9 +351,10 @@ fn push_tui_count_line(lines: &mut Vec<String>, key: &str, source: &Value, point
 
 fn print_tui_command_help() {
     println!();
-    println!("tui_keys: r,w,c,u,n,e,q");
+    println!("tui_keys: r,w,p,c,u,n,e,q");
     println!("tui_key.r=refresh");
     println!("tui_key.w=watch");
+    println!("tui_key.p=pause");
     println!("tui_key.c=cancel");
     println!("tui_key.u=resume");
     println!("tui_key.n=continue");
