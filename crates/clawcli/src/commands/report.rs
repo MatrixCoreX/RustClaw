@@ -912,7 +912,14 @@ fn collect_coding_report_signals(value: &Value, signals: &mut CodingReportSignal
                 collect_coding_report_signals(item, signals, depth + 1);
             }
         }
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+        Value::String(text) => {
+            if let Ok(value) = serde_json::from_str::<Value>(text.trim()) {
+                collect_coding_report_signals(&value, signals, depth + 1);
+            } else {
+                collect_command_from_machine_excerpt(text, signals);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
 }
 
@@ -1027,6 +1034,9 @@ fn collect_command_fields(map: &Map<String, Value>, signals: &mut CodingReportSi
         collect_command_token(command, signals);
     }
     if let Some(command) = map.get("verification_command").and_then(Value::as_str) {
+        collect_command_token(command, signals);
+    }
+    if let Some(command) = map.get("test_command").and_then(Value::as_str) {
         collect_command_token(command, signals);
     }
     if let Some(summary) = map.get("sanitized_args_summary").and_then(Value::as_str) {

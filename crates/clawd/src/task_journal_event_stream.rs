@@ -463,7 +463,13 @@ fn collect_coding_evidence_value(
                 collect_coding_evidence_value(item, signals, evidence_ref, depth + 1);
             }
         }
-        Value::String(text) => collect_command_machine_tokens(text, signals, evidence_ref),
+        Value::String(text) => {
+            if let Some(value) = parse_json_value(text) {
+                collect_coding_evidence_value(&value, signals, evidence_ref, depth + 1);
+            } else {
+                collect_command_machine_tokens(text, signals, evidence_ref);
+            }
+        }
         Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
 }
@@ -543,6 +549,12 @@ fn collect_command_fields(
     evidence_ref: Option<&str>,
 ) {
     if let Some(command) = map.get("command").and_then(Value::as_str) {
+        collect_command_token(command, signals, evidence_ref);
+    }
+    if let Some(command) = map.get("test_command").and_then(Value::as_str) {
+        collect_command_token(command, signals, evidence_ref);
+    }
+    if let Some(command) = map.get("verification_command").and_then(Value::as_str) {
         collect_command_token(command, signals, evidence_ref);
     }
     if let Some(summary) = map.get("sanitized_args_summary").and_then(Value::as_str) {
@@ -706,6 +718,7 @@ fn is_test_command_token(command: &str) -> bool {
         || command.starts_with("pnpm test")
         || command.starts_with("yarn test")
         || command.starts_with("pytest")
+        || is_python_test_command_token(&command)
         || command.starts_with("go test")
 }
 
@@ -722,9 +735,28 @@ fn is_verification_command_token(command: &str) -> bool {
         || command.starts_with("yarn lint")
         || command.starts_with("yarn build")
         || command.starts_with("pytest")
+        || is_python_test_command_token(&command)
         || command.starts_with("ruff check")
         || command.starts_with("go vet")
         || command.starts_with("go test")
+}
+
+fn is_python_test_command_token(command: &str) -> bool {
+    let mut parts = command.split_whitespace();
+    let Some(program) = parts.next() else {
+        return false;
+    };
+    if !matches!(program, "python" | "python3") {
+        return false;
+    }
+    let args = parts.collect::<Vec<_>>();
+    if args.starts_with(&["-m", "pytest"]) || args.starts_with(&["-m", "unittest"]) {
+        return true;
+    }
+    args.iter().any(|arg| {
+        let arg = arg.trim_matches('"').trim_matches('\'');
+        arg.starts_with("test_") || arg.ends_with("_test.py") || arg.contains("/test_")
+    })
 }
 
 fn record_verification_failure_kind(command: &str, signals: &mut CodingEvidenceSignals) {
