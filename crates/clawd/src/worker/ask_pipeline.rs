@@ -822,12 +822,27 @@ fn route_allows_active_plan_file_observations(
     if !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
         || route.wants_file_delivery
-        || route.output_contract.locator_kind != crate::OutputLocatorKind::CurrentWorkspace
     {
         return false;
     }
 
-    route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary)
+    if route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary) {
+        return true;
+    }
+
+    route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+        && matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        && matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Free
+                | crate::OutputResponseShape::OneSentence
+                | crate::OutputResponseShape::Strict
+        )
 }
 
 fn active_plan_file_observations(state: &AppState) -> Vec<serde_json::Value> {

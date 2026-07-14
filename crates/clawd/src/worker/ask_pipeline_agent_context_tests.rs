@@ -677,6 +677,59 @@ fn boundary_observation_exports_active_plan_files_for_workspace_summary_contract
 }
 
 #[test]
+fn boundary_observation_exports_active_plan_files_for_agent_loop_content_evidence() {
+    let root = temp_workspace_root("agent_loop_content_evidence_plan_files");
+    let plan_dir = root.join("plan");
+    std::fs::create_dir_all(&plan_dir).expect("plan dir");
+    let active_plan = plan_dir.join("active.md");
+    std::fs::write(&active_plan, "# Active Plan\n").expect("active plan");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+    state.skill_rt.default_locator_search_dir = root.clone();
+    let mut route = base_route();
+    route.route_reason =
+        "executable_contract_preserved_for_agent_loop; current_turn_locator_overrides_contextual_path"
+            .to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    let post_route = crate::post_route_policy::PostRoutePolicyResult {
+        execution_route_result: route,
+        auto_locator_path: Some(root.join("AGENTS.md").display().to_string()),
+        auto_locator_hint: None,
+        auto_locator_resolved_direct: true,
+        fuzzy_locator_suggestions: Vec::new(),
+        missing_locator_for_path_scoped_content: false,
+        clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
+        gate_record: crate::post_route_policy::PostRouteGateRecord::with_owner(
+            "boundary_locator_gate",
+            "post_route_auto_locator_satisfied_path_scoped_content",
+            crate::post_route_policy::PostRoutePolicyOutcome::BoundaryReady,
+        ),
+    };
+
+    let block = agent_loop_boundary_observations_block(
+        &state,
+        &post_route,
+        &crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        },
+        None,
+        "review AGENTS.md with structured content evidence",
+        "review AGENTS.md with structured content evidence",
+        &[],
+    )
+    .expect("agent-loop content evidence should export boundary observation");
+
+    assert!(block.contains("\"active_plan_files\""));
+    assert!(block.contains(&active_plan.display().to_string()));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn post_route_missing_locator_boundary_defers_to_agent_loop_candidate() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let task = claimed_task("missing-locator-boundary-defer");
