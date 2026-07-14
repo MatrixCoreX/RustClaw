@@ -146,6 +146,82 @@ fn update_task_goal_payload_edits_structured_goal_fields() {
 }
 
 #[test]
+fn update_task_goal_payload_normalizes_goal_status_machine_token() {
+    let task_id = "task-goal-status";
+    let state = state_with_goal_task(
+        task_id,
+        json!({
+            "text": "work",
+            "goal": {"objective": "old"}
+        }),
+    );
+
+    let update = update_task_goal_payload(
+        &state,
+        task_id,
+        TaskGoalControlOperation::Edit,
+        Some(json!({
+            "goal_status": "canceled"
+        })),
+    )
+    .expect("edit status")
+    .expect("goal update");
+
+    assert_eq!(update.goal.as_ref().unwrap()["goal_status"], "cancelled");
+}
+
+#[test]
+fn update_task_goal_payload_rejects_invalid_goal_status_token() {
+    let task_id = "task-goal-status-invalid";
+    let state = state_with_goal_task(
+        task_id,
+        json!({
+            "text": "work",
+            "goal": {"objective": "old"}
+        }),
+    );
+
+    let err = update_task_goal_payload(
+        &state,
+        task_id,
+        TaskGoalControlOperation::Edit,
+        Some(json!({
+            "goal_status": "done soon"
+        })),
+    )
+    .expect_err("invalid status should fail");
+
+    assert!(err.to_string().contains("goal_status_invalid"));
+}
+
+#[test]
+fn task_goal_projection_ignores_invalid_result_goal_status() {
+    let task_id = Uuid::parse_str("00000000-0000-0000-0000-000000000126").unwrap();
+    let payload = json!({
+        "goal": {
+            "objective": "status fallback"
+        }
+    });
+    let result = json!({
+        "task_journal": {
+            "summary": {
+                "task_goal": {
+                    "goal_status": "done soon",
+                    "goal_status_source": "journal_final_status"
+                }
+            }
+        }
+    });
+    let lifecycle = json!({"execution_state": "running"});
+
+    let goal =
+        task_goal_projection(task_id, &payload.to_string(), Some(&result), &lifecycle).unwrap();
+
+    assert_eq!(goal["goal_status"], "in_progress");
+    assert_eq!(goal["goal_status_source"], "lifecycle");
+}
+
+#[test]
 fn update_task_goal_payload_clears_goal_keys() {
     let task_id = "task-goal-clear";
     let state = state_with_goal_task(
