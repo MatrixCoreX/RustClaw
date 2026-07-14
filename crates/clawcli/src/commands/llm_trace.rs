@@ -52,6 +52,21 @@ pub(super) fn llm_trace_text_lines(
 ) -> Vec<String> {
     let mut lines = Vec::new();
     push_value_line(&mut lines, "llm_trace_task_id", debug.get("task_id"));
+    push_first_value_line(
+        &mut lines,
+        "llm_trace_goal_id",
+        debug,
+        &[
+            "/goal_id",
+            "/goal/goal_id",
+            "/task_goal/goal_id",
+            "/result_json/task_goal/goal_id",
+            "/result_json/task_journal/summary/task_goal/goal_id",
+        ],
+    );
+    if let Some(session_id) = trace_session_id(debug) {
+        lines.push(format!("llm_trace_session_id={session_id}"));
+    }
     push_value_line(&mut lines, "llm_trace_call_count", debug.get("call_count"));
     if let Some(summary) = debug.get("flow_summary") {
         push_value_line(
@@ -180,6 +195,29 @@ fn push_value_line(lines: &mut Vec<String>, key: &str, value: Option<&Value>) {
         return;
     };
     lines.push(format!("{key}: {value}"));
+}
+
+fn push_first_value_line(lines: &mut Vec<String>, key: &str, value: &Value, pointers: &[&str]) {
+    for pointer in pointers {
+        let before = lines.len();
+        push_value_line(lines, key, value.pointer(pointer));
+        if lines.len() != before {
+            return;
+        }
+    }
+}
+
+fn trace_session_id(debug: &Value) -> Option<String> {
+    compact_value(
+        debug
+            .get("session_id")
+            .or_else(|| debug.pointer("/session/session_id")),
+    )
+    .or_else(|| {
+        let user_id = compact_value(debug.get("user_id"))?;
+        let chat_id = compact_value(debug.get("chat_id"))?;
+        Some(format!("user_chat:{user_id}:{chat_id}"))
+    })
 }
 
 fn push_token(tokens: &mut Vec<String>, key: &str, value: Option<&Value>) {
