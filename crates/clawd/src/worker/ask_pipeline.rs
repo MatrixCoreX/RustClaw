@@ -476,7 +476,7 @@ fn agent_loop_boundary_observations_block(
         file_delivery_target_candidate_observations(route, session_snapshot);
     let current_workspace_scope = current_workspace_scope_observation(state, route);
     let active_plan_files = if missing_referent.is_some()
-        || !route_allows_active_plan_file_observations(route, turn_analysis)
+        || !route_allows_active_plan_file_observations(state, prompt, route, turn_analysis)
     {
         Vec::new()
     } else {
@@ -816,21 +816,22 @@ fn current_workspace_scope_has_count_shape(route: &crate::RouteResult) -> bool {
 }
 
 fn route_allows_active_plan_file_observations(
+    state: &AppState,
+    prompt: &str,
     route: &crate::RouteResult,
     _turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> bool {
-    if !route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
-        || route.wants_file_delivery
-    {
+    if route.output_contract.delivery_required || route.wants_file_delivery || route.needs_clarify {
         return false;
     }
 
-    if route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary) {
+    if route.output_contract.requires_content_evidence
+        && route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary)
+    {
         return true;
     }
 
-    route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
+    if route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
         && matches!(
             route.output_contract.locator_kind,
             crate::OutputLocatorKind::Filename
@@ -843,6 +844,14 @@ fn route_allows_active_plan_file_observations(
                 | crate::OutputResponseShape::OneSentence
                 | crate::OutputResponseShape::Strict
         )
+    {
+        return true;
+    }
+
+    route.has_route_reason_machine_marker("current_turn_locator_overrides_contextual_path")
+        && current_request_resolves_workspace_child_locator(state, prompt).is_some()
+        && !route.output_contract.delivery_required
+        && !route.wants_file_delivery
 }
 
 fn active_plan_file_observations(state: &AppState) -> Vec<serde_json::Value> {
