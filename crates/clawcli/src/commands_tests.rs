@@ -567,6 +567,50 @@ fn task_report_json_summarizes_coding_verification_gaps() {
 }
 
 #[test]
+fn task_report_json_extracts_run_cmd_machine_excerpt_verification() {
+    let task = crate::task::TaskStatusView {
+        task_id: "task-coding-python-test".to_string(),
+        status: "succeeded".to_string(),
+        raw_data: serde_json::json!({
+            "execution_state": "completed",
+            "result_json": {
+                "changed_files": ["tmp/work/calc_core.py", "tmp/work/test_calc_core.py"],
+                "task_journal": {
+                    "trace": {
+                        "step_results": [
+                            {
+                                "step_id": "step_4",
+                                "status": "ok",
+                                "skill": "run_cmd",
+                                "requested_action_ref": "run_cmd",
+                                "output_excerpt": "exit=0 command=python3 test_calc_core.py"
+                            }
+                        ]
+                    }
+                }
+            }
+        }),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    let report = task_report_json(&task, false);
+
+    assert_eq!(report["coding"]["changed_file_count"], 2);
+    assert_eq!(report["coding"]["command_count"], 1);
+    assert_eq!(report["coding"]["commands"][0], "python3 test_calc_core.py");
+    assert_eq!(report["coding"]["verification_command_count"], 1);
+    assert_eq!(
+        report["coding"]["verification_commands"][0],
+        "python3 test_calc_core.py"
+    );
+    assert_eq!(report["coding"]["test_count"], 1);
+    assert_eq!(report["coding"]["tests"][0], "python3 test_calc_core.py");
+    assert_eq!(report["coding"]["unverified_risk"], serde_json::Value::Null);
+}
+
+#[test]
 fn task_log_event_output_uses_task_events_not_raw_log_files() {
     let task = crate::task::TaskStatusView {
         task_id: "task-logs".to_string(),
