@@ -35,6 +35,7 @@ pub(super) fn task_report_json(task: &task::TaskStatusView, include_events: bool
         } else {
             Value::Null
         },
+        "llm": llm_report_json(task),
         "coding": coding_report_json(&task.raw_data),
         "artifacts": {
             "ref_count": artifact_refs.len(),
@@ -60,6 +61,51 @@ pub(super) fn task_report_text_lines(task: &task::TaskStatusView, report: &Value
         "artifact_ref_count: {}",
         report_u64(report, "/artifacts/ref_count")
     ));
+    lines.push(format!(
+        "llm_call_count: {}",
+        report_u64(report, "/llm/llm_call_count")
+    ));
+    lines.push(format!(
+        "llm_prompt_bucket_count: {}",
+        report_u64(report, "/llm/prompt_bucket_count")
+    ));
+    lines.push(format!(
+        "llm_prompt_truncation_count: {}",
+        report_u64(report, "/llm/prompt_truncation_count")
+    ));
+    if let Some(bytes) = report
+        .pointer("/llm/prompt_bytes_before_max")
+        .and_then(Value::as_u64)
+    {
+        lines.push(format!("llm_prompt_bytes_before_max: {bytes}"));
+    }
+    for item in report
+        .pointer("/llm/by_prompt")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .take(32)
+    {
+        let label = item
+            .get("prompt_label")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let calls = item
+            .get("llm_call_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let truncations = item
+            .get("prompt_truncation_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let bytes_before = item
+            .get("prompt_bytes_before_max")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        lines.push(format!(
+            "llm_prompt: prompt_label={label} llm_call_count={calls} prompt_truncation_count={truncations} prompt_bytes_before_max={bytes_before}"
+        ));
+    }
 
     let verification_status = coding_verification_status(report);
     lines.push(format!(
@@ -389,6 +435,184 @@ fn report_value_or_empty_array(report: &Value, pointer: &str) -> Value {
         .filter(|value| value.is_array())
         .cloned()
         .unwrap_or_else(|| Value::Array(Vec::new()))
+}
+
+#[derive(Default)]
+struct LlmReportSignals {
+    by_prompt: std::collections::BTreeMap<String, LlmPromptSignals>,
+}
+
+#[derive(Default)]
+struct LlmPromptSignals {
+    llm_call_count: u64,
+    elapsed_ms: u64,
+    provider_attempt_count: u64,
+    provider_retry_count: u64,
+    provider_retryable_error_count: u64,
+    provider_final_error_count: u64,
+    prompt_truncation_count: u64,
+    prompt_bytes_before_max: Option<u64>,
+    prompt_bytes_budget_min: Option<u64>,
+    prompt_bytes_after_max: Option<u64>,
+    prompt_truncated_bytes_total: u64,
+}
+
+fn llm_report_json(task: &task::TaskStatusView) -> Value {
+    let mut signals = LlmReportSignals::default();
+    for event in task
+        .events
+        .iter()
+        .filter(|event| event.event_type == "provider_call")
+    {
+        let prompt_label = event
+            .fields
+            .get("prompt_label")
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|value| is_report_machine_token(value))
+            .unwrap_or("unknown")
+            .to_string();
+        let bucket = signals.by_prompt.entry(prompt_label).or_default();
+        bucket.llm_call_count = bucket
+            .llm_call_count
+            .saturating_add(event_field_u64(event, "llm_call_count"));
+        bucket.elapsed_ms = bucket
+            .elapsed_ms
+            .saturating_add(event_field_u64(event, "elapsed_ms"));
+        bucket.provider_attempt_count = bucket
+            .provider_attempt_count
+            .saturating_add(event_field_u64(event, "provider_attempt_count"));
+        bucket.provider_retry_count = bucket
+            .provider_retry_count
+            .saturating_add(event_field_u64(event, "provider_retry_count"));
+        bucket.provider_retryable_error_count = bucket
+            .provider_retryable_error_count
+            .saturating_add(event_field_u64(event, "provider_retryable_error_count"));
+        bucket.provider_final_error_count = bucket
+            .provider_final_error_count
+            .saturating_add(event_field_u64(event, "provider_final_error_count"));
+        bucket.prompt_truncation_count = bucket
+            .prompt_truncation_count
+            .saturating_add(event_field_u64(event, "prompt_truncation_count"));
+        bucket.prompt_truncated_bytes_total = bucket
+            .prompt_truncated_bytes_total
+            .saturating_add(event_field_u64(event, "prompt_truncated_bytes_total"));
+        merge_optional_max(
+            &mut bucket.prompt_bytes_before_max,
+            event_field_optional_u64(event, "prompt_bytes_before_max"),
+        );
+        merge_optional_min(
+            &mut bucket.prompt_bytes_budget_min,
+            event_field_optional_u64(event, "prompt_bytes_budget_min"),
+        );
+        merge_optional_max(
+            &mut bucket.prompt_bytes_after_max,
+            event_field_optional_u64(event, "prompt_bytes_after_max"),
+        );
+    }
+    let mut total = LlmPromptSignals::default();
+    let by_prompt = signals
+        .by_prompt
+        .iter()
+        .map(|(prompt_label, bucket)| {
+            accumulate_llm_prompt_signals(&mut total, bucket);
+            json!({
+                "prompt_label": prompt_label,
+                "llm_call_count": bucket.llm_call_count,
+                "elapsed_ms": bucket.elapsed_ms,
+                "provider_attempt_count": bucket.provider_attempt_count,
+                "provider_retry_count": bucket.provider_retry_count,
+                "provider_retryable_error_count": bucket.provider_retryable_error_count,
+                "provider_final_error_count": bucket.provider_final_error_count,
+                "prompt_truncation_count": bucket.prompt_truncation_count,
+                "prompt_bytes_before_max": bucket.prompt_bytes_before_max,
+                "prompt_bytes_budget_min": bucket.prompt_bytes_budget_min,
+                "prompt_bytes_after_max": bucket.prompt_bytes_after_max,
+                "prompt_truncated_bytes_total": bucket.prompt_truncated_bytes_total,
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "schema_version": 1,
+        "provider_call_event_count": task
+            .events
+            .iter()
+            .filter(|event| event.event_type == "provider_call")
+            .count(),
+        "prompt_bucket_count": by_prompt.len(),
+        "llm_call_count": total.llm_call_count,
+        "elapsed_ms": total.elapsed_ms,
+        "provider_attempt_count": total.provider_attempt_count,
+        "provider_retry_count": total.provider_retry_count,
+        "provider_retryable_error_count": total.provider_retryable_error_count,
+        "provider_final_error_count": total.provider_final_error_count,
+        "prompt_truncation_count": total.prompt_truncation_count,
+        "prompt_bytes_before_max": total.prompt_bytes_before_max,
+        "prompt_bytes_budget_min": total.prompt_bytes_budget_min,
+        "prompt_bytes_after_max": total.prompt_bytes_after_max,
+        "prompt_truncated_bytes_total": total.prompt_truncated_bytes_total,
+        "by_prompt": by_prompt,
+    })
+}
+
+fn event_field_u64(event: &crate::events::TaskEventLine, key: &str) -> u64 {
+    event_field_optional_u64(event, key).unwrap_or(0)
+}
+
+fn event_field_optional_u64(event: &crate::events::TaskEventLine, key: &str) -> Option<u64> {
+    event
+        .fields
+        .get(key)
+        .and_then(|value| value.trim().parse::<u64>().ok())
+}
+
+fn merge_optional_max(slot: &mut Option<u64>, value: Option<u64>) {
+    let Some(value) = value else {
+        return;
+    };
+    *slot = Some(slot.map_or(value, |current| current.max(value)));
+}
+
+fn merge_optional_min(slot: &mut Option<u64>, value: Option<u64>) {
+    let Some(value) = value else {
+        return;
+    };
+    *slot = Some(slot.map_or(value, |current| current.min(value)));
+}
+
+fn accumulate_llm_prompt_signals(total: &mut LlmPromptSignals, bucket: &LlmPromptSignals) {
+    total.llm_call_count = total.llm_call_count.saturating_add(bucket.llm_call_count);
+    total.elapsed_ms = total.elapsed_ms.saturating_add(bucket.elapsed_ms);
+    total.provider_attempt_count = total
+        .provider_attempt_count
+        .saturating_add(bucket.provider_attempt_count);
+    total.provider_retry_count = total
+        .provider_retry_count
+        .saturating_add(bucket.provider_retry_count);
+    total.provider_retryable_error_count = total
+        .provider_retryable_error_count
+        .saturating_add(bucket.provider_retryable_error_count);
+    total.provider_final_error_count = total
+        .provider_final_error_count
+        .saturating_add(bucket.provider_final_error_count);
+    total.prompt_truncation_count = total
+        .prompt_truncation_count
+        .saturating_add(bucket.prompt_truncation_count);
+    total.prompt_truncated_bytes_total = total
+        .prompt_truncated_bytes_total
+        .saturating_add(bucket.prompt_truncated_bytes_total);
+    merge_optional_max(
+        &mut total.prompt_bytes_before_max,
+        bucket.prompt_bytes_before_max,
+    );
+    merge_optional_min(
+        &mut total.prompt_bytes_budget_min,
+        bucket.prompt_bytes_budget_min,
+    );
+    merge_optional_max(
+        &mut total.prompt_bytes_after_max,
+        bucket.prompt_bytes_after_max,
+    );
 }
 
 fn coding_verification_status(report: &Value) -> &'static str {
