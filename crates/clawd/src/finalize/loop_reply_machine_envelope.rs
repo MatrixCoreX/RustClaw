@@ -70,14 +70,12 @@ fn latest_machine_envelope_message(loop_state: &LoopState) -> Option<String> {
         .delivery_messages
         .iter()
         .rev()
-        .find_map(|message| machine_envelope_payload(message).map(|_| message.trim().to_string()))
+        .find_map(|message| machine_envelope_delivery_message(message))
         .or_else(|| {
             loop_state
                 .last_user_visible_respond
                 .as_deref()
-                .and_then(|message| {
-                    machine_envelope_payload(message).map(|_| message.trim().to_string())
-                })
+                .and_then(machine_envelope_delivery_message)
         })
         .or_else(|| {
             loop_state
@@ -85,10 +83,45 @@ fn latest_machine_envelope_message(loop_state: &LoopState) -> Option<String> {
                 .iter()
                 .rev()
                 .filter_map(|step| step.output.as_deref())
-                .find_map(|message| {
-                    machine_envelope_payload(message).map(|_| message.trim().to_string())
-                })
+                .find_map(machine_envelope_delivery_message)
         })
+}
+
+fn machine_envelope_delivery_message(message: &str) -> Option<String> {
+    let payload = machine_envelope_payload(message)?;
+    child_model_result_projection(&payload)
+        .or_else(|| Some(payload))
+        .map(|payload| payload.to_string())
+}
+
+fn child_model_result_projection(payload: &serde_json::Value) -> Option<serde_json::Value> {
+    if payload
+        .get("owner_layer")
+        .and_then(serde_json::Value::as_str)
+        != Some("subagent_runtime")
+    {
+        return None;
+    }
+    let child = payload.get("child_model_result")?;
+    if child
+        .get("output_format")
+        .and_then(serde_json::Value::as_str)
+        != Some("machine_json")
+    {
+        return None;
+    }
+    if child.get("owner_layer").and_then(serde_json::Value::as_str) != Some("subagent_model_child")
+    {
+        return None;
+    }
+    let status = child
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if !matches!(status, "completed" | "needs_more_evidence" | "failed") {
+        return None;
+    }
+    Some(child.clone())
 }
 
 fn machine_envelope_payload(message: &str) -> Option<serde_json::Value> {

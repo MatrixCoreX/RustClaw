@@ -311,6 +311,31 @@ fn subagent_model_child_result_merges_into_runtime_observation() {
 }
 
 #[test]
+fn subagent_model_child_parser_ignores_visible_thinking_and_nested_json() {
+    let raw = r#"<think>notes with a nested but irrelevant object {"id":"F0","summary":"not result"} and refs ["/tmp/a"].</think>
+{"schema_version":1,"owner_layer":"subagent_model_child","output_format":"machine_json","status":"completed","role":"review","findings":[{"code":"boundary_consistent","summary":"policy and plan align"}],"evidence_refs":["AGENTS.md","plan/current.md"],"confidence":0.82}"#;
+
+    let parsed = parse_child_model_result_for_test(raw);
+
+    assert_eq!(parsed["owner_layer"], "subagent_model_child");
+    assert_eq!(parsed["output_format"], "machine_json");
+    assert_eq!(parsed["status"], "completed");
+    assert_eq!(parsed["findings"][0]["code"], "boundary_consistent");
+    assert_eq!(parsed["evidence_refs"][1], "plan/current.md");
+}
+
+#[test]
+fn subagent_model_child_parser_rejects_partial_nested_array_as_result() {
+    let raw = r#"<think>incomplete top-level result follows</think>
+{"schema_version":1,"owner_layer":"subagent_model_child","output_format":"machine_json","status":"completed","role":"review","findings":[{"code":"boundary_consistent","summary":"truncated"}],"evidence_refs":["AGENTS.md","plan/current.md"]"#;
+
+    let parsed = parse_child_model_result_for_test(raw);
+
+    assert_eq!(parsed["status"], "failed");
+    assert_eq!(parsed["error_code"], "subagent_child_json_parse_failed");
+}
+
+#[test]
 fn subagent_new_role_tokens_preserve_readonly_policy() {
     let mut loop_state = LoopState::new(2);
 

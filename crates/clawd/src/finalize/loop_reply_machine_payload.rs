@@ -83,10 +83,12 @@ pub(super) fn visible_machine_payload_should_remain_structured(text: &str) -> bo
         .get("output_format")
         .and_then(serde_json::Value::as_str)
         == Some("machine_json")
-        && object
-            .get("owner_layer")
-            .and_then(serde_json::Value::as_str)
-            == Some("subagent_runtime")
+        && matches!(
+            object
+                .get("owner_layer")
+                .and_then(serde_json::Value::as_str),
+            Some("subagent_runtime" | "subagent_model_child")
+        )
     {
         return true;
     }

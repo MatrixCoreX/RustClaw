@@ -1,4 +1,4 @@
-use serde_json::json;
+use serde_json::{json, Value};
 use tracing::info;
 
 use super::{
@@ -93,6 +93,94 @@ pub(super) fn bare_last_output_placeholder(content: &str) -> bool {
     let inner = trimmed[2..trimmed.len().saturating_sub(2)].trim();
     let lower = inner.to_ascii_lowercase();
     lower == "last_output" || lower.starts_with("last_output.") || lower.starts_with("last_output[")
+}
+
+pub(super) fn should_publish_respond_message(loop_state: &LoopState, text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if loop_state
+        .delivery_messages
+        .last()
+        .is_some_and(|last| last.trim() == trimmed)
+    {
+        return false;
+    }
+    if respond_machine_envelope_payload(trimmed) {
+        return true;
+    }
+    if respond_lifecycle_result_payload(trimmed) {
+        return true;
+    }
+    if !loop_state.has_tool_or_skill_output {
+        return true;
+    }
+    if loop_state
+        .last_output
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|last| last == trimmed)
+    {
+        return false;
+    }
+    true
+}
+
+pub(super) fn terminal_last_output_machine_projection(loop_state: &LoopState) -> Option<String> {
+    let value = serde_json::from_str::<Value>(loop_state.last_output.as_deref()?.trim()).ok()?;
+    child_model_result_projection(&value).map(|projection| projection.to_string())
+}
+
+fn child_model_result_projection(value: &Value) -> Option<Value> {
+    let child = value.get("child_model_result")?;
+    let object = child.as_object()?;
+    let owner_ok = object
+        .get("owner_layer")
+        .and_then(Value::as_str)
+        .is_some_and(|owner| owner == "subagent_model_child");
+    let format_ok = object
+        .get("output_format")
+        .and_then(Value::as_str)
+        .is_some_and(|format| format == "machine_json");
+    let status_ok = object
+        .get("status")
+        .and_then(Value::as_str)
+        .is_some_and(|status| matches!(status, "completed" | "needs_more_evidence" | "failed"));
+    (owner_ok && format_ok && status_ok).then(|| child.clone())
+}
+
+fn respond_machine_envelope_payload(text: &str) -> bool {
+    let Ok(payload) = serde_json::from_str::<Value>(text.trim()) else {
+        return false;
+    };
+    payload.is_object()
+        && payload
+            .get("output_format")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == "machine_json")
+        && payload
+            .get("owner_layer")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|owner| !owner.is_empty())
+}
+
+fn respond_lifecycle_result_payload(text: &str) -> bool {
+    let Ok(payload) = serde_json::from_str::<Value>(text.trim()) else {
+        return false;
+    };
+    payload.is_object()
+        && payload.get("final_answer_shape").and_then(Value::as_str) == Some("lifecycle_result")
+        && payload.get("status").and_then(Value::as_str) == Some("ok")
+        && payload
+            .get("steps")
+            .and_then(Value::as_array)
+            .is_some_and(|steps| !steps.is_empty())
+        && payload
+            .pointer("/final_state/cleanup_observed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 fn unresolved_runtime_template_respond(content: &str, resolved_text: &str) -> bool {

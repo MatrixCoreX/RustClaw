@@ -404,6 +404,11 @@ pub(super) fn apply_model_assisted_child_result_for_test(
     )
 }
 
+#[cfg(test)]
+pub(super) fn parse_child_model_result_for_test(raw: &str) -> Value {
+    subagent_runtime_model::parse_child_model_result_for_test(raw)
+}
+
 pub(super) struct SubagentActionOptions {
     allowed_capabilities: Vec<String>,
     budget: Option<Value>,
