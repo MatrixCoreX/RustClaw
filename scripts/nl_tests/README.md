@@ -107,6 +107,8 @@ Client-like continuous regression:
 - Summarize compact or large-run machine metrics:
   `python3 scripts/nl_tests/summarize_rollout_metrics.py scripts/nl_suite_logs/client_like_continuous/<run_id> --print-json`
   This records pass/fail counts, LLM calls, prompt bytes/tokens when present, elapsed time, provider retries/errors, verifier-call count, lifecycle/background counts, checkpoint counts, provider blockers, tool-call counts, and prompt latency diagnostics from existing run JSON only.
+  Add absolute gates after compact runs when the touched surface is expected to stay bounded, for example:
+  `python3 scripts/nl_tests/summarize_rollout_metrics.py scripts/nl_suite_logs/client_like_continuous/<run_id> --min-pass-rate 1.0 --max-avg-llm-calls 4 --max-prompt-truncations 0 --max-provider-final-errors 0`
 - Generate or check a lightweight offline regression baseline:
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --write-baseline /tmp/rustclaw-client-like-baseline.jsonl`
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --expectations scripts/nl_tests/expectations/<name>.jsonl`
