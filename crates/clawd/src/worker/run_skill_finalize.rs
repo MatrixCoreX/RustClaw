@@ -495,6 +495,7 @@ async fn finalize_run_skill_success(
         "run_skill",
         format!("run_skill:{skill_name}"),
     );
+    journal.record_task_goal_spec_from_payload_json(&task.payload_json);
     journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
     journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
     journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
@@ -662,6 +663,7 @@ async fn finalize_run_skill_failure(
         "run_skill",
         format!("run_skill:{skill_name}"),
     );
+    journal.record_task_goal_spec_from_payload_json(&task.payload_json);
     journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
     journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
     journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));

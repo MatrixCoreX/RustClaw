@@ -146,6 +146,7 @@ pub(crate) fn build_from_loop_state(
     final_status: TaskJournalFinalStatus,
 ) -> TaskJournal {
     let mut journal = TaskJournal::for_task(&task.task_id, "ask", user_text);
+    journal.record_task_goal_spec_from_payload_json(&task.payload_json);
     let effective_stop_signal = effective_final_stop_signal(
         loop_state.last_stop_signal.as_deref(),
         final_status,

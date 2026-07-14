@@ -11,7 +11,6 @@ fn normalize_log_file_name(raw: Option<&str>) -> String {
         "act_plan.log",
         "clawd.log",
         "nni.log",
-        "nni-server.log",
         "channel-gateway.log",
         "telegramd.log",
         "whatsappd.log",
@@ -1207,11 +1206,11 @@ mod logs_usage_debug_tests {
     use serde_json::json;
 
     #[test]
-    fn logs_latest_allows_device_side_and_server_nni_logs() {
+    fn logs_latest_allows_device_side_nni_log_only() {
         assert_eq!(normalize_log_file_name(Some("nni.log")), "nni.log");
         assert_eq!(
             normalize_log_file_name(Some("nni-server.log")),
-            "nni-server.log"
+            "agent_trace.log"
         );
     }
 

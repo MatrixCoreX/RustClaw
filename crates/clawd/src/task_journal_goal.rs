@@ -4,6 +4,16 @@ use super::{TaskJournal, TaskJournalFinalStatus};
 
 const MAX_GOAL_LIST_ITEMS: usize = 12;
 
+pub(super) fn task_goal_spec_from_payload_json(payload_json: &str) -> Option<Value> {
+    let payload = serde_json::from_str::<Value>(payload_json).ok()?;
+    payload
+        .get("goal")
+        .or_else(|| payload.get("goal_spec"))
+        .or_else(|| payload.get("task_goal"))
+        .filter(|value| value.is_object())
+        .cloned()
+}
+
 pub(super) fn task_goal_summary_json(journal: &TaskJournal) -> Value {
     let mut goal = Map::new();
     goal.insert("schema_version".to_string(), json!(1));
@@ -12,6 +22,7 @@ pub(super) fn task_goal_summary_json(journal: &TaskJournal) -> Value {
         goal.insert("task_id".to_string(), json!(task_id));
         goal.insert("goal_id".to_string(), json!(format!("task:{task_id}")));
     }
+    merge_goal_spec_fields(&mut goal, journal.task_goal_spec.as_ref());
 
     let missing_evidence = missing_evidence_for_journal(journal);
     let validation = super::task_journal_validation_result::validation_result_json(journal);
@@ -19,8 +30,16 @@ pub(super) fn task_goal_summary_json(journal: &TaskJournal) -> Value {
         .get("latest_status")
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty());
-    let (goal_status, goal_status_source) =
-        journal_goal_status(journal, missing_evidence.len(), validation_status);
+    let explicit_goal_status = journal
+        .task_goal_spec
+        .as_ref()
+        .and_then(explicit_goal_status_token);
+    let (goal_status, goal_status_source) = journal_goal_status(
+        journal,
+        missing_evidence.len(),
+        validation_status,
+        explicit_goal_status,
+    );
     goal.insert("goal_status".to_string(), json!(goal_status));
     goal.insert("goal_status_source".to_string(), json!(goal_status_source));
 
@@ -35,7 +54,7 @@ pub(super) fn task_goal_summary_json(journal: &TaskJournal) -> Value {
         "last_successful_evidence_ref",
         last_successful_evidence_ref(journal).as_deref(),
     );
-    insert_string_array(
+    merge_string_array(
         &mut goal,
         "verification_commands",
         verification_commands(journal),
@@ -66,6 +85,7 @@ fn journal_goal_status(
     journal: &TaskJournal,
     missing_evidence_count: usize,
     validation_status: Option<&str>,
+    explicit_goal_status: Option<&'static str>,
 ) -> (&'static str, &'static str) {
     if let Some(state) = journal
         .task_lifecycle
@@ -96,7 +116,46 @@ fn journal_goal_status(
             ("blocked", "journal_final_status")
         }
         None if validation_status == Some("passed") => ("verified", "validation_result"),
+        None if let Some(status) = explicit_goal_status => (status, "goal"),
         None => ("in_progress", "journal_final_status"),
+    }
+}
+
+fn explicit_goal_status_token(goal: &Value) -> Option<&'static str> {
+    goal.get("goal_status")
+        .or_else(|| goal.get("state"))
+        .and_then(Value::as_str)
+        .and_then(canonical_goal_status_token)
+}
+
+fn canonical_goal_status_token(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "created" => Some("created"),
+        "in_progress" => Some("in_progress"),
+        "waiting_user" => Some("waiting_user"),
+        "background" => Some("background"),
+        "blocked" => Some("blocked"),
+        "verified" => Some("verified"),
+        "completed" => Some("completed"),
+        "cancelled" | "canceled" => Some("cancelled"),
+        _ => None,
+    }
+}
+
+fn merge_goal_spec_fields(goal: &mut Map<String, Value>, spec: Option<&Value>) {
+    let Some(spec) = spec else {
+        return;
+    };
+    for key in [
+        "goal_id",
+        "objective",
+        "constraints",
+        "done_conditions",
+        "verification_commands",
+        "allowed_files_or_scopes",
+        "forbidden_actions",
+    ] {
+        copy_non_empty(goal, spec, key);
     }
 }
 
@@ -261,5 +320,48 @@ fn insert_optional_string(map: &mut Map<String, Value>, key: &str, value: Option
 fn insert_string_array(map: &mut Map<String, Value>, key: &str, values: Vec<String>) {
     if !values.is_empty() {
         map.insert(key.to_string(), json!(values));
+    }
+}
+
+fn merge_string_array(map: &mut Map<String, Value>, key: &str, values: Vec<String>) {
+    let mut merged = map
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    merged.extend(values);
+    merged.sort();
+    merged.dedup();
+    merged.truncate(MAX_GOAL_LIST_ITEMS);
+    if !merged.is_empty() {
+        map.insert(key.to_string(), json!(merged));
+    }
+}
+
+fn copy_non_empty(map: &mut Map<String, Value>, source: &Value, key: &str) {
+    let Some(value) = source.get(key) else {
+        return;
+    };
+    if value_is_empty(value) {
+        return;
+    }
+    map.insert(key.to_string(), value.clone());
+}
+
+fn value_is_empty(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::String(value) => value.trim().is_empty(),
+        Value::Array(values) => values.is_empty(),
+        Value::Object(values) => values.is_empty(),
+        Value::Bool(_) | Value::Number(_) => false,
     }
 }

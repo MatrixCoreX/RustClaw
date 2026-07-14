@@ -85,6 +85,108 @@ fn summary_json_includes_machine_readable_task_goal() {
 }
 
 #[test]
+fn summary_json_merges_payload_task_goal_spec() {
+    let mut journal = TaskJournal::for_task("task-goal-spec", "ask", "continue goal");
+    journal.record_task_goal_spec(json!({
+        "goal_id": "goal-user-1",
+        "objective": "ship feature",
+        "constraints": ["no runtime natural-language matching"],
+        "done_conditions": ["tests_pass"],
+        "verification_commands": ["cargo test -p clawd task_goal -- --quiet"],
+        "allowed_files_or_scopes": ["crates/clawd"],
+        "forbidden_actions": ["external_publish"],
+        "goal_status": "created"
+    }));
+
+    let summary = journal.to_summary_json();
+    let goal = summary.get("task_goal").expect("task_goal");
+
+    assert_eq!(
+        goal.get("goal_id").and_then(Value::as_str),
+        Some("goal-user-1")
+    );
+    assert_eq!(
+        goal.get("objective").and_then(Value::as_str),
+        Some("ship feature")
+    );
+    assert_eq!(
+        goal.pointer("/constraints/0").and_then(Value::as_str),
+        Some("no runtime natural-language matching")
+    );
+    assert_eq!(
+        goal.pointer("/done_conditions/0").and_then(Value::as_str),
+        Some("tests_pass")
+    );
+    assert_eq!(
+        goal.pointer("/allowed_files_or_scopes/0")
+            .and_then(Value::as_str),
+        Some("crates/clawd")
+    );
+    assert_eq!(
+        goal.pointer("/forbidden_actions/0").and_then(Value::as_str),
+        Some("external_publish")
+    );
+    assert_eq!(
+        goal.get("goal_status").and_then(Value::as_str),
+        Some("created")
+    );
+    assert_eq!(
+        goal.get("goal_status_source").and_then(Value::as_str),
+        Some("goal")
+    );
+}
+
+#[test]
+fn summary_json_prefers_evidence_status_and_merges_goal_commands() {
+    let mut journal = TaskJournal::for_task("task-goal-verified", "ask", "verify goal");
+    journal.record_task_goal_spec(json!({
+        "objective": "verify code",
+        "verification_commands": ["cargo check -p clawd"],
+        "goal_status": "created"
+    }));
+    journal.push_step_result(&step_result(
+        "step_1",
+        "run_cmd",
+        crate::executor::StepExecutionStatus::Ok,
+        Some(
+            json!({
+                "extra": {
+                    "command": "cargo test -p clawd task_goal -- --quiet"
+                },
+                "validation_result": {
+                    "status": "passed",
+                    "status_code": "tests_passed"
+                }
+            })
+            .to_string(),
+        ),
+        None,
+    ));
+    journal.record_final_status(TaskJournalFinalStatus::Success);
+
+    let summary = journal.to_summary_json();
+    let goal = summary.get("task_goal").expect("task_goal");
+
+    assert_eq!(
+        goal.get("goal_status").and_then(Value::as_str),
+        Some("completed")
+    );
+    assert_eq!(
+        goal.get("goal_status_source").and_then(Value::as_str),
+        Some("journal_final_status")
+    );
+    let commands = goal
+        .get("verification_commands")
+        .and_then(Value::as_array)
+        .expect("verification_commands")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    assert!(commands.contains(&"cargo check -p clawd"));
+    assert!(commands.contains(&"cargo test -p clawd task_goal -- --quiet"));
+}
+
+#[test]
 fn summary_json_marks_missing_evidence_as_remaining_work() {
     let mut journal = TaskJournal::for_task("task-goal-missing", "ask", "list files");
     let mut route = crate::RouteResult {
