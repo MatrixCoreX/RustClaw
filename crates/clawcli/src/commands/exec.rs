@@ -589,6 +589,17 @@ pub(super) fn write_exec_artifacts(
 fn exec_resume_artifact_json(task: &task::TaskStatusView) -> Value {
     let lifecycle = task.lifecycle();
     let checkpoint_id = lifecycle_string(lifecycle, "checkpoint_id");
+    let completed_side_effect_refs = exec_completed_side_effect_refs(&task.raw_data);
+    let completed_side_effect_count = lifecycle_value(lifecycle, "completed_side_effect_count")
+        .as_u64()
+        .unwrap_or(
+            completed_side_effect_refs
+                .as_array()
+                .map(|items| items.len() as u64)
+                .unwrap_or(0),
+        );
+    let requires_idempotency_guard = lifecycle_bool(lifecycle, "requires_idempotency_guard")
+        .unwrap_or(completed_side_effect_count > 0);
     let mut recommended_command_tokens = vec![
         "clawcli".to_string(),
         "watch".to_string(),
@@ -617,7 +628,41 @@ fn exec_resume_artifact_json(task: &task::TaskStatusView) -> Value {
         "poll_ref": lifecycle_string(lifecycle, "poll_ref"),
         "cancel_ref": lifecycle_string(lifecycle, "cancel_ref"),
         "recommended_command_tokens": recommended_command_tokens,
+        "completed_side_effect_count": completed_side_effect_count,
+        "completed_side_effect_refs": completed_side_effect_refs,
+        "requires_idempotency_guard": requires_idempotency_guard,
+        "coding": coding_exec_summary_json(task),
     })
+}
+
+fn exec_completed_side_effect_refs(data: &Value) -> Value {
+    let refs = exec_task_checkpoint_value(data)
+        .and_then(|checkpoint| checkpoint.get("completed_side_effect_refs"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| is_resume_ref_token(value))
+        .take(128)
+        .map(|value| Value::String(value.to_string()))
+        .collect::<Vec<_>>();
+    Value::Array(refs)
+}
+
+fn exec_task_checkpoint_value(data: &Value) -> Option<&Value> {
+    data.pointer("/result_json/task_checkpoint")
+        .or_else(|| data.pointer("/result_json/task_journal/summary/task_checkpoint"))
+        .or_else(|| data.get("task_checkpoint"))
+        .or_else(|| data.pointer("/task_journal/summary/task_checkpoint"))
+        .filter(|value| value.is_object())
+}
+
+fn is_resume_ref_token(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && trimmed.len() <= 300
+        && !trimmed.chars().any(|ch| matches!(ch, '\n' | '\r'))
 }
 
 fn lifecycle_value(lifecycle: Option<&Value>, key: &str) -> Value {
