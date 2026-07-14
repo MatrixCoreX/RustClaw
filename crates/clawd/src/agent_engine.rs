@@ -7,6 +7,8 @@ use tracing::{debug, info, warn};
 mod arg_resolver;
 mod async_start_checkpoint;
 mod attempt_ledger;
+#[allow(dead_code)]
+mod context_compaction;
 mod dispatch_support;
 mod execution_loop;
 mod filesystem_lifecycle_contract;
