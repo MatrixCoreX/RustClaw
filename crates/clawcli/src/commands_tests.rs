@@ -138,6 +138,19 @@ fn task_report_json_exposes_stable_machine_fields() {
                             "verification": {"command": "cargo test -p clawd"},
                             "current_progress": ["changed_file_count=1"],
                             "remaining_work": ["summarize"]
+                        },
+                        "context_budget_report": {
+                            "schema_version": 1,
+                            "budget_tier": "normal",
+                            "included_ref_count": 2,
+                            "included_refs": ["goal:goal-report", "file:src/lib.rs"],
+                            "excluded_ref_count": 1,
+                            "excluded_refs": ["transcript:old"],
+                            "char_estimate": 4096,
+                            "token_estimate": 1024,
+                            "truncation_reason": "budget_limit",
+                            "safety_reason": null,
+                            "compaction_source": "deterministic"
                         }
                     },
                     "trace": {
@@ -224,6 +237,15 @@ fn task_report_json_exposes_stable_machine_fields() {
     assert_eq!(report["llm"]["prompt_truncation_count"], 1);
     assert_eq!(report["llm"]["prompt_bytes_before_max"], 157037);
     assert_eq!(report["llm"]["budget_health"]["status"], "warning");
+    assert_eq!(
+        report["context_budget"]["source"],
+        "task_journal_context_budget_report"
+    );
+    assert_eq!(report["context_budget"]["included_ref_count"], 2);
+    assert_eq!(
+        report["context_budget"]["excluded_refs"][0],
+        "transcript:old"
+    );
     assert_eq!(
         report["llm"]["budget_health"]["warnings"][0],
         "prompt_truncation_count"

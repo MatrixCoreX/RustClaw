@@ -25,6 +25,7 @@ pub(super) fn task_report_json(task: &task::TaskStatusView, include_events: bool
     let coding = coding_report_json(&task.raw_data);
     let outcome = super::report_outcome::task_outcome_report_json(&task.raw_data, &coding);
     let session = task_session_projection_json(task);
+    let context_budget = context_budget_report_json(&task.raw_data);
     json!({
         "report_kind": "rustclaw_task_report",
         "task_id": task.task_id,
@@ -46,6 +47,7 @@ pub(super) fn task_report_json(task: &task::TaskStatusView, include_events: bool
             Value::Null
         },
         "llm": llm_report_json(task),
+        "context_budget": context_budget,
         "coding": coding,
         "outcome": outcome,
         "artifacts": {
@@ -260,6 +262,21 @@ fn task_session_projection_json(task: &task::TaskStatusView) -> Value {
         "task_ids": [task.task_id.clone()],
         "active_goal_id": task_goal_id(&task.raw_data),
     })
+}
+
+fn context_budget_report_json(data: &Value) -> Value {
+    data.pointer("/result_json/task_journal/summary/context_budget_report")
+        .or_else(|| data.pointer("/task_journal/summary/context_budget_report"))
+        .and_then(Value::as_object)
+        .map(|report| {
+            let mut projected = report.clone();
+            projected.insert(
+                "source".to_string(),
+                Value::String("task_journal_context_budget_report".to_string()),
+            );
+            Value::Object(projected)
+        })
+        .unwrap_or(Value::Null)
 }
 
 pub(super) fn coding_review_json(task: &task::TaskStatusView, include_events: bool) -> Value {
