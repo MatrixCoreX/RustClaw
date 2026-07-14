@@ -357,6 +357,31 @@ pub(crate) fn resume_task_by_id(
     )
 }
 
+pub(crate) fn update_goal_by_task_id(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    operation: &str,
+    goal: Option<serde_json::Value>,
+) -> Result<serde_json::Value> {
+    let mut payload = json!({
+        "task_id": task_id,
+        "operation": operation,
+    });
+    if let Some(obj) = payload.as_object_mut() {
+        if let Some(goal) = goal {
+            obj.insert("goal".to_string(), goal);
+        }
+    }
+    task_control_by_id(
+        base_url,
+        key,
+        "/tasks/goal-by-task-id",
+        "goal-control",
+        payload,
+    )
+}
+
 pub(crate) fn pause_task_by_id(
     base_url: &str,
     key: &str,

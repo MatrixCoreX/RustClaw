@@ -184,7 +184,7 @@ pub(crate) use system_health::{
     whatsappd_process_stats,
 };
 use task_admin_routes::{
-    cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks,
+    cancel_one_task, cancel_task_by_id as cancel_task_by_id_handler, cancel_tasks, goal_by_task_id,
     list_active_tasks, list_automation_runs, pause_task_by_id, resume_task_by_id,
 };
 pub(crate) use worker::task_payload_value;
@@ -795,6 +795,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/tasks/cancel-by-task-id", post(cancel_task_by_id_handler))
         .route("/tasks/resume-by-task-id", post(resume_task_by_id))
         .route("/tasks/pause-by-task-id", post(pause_task_by_id))
+        .route("/tasks/goal-by-task-id", post(goal_by_task_id))
         .route("/admin/reload-skills", post(reload_skills_handler))
         .with_state(state.clone());
 

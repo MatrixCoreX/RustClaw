@@ -451,6 +451,28 @@ enum GoalCommand {
         #[arg(long = "constraints-json")]
         constraints_json: Option<String>,
     },
+    /// Patch structured goal metadata on an existing task.
+    Edit {
+        task_id: String,
+        #[arg(long = "goal-json")]
+        goal_json: Option<String>,
+        #[arg(long)]
+        objective: Option<String>,
+        #[arg(long = "done")]
+        done_conditions: Vec<String>,
+        #[arg(long = "verify")]
+        verification_commands: Vec<String>,
+        #[arg(long = "constraint")]
+        constraints: Vec<String>,
+        #[arg(long = "allowed-scope")]
+        allowed_scopes: Vec<String>,
+        #[arg(long = "forbidden-action")]
+        forbidden_actions: Vec<String>,
+        #[arg(long = "goal-status")]
+        goal_status: Option<String>,
+    },
+    /// Remove structured goal metadata from an existing task payload.
+    Clear { task_id: String },
 }
 
 impl WaitUntil {
@@ -672,6 +694,36 @@ fn main() -> Result<()> {
                     user_message.as_deref(),
                     constraints_json.as_deref(),
                 )
+            }
+            GoalCommand::Edit {
+                task_id,
+                goal_json,
+                objective,
+                done_conditions,
+                verification_commands,
+                constraints,
+                allowed_scopes,
+                forbidden_actions,
+                goal_status,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_goal_edit(
+                    base_url,
+                    k,
+                    task_id,
+                    goal_json.as_deref(),
+                    objective.as_deref(),
+                    done_conditions,
+                    verification_commands,
+                    constraints,
+                    allowed_scopes,
+                    forbidden_actions,
+                    goal_status.as_deref(),
+                )
+            }
+            GoalCommand::Clear { task_id } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_goal_clear(base_url, k, task_id)
             }
         },
         Command::RunSkill {
@@ -1114,7 +1166,7 @@ mod tests {
             .get_subcommands()
             .map(|subcommand| subcommand.get_name().to_string())
             .collect::<std::collections::BTreeSet<_>>();
-        for required in ["start", "status", "pause", "resume"] {
+        for required in ["start", "status", "pause", "resume", "edit", "clear"] {
             assert!(goal_names.contains(required), "missing {required}");
         }
 

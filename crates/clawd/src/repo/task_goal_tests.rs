@@ -1,7 +1,28 @@
 use serde_json::json;
 use uuid::Uuid;
 
-use super::task_goal_projection;
+use super::{task_goal_projection, update_task_goal_payload, TaskGoalControlOperation};
+
+fn state_with_goal_task(task_id: &str, payload: serde_json::Value) -> crate::AppState {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let db = state.core.db.get().expect("get db");
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS tasks (
+            task_id TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );",
+    )
+    .expect("create tasks table");
+    db.execute(
+        "INSERT OR REPLACE INTO tasks (task_id, payload_json, updated_at)
+         VALUES (?1, ?2, '0')",
+        rusqlite::params![task_id, payload.to_string()],
+    )
+    .expect("insert task");
+    drop(db);
+    state
+}
 
 #[test]
 fn task_goal_projection_merges_payload_goal_and_structured_progress() {
@@ -74,4 +95,71 @@ fn task_goal_projection_returns_none_without_goal_sources() {
     let lifecycle = json!({"execution_state": "completed"});
 
     assert!(task_goal_projection(task_id, r#"{"text":"plain"}"#, None, &lifecycle).is_none());
+}
+
+#[test]
+fn update_task_goal_payload_edits_structured_goal_fields() {
+    let task_id = "task-goal-edit";
+    let state = state_with_goal_task(
+        task_id,
+        json!({
+            "text": "work",
+            "goal": {
+                "objective": "old",
+                "done_conditions": ["old_done"]
+            },
+            "goal_spec": {
+                "objective": "legacy"
+            }
+        }),
+    );
+
+    let update = update_task_goal_payload(
+        &state,
+        task_id,
+        TaskGoalControlOperation::Edit,
+        Some(json!({
+            "objective": "new",
+            "verification_commands": ["cargo test -p clawcli"],
+            "constraints": ["scope=workspace"]
+        })),
+    )
+    .expect("edit goal")
+    .expect("goal update");
+
+    assert_eq!(update.operation, "edit");
+    assert_eq!(update.goal.as_ref().unwrap()["objective"], "new");
+    assert_eq!(
+        update.goal.as_ref().unwrap()["verification_commands"][0],
+        "cargo test -p clawcli"
+    );
+    assert!(update.payload_json.get("goal_spec").is_none());
+    assert_eq!(
+        update.payload_json["goal"]["done_conditions"][0],
+        "old_done"
+    );
+    assert_eq!(update.payload_json["goal"]["schema_version"], 1);
+}
+
+#[test]
+fn update_task_goal_payload_clears_goal_keys() {
+    let task_id = "task-goal-clear";
+    let state = state_with_goal_task(
+        task_id,
+        json!({
+            "text": "work",
+            "goal": {"objective": "old"},
+            "task_goal": {"objective": "legacy"}
+        }),
+    );
+
+    let update = update_task_goal_payload(&state, task_id, TaskGoalControlOperation::Clear, None)
+        .expect("clear goal")
+        .expect("goal update");
+
+    assert_eq!(update.operation, "clear");
+    assert!(update.goal.is_none());
+    assert!(update.payload_json.get("goal").is_none());
+    assert!(update.payload_json.get("task_goal").is_none());
+    assert_eq!(update.payload_json["text"], "work");
 }
