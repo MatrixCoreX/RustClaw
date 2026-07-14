@@ -1,4 +1,8 @@
-use super::{ExecutionContextView, RouteContextView, TaskContextBundle};
+use serde_json::{json, Value};
+
+use super::{
+    ExecutionContextBudgetTier, ExecutionContextView, RouteContextView, TaskContextBundle,
+};
 
 pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String {
     let route_attached = bundle.route_view.is_some();
@@ -42,8 +46,9 @@ pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String 
         .map(super::execution_context_budget_report_json)
         .map(|value| value.to_string())
         .unwrap_or_else(|| "{}".to_string());
+    let transcript_compaction_records = transcript_compaction_records_json(bundle).to_string();
     format!(
-        "route_view={} route_budget={} route_profile={} execution_view={} execution_budget={} execution_profile={} context_profile={} visible_skills={} resume_context={} binding_context={} goal_context={} context_budget_report={}",
+        "route_view={} route_budget={} route_profile={} execution_view={} execution_budget={} execution_profile={} context_profile={} visible_skills={} resume_context={} binding_context={} goal_context={} context_budget_report={} transcript_compaction_records={}",
         route_attached,
         route_budget,
         route_profile,
@@ -55,8 +60,70 @@ pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String 
         has_resume_context,
         has_binding_context,
         has_goal_context,
-        context_budget_report
+        context_budget_report,
+        transcript_compaction_records
     )
+}
+
+fn transcript_compaction_records_json(bundle: &TaskContextBundle) -> Value {
+    let Some(view) = bundle.execution_view.as_ref() else {
+        return Value::Array(Vec::new());
+    };
+    if !matches!(view.budget_tier, ExecutionContextBudgetTier::Light) {
+        return Value::Array(Vec::new());
+    }
+    let source_refs = transcript_compaction_source_refs(view);
+    if source_refs.is_empty() {
+        return Value::Array(Vec::new());
+    }
+    let hash_input = serde_json::to_string(&source_refs).unwrap_or_default();
+    let active_goal_refs = if value_present(&view.goal_context) {
+        vec![Value::String("goal_context".to_string())]
+    } else {
+        Vec::new()
+    };
+    json!([{
+        "schema_version": 1,
+        "compaction_id": format!("context_compaction:{}", stable_context_hash(&hash_input)),
+        "source_task_ids": [],
+        "source_event_range": {"start": null, "end": null},
+        "summary_kind": "deterministic_context_budget",
+        "facts": [],
+        "open_questions": [],
+        "active_goal_refs": active_goal_refs,
+        "artifact_refs": [],
+        "source_refs": source_refs,
+        "risk_flags": ["budget_excluded_context", "old_assistant_output_not_instruction"],
+    }])
+}
+
+fn transcript_compaction_source_refs(view: &ExecutionContextView) -> Vec<Value> {
+    let budget = super::execution_context_budget_report_json(view);
+    budget
+        .get("excluded_refs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| {
+            item.get("ref")
+                .and_then(Value::as_str)
+                .is_some_and(is_transcript_context_ref)
+        })
+        .cloned()
+        .collect()
+}
+
+fn is_transcript_context_ref(slot: &str) -> bool {
+    matches!(slot, "recent_turns_full" | "last_turn_full")
+}
+
+fn stable_context_hash(text: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv64:{hash:016x}")
 }
 
 fn route_context_profile(view: &RouteContextView) -> &'static str {
