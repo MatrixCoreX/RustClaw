@@ -39,6 +39,8 @@ export interface ChatThreadSummary {
 export interface ChatTeachingRunSummary {
   id: string;
   taskId: string | null;
+  userMessageId: string;
+  assistantMessageId: string | null;
   userText: string;
   assistantText: string | null;
   status: TaskQueryResponse["status"] | "running";
@@ -1133,6 +1135,8 @@ function buildChatTeachingRunSummaries(thread: ChatThreadRecord): ChatTeachingRu
     .map((run) => ({
       id: run.id,
       taskId: run.taskId ?? null,
+      userMessageId: run.userMessageId,
+      assistantMessageId: run.assistantMessageId ?? null,
       userText: run.userText,
       assistantText: run.assistantText ?? null,
       status: run.status,
