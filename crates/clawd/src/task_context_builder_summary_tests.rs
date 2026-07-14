@@ -5,7 +5,7 @@ use super::{
 
 fn empty_prompt_memory_context() -> crate::memory::service::PromptMemoryContext {
     crate::memory::service::PromptMemoryContext {
-        prompt_with_memory: String::new(),
+        prompt_with_memory: "memory".to_string(),
         chat_prompt_context: String::new(),
         memory_trace: None,
         long_term_summary: None,
@@ -40,11 +40,30 @@ fn summary_emits_transcript_compaction_record_for_light_execution_budget() {
     };
 
     let summary = bundle.summary();
+    let (_, budget_tail) = summary
+        .split_once("context_budget_report=")
+        .expect("summary should include context budget report");
+    let (budget_json, _) = budget_tail
+        .split_once(" transcript_compaction_records=")
+        .expect("context budget should precede compaction records");
+    let budget: serde_json::Value = serde_json::from_str(budget_json).unwrap();
     let (_, tail) = summary
         .split_once("transcript_compaction_records=")
         .expect("summary should include compaction records field");
     let records: serde_json::Value = serde_json::from_str(tail.trim()).unwrap();
 
+    assert_eq!(
+        budget["context_input_inventory"]["inputs"][1]["input_kind"],
+        "memory_recent_records"
+    );
+    assert_eq!(
+        budget["context_input_inventory"]["inputs"][1]["status"],
+        "attached"
+    );
+    assert_eq!(
+        budget["context_input_inventory"]["inputs"][2]["input_kind"],
+        "goal_fields"
+    );
     assert_eq!(records[0]["summary_kind"], "deterministic_context_budget");
     assert_eq!(records[0]["active_goal_refs"][0], "goal_context");
     assert_eq!(records[0]["source_refs"][0]["ref"], "recent_turns_full");
