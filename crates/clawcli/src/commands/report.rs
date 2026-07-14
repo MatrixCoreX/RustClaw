@@ -835,6 +835,8 @@ fn coding_report_json_from_scan(data: &Value) -> Value {
     let mut signals = CodingReportSignals::default();
     collect_coding_report_signals(data, &mut signals, 0);
     let state = coding_state_json(&signals);
+    let verification_status = coding_verification_status_from_signals(&signals);
+    let validation_gate = coding_validation_gate_json_from_signals(&signals, verification_status);
     let unverified_risk = if !signals.changed_files.is_empty() && signals.tests.is_empty() {
         Value::String("tests_not_observed".to_string())
     } else {
@@ -853,6 +855,7 @@ fn coding_report_json_from_scan(data: &Value) -> Value {
         "verification_failure_kind_count": signals.verification_failure_kinds.len(),
         "verification_failure_kinds": signals.verification_failure_kinds.into_iter().collect::<Vec<_>>(),
         "state": state,
+        "validation_gate": validation_gate,
         "diff_summary_count": signals.diff_summaries.len(),
         "diff_summaries": signals.diff_summaries,
         "failure_count": signals.failures.len(),
@@ -922,7 +925,21 @@ fn coding_report_json_from_workflow(data: &Value, scanned: &Value) -> Option<Val
             "resume_entrypoint_count": report_u64(scanned, "/state/resume_entrypoint_count"),
             "resume_entrypoints": report_value_or_empty_array(scanned, "/state/resume_entrypoints"),
             "verification_status": verification_status,
+            "can_report_fully_verified": workflow_value
+                .pointer("/validation_gate/can_report_fully_verified")
+                .cloned()
+                .unwrap_or(Value::Null),
         },
+        "validation_gate": workflow_value
+            .get("validation_gate")
+            .cloned()
+            .unwrap_or_else(|| coding_validation_gate_json_from_report(
+                changed_file_count,
+                verification_status,
+                failure_kind_count,
+                checkpoint_ref_count,
+                completed_side_effect_count,
+            )),
         "diff_summary_count": report_u64(scanned, "/diff_summary_count"),
         "diff_summaries": report_value_or_empty_array(scanned, "/diff_summaries"),
         "failure_count": if verification_status == "failed" && failure_kind_count == 0 { 1 } else { failure_kind_count },
@@ -966,6 +983,56 @@ fn coding_state_json(signals: &CodingReportSignals) -> Value {
         "resume_entrypoint_count": signals.resume_entrypoints.len(),
         "resume_entrypoints": signals.resume_entrypoints.iter().cloned().collect::<Vec<_>>(),
         "verification_status": coding_verification_status_from_signals(signals),
+    })
+}
+
+fn coding_validation_gate_json_from_signals(
+    signals: &CodingReportSignals,
+    verification_status: &str,
+) -> Value {
+    coding_validation_gate_json_from_report(
+        signals.changed_files.len() as u64,
+        verification_status,
+        signals.verification_failure_kinds.len() as u64,
+        signals.checkpoint_refs.len() as u64,
+        signals.completed_side_effect_refs.len() as u64,
+    )
+}
+
+fn coding_validation_gate_json_from_report(
+    changed_file_count: u64,
+    verification_status: &str,
+    failure_kind_count: u64,
+    checkpoint_ref_count: u64,
+    completed_side_effect_count: u64,
+) -> Value {
+    let can_report_fully_verified = verification_status != "failed"
+        && (changed_file_count == 0 || verification_status == "verified");
+    let gate_status = if verification_status == "failed" {
+        "repair_required"
+    } else if changed_file_count > 0 && verification_status != "verified" {
+        "verification_required"
+    } else {
+        "satisfied"
+    };
+    let repair_signal = if verification_status == "failed" {
+        json!({
+            "signal_kind": "verification_failed",
+            "next_step": "repair_failed_verification",
+            "failure_kind_count": failure_kind_count,
+        })
+    } else {
+        Value::Null
+    };
+    json!({
+        "schema_version": 1,
+        "gate_status": gate_status,
+        "can_report_fully_verified": can_report_fully_verified,
+        "requires_verification": changed_file_count > 0 && verification_status != "verified",
+        "requires_repair": verification_status == "failed",
+        "checkpoint_recommended": !can_report_fully_verified
+            && (checkpoint_ref_count > 0 || completed_side_effect_count > 0),
+        "repair_signal": repair_signal,
     })
 }
 

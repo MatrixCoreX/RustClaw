@@ -76,6 +76,18 @@ fn summary_json_includes_coding_workflow_verified_contract() {
             .and_then(Value::as_str),
         Some("verified")
     );
+    assert_eq!(
+        workflow
+            .pointer("/validation_gate/gate_status")
+            .and_then(Value::as_str),
+        Some("satisfied")
+    );
+    assert_eq!(
+        workflow
+            .pointer("/validation_gate/can_report_fully_verified")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
 }
 
 #[test]
@@ -103,4 +115,66 @@ fn summary_json_includes_coding_workflow_repair_contract() {
         .is_some_and(|risks| risks
             .iter()
             .any(|value| value.as_str() == Some("failed_verification"))));
+    assert_eq!(
+        workflow
+            .pointer("/validation_gate/gate_status")
+            .and_then(Value::as_str),
+        Some("repair_required")
+    );
+    assert_eq!(
+        workflow
+            .pointer("/validation_gate/can_report_fully_verified")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        workflow
+            .pointer("/validation_gate/repair_signal/signal_kind")
+            .and_then(Value::as_str),
+        Some("verification_failed")
+    );
+}
+
+#[test]
+fn summary_json_marks_changed_files_without_verification_as_gate_required() {
+    let mut journal = TaskJournal::for_task("task-coding-workflow-unverified", "ask", "edit only");
+    journal.push_step_result(&step_result(
+        "step_1",
+        "fs_basic",
+        crate::executor::StepExecutionStatus::Ok,
+        Some(
+            json!({
+                "extra": {
+                    "action": "write_text",
+                    "path": "src/lib.rs",
+                    "resolved_path": "/workspace/src/lib.rs"
+                }
+            })
+            .to_string(),
+        ),
+        None,
+    ));
+
+    let summary = journal.to_summary_json();
+    let workflow = summary.get("coding_workflow").expect("coding workflow");
+
+    assert_eq!(workflow["verification_status"], "unverified");
+    assert_eq!(
+        workflow
+            .pointer("/validation_gate/gate_status")
+            .and_then(Value::as_str),
+        Some("verification_required")
+    );
+    assert_eq!(
+        workflow
+            .pointer("/validation_gate/can_report_fully_verified")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        workflow
+            .pointer("/validation_gate/requires_verification")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
 }
