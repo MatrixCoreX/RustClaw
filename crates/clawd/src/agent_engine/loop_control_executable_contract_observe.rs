@@ -11,6 +11,15 @@ pub(super) fn executable_contract_observation_round_needs_planner(
         && executable_contract_observe_only_round_should_continue(route_result, loop_state, actions)
 }
 
+pub(super) fn executable_contract_read_observe_round_should_continue(
+    route_result: &RouteResult,
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> bool {
+    executable_contract_observe_only_round_should_continue(route_result, loop_state, actions)
+        && actions.iter().any(action_reads_text_content)
+}
+
 pub(super) fn executable_contract_observe_only_round_should_continue(
     route_result: &RouteResult,
     loop_state: &LoopState,
@@ -66,7 +75,45 @@ fn action_is_bounded_read_observation(action: &AgentAction) -> bool {
         }
         AgentAction::CallCapability { capability, .. } => matches!(
             capability.trim().to_ascii_lowercase().as_str(),
-            "filesystem.read_range" | "filesystem.read_text_range"
+            "filesystem.read_range"
+                | "filesystem.read_text_range"
+                | "fs_basic.read_range"
+                | "fs_basic.read_text_range"
+        ),
+        AgentAction::Think { .. }
+        | AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Respond { .. } => false,
+    }
+}
+
+fn action_reads_text_content(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args } => {
+            let tool = tool.trim();
+            if matches!(tool, "read_file" | "read_range") {
+                return true;
+            }
+            let action = args
+                .get("action")
+                .and_then(Value::as_str)
+                .map(normalize_machine_action_token)
+                .unwrap_or_default();
+            matches!(tool, "fs_basic" | "system_basic")
+                && matches!(
+                    action.as_str(),
+                    "read_range" | "read_text" | "read_text_range"
+                )
+        }
+        AgentAction::CallCapability { capability, .. } => matches!(
+            capability.trim().to_ascii_lowercase().as_str(),
+            "filesystem.read_range"
+                | "filesystem.read_text_range"
+                | "filesystem.read_text"
+                | "filesystem.read_file"
+                | "fs_basic.read_range"
+                | "fs_basic.read_text_range"
+                | "fs_basic.read_text"
+                | "fs_basic.read_file"
         ),
         AgentAction::Think { .. }
         | AgentAction::SynthesizeAnswer { .. }
@@ -170,6 +217,14 @@ fn machine_capability_is_observe_only(capability: &str) -> bool {
             | "filesystem.grep_text"
             | "filesystem.search_text"
             | "filesystem.compare_paths"
+            | "fs_basic.list_dir"
+            | "fs_basic.read_range"
+            | "fs_basic.read_text"
+            | "fs_basic.read_text_range"
+            | "fs_basic.find_entries"
+            | "fs_basic.grep_text"
+            | "fs_basic.metadata"
+            | "fs_basic.stat"
     )
 }
 
