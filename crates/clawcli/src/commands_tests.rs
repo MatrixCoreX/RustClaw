@@ -367,6 +367,13 @@ fn subagent_report_json_collects_child_results_and_events() {
                         "subagent_id": "explorer",
                         "status": "succeeded",
                         "result_status": "completed",
+                        "role_metadata": {
+                            "tool_permission_profile": "read_only"
+                        },
+                        "timeout_policy": {
+                            "timeout_ms": 30000,
+                            "source": "agent_guard.subagents.default_timeout_ms"
+                        },
                         "outcome_code": "subagent_parallel_readonly_completed",
                         "conflict_count": 1,
                         "failure_isolated": true,
@@ -395,6 +402,14 @@ fn subagent_report_json_collects_child_results_and_events() {
                 ),
                 ("subagent_id".to_string(), "verifier".to_string()),
                 ("status".to_string(), "succeeded".to_string()),
+                (
+                    "tool_permission_profile".to_string(),
+                    "read_only".to_string(),
+                ),
+                (
+                    "execution_mode".to_string(),
+                    "inline_readonly_child_run".to_string(),
+                ),
             ]),
         }],
     };
@@ -421,11 +436,30 @@ fn subagent_report_json_collects_child_results_and_events() {
     assert_eq!(report["subagents"][0]["confidence_min"], 0.72);
     assert_eq!(report["subagents"][0]["confidence_max"], 0.93);
     assert_eq!(report["subagents"][0]["failure_isolated"], true);
+    assert_eq!(
+        report["subagents"][0]["tool_permission_profile"],
+        "read_only"
+    );
+    assert_eq!(report["subagents"][0]["read_only_enforced"], true);
+    assert_eq!(
+        report["subagents"][0]["write_isolation_status"],
+        "not_supported"
+    );
+    assert_eq!(report["subagents"][0]["timeout_ms"], 30000);
+    assert_eq!(
+        report["subagents"][0]["timeout_source"],
+        "agent_guard.subagents.default_timeout_ms"
+    );
     assert_eq!(report["subagents"][0]["finding_refs"][0], "finding:1");
     assert_eq!(
         report["subagents"][1]["child_run_id"],
         "subagent:1:2:verifier"
     );
+    assert_eq!(
+        report["subagents"][1]["tool_permission_profile"],
+        "read_only"
+    );
+    assert_eq!(report["subagents"][1]["read_only_enforced"], true);
 }
 
 #[test]
@@ -442,14 +476,21 @@ fn permission_report_json_collects_structured_decisions() {
                     "dry_run_required": true,
                     "risk_level": "high",
                     "action_effect": "external_publish",
-                    "reason_code": "dry_run_required"
+                    "reason_code": "dry_run_required",
+                    "isolation_profile": "local_temp_workspace",
+                    "sandbox": {
+                        "profile": "workspace_guard",
+                        "source": "plan_verifier",
+                        "filesystem_write": false
+                    }
                 },
                 "step_results": [
                     {
                         "extra": {
                             "command_policy": {
                                 "policy_authority": "contract_matrix",
-                                "effect": "filesystem_write"
+                                "effect": "filesystem_write",
+                                "isolation_profile": "read_only"
                             }
                         }
                     }
@@ -471,8 +512,25 @@ fn permission_report_json_collects_structured_decisions() {
     );
     assert_eq!(report["permission_entries"][0]["risk_level"], "high");
     assert_eq!(
+        report["permission_entries"][0]["isolation_profile"],
+        "local_temp_workspace"
+    );
+    assert_eq!(
+        report["permission_entries"][0]["sandbox_profile"],
+        "workspace_guard"
+    );
+    assert_eq!(
+        report["permission_entries"][0]["sandbox_source"],
+        "plan_verifier"
+    );
+    assert_eq!(report["permission_entries"][0]["filesystem_write"], false);
+    assert_eq!(
         report["permission_entries"][1]["decision"],
         "contract_matrix"
+    );
+    assert_eq!(
+        report["permission_entries"][1]["isolation_profile"],
+        "read_only"
     );
     assert!(report.get("result_text").is_none());
 }
