@@ -1,5 +1,6 @@
 import { Database, Loader2, RefreshCw } from "lucide-react";
 
+import { flowStageMachineTokens, flowSummaryMachineTokens } from "../lib/task-llm-trace";
 import type { TaskLlmDebugCall, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
 
 type Translate = (zh: string, en: string) => string;
@@ -173,6 +174,43 @@ export function TaskLlmTracePanel({
               llm_calls={callCount}
             </span>
           </div>
+
+          {taskLlmDebug.flow_summary ? (
+            <details className="mb-3 rounded-lg border border-sky-300/15 bg-sky-400/5 p-3" open>
+              <summary className="cursor-pointer text-xs font-medium text-sky-100">
+                {t("Agent 流程摘要", "Agent flow summary")}
+              </summary>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {flowSummaryMachineTokens(taskLlmDebug.flow_summary).map((item) => (
+                  <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-[11px] text-sky-50/75">
+                    {item}
+                  </span>
+                ))}
+              </div>
+              {taskLlmDebug.flow_summary.stages.length > 0 ? (
+                <div className="mt-3 grid gap-2 lg:grid-cols-2">
+                  {taskLlmDebug.flow_summary.stages.map((stage) => (
+                    <details key={stage.flow_stage} className="rounded-md border border-white/10 bg-black/20 p-2">
+                      <summary className="cursor-pointer font-mono text-[11px] text-white/70">
+                        {stage.flow_stage} · calls={stage.call_count}
+                      </summary>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {flowStageMachineTokens(stage).map((item) => (
+                          <span key={item} className="rounded-md border border-white/10 bg-white/5 px-2 py-1 font-mono text-[11px] text-white/60">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="mt-2 grid gap-2 text-[11px] md:grid-cols-2">
+                        <FlowField label={t("代码模块", "Code module")} value={stage.code_modules[0]} />
+                        <FlowField label={t("入口函数", "Entrypoint")} value={stage.code_entrypoints[0]} />
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              ) : null}
+            </details>
+          ) : null}
 
           {taskLlmDebug.memory_trace ? (
             <details className="mb-3 rounded-lg border border-emerald-300/15 bg-emerald-400/5 p-3">

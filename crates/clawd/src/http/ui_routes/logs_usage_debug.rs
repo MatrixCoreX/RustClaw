@@ -810,6 +810,88 @@ fn numbered_task_debug_calls(entries: &[TaskDebugEntry]) -> Vec<TaskDebugCall> {
         .collect()
 }
 
+fn build_task_debug_flow_summary(calls: &[TaskDebugCall]) -> TaskDebugFlowSummary {
+    let mut stages: BTreeMap<String, TaskDebugFlowStageSummary> = BTreeMap::new();
+    let mut modules = BTreeSet::new();
+    let mut status_counts = BTreeMap::new();
+    let mut trigger_counts = BTreeMap::new();
+    let mut retry_count = 0usize;
+    let mut verifier_call_count = 0usize;
+    let mut finalizer_call_count = 0usize;
+    let mut provider_error_count = 0usize;
+
+    for call in calls {
+        let flow = &call.flow;
+        let status = call.entry.status.as_deref().unwrap_or("unknown");
+        let provider_error = call
+            .entry
+            .error
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty());
+        let retry_trigger = matches!(flow.trigger_kind.as_str(), "retry" | "json_retry");
+
+        if retry_trigger {
+            retry_count += 1;
+        }
+        if flow.flow_stage.contains("verifier") {
+            verifier_call_count += 1;
+        }
+        if flow.flow_stage.starts_with("finalizer.") {
+            finalizer_call_count += 1;
+        }
+        if provider_error {
+            provider_error_count += 1;
+        }
+        modules.insert(flow.code_module.clone());
+        *status_counts.entry(status.to_string()).or_insert(0) += 1;
+        *trigger_counts.entry(flow.trigger_kind.clone()).or_insert(0) += 1;
+
+        let stage = stages
+            .entry(flow.flow_stage.clone())
+            .or_insert_with(|| TaskDebugFlowStageSummary {
+                flow_stage: flow.flow_stage.clone(),
+                call_count: 0,
+                prompt_labels: Vec::new(),
+                flow_nodes: Vec::new(),
+                code_modules: Vec::new(),
+                code_entrypoints: Vec::new(),
+                trigger_counts: BTreeMap::new(),
+                status_counts: BTreeMap::new(),
+                provider_error_count: 0,
+            });
+        stage.call_count += 1;
+        push_unique_debug_summary_value(&mut stage.prompt_labels, &flow.prompt_label);
+        push_unique_debug_summary_value(&mut stage.flow_nodes, &flow.flow_node);
+        push_unique_debug_summary_value(&mut stage.code_modules, &flow.code_module);
+        push_unique_debug_summary_value(&mut stage.code_entrypoints, &flow.code_entrypoint);
+        *stage.trigger_counts.entry(flow.trigger_kind.clone()).or_insert(0) += 1;
+        *stage.status_counts.entry(status.to_string()).or_insert(0) += 1;
+        if provider_error {
+            stage.provider_error_count += 1;
+        }
+    }
+
+    TaskDebugFlowSummary {
+        call_count: calls.len(),
+        stage_count: stages.len(),
+        stages: stages.into_values().collect(),
+        modules: modules.into_iter().collect(),
+        retry_count,
+        verifier_call_count,
+        finalizer_call_count,
+        provider_error_count,
+        status_counts,
+        trigger_counts,
+    }
+}
+
+fn push_unique_debug_summary_value(values: &mut Vec<String>, value: &str) {
+    if !values.iter().any(|existing| existing == value) {
+        values.push(value.to_string());
+    }
+}
+
 fn task_debug_flow_for_entry(entry: &TaskDebugEntry) -> TaskDebugFlow {
     let source = entry
         .prompt_source
@@ -1045,6 +1127,7 @@ async fn task_debug_detail(
             .cmp(&(b.ts.unwrap_or(0), b.call_id.as_deref().unwrap_or_default()))
     });
     let calls = numbered_task_debug_calls(&entries);
+    let flow_summary = build_task_debug_flow_summary(&calls);
     let memory_trace = match read_task_memory_trace_for_debug(&state, normalized_task_id) {
         Ok(trace) => trace,
         Err(err) => {
@@ -1065,6 +1148,7 @@ async fn task_debug_detail(
             data: Some(json!({
                 "task_id": normalized_task_id,
                 "call_count": calls.len(),
+                "flow_summary": flow_summary,
                 "calls": calls,
                 "entries": entries,
                 "memory_trace": memory_trace,
@@ -1117,8 +1201,8 @@ fn extract_memory_trace_for_debug(result_json: &Value) -> Option<Value> {
 #[cfg(test)]
 mod logs_usage_debug_tests {
     use super::{
-        extract_memory_trace_for_debug, normalize_log_file_name, numbered_task_debug_calls,
-        TaskDebugEntry,
+        build_task_debug_flow_summary, extract_memory_trace_for_debug, normalize_log_file_name,
+        numbered_task_debug_calls, TaskDebugEntry,
     };
     use serde_json::json;
 
@@ -1207,6 +1291,132 @@ mod logs_usage_debug_tests {
             calls[1].entry.raw_response.as_deref(),
             Some("{\"id\":\"resp-2\"}")
         );
+    }
+
+    #[test]
+    fn task_debug_flow_summary_groups_stage_counts_and_recovery_signals() {
+        let entries = vec![
+            TaskDebugEntry {
+                ts: Some(10),
+                task_id: Some("task-1".to_string()),
+                call_id: Some("task-1:planner".to_string()),
+                vendor: None,
+                provider: None,
+                provider_type: None,
+                model: None,
+                model_kind: None,
+                status: Some("ok".to_string()),
+                mode: None,
+                prompt_source: Some(
+                    "layered:prompts/lightweight_execution_prompt.md#vendor=minimax".to_string(),
+                ),
+                prompt_hash: None,
+                prompt_file: None,
+                prompt: None,
+                request_payload: Some(json!({"messages":[{"role":"user","content":"plan"}]})),
+                response: None,
+                raw_response: Some("{\"id\":\"resp-1\"}".to_string()),
+                clean_response: None,
+                sanitized: None,
+                error: None,
+                usage: None,
+            },
+            TaskDebugEntry {
+                ts: Some(11),
+                task_id: Some("task-1".to_string()),
+                call_id: Some("task-1:repair".to_string()),
+                vendor: None,
+                provider: None,
+                provider_type: None,
+                model: None,
+                model_kind: None,
+                status: Some("ok".to_string()),
+                mode: None,
+                prompt_source: Some(
+                    "layered:prompts/plan_repair_prompt.md#retry=json_only".to_string(),
+                ),
+                prompt_hash: None,
+                prompt_file: None,
+                prompt: None,
+                request_payload: Some(json!({"messages":[{"role":"user","content":"repair"}]})),
+                response: None,
+                raw_response: Some("{\"id\":\"resp-2\"}".to_string()),
+                clean_response: None,
+                sanitized: None,
+                error: None,
+                usage: None,
+            },
+            TaskDebugEntry {
+                ts: Some(12),
+                task_id: Some("task-1".to_string()),
+                call_id: Some("task-1:verifier".to_string()),
+                vendor: None,
+                provider: None,
+                provider_type: None,
+                model: None,
+                model_kind: None,
+                status: Some("error".to_string()),
+                mode: None,
+                prompt_source: Some("layered:prompts/answer_verifier_prompt.md".to_string()),
+                prompt_hash: None,
+                prompt_file: None,
+                prompt: None,
+                request_payload: Some(json!({"messages":[{"role":"user","content":"verify"}]})),
+                response: None,
+                raw_response: None,
+                clean_response: None,
+                sanitized: None,
+                error: Some("provider_timeout".to_string()),
+                usage: None,
+            },
+            TaskDebugEntry {
+                ts: Some(13),
+                task_id: Some("task-1".to_string()),
+                call_id: Some("task-1:composer".to_string()),
+                vendor: None,
+                provider: None,
+                provider_type: None,
+                model: None,
+                model_kind: None,
+                status: Some("ok".to_string()),
+                mode: None,
+                prompt_source: Some(
+                    "layered:prompts/user_response_composer_prompt.md#vendor=minimax".to_string(),
+                ),
+                prompt_hash: None,
+                prompt_file: None,
+                prompt: None,
+                request_payload: Some(json!({"messages":[{"role":"user","content":"compose"}]})),
+                response: None,
+                raw_response: Some("{\"id\":\"resp-4\"}".to_string()),
+                clean_response: None,
+                sanitized: None,
+                error: None,
+                usage: None,
+            },
+        ];
+
+        let calls = numbered_task_debug_calls(&entries);
+        let summary = build_task_debug_flow_summary(&calls);
+
+        assert_eq!(summary.call_count, 4);
+        assert_eq!(summary.retry_count, 1);
+        assert_eq!(summary.verifier_call_count, 1);
+        assert_eq!(summary.finalizer_call_count, 1);
+        assert_eq!(summary.provider_error_count, 1);
+        assert_eq!(summary.status_counts.get("ok"), Some(&3));
+        assert_eq!(summary.status_counts.get("error"), Some(&1));
+        assert_eq!(summary.trigger_counts.get("json_retry"), Some(&1));
+        assert!(summary
+            .modules
+            .iter()
+            .any(|module| module == "crates/clawd/src/agent_engine/planning.rs"));
+        let verifier_stage = summary
+            .stages
+            .iter()
+            .find(|stage| stage.flow_stage == "agent_loop.answer_verifier")
+            .expect("verifier stage");
+        assert_eq!(verifier_stage.provider_error_count, 1);
     }
 
     #[test]

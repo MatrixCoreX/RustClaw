@@ -1092,6 +1092,33 @@ struct TaskDebugCall {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct TaskDebugFlowStageSummary {
+    flow_stage: String,
+    call_count: usize,
+    prompt_labels: Vec<String>,
+    flow_nodes: Vec<String>,
+    code_modules: Vec<String>,
+    code_entrypoints: Vec<String>,
+    trigger_counts: BTreeMap<String, usize>,
+    status_counts: BTreeMap<String, usize>,
+    provider_error_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TaskDebugFlowSummary {
+    call_count: usize,
+    stage_count: usize,
+    stages: Vec<TaskDebugFlowStageSummary>,
+    modules: Vec<String>,
+    retry_count: usize,
+    verifier_call_count: usize,
+    finalizer_call_count: usize,
+    provider_error_count: usize,
+    status_counts: BTreeMap<String, usize>,
+    trigger_counts: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct UsageHistoryPage {
     page: usize,
     page_size: usize,
