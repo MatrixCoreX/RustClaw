@@ -1307,11 +1307,17 @@ fn should_suppress_active_task_context(
     let Some(analysis) = turn_analysis else {
         return false;
     };
-    if analysis.turn_type != Some(crate::intent_router::TurnType::PreferenceOrMemory)
-        || !matches!(
-            analysis.target_task_policy,
-            None | Some(crate::intent_router::TargetTaskPolicy::Standalone)
+    let standalone_current_turn = matches!(
+        analysis.turn_type,
+        Some(
+            crate::intent_router::TurnType::PreferenceOrMemory
+                | crate::intent_router::TurnType::TaskRequest
         )
+    ) && matches!(
+        analysis.target_task_policy,
+        None | Some(crate::intent_router::TargetTaskPolicy::Standalone)
+    );
+    if !standalone_current_turn
         || analysis.attachment_processing_required
         || analysis.should_interrupt_active_run
         || route_result.needs_clarify
