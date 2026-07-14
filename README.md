@@ -617,6 +617,124 @@ flowchart TD
     O --> F
 ```
 
+Permission and policy decision flow:
+
+```mermaid
+flowchart TD
+    A[Planner/runtime step<br/>call_capability / call_tool / call_skill] --> B[CapabilityResolver]
+    B --> C[Registry metadata<br/>risk + effect + required args + idempotency + dedup]
+    C --> D[PlanVerifier]
+    D --> E[PermissionDecision<br/>allowed / needs_confirmation / denied / dry_run_required]
+    E -->|allowed| F[Pre-tool hooks]
+    E -->|needs_confirmation| G[needs_user / confirmation UI<br/>machine prompt key + refs]
+    E -->|denied| H[Structured blocker<br/>policy token + evidence refs]
+    E -->|dry_run_required| I[Dry-run execution path]
+    F --> J[Adapter preflight<br/>contract args + command_policy]
+    I --> J
+    J -->|ok| K[Executor / skill dispatcher]
+    J -->|blocked| L[RepairEnvelope or checkpoint<br/>machine issue codes]
+    K --> M[Observation + policy evidence]
+    L --> N[Task journal event]
+    M --> N
+    N --> O[UI / CLI permission panes<br/>raw JSON secondary detail]
+```
+
+Skill registry and runner protocol flow:
+
+```mermaid
+flowchart TD
+    A{Task source} -->|ask planner| B[call_capability / call_skill]
+    A -->|run_skill API| C[explicit payload.skill_name]
+    B --> D[CapabilityResolver<br/>planner_capabilities]
+    C --> E[Canonical skill name<br/>registry aliases only machine tokens]
+    D --> E
+    E --> F[Skill registry<br/>enabled + kind + runner_name + prompt_file]
+    F --> G{Skill kind}
+    G -->|builtin| H[In-process skill adapter]
+    G -->|external| I[External skill adapter]
+    G -->|runner| J[skill-runner subprocess]
+    J --> K[Concrete skill binary<br/>one-line JSON stdin/stdout]
+    H --> L[Skill response JSON]
+    I --> L
+    K --> L
+    L --> M[Parse status + extra machine fields]
+    M --> N[Observation<br/>status_code / message_key / artifacts / evidence]
+    N --> O[Verifier/finalizer uses machine fields<br/>not text parsing]
+```
+
+Long-tail media and async job flow:
+
+```mermaid
+flowchart TD
+    A[Planner action<br/>image/audio/video/music capability] --> B[CapabilityResolver]
+    B --> C[Registry async contract<br/>start + poll + cancel + timeout]
+    C --> D[PlanVerifier<br/>risk + dry-run + required args]
+    D --> E{Allowed start?}
+    E -->|no| F[Structured blocker<br/>permission_decision]
+    E -->|yes| G[Provider adapter start]
+    G --> H{Immediate result?}
+    H -->|complete| I[Artifact refs + final observation]
+    H -->|pending| J[pending_async_job<br/>job_id + poll_ref + next_check_after]
+    J --> K[task_checkpoint<br/>checkpoint_id + resume_entrypoint=poll_async_job]
+    K --> L[Visible accepted machine reply<br/>task_id + can_poll + can_cancel]
+    L --> M[Worker recovery or user poll]
+    M --> N[Poll adapter]
+    N -->|still running| J
+    N -->|complete| I
+    N -->|failed/provider wait| O[RepairEnvelope / background wait]
+    L --> P[Cancel capability]
+    P --> Q[Cancel adapter + terminal projection]
+```
+
+Coding edit, verify, and repair flow:
+
+```mermaid
+flowchart TD
+    A[Coding request or goal] --> B[Planner loop]
+    B --> C[Planned change contract]
+    C --> D[Edit tool / file operation]
+    D --> E[Changed-file refs + side-effect fingerprints]
+    E --> F[Diff summary<br/>file path + change kind + bounded hunks]
+    F --> G[Verification command contract]
+    G --> H{Verification observed?}
+    H -->|pass| I[verified evidence refs]
+    H -->|fail| J[repair_signal<br/>failure kind + command + attempt ledger]
+    H -->|missing| K[validation_gate<br/>cannot report fully verified]
+    J --> L[Repair round in agent loop]
+    K --> L
+    L --> M{Repair budget / blocker}
+    M -->|retry| B
+    M -->|provider/tool wait| N[checkpoint + resume state]
+    M -->|terminal| O[structured failure evidence]
+    I --> P[Coding workflow event<br/>verification_status=passed]
+    N --> P
+    O --> P
+    P --> Q[clawcli report/review + UI teaching timeline]
+```
+
+Memory write and recall policy flow:
+
+```mermaid
+flowchart TD
+    A[Completed ask task] --> B[Optional memory intent extractor]
+    B --> C[memory_actions schema<br/>upsert / delete / expire / noop]
+    C --> D[Runtime validation<br/>scope + confidence + safety + source refs]
+    D --> E[(memories)]
+    D --> F[(user_preferences)]
+    D --> G[(memory_facts)]
+    E --> H[(memory_retrieval_index)]
+    F --> H
+    G --> H
+    I[New task context builder] --> J[Memory use policy<br/>route / planner / chat / skill]
+    H --> K[Hybrid retrieval<br/>lexical + vector-compatible + salience + recency]
+    K --> J
+    J --> L[Filtered context refs<br/>preferences + facts + knowledge docs]
+    L --> M[Prompt machine context]
+    L --> N[memory_trace<br/>stage + policy + refs + budget]
+    M --> O[Planner/chat/skill]
+    N --> P[Teaching mode + debug task trace]
+```
+
 ## Main Components
 
 - `crates/clawd`: core runtime, HTTP API, routing, memory, scheduling, auth, task queue
