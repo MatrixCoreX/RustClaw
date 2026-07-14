@@ -198,6 +198,12 @@ safe aggregate.
   real local file edits and verification commands. It is included in the static
   compact coverage gate so coding-agent regressions are not treated as optional
   after CLI or loop changes.
+- Chinese-provider adapter smoke: `scripts/nl_tests/cases/nl_cases_chinese_model_adapter_20260715.txt`
+  covers MiniMax, MiMo, Qwen, and DeepSeek adapter boundaries, including
+  OpenAI-compatible provider config, vendor patches, strict JSON behavior,
+  large-context metadata, and MiniMax multimodal-understanding versus media
+  generation-skill separation. It is metadata-gated by the compact coverage
+  check and does not require live provider generation.
 - Task execution async lifecycle: `scripts/nl_tests/cases/nl_cases_task_execution_async_lifecycle_20260626.txt`
   covers representative async start, local-process poll, cancel contract,
   timeout expiry, terminal projection, and media async dry-run handoff without
@@ -238,6 +244,11 @@ bash scripts/nl_tests/run_client_like_continuous_suite.sh \
 bash scripts/nl_tests/run_client_like_continuous_suite.sh \
   --skip-smoke \
   --case-file scripts/nl_tests/cases/nl_cases_codex_cli_continuous_dev_20260711.txt \
+  --prompt-reply-only --quality-guard
+
+bash scripts/nl_tests/run_client_like_continuous_suite.sh \
+  --skip-smoke \
+  --case-file scripts/nl_tests/cases/nl_cases_chinese_model_adapter_20260715.txt \
   --prompt-reply-only --quality-guard
 
 bash scripts/nl_tests/run_client_like_continuous_suite.sh \

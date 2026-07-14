@@ -1,0 +1,17 @@
+# Chinese-provider adapter NL cases.
+# Created: 2026-07-15
+#
+# Purpose:
+# - Keep Chinese-market model support visible in the compact gate.
+# - Cover MiniMax / MiMo / Qwen / DeepSeek OpenAI-compatible behavior,
+#   vendor patches, strict JSON output, large-context metadata, and multimodal
+#   understanding boundaries without requiring live media generation.
+#
+# Format:
+#   suite|name|tags|prompt|expect=<substring>
+
+chinese_model_adapter|minimax_m3_config_boundary_zh|covers:chinese_provider,minimax,openai_compatible,large_context,multimodal_understanding,config_basic,read_files,no_hardmatch,no_hard_reply;requires_tool_call=true|读取 configs/config.toml 里 MiniMax 文本模型配置，说明 selected model、base_url、context_window_tokens，以及 M3 的图片/视频理解和图片/音频/视频/音乐生成 skill 的边界。最后只输出 JSON，字段包含 provider、model、context_window_tokens、understanding_inputs、generation_boundary。|expect=contains:MiniMax;contains:context_window_tokens
+chinese_model_adapter|mimo_vendor_patch_contract_zh|covers:chinese_provider,mimo,openai_compatible,vendor_patch,strict_json,no_hardmatch,no_hard_reply,read_files;requires_tool_call=true|读取 prompts/layers/vendor_patches/mimo 下面的 common patch 摘要，确认 MiMo 路由、执行、恢复、文本回复都要求严格结构化输出且不输出隐藏推理。最后只输出 JSON，字段包含 provider、patch_paths、strict_json_rules、hidden_reasoning_policy。|expect=contains:mimo;contains:strict_json_rules
+chinese_model_adapter|qwen_deepseek_fallback_config_zh|covers:chinese_provider,qwen,deepseek,openai_compatible,config_basic,read_files,no_hardmatch,no_hard_reply;requires_tool_call=true|查看 configs/config.toml 中 Qwen 和 DeepSeek 的 provider 配置，返回每个 provider 的 base_url、默认模型、可选模型数量，以及它们是否走 OpenAI-compatible 接口。最后只输出 JSON，字段包含 providers、base_url、default_model、model_count、api_style。|expect=contains:qwen;contains:deepseek
+chinese_model_adapter|mixed_language_strict_contract_en_zh|covers:chinese_provider,multilingual,strict_json,vendor_patch,no_hardmatch,no_hard_reply|Use Chinese for the visible answer, but keep JSON keys in English. Summarize why Chinese-provider adaptation should stay in vendor patches, schemas, registry metadata, and model config instead of runtime natural-language phrase matching. Return only JSON with keys policy, runtime_boundary, provider_patch_boundary, test_gate.|expect=contains:runtime_boundary;contains:provider_patch_boundary
+chinese_model_adapter|minimax_media_dry_run_boundary_zh|covers:chinese_provider,minimax,media,dry_run,multimodal_understanding,image_generate,audio_synthesize,video_generate,music_generate,no_hardmatch,no_hard_reply|用 dry-run 思路说明：MiniMax M3 负责文本/图像/视频理解时，文生图、语音合成、视频生成、音乐生成应通过对应 media skill 的 async start/poll/cancel 合同，而不是把 M3 当作生成模型直接调用。最后只输出 JSON，字段包含 text_model_boundary、media_skills、async_contract、dry_run_only。|expect=contains:async_contract;contains:dry_run_only
