@@ -42,6 +42,7 @@ pub(super) fn coding_workflow_summary_json(journal: &TaskJournal) -> Value {
         "completed_side_effect_refs": bounded_set_values(&signals.completed_side_effect_refs),
         "remaining_risks": remaining_risks(&signals, verification_status),
         "done_condition_coverage": done_condition_coverage(&signals, verification_status),
+        "validation_gate": validation_gate_json(&signals, verification_status),
     })
 }
 
@@ -164,6 +165,39 @@ fn done_condition_coverage(signals: &CodingWorkflowSignals, verification_status:
             "status": if signals.repair_step_refs.is_empty() { "not_observed" } else { "observed" },
         },
     ])
+}
+
+fn validation_gate_json(signals: &CodingWorkflowSignals, verification_status: &str) -> Value {
+    let has_changes = !signals.changed_files.is_empty();
+    let can_report_fully_verified =
+        verification_status != "failed" && (!has_changes || verification_status == "verified");
+    let gate_status = if verification_status == "failed" {
+        "repair_required"
+    } else if has_changes && verification_status != "verified" {
+        "verification_required"
+    } else {
+        "satisfied"
+    };
+    let repair_signal = if verification_status == "failed" {
+        json!({
+            "signal_kind": "verification_failed",
+            "next_step": "repair_failed_verification",
+            "failure_kind_count": signals.failure_kinds.len(),
+            "failure_kinds": bounded_set_values(&signals.failure_kinds),
+        })
+    } else {
+        Value::Null
+    };
+    json!({
+        "schema_version": 1,
+        "gate_status": gate_status,
+        "can_report_fully_verified": can_report_fully_verified,
+        "requires_verification": has_changes && verification_status != "verified",
+        "requires_repair": verification_status == "failed",
+        "checkpoint_recommended": !can_report_fully_verified
+            && (!signals.checkpoint_refs.is_empty() || !signals.completed_side_effect_refs.is_empty()),
+        "repair_signal": repair_signal,
+    })
 }
 
 fn collect_step_ref(map: &Map<String, Value>, refs: &mut BTreeSet<String>) {

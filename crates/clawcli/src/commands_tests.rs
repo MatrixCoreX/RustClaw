@@ -297,7 +297,16 @@ fn task_report_json_prefers_journal_coding_workflow_contract() {
                             "done_condition_coverage": [
                                 {"condition": "changes", "status": "observed"},
                                 {"condition": "verification", "status": "verified"}
-                            ]
+                            ],
+                            "validation_gate": {
+                                "schema_version": 1,
+                                "gate_status": "satisfied",
+                                "can_report_fully_verified": true,
+                                "requires_verification": false,
+                                "requires_repair": false,
+                                "checkpoint_recommended": false,
+                                "repair_signal": null
+                            }
                         }
                     }
                 },
@@ -331,6 +340,15 @@ fn task_report_json_prefers_journal_coding_workflow_contract() {
         "cargo test -p clawd"
     );
     assert_eq!(report["coding"]["state"]["verification_status"], "verified");
+    assert_eq!(report["coding"]["state"]["can_report_fully_verified"], true);
+    assert_eq!(
+        report["coding"]["validation_gate"]["gate_status"],
+        "satisfied"
+    );
+    assert_eq!(
+        report["coding"]["validation_gate"]["can_report_fully_verified"],
+        true
+    );
     assert_eq!(report["coding"]["state"]["checkpoint_ref_count"], 1);
     assert_eq!(report["coding"]["diff_summary_count"], 1);
     assert_eq!(
@@ -1139,6 +1157,15 @@ fn task_report_json_summarizes_coding_verification_gaps() {
     assert_eq!(report["coding"]["state"]["has_changes"], true);
     assert_eq!(report["coding"]["state"]["has_verification"], true);
     assert_eq!(report["coding"]["state"]["has_failed_verification"], true);
+    assert_eq!(report["coding"]["state"]["verification_status"], "failed");
+    assert_eq!(
+        report["coding"]["validation_gate"]["gate_status"],
+        "repair_required"
+    );
+    assert_eq!(
+        report["coding"]["validation_gate"]["can_report_fully_verified"],
+        false
+    );
     assert_eq!(report["coding"]["state"]["repair_observed"], true);
     assert_eq!(report["coding"]["state"]["checkpointed"], true);
     assert_eq!(report["coding"]["state"]["resumable"], true);
