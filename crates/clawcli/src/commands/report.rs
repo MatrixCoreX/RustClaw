@@ -962,6 +962,10 @@ fn coding_report_json_from_workflow(data: &Value, scanned: &Value) -> Option<Val
     Some(json!({
         "schema_version": 1,
         "source": "task_journal_coding_workflow",
+        "planned_change_count": report_u64(&workflow_value, "/planned_change_count"),
+        "planned_changes": report_value_or_empty_array(&workflow_value, "/planned_changes"),
+        "diff_ref_count": report_u64(&workflow_value, "/diff_ref_count"),
+        "diff_refs": report_value_or_empty_array(&workflow_value, "/diff_refs"),
         "changed_file_count": changed_file_count,
         "changed_files": report_value_or_empty_array(&workflow_value, "/changed_files"),
         "command_count": report_u64(scanned, "/command_count"),

@@ -45,7 +45,9 @@ fn step_result_records_coding_edit_transition_observation() {
                 "extra": {
                     "action": "write_text",
                     "path": "src/lib.rs",
-                    "resolved_path": "/workspace/src/lib.rs"
+                    "resolved_path": "/workspace/src/lib.rs",
+                    "planned_change": "add library entrypoint",
+                    "diff_ref": "diff:src/lib.rs:step_1"
                 }
             })
             .to_string(),
@@ -58,11 +60,15 @@ fn step_result_records_coding_edit_transition_observation() {
     assert_eq!(transition["next_phase_hint"], "verify");
     assert_eq!(transition["status"], "ok");
     assert_eq!(transition["action"], "write_text");
+    assert_eq!(transition["planned_changes"][0], "add library entrypoint");
+    assert_eq!(transition["diff_refs"][0], "diff:src/lib.rs:step_1");
     assert_eq!(transition["changed_files"][0], "src/lib.rs");
 
     let checkpoint = observation(&journal, "coding_checkpoint");
     assert_eq!(checkpoint["checkpoint_kind"], "file_edit_group");
     assert_eq!(checkpoint["verification_status"], "unverified");
+    assert_eq!(checkpoint["planned_changes"][0], "add library entrypoint");
+    assert_eq!(checkpoint["diff_refs"][0], "diff:src/lib.rs:step_1");
     assert_eq!(checkpoint["changed_files"][0], "src/lib.rs");
 }
 

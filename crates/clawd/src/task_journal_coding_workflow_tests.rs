@@ -32,7 +32,9 @@ fn summary_json_includes_coding_workflow_verified_contract() {
                 "extra": {
                     "action": "write_text",
                     "path": "src/lib.rs",
-                    "resolved_path": "/workspace/src/lib.rs"
+                    "resolved_path": "/workspace/src/lib.rs",
+                    "planned_change": "add library entrypoint",
+                    "diff_ref": "diff:src/lib.rs:step_1"
                 }
             })
             .to_string(),
@@ -57,6 +59,10 @@ fn summary_json_includes_coding_workflow_verified_contract() {
     let summary = journal.to_summary_json();
     let workflow = summary.get("coding_workflow").expect("coding workflow");
 
+    assert_eq!(workflow["planned_change_count"], 1);
+    assert_eq!(workflow["planned_changes"][0], "add library entrypoint");
+    assert_eq!(workflow["diff_ref_count"], 1);
+    assert_eq!(workflow["diff_refs"][0], "diff:src/lib.rs:step_1");
     assert_eq!(workflow["changed_file_count"], 1);
     assert_eq!(workflow["changed_files"][0], "src/lib.rs");
     assert_eq!(workflow["verification_command_count"], 1);
