@@ -975,9 +975,51 @@ fn workspace_fs_basic_mutation_does_not_emit_route_ceiling_or_confirmation_noise
     assert_eq!(
         result
             .permission_decision
+            .pointer("/steps/0/sandbox_profile")
+            .and_then(serde_json::Value::as_str),
+        Some("local_current_workspace")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/sandbox/source")
+            .and_then(serde_json::Value::as_str),
+        Some("registry_capability_policy")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/workspace_scope/scope")
+            .and_then(serde_json::Value::as_str),
+        Some("workspace_scoped")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/workspace_scope/untrusted_path_present")
+            .and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        result
+            .permission_decision
             .pointer("/steps/1/decision")
             .and_then(serde_json::Value::as_str),
         Some("allow")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/1/workspace_scope/path_arg_count")
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/1/sandbox/filesystem_write")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
     );
 }
 

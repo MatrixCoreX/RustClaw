@@ -481,6 +481,11 @@ fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
                             "capability": mapping.name,
                             "effect": mapping.effect.map(|effect| effect.as_token()),
                             "risk_level": mapping.risk_level.map(risk_level_token),
+                            "isolation_profile": mapping.isolation_profile.map(|profile| profile.as_token()),
+                            "network_access": mapping.network_access,
+                            "filesystem_write": mapping.filesystem_write,
+                            "external_publish": mapping.external_publish,
+                            "credential_access": mapping.credential_access,
                             "once_per_task": mapping.once_per_task,
                             "dedup_scope": mapping.dedup_scope.map(|scope| scope.as_token()),
                             "idempotent": mapping.idempotent,
@@ -493,6 +498,7 @@ fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
     } else {
         crate::policy_decision::PolicyDecision::Allow
     };
+    let sandbox_profile = verifier_sandbox_profile_token(registry_policy.as_ref(), effect);
 
     json!({
         "step_id": step.step_id,
@@ -508,6 +514,17 @@ fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
         },
         "risk_level": risk_level_token(risk_level),
         "requires_confirmation": requires_confirmation,
+        "sandbox_profile": sandbox_profile.clone(),
+        "sandbox": verifier_sandbox_summary(registry_policy.as_ref(), &sandbox_profile, effect),
+        "workspace_scope": verifier_workspace_scope_summary(
+            &step.args,
+            &state.skill_rt.workspace_root,
+            crate::execution_recipe::action_targets_external_workspace(
+                state,
+                &normalized_skill,
+                &step.args
+            )
+        ),
         "registry_policy": registry_policy,
     })
 }
@@ -933,6 +950,87 @@ fn path_value_is_workspace_scoped(path: &str, workspace_root: &Path) -> bool {
         .canonicalize()
         .unwrap_or_else(|_| candidate.to_path_buf());
     target.starts_with(root)
+}
+
+fn verifier_workspace_scope_summary(
+    args: &Value,
+    workspace_root: &Path,
+    external_workspace: bool,
+) -> Value {
+    let paths = path_args(args);
+    let untrusted_path_present = paths
+        .iter()
+        .any(|path| !path_value_is_workspace_scoped(path, workspace_root));
+    let scope = if untrusted_path_present || external_workspace {
+        "external_or_untrusted"
+    } else if paths.is_empty() {
+        "unspecified"
+    } else {
+        "workspace_scoped"
+    };
+    json!({
+        "schema_version": 1,
+        "scope": scope,
+        "path_arg_count": paths.len(),
+        "cwd_present": args
+            .get("cwd")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty()),
+        "untrusted_path_present": untrusted_path_present,
+        "external_workspace": external_workspace,
+    })
+}
+
+fn verifier_sandbox_profile_token(
+    registry_policy: Option<&Value>,
+    effect: crate::execution_recipe::ActionEffect,
+) -> String {
+    registry_policy
+        .and_then(|policy| policy.get("isolation_profile"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| {
+            if effect.mutates {
+                "local_current_workspace".to_string()
+            } else {
+                "read_only_or_validation".to_string()
+            }
+        })
+}
+
+fn verifier_sandbox_summary(
+    registry_policy: Option<&Value>,
+    sandbox_profile: &str,
+    effect: crate::execution_recipe::ActionEffect,
+) -> Value {
+    json!({
+        "schema_version": 1,
+        "profile": sandbox_profile,
+        "source": if registry_policy
+            .and_then(|policy| policy.get("isolation_profile"))
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            "registry_capability_policy"
+        } else {
+            "effect_default"
+        },
+        "filesystem_write": registry_policy
+            .and_then(|policy| policy.get("filesystem_write"))
+            .and_then(Value::as_bool)
+            .unwrap_or(effect.mutates),
+        "network_access": registry_policy
+            .and_then(|policy| policy.get("network_access"))
+            .and_then(Value::as_bool),
+        "external_publish": registry_policy
+            .and_then(|policy| policy.get("external_publish"))
+            .and_then(Value::as_bool),
+        "credential_access": registry_policy
+            .and_then(|policy| policy.get("credential_access"))
+            .and_then(Value::as_bool),
+    })
 }
 
 fn args_have_untrusted_path_value(args: &Value, workspace_root: &Path) -> bool {
