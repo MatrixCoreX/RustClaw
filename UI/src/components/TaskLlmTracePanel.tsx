@@ -1,12 +1,19 @@
 import { Database, Loader2, RefreshCw, Workflow } from "lucide-react";
 
 import {
+  taskLlmDebugCallEntry,
+  taskLlmDebugCallMetaTokens,
+  taskLlmDebugRawFields,
+  taskLlmDebugRequestData,
+  taskLlmDebugResponseData,
+} from "../lib/task-llm-debug-display";
+import {
   agentFlowTimelineRows,
   flowStageMachineTokens,
   flowSummaryMachineTokens,
   type AgentFlowTimelineRow,
 } from "../lib/task-llm-trace";
-import type { TaskLlmDebugCall, TaskLlmDebugEntry, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
+import type { TaskLlmDebugCall, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
 
 type Translate = (zh: string, en: string) => string;
 type TranslateSlash = (text: string) => string;
@@ -43,50 +50,6 @@ function formatJsonish(value: unknown): string {
   } catch {
     return String(value);
   }
-}
-
-function debugCallEntry(call: TaskLlmDebugCall): TaskLlmDebugEntry {
-  return call.entry ?? call;
-}
-
-function usageMeta(call: TaskLlmDebugCall): string[] {
-  const usage = debugCallEntry(call).usage;
-  if (!usage) return [];
-  const promptTokens = usage.prompt_tokens ?? usage.input_tokens;
-  const completionTokens = usage.completion_tokens ?? usage.output_tokens;
-  return [
-    promptTokens != null ? `prompt=${promptTokens}` : null,
-    completionTokens != null ? `completion=${completionTokens}` : null,
-    usage.reasoning_tokens != null ? `reasoning=${usage.reasoning_tokens}` : null,
-    usage.cached_tokens != null ? `cached=${usage.cached_tokens}` : null,
-    usage.total_tokens != null ? `total=${usage.total_tokens}` : null,
-  ].filter((item): item is string => Boolean(item));
-}
-
-function callMeta(call: TaskLlmDebugCall): string[] {
-  const entry = debugCallEntry(call);
-  return [
-    compactMetaValue(entry.status) ? `status=${entry.status}` : null,
-    compactMetaValue(entry.model) ? `model=${entry.model}` : null,
-    compactMetaValue(entry.provider) ? `provider=${entry.provider}` : null,
-    compactMetaValue(entry.vendor) ? `vendor=${entry.vendor}` : null,
-    compactMetaValue(entry.prompt_source ?? entry.prompt_file) ? `stage=${entry.prompt_source ?? entry.prompt_file}` : null,
-    compactMetaValue(entry.call_id) ? `call_id=${entry.call_id}` : null,
-    compactMetaValue(entry.ts) ? `ts=${entry.ts}` : null,
-    ...usageMeta(call),
-  ].filter((item): item is string => Boolean(item));
-}
-
-function rawFields(call: TaskLlmDebugCall): string {
-  const entry = debugCallEntry(call);
-  const entryKeys = Object.keys(entry)
-    .filter((key) => entry[key as keyof TaskLlmDebugEntry] != null)
-    .sort()
-    .map((key) => (call.entry ? `entry.${key}` : key));
-  const callKeys = Object.keys(call)
-    .filter((key) => key !== "entry" && call[key as keyof TaskLlmDebugCall] != null)
-    .sort();
-  return [...new Set([...callKeys, ...entryKeys])].join(", ");
 }
 
 function flowMeta(call: TaskLlmDebugCall): string[] {
@@ -324,7 +287,7 @@ export function TaskLlmTracePanel({
           {calls.length > 0 ? (
             <div className="space-y-3">
               {calls.map((call, index) => {
-                const entry = debugCallEntry(call);
+                const entry = taskLlmDebugCallEntry(call);
                 const callIndex = call.call_index ?? index + 1;
                 return (
                   <details
@@ -350,7 +313,7 @@ export function TaskLlmTracePanel({
                             {item}
                           </span>
                         ))}
-                        {callMeta(call).slice(0, 8).map((item) => (
+                        {taskLlmDebugCallMetaTokens(call).slice(0, 8).map((item) => (
                           <span key={item} className="rounded-md border border-white/10 bg-white/5 px-2 py-1 font-mono text-[11px] text-white/60">
                             {item}
                           </span>
@@ -380,7 +343,7 @@ export function TaskLlmTracePanel({
                           {t("发送给大模型的数据", "Request sent to model")}
                         </p>
                         <pre className="max-h-80 overflow-auto rounded-md bg-black/40 p-3 text-[11px] leading-relaxed text-white/75">
-                          {formatJsonish(entry.request_payload ?? entry.prompt)}
+                          {formatJsonish(taskLlmDebugRequestData(call))}
                         </pre>
                       </div>
                       <div>
@@ -388,14 +351,14 @@ export function TaskLlmTracePanel({
                           {t("大模型返回的数据", "Model response data")}
                         </p>
                         <pre className="max-h-80 overflow-auto rounded-md bg-black/40 p-3 text-[11px] leading-relaxed text-white/75">
-                          {formatJsonish(entry.raw_response ?? entry.clean_response ?? entry.response ?? entry.error)}
+                          {formatJsonish(taskLlmDebugResponseData(call))}
                         </pre>
                       </div>
                     </div>
 
                     <details className="mt-3">
                       <summary className="cursor-pointer text-[11px] text-white/45">
-                        {t("原始字段", "Raw fields")} · {rawFields(call)}
+                        {t("原始字段", "Raw fields")} · {taskLlmDebugRawFields(call)}
                       </summary>
                       <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-black/40 p-3 text-[11px] leading-relaxed text-white/70">
                         {formatJsonish(call)}

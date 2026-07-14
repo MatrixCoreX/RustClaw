@@ -162,6 +162,7 @@ export function useChatRuntime({
   const chatRecordingValueRef = useRef(false);
   const chatTeachingModeValueRef = useRef(false);
   const activeChatThreadRef = useRef(activeChatThread);
+  const teachingTraceAutoLoadKeysRef = useRef<Set<string>>(new Set());
   const voiceSendOnStopRef = useRef(false);
   const voiceStopRequestedRef = useRef(false);
 
@@ -338,6 +339,38 @@ export function useChatRuntime({
       setChatTeachingLlmDebugLoading(false);
     }
   };
+
+  useEffect(() => {
+    const targetTaskId = (
+      activeTeachingRun?.taskId ??
+      activeTeachingRun?.taskResult?.task_id ??
+      ""
+    ).trim();
+    if (
+      !chatTeachingMode ||
+      !targetTaskId ||
+      activeTeachingRun?.llmDebug ||
+      activeTeachingRun?.llmDebugError ||
+      chatTeachingLlmDebugLoading
+    ) {
+      return;
+    }
+    const autoLoadKey = `${activeChatThread.id}:${targetTaskId}`;
+    if (teachingTraceAutoLoadKeysRef.current.has(autoLoadKey)) {
+      return;
+    }
+    teachingTraceAutoLoadKeysRef.current.add(autoLoadKey);
+    void queryChatTeachingLlmDebug(targetTaskId);
+  }, [
+    activeChatThread.id,
+    activeTeachingRun?.id,
+    activeTeachingRun?.taskId,
+    activeTeachingRun?.taskResult?.task_id,
+    activeTeachingRun?.llmDebug,
+    activeTeachingRun?.llmDebugError,
+    chatTeachingMode,
+    chatTeachingLlmDebugLoading,
+  ]);
 
   const handleChatAttachmentSelection = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
