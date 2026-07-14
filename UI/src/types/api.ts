@@ -79,6 +79,31 @@ export interface TaskLlmDebugFlow {
   trigger_kind?: string | null;
 }
 
+export interface TaskLlmDebugFlowStageSummary {
+  flow_stage: string;
+  call_count: number;
+  prompt_labels: string[];
+  flow_nodes: string[];
+  code_modules: string[];
+  code_entrypoints: string[];
+  trigger_counts: Record<string, number>;
+  status_counts: Record<string, number>;
+  provider_error_count: number;
+}
+
+export interface TaskLlmDebugFlowSummary {
+  call_count: number;
+  stage_count: number;
+  stages: TaskLlmDebugFlowStageSummary[];
+  modules: string[];
+  retry_count: number;
+  verifier_call_count: number;
+  finalizer_call_count: number;
+  provider_error_count: number;
+  status_counts: Record<string, number>;
+  trigger_counts: Record<string, number>;
+}
+
 export interface TaskLlmDebugCall {
   call_index?: number | null;
   flow?: TaskLlmDebugFlow | null;
@@ -108,6 +133,7 @@ export interface TaskLlmDebugCall {
 export interface TaskLlmDebugResponse {
   task_id: string;
   call_count?: number | null;
+  flow_summary?: TaskLlmDebugFlowSummary | null;
   calls?: TaskLlmDebugCall[] | null;
   entries?: TaskLlmDebugCall[] | null;
   memory_trace?: unknown | null;
