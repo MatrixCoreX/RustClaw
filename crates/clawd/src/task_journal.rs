@@ -8,6 +8,8 @@ use self::decision_envelope::agent_loop_round_plan_decision_envelope_json;
 
 #[path = "task_journal_coding_state.rs"]
 mod task_journal_coding_state;
+#[path = "task_journal_coding_workflow.rs"]
+mod task_journal_coding_workflow;
 #[path = "task_journal_event_stream.rs"]
 mod task_journal_event_stream;
 #[path = "task_journal_evidence_collect.rs"]
@@ -28,6 +30,7 @@ mod task_journal_validation_result;
 use task_journal_coding_state::{
     coding_milestone_checkpoint_observation, coding_state_transition_observation,
 };
+use task_journal_coding_workflow::coding_workflow_summary_json;
 use task_journal_event_stream::task_event_stream_json;
 use task_journal_evidence_collect::*;
 use task_journal_evidence_coverage::*;
@@ -1774,6 +1777,7 @@ impl TaskJournal {
             "task_lifecycle": self.task_lifecycle.clone(),
             "task_checkpoint": self.task_checkpoint.clone(),
             "task_goal": task_goal_summary_json(self),
+            "coding_workflow": coding_workflow_summary_json(self),
             "task_outcome": task_outcome_summary_json(self),
             "task_metrics": task_metrics_json(&self.task_metrics),
             "cost_budget": cost_budget_json(self),
@@ -1877,6 +1881,7 @@ impl TaskJournal {
             "task_lifecycle": self.task_lifecycle.clone(),
             "task_checkpoint": self.task_checkpoint.clone(),
             "task_goal": task_goal_summary_json(self),
+            "coding_workflow": coding_workflow_summary_json(self),
             "task_metrics": task_metrics_json(&self.task_metrics),
             "cost_budget": cost_budget_json(self),
             "validation_result": validation_result_json(self),
@@ -1927,6 +1932,10 @@ mod recent_artifacts_tests;
 #[cfg(test)]
 #[path = "task_journal_coding_state_tests.rs"]
 mod coding_state_tests;
+
+#[cfg(test)]
+#[path = "task_journal_coding_workflow_tests.rs"]
+mod coding_workflow_tests;
 
 #[cfg(test)]
 #[path = "task_journal_goal_tests.rs"]
