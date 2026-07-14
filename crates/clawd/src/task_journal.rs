@@ -1377,6 +1377,7 @@ pub(crate) struct TaskJournal {
     pub(crate) task_id: Option<String>,
     pub(crate) kind: Option<String>,
     pub(crate) input_text: String,
+    pub(crate) task_goal_spec: Option<Value>,
     pub(crate) context_bundle_summary: Option<String>,
     pub(crate) memory_trace: Option<Value>,
     pub(crate) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
@@ -1463,6 +1464,18 @@ impl TaskJournal {
         journal.task_id = Some(task_id.into());
         journal.kind = Some(kind.into());
         journal
+    }
+
+    pub(crate) fn record_task_goal_spec(&mut self, goal: Value) {
+        if goal.is_object() {
+            self.task_goal_spec = Some(goal);
+        }
+    }
+
+    pub(crate) fn record_task_goal_spec_from_payload_json(&mut self, payload_json: &str) {
+        if let Some(goal) = task_journal_goal::task_goal_spec_from_payload_json(payload_json) {
+            self.record_task_goal_spec(goal);
+        }
     }
 
     pub(crate) fn record_context_bundle_summary(&mut self, summary: impl Into<String>) {
