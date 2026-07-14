@@ -348,6 +348,47 @@ export function useTaskRuntime({
     }
   };
 
+  const controlTaskGoalById = async (
+    operation: "edit" | "clear",
+    controlTaskId: string,
+    goal?: Record<string, unknown>,
+  ) => {
+    const normalizedTaskId = controlTaskId.trim();
+    if (!normalizedTaskId) return;
+    setTaskControlSubmittingId(`goal-${operation}:${normalizedTaskId}`);
+    setTaskControlMessage(null);
+    setTaskControlError(null);
+    try {
+      const res = await apiFetch("/v1/tasks/goal-by-task-id", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          task_id: normalizedTaskId,
+          operation,
+          ...(operation === "edit" ? { goal: goal ?? {} } : {}),
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<{ status?: string; task_id?: string }>;
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `task goal control failed (${res.status})`);
+      }
+      setTaskControlMessage(
+        operation === "edit"
+          ? t("目标已更新。", "Goal updated.")
+          : t("目标已清除。", "Goal cleared."),
+      );
+      await fetchActiveTasks(true);
+      if (taskResult?.task_id === normalizedTaskId) {
+        void queryTaskById(normalizedTaskId, false);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setTaskControlError(message);
+    } finally {
+      setTaskControlSubmittingId(null);
+    }
+  };
+
   const submitInteractionTask = async () => {
     setInteractionLoading(true);
     setInteractionError(null);
@@ -502,6 +543,7 @@ export function useTaskRuntime({
     submitResumeForTask,
     cancelActiveTask,
     controlTaskById,
+    controlTaskGoalById,
     submitInteractionTask,
     markTaskSubmitted,
     recordTaskResult,

@@ -1,6 +1,13 @@
-import { Loader2, MessageCircle, RefreshCw } from "lucide-react";
+import { Loader2, MessageCircle, Pause, Play, RefreshCw, Save, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 
-import { buildTaskLifecycleView, buildTaskPollingView, type TaskLifecycleLang } from "../lib/task-lifecycle";
+import {
+  buildTaskLifecycleView,
+  buildTaskPollingView,
+  canPauseTaskControl,
+  canResumeTaskControl,
+  type TaskLifecycleLang,
+} from "../lib/task-lifecycle";
 import {
   buildReplaySummary,
   buildTaskGoalView,
@@ -32,11 +39,18 @@ export interface TaskResultPanelProps {
   taskLlmDebugError: string | null;
   resumeDrafts: Record<string, string>;
   resumeSubmittingTaskId: string | null;
+  taskControlSubmittingId: string | null;
   onTaskIdChange: (value: string) => void;
   onQueryTask: () => unknown | Promise<unknown>;
   onQueryTaskLlmDebug: (taskId?: string) => unknown | Promise<unknown>;
   onResumeDraftChange: (taskId: string, value: string) => void;
   onSubmitResume: (taskId: string) => unknown | Promise<unknown>;
+  onControlTask: (control: "pause" | "resume", taskId: string) => unknown | Promise<unknown>;
+  onControlTaskGoal: (
+    operation: "edit" | "clear",
+    taskId: string,
+    goal?: Record<string, unknown>,
+  ) => unknown | Promise<unknown>;
 }
 
 function toneClassName(tone: Tone): string {
@@ -59,11 +73,14 @@ export function TaskResultPanel({
   taskLlmDebugError,
   resumeDrafts,
   resumeSubmittingTaskId,
+  taskControlSubmittingId,
   onTaskIdChange,
   onQueryTask,
   onQueryTaskLlmDebug,
   onResumeDraftChange,
   onSubmitResume,
+  onControlTask,
+  onControlTaskGoal,
 }: TaskResultPanelProps) {
   const taskOutcome = taskResult ? buildTaskOutcome(taskResult, lang) : null;
   const taskGoalView = taskResult ? buildTaskGoalView(taskResult, lang) : null;
@@ -73,6 +90,28 @@ export function TaskResultPanel({
   const taskEvents = taskResult ? taskTraceEvents(taskResult) : [];
   const artifactRefs = taskResult ? taskArtifactRefs(taskResult) : [];
   const replaySummary = taskResult ? buildReplaySummary(taskResult) : null;
+  const [goalObjectiveDraft, setGoalObjectiveDraft] = useState("");
+  useEffect(() => {
+    setGoalObjectiveDraft(taskGoalView?.objective ?? "");
+  }, [taskGoalView?.objective, taskResult?.task_id]);
+  const canPauseGoalTask = taskResult
+    ? canPauseTaskControl(taskResult.lifecycle, taskResult.status)
+    : false;
+  const canResumeGoalTask = taskResult
+    ? canResumeTaskControl(taskResult.lifecycle, taskResult.status)
+    : false;
+  const goalPauseSubmitting = taskResult
+    ? taskControlSubmittingId === `pause:${taskResult.task_id}`
+    : false;
+  const goalResumeSubmitting = taskResult
+    ? taskControlSubmittingId === `resume:${taskResult.task_id}`
+    : false;
+  const goalEditSubmitting = taskResult
+    ? taskControlSubmittingId === `goal-edit:${taskResult.task_id}`
+    : false;
+  const goalClearSubmitting = taskResult
+    ? taskControlSubmittingId === `goal-clear:${taskResult.task_id}`
+    : false;
 
   return (
     <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
@@ -132,6 +171,56 @@ export function TaskResultPanel({
                     {item}
                   </span>
                 ))}
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
+                <input
+                  className="theme-input text-xs"
+                  value={goalObjectiveDraft}
+                  onChange={(event) => setGoalObjectiveDraft(event.target.value)}
+                  placeholder={t("目标说明", "Goal objective")}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void onControlTaskGoal("edit", taskResult.task_id, { objective: goalObjectiveDraft.trim() })}
+                    disabled={goalEditSubmitting || !goalObjectiveDraft.trim()}
+                    className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {goalEditSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                    {t("保存目标", "Save goal")}
+                  </button>
+                  {canPauseGoalTask ? (
+                    <button
+                      type="button"
+                      onClick={() => void onControlTask("pause", taskResult.task_id)}
+                      disabled={goalPauseSubmitting}
+                      className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {goalPauseSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />}
+                      {t("暂停", "Pause")}
+                    </button>
+                  ) : null}
+                  {canResumeGoalTask ? (
+                    <button
+                      type="button"
+                      onClick={() => void onControlTask("resume", taskResult.task_id)}
+                      disabled={goalResumeSubmitting}
+                      className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {goalResumeSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                      {t("恢复", "Resume")}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => void onControlTaskGoal("clear", taskResult.task_id)}
+                    disabled={goalClearSubmitting}
+                    className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {goalClearSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    {t("清除目标", "Clear goal")}
+                  </button>
+                </div>
               </div>
               {[
                 [t("完成条件", "Done conditions"), taskGoalView.doneConditions],
