@@ -172,6 +172,15 @@ test("builds model catalog trace machine tokens", () => {
         active_text_provider: true,
         input_modalities: ["text", "image", "video"],
         output_modalities: ["text"],
+        supports_text: true,
+        supports_image_input: true,
+        supports_video_input: true,
+        supports_audio_input: false,
+        supports_image_understanding: true,
+        supports_audio_transcription: false,
+        supports_video_generation: true,
+        async_required: true,
+        dry_run_supported: true,
       },
     ],
   });
@@ -184,6 +193,11 @@ test("builds model catalog trace machine tokens", () => {
   assert.ok(tokens.includes("entries.1.active_text_provider=true"));
   assert.ok(tokens.includes("entries.1.input_modalities=text,image,video"));
   assert.ok(tokens.includes("entries.1.output_modalities=text"));
+  assert.ok(tokens.includes("entries.1.supports_image_understanding=true"));
+  assert.ok(tokens.includes("entries.1.supports_audio_transcription=false"));
+  assert.ok(tokens.includes("entries.1.supports_video_generation=true"));
+  assert.ok(tokens.includes("entries.1.async_required=true"));
+  assert.ok(tokens.includes("entries.1.dry_run_supported=true"));
 });
 
 test("builds resume trace machine tokens", () => {

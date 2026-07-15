@@ -77,6 +77,8 @@ fn build_model_catalog_trace_for_debug(state: &AppState, entries: &[TaskDebugEnt
                 "supports_image_input": entry.supports_image_input,
                 "supports_video_input": entry.supports_video_input,
                 "supports_audio_input": entry.supports_audio_input,
+                "supports_image_understanding": entry.supports_image_understanding,
+                "supports_audio_transcription": entry.supports_audio_transcription,
                 "supports_image_generation": entry.supports_image_generation,
                 "supports_audio_generation": entry.supports_audio_generation,
                 "supports_video_generation": entry.supports_video_generation,
@@ -370,6 +372,8 @@ minimax_models = ["MiniMax-M3"]
         );
         assert_eq!(trace["entries"][0]["output_modalities"], json!(["text"]));
         assert_eq!(trace["entries"][0]["supports_image_input"], true);
+        assert_eq!(trace["entries"][0]["supports_image_understanding"], true);
+        assert_eq!(trace["entries"][0]["supports_audio_transcription"], false);
         assert_eq!(trace["entries"][0]["active_text_provider"], true);
         assert_eq!(trace["entries"][0]["credential_state"], "configured_inline");
         assert_eq!(trace["vendor_patch_names"][0], "minimax");
