@@ -70,6 +70,7 @@ SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_provider_scope_skip_reason": "provider_not_in_live_scope",
     "agent_parity_rollout_metrics_validator": "validate_rollout_metrics_artifact",
     "agent_parity_live_metrics_summary_flag": '"live_metrics"',
+    "agent_parity_live_metrics_strict_gate": 'live_metrics_enabled = gate_summary.get("live_metrics") == "1"',
     "agent_parity_bad_machine_field_finding": "agent_parity_gate_summary_bad_machine_field",
     "contract_report_content_validator": "validate_existing_contract_report",
     "contract_report_validate_cli_arg": "--validate-contract-report-content",
@@ -101,6 +102,11 @@ SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_content_check_count": '"content_check_count"',
 }
 
+SUITE_ARTIFACT_CONTRACT_FORBIDDEN_SNIPPETS = {
+    "agent_parity_live_metrics_missing_field_fallback": '"live_metrics" not in gate_summary',
+    "agent_parity_live_metrics_run_dir_count_fallback": 'safe_int(gate_summary.get("run_dir_count")) > 0',
+}
+
 
 def check_required_snippets(
     path: Path,
@@ -119,6 +125,23 @@ def check_required_snippets(
     return findings, len(snippets)
 
 
+def check_forbidden_snippets(
+    path: Path,
+    snippets: dict[str, str],
+    finding_prefix: str,
+) -> tuple[list[str], int]:
+    findings: list[str] = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"{finding_prefix}_read_failed:{exc.__class__.__name__}"], len(snippets)
+
+    for label, snippet in snippets.items():
+        if snippet in text:
+            findings.append(f"forbidden_snippet:{finding_prefix}:{label}")
+    return findings, len(snippets)
+
+
 def build_report() -> dict[str, Any]:
     findings: list[str] = []
     checked_count = 0
@@ -133,6 +156,13 @@ def build_report() -> dict[str, Any]:
         path_findings, path_checked_count = check_required_snippets(path, snippets, prefix)
         findings.extend(path_findings)
         checked_count += path_checked_count
+    forbidden_findings, forbidden_checked_count = check_forbidden_snippets(
+        SUITE_ARTIFACT_CONTRACT,
+        SUITE_ARTIFACT_CONTRACT_FORBIDDEN_SNIPPETS,
+        "suite_artifact_contract",
+    )
+    findings.extend(forbidden_findings)
+    checked_count += forbidden_checked_count
 
     return {
         "ok": not findings,
