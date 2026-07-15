@@ -476,12 +476,12 @@ run_mode_clarify_context_prompt() {
   echo "==== Paste this to Codex ===="
   if [[ -n "${latest_clarify}" && -n "${latest_context}" ]]; then
     printf "请分析这两次测试结果：\n"
-    printf "clarify_run_dir: %s\n" "$latest_clarify"
-    printf "clarify_run_log: %s/run.log\n" "$latest_clarify"
-    printf "clarify_summary_jsonl: %s/summary.jsonl\n" "$latest_clarify"
-    printf "context_run_dir: %s\n" "$latest_context"
-    printf "context_run_log: %s/run.log\n" "$latest_context"
-    printf "context_summary_jsonl: %s/summary.jsonl\n" "$latest_context"
+    printf "clarify_run_dir_ref: %s\n" "$(path_ref "$SCRIPT_DIR" "$latest_clarify")"
+    printf "clarify_run_log_ref: %s\n" "$(path_ref "$SCRIPT_DIR" "${latest_clarify}/run.log")"
+    printf "clarify_summary_jsonl_ref: %s\n" "$(path_ref "$SCRIPT_DIR" "${latest_clarify}/summary.jsonl")"
+    printf "context_run_dir_ref: %s\n" "$(path_ref "$SCRIPT_DIR" "$latest_context")"
+    printf "context_run_log_ref: %s\n" "$(path_ref "$SCRIPT_DIR" "${latest_context}/run.log")"
+    printf "context_summary_jsonl_ref: %s\n" "$(path_ref "$SCRIPT_DIR" "${latest_context}/summary.jsonl")"
   else
     echo "Unable to locate one or both latest run directories."
   fi
