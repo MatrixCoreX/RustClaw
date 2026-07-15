@@ -98,6 +98,31 @@ REQUIRED_CHINESE_CASE_TAGS = {
     "vendor_patch",
 }
 
+RUNTIME_CATALOG_ENTRY_FIELDS = {
+    "active_text_provider",
+    "api_style",
+    "async_required",
+    "base_url_kind",
+    "config_source",
+    "context_window_tokens",
+    "dry_run_supported",
+    "model",
+    "models",
+    "provider",
+    "schema_version",
+    "supports_audio_generation",
+    "supports_audio_input",
+    "supports_audio_transcription",
+    "supports_image_generation",
+    "supports_image_input",
+    "supports_image_understanding",
+    "supports_music_generation",
+    "supports_text",
+    "supports_video_generation",
+    "supports_video_input",
+    "timeout_seconds",
+}
+
 
 def load_toml(path: Path) -> dict[str, Any]:
     return tomllib.loads(path.read_text(encoding="utf-8"))
@@ -143,6 +168,8 @@ def catalog_entry(
     audio: dict[str, Any],
     video: dict[str, Any],
     music: dict[str, Any],
+    selected_provider: str,
+    selected_model: str,
 ) -> dict[str, Any]:
     image_edit = image.get("image_edit", {}) if isinstance(image.get("image_edit"), dict) else {}
     image_generation = (
@@ -198,6 +225,7 @@ def catalog_entry(
         "supports_music_generation": supports_music_generation,
         "async_required": media_support,
         "dry_run_supported": media_support,
+        "active_text_provider": provider == selected_provider and model == selected_model,
         "config_source": [
             "configs/config.toml",
             "configs/image.toml",
@@ -211,6 +239,8 @@ def catalog_entry(
 
 def build_catalog(main: dict[str, Any]) -> list[dict[str, Any]]:
     llm = main.get("llm") if isinstance(main.get("llm"), dict) else {}
+    selected_provider = str(llm.get("selected_vendor") or "") if isinstance(llm, dict) else ""
+    selected_model = str(llm.get("selected_model") or "") if isinstance(llm, dict) else ""
     image = load_toml(IMAGE_CONFIG)
     audio = load_toml(AUDIO_CONFIG)
     video = load_toml(VIDEO_CONFIG)
@@ -220,7 +250,18 @@ def build_catalog(main: dict[str, Any]) -> list[dict[str, Any]]:
         table = llm.get(provider) if isinstance(llm, dict) else None
         if not isinstance(table, dict):
             continue
-        catalog.append(catalog_entry(provider, table, image, audio, video, music))
+        catalog.append(
+            catalog_entry(
+                provider,
+                table,
+                image,
+                audio,
+                video,
+                music,
+                selected_provider,
+                selected_model,
+            )
+        )
     return catalog
 
 
@@ -423,6 +464,13 @@ def check_chinese_case_gate(findings: list[str]) -> None:
     require(not missing, findings, f"Chinese model adapter cases missing tags: {missing}")
 
 
+def check_runtime_catalog_shape(findings: list[str], catalog: list[dict[str, Any]]) -> None:
+    for entry in catalog:
+        provider = str(entry.get("provider") or "unknown")
+        missing = sorted(RUNTIME_CATALOG_ENTRY_FIELDS - set(entry))
+        require(not missing, findings, f"catalog entry {provider}: missing runtime fields {missing}")
+
+
 def build_report() -> dict[str, Any]:
     findings: list[str] = []
     main = load_toml(MAIN_CONFIG)
@@ -434,6 +482,7 @@ def build_report() -> dict[str, Any]:
     check_vendor_patches(findings)
     check_chinese_case_gate(findings)
     catalog = build_catalog(main)
+    check_runtime_catalog_shape(findings, catalog)
     return {
         "schema_version": 1,
         "status": "ok" if not findings else "error",
