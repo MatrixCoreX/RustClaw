@@ -77,8 +77,8 @@ fn quick_index_includes_planner_capability_metadata() {
         }
     }));
 
-    let text = quick_index_planner_capabilities(&manifest);
-    let output_contract = quick_index_output_contract(&manifest);
+    let text = skill_quick_index::planner_capabilities(&manifest);
+    let output_contract = skill_quick_index::output_contract(&manifest);
 
     assert!(text.contains("planner_capabilities: filesystem.list_entries"));
     assert!(text.contains("action=list_dir"));

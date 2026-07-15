@@ -392,10 +392,12 @@ fn registry_planner_metadata_hint(state: &AppState, skill: &str) -> Option<Strin
             manifest.validation_actions.join(", ")
         ));
     }
-    if let Some(capabilities) = super::quick_index_planner_capabilities_metadata(&manifest) {
+    if let Some(capabilities) = super::skill_quick_index::planner_capabilities_metadata(&manifest) {
         parts.push(capabilities);
     }
-    parts.push(super::quick_index_output_contract_metadata(&manifest));
+    parts.push(super::skill_quick_index::output_contract_metadata(
+        &manifest,
+    ));
     if let Some(retryable) = manifest.retryable {
         parts.push(format!("retryable: {retryable}"));
     }
