@@ -469,15 +469,22 @@ for raw in [part.strip() for part in expected.split(";") if part.strip()]:
             for field in raw[len("visible_json_fields:"):].split(",")
             if field.strip()
         ]
-        try:
-            visible_obj = json.loads(visible_joined)
-        except Exception:
-            visible_obj = None
-        part_ok = (
-            isinstance(visible_obj, dict)
-            and bool(wanted_fields)
-            and all(field in visible_obj for field in wanted_fields)
-        )
+        candidate_texts = [item for item in visible_items if item]
+        if visible_joined.strip():
+            candidate_texts.append(visible_joined.strip())
+        part_ok = False
+        for candidate_text in candidate_texts:
+            try:
+                visible_obj = json.loads(candidate_text)
+            except Exception:
+                continue
+            if (
+                isinstance(visible_obj, dict)
+                and bool(wanted_fields)
+                and all(field in visible_obj for field in wanted_fields)
+            ):
+                part_ok = True
+                break
     else:
         part_ok = normalize_text(raw) in normalize_text(joined)
     ok = ok and part_ok
