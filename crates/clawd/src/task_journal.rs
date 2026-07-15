@@ -248,14 +248,9 @@ fn step_output_excerpt_for_journal(output: &str) -> String {
 
 fn compact_structured_action_output_for_journal(output: &str) -> Option<String> {
     let value = serde_json::from_str::<Value>(output.trim()).ok()?;
-    let text_json = value
-        .get("text")
-        .and_then(Value::as_str)
-        .and_then(|text| serde_json::from_str::<Value>(text.trim()).ok());
     let source = value
         .get("extra")
         .filter(|extra| extra.is_object())
-        .or_else(|| text_json.as_ref())
         .unwrap_or(&value);
     let action = source.get("action").and_then(Value::as_str)?;
     if !matches!(
@@ -298,14 +293,9 @@ fn compact_structured_action_output_for_journal(output: &str) -> Option<String> 
 
 fn compact_structured_listing_output_for_journal(output: &str) -> Option<String> {
     let value = serde_json::from_str::<Value>(output.trim()).ok()?;
-    let text_json = value
-        .get("text")
-        .and_then(Value::as_str)
-        .and_then(|text| serde_json::from_str::<Value>(text.trim()).ok());
     let source = value
         .get("extra")
         .filter(|extra| extra.is_object())
-        .or_else(|| text_json.as_ref())
         .unwrap_or(&value);
     if !value_is_structured_listing_output(source) {
         return None;

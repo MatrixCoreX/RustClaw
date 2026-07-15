@@ -341,7 +341,13 @@ fn long_term_source_recall_skips_unfinished_goal_runtime_memory() {
         "local",
         None,
         MEMORY_ROLE_SYSTEM,
-        "Unfinished goal\nUser request: 帮我写一个 RustClaw 生产环境部署方案，包含启动、日志和回滚\nCurrent blocker: provider timeout",
+        &serde_json::json!({
+            "schema": "rustclaw.memory.unfinished_goal.v1",
+            "message_key": "memory.unfinished_goal",
+            "user_request": "帮我写一个 RustClaw 生产环境部署方案，包含启动、日志和回滚",
+            "blocker": "provider timeout",
+        })
+        .to_string(),
         2000,
         MemoryWriteKind::UnfinishedGoal,
     )
@@ -353,7 +359,7 @@ fn long_term_source_recall_skips_unfinished_goal_runtime_memory() {
     assert!(recalled[0].2.contains("部署方案"));
     assert!(!recalled
         .iter()
-        .any(|(_, _, content, _)| content.contains("Unfinished goal")));
+        .any(|(_, _, _, kind)| kind == crate::memory::MEMORY_TYPE_UNFINISHED_GOAL));
 }
 
 #[test]

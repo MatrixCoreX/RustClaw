@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde_json::{json, Value};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::{repo, AppState};
 
@@ -10,12 +10,18 @@ mod task_answer_verifier_failure;
 mod task_config_guard_recovery;
 #[path = "task_content_evidence_delivery.rs"]
 mod task_content_evidence_delivery;
+#[path = "task_delivery_guards.rs"]
+mod task_delivery_guards;
 #[path = "task_deterministic_recovery.rs"]
 mod task_deterministic_recovery;
 #[path = "task_failure_lifecycle.rs"]
 mod task_failure_lifecycle;
 #[path = "task_machine_kv_summary.rs"]
 mod task_machine_kv_summary;
+#[path = "task_memory.rs"]
+mod task_memory;
+#[path = "task_observed_failure_recovery.rs"]
+mod task_observed_failure_recovery;
 #[path = "task_payload_helpers.rs"]
 mod task_payload_helpers;
 #[path = "task_resume.rs"]
@@ -42,9 +48,14 @@ use task_answer_verifier_failure::{
     machine_payload_observed_facts,
 };
 use task_config_guard_recovery::deterministic_config_guard_candidates_recovery;
-use task_content_evidence_delivery::{
-    backfill_file_delivery_contract_from_journal, has_any_delivery_file_token,
-    route_has_file_delivery_contract,
+use task_content_evidence_delivery::backfill_file_delivery_contract_from_journal;
+use task_delivery_guards::{
+    delivery_path_gap_should_finalize_as_clarify, drop_execution_summaries_when_delivery_is_scalar,
+    missing_file_delivery_reply_text, should_reinsert_execution_summaries_for_delivery,
+};
+#[cfg(test)]
+use task_delivery_guards::{
+    journal_has_missing_file_search_evidence, should_use_missing_file_delivery_reply,
 };
 use task_deterministic_recovery::{
     mark_answer_verifier_recovered_by_deterministic_observed_evidence,
@@ -55,10 +66,16 @@ use task_failure_lifecycle::failed_task_lifecycle_payload;
 #[cfg(test)]
 use task_machine_kv_summary::apply_requested_machine_kv_summary_to_final_answer;
 use task_machine_kv_summary::recover_requested_machine_kv_summary_final_answer;
+#[cfg(test)]
+use task_memory::assistant_memory_source_text;
+use task_memory::{insert_ask_memory_pair, insert_unfinished_goal_memory};
+use task_observed_failure_recovery::{
+    deterministic_content_tail_read_failure_recovery, deterministic_filtered_log_entry_recovery,
+    deterministic_raw_tail_read_failure_recovery,
+};
 use task_payload_helpers::{
     answer_verifier_forces_task_failure, answer_verifier_should_force_task_failure,
     ask_result_payload, non_failure_final_status, normalize_existing_file_delivery_token_answer,
-    should_skip_ask_memory_pair,
 };
 pub(crate) use task_resume::answer_verifier_retry_answer_has_required_machine_evidence;
 use task_resume::{
@@ -66,7 +83,6 @@ use task_resume::{
     resume_failure_execution_failed_step_answer, resume_failure_is_missing_file_delivery_result,
     resume_failure_is_structured_service_status_result,
     resume_failure_is_unbound_path_lookup_clarify_result, retry_answer_after_verifier,
-    text_looks_like_missing_file_target,
 };
 use task_runtime_failure_payload::ask_runtime_failure_machine_payload;
 use task_structured_evidence_table::deterministic_structured_evidence_table_recovery;
@@ -107,580 +123,6 @@ fn record_answer_verifier_required_evidence_rollout_attribution(
             journal.answer_verifier_summary.as_ref(),
         );
     journal.record_rollout_attribution(rollout_attribution);
-}
-
-fn answer_verifier_requests_filtered_entry(journal: &crate::task_journal::TaskJournal) -> bool {
-    journal
-        .answer_verifier_summary
-        .as_ref()
-        .filter(|summary| summary.high_confidence_retry_gap())
-        .is_some_and(|summary| {
-            summary
-                .missing_evidence_fields
-                .iter()
-                .any(|field| field.trim() == "filtered_entry")
-        })
-}
-
-fn answer_verifier_requests_content_excerpt(journal: &crate::task_journal::TaskJournal) -> bool {
-    journal
-        .answer_verifier_summary
-        .as_ref()
-        .filter(|summary| summary.high_confidence_retry_gap())
-        .is_some_and(|summary| {
-            summary
-                .missing_evidence_fields
-                .iter()
-                .any(|field| field.trim() == "content_excerpt")
-        })
-}
-
-fn log_path_from_read_range_value(value: &Value) -> Option<String> {
-    if value.get("action").and_then(Value::as_str) != Some("read_range") {
-        return None;
-    }
-    let path = value
-        .get("resolved_path")
-        .or_else(|| value.get("path"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|path| !path.is_empty())?;
-    std::path::Path::new(path)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("log"))
-        .then(|| path.to_string())
-}
-
-fn read_range_log_excerpt_from_output(output: &str) -> Option<String> {
-    let value = serde_json::from_str::<Value>(output.trim()).ok()?;
-    for candidate in [&value, value.get("extra").unwrap_or(&Value::Null)] {
-        if log_path_from_read_range_value(candidate).is_none() {
-            continue;
-        }
-        if let Some(excerpt) = candidate
-            .get("excerpt")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|excerpt| !excerpt.is_empty())
-        {
-            return Some(excerpt.to_string());
-        }
-    }
-    None
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct FilteredLogEntry {
-    severity_rank: u8,
-    level: &'static str,
-    line_no: Option<u64>,
-    text: String,
-}
-
-fn parse_log_alert_line(line: &str) -> Option<FilteredLogEntry> {
-    let line = line.trim();
-    if line.is_empty() {
-        return None;
-    }
-    let (line_no, text) = line
-        .split_once('|')
-        .and_then(|(prefix, rest)| {
-            prefix
-                .trim()
-                .parse::<u64>()
-                .ok()
-                .map(|line_no| (Some(line_no), rest.trim()))
-        })
-        .unwrap_or((None, line));
-    let level = text.split_whitespace().find_map(|token| {
-        match token.trim_matches(|ch: char| !ch.is_ascii_alphabetic()) {
-            "ERROR" => Some((2, "ERROR")),
-            "WARN" => Some((1, "WARN")),
-            _ => None,
-        }
-    })?;
-    Some(FilteredLogEntry {
-        severity_rank: level.0,
-        level: level.1,
-        line_no,
-        text: text.to_string(),
-    })
-}
-
-fn most_notable_log_alert_entry(excerpt: &str) -> Option<FilteredLogEntry> {
-    excerpt
-        .lines()
-        .filter_map(parse_log_alert_line)
-        .max_by(|left, right| {
-            left.severity_rank
-                .cmp(&right.severity_rank)
-                .then_with(|| left.line_no.unwrap_or(0).cmp(&right.line_no.unwrap_or(0)))
-        })
-}
-
-fn filtered_log_entry_answer(entry: &FilteredLogEntry) -> String {
-    let line = entry
-        .line_no
-        .map(|line_no| line_no.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-    format!(
-        "log.filtered_entry.level={}; log.filtered_entry.line={}; log.filtered_entry.text={}",
-        entry.level, line, entry.text
-    )
-}
-
-fn deterministic_filtered_log_entry_recovery(
-    journal: &crate::task_journal::TaskJournal,
-) -> Option<String> {
-    if !answer_verifier_requests_filtered_entry(journal) {
-        return None;
-    }
-    journal.step_results.iter().rev().find_map(|step| {
-        if step.status != crate::executor::StepExecutionStatus::Ok
-            || !matches!(step.skill.as_str(), "system_basic" | "fs_basic")
-        {
-            return None;
-        }
-        let excerpt = step
-            .output_excerpt
-            .as_deref()
-            .and_then(read_range_log_excerpt_from_output)?;
-        most_notable_log_alert_entry(&excerpt).map(|entry| filtered_log_entry_answer(&entry))
-    })
-}
-
-fn content_tail_read_route_allows_failure_recovery(route_result: &crate::RouteResult) -> bool {
-    let contract = route_result.effective_output_contract();
-    !matches!(
-        contract.response_shape,
-        crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
-    ) && contract.requires_content_evidence
-        && !contract.delivery_required
-        && route_result.output_contract_marker_is_any(&[
-            crate::OutputSemanticKind::ContentExcerptSummary,
-            crate::OutputSemanticKind::ExcerptKindJudgment,
-        ])
-}
-
-fn content_tail_read_answer_from_step_output(output: &str, prefer_english: bool) -> Option<String> {
-    crate::finalize::selected_tail_read_range_line_from_step_output(output, prefer_english)
-        .or_else(|| raw_tail_read_answer_from_step_output(output, prefer_english))
-        .map(|answer| answer.trim().to_string())
-        .filter(|answer| !answer.is_empty())
-}
-
-fn deterministic_content_tail_read_failure_recovery(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    user_request: &str,
-    route_result: &crate::RouteResult,
-    journal: &crate::task_journal::TaskJournal,
-) -> Option<String> {
-    if !content_tail_read_route_allows_failure_recovery(route_result)
-        || !answer_verifier_requests_content_excerpt(journal)
-    {
-        return None;
-    }
-    let language_hint =
-        crate::language_policy::task_response_language_hint(state, task, user_request);
-    let prefer_english =
-        crate::fallback::fallback_prefers_english_for_language_hint(state, &language_hint);
-    journal.step_results.iter().rev().find_map(|step| {
-        if step.status != crate::executor::StepExecutionStatus::Ok
-            || !matches!(step.skill.as_str(), "system_basic" | "fs_basic")
-        {
-            return None;
-        }
-        step.output_excerpt
-            .as_deref()
-            .and_then(|output| content_tail_read_answer_from_step_output(output, prefer_english))
-    })
-}
-
-fn raw_tail_read_route_allows_failure_recovery(route_result: &crate::RouteResult) -> bool {
-    let contract = route_result.effective_output_contract();
-    route_result.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
-        && contract.response_shape == crate::OutputResponseShape::Strict
-        && contract.requires_content_evidence
-        && !contract.delivery_required
-}
-
-fn raw_tail_read_finalizer_has_qualified_evidence(
-    journal: &crate::task_journal::TaskJournal,
-) -> bool {
-    journal.finalizer_summary.as_ref().is_some_and(|summary| {
-        summary.contract_ok
-            && matches!(
-                summary.disposition,
-                Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-            )
-            && summary.used_evidence_ids_count > 0
-    })
-}
-
-fn raw_tail_read_answer_from_value(value: &Value, prefer_english: bool) -> Option<String> {
-    if let Some(answer) = raw_tail_read_answer_from_flat_value(value, prefer_english) {
-        return Some(answer);
-    }
-    value
-        .get("extra")
-        .and_then(|extra| raw_tail_read_answer_from_value(extra, prefer_english))
-}
-
-fn raw_tail_read_answer_from_flat_value(value: &Value, prefer_english: bool) -> Option<String> {
-    if !matches!(
-        value.get("action").and_then(Value::as_str),
-        Some("read_range" | "read_text_range")
-    ) || value.get("mode").and_then(Value::as_str) != Some("tail")
-    {
-        return None;
-    }
-    let requested_n = value
-        .get("requested_n")
-        .or_else(|| value.get("n"))
-        .or_else(|| value.get("count"))
-        .and_then(Value::as_u64)?;
-    if requested_n == 0 || requested_n > 50 {
-        return None;
-    }
-    value
-        .get("excerpt")
-        .and_then(Value::as_str)
-        .filter(|excerpt| !excerpt.trim().is_empty())?;
-    let mut candidate = value.clone();
-    let obj = candidate.as_object_mut()?;
-    obj.insert(
-        "action".to_string(),
-        Value::String("read_range".to_string()),
-    );
-    if !obj.contains_key("requested_n") {
-        obj.insert("requested_n".to_string(), json!(requested_n));
-    }
-    crate::agent_engine::observed_output::tail_read_range_direct_answer_candidate(
-        &candidate.to_string(),
-        prefer_english,
-    )
-}
-
-fn raw_tail_read_answer_from_step_output(output: &str, prefer_english: bool) -> Option<String> {
-    serde_json::from_str::<Value>(output.trim())
-        .ok()
-        .and_then(|value| raw_tail_read_answer_from_value(&value, prefer_english))
-        .map(|answer| answer.trim().to_string())
-        .filter(|answer| !answer.is_empty())
-}
-
-fn deterministic_raw_tail_read_failure_recovery(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    user_request: &str,
-    route_result: &crate::RouteResult,
-    journal: &crate::task_journal::TaskJournal,
-) -> Option<String> {
-    if !raw_tail_read_route_allows_failure_recovery(route_result)
-        || !raw_tail_read_finalizer_has_qualified_evidence(journal)
-    {
-        return None;
-    }
-    let language_hint =
-        crate::language_policy::task_response_language_hint(state, task, user_request);
-    let prefer_english =
-        crate::fallback::fallback_prefers_english_for_language_hint(state, &language_hint);
-    journal.step_results.iter().rev().find_map(|step| {
-        if step.status != crate::executor::StepExecutionStatus::Ok
-            || !matches!(step.skill.as_str(), "system_basic" | "fs_basic")
-        {
-            return None;
-        }
-        step.output_excerpt
-            .as_deref()
-            .and_then(|output| raw_tail_read_answer_from_step_output(output, prefer_english))
-    })
-}
-
-fn assistant_memory_source_text(answer_text: &str, answer_messages: &[String]) -> String {
-    let publishable_messages = answer_messages
-        .iter()
-        .map(|message| message.trim())
-        .filter(|message| !message.is_empty())
-        .filter(|message| !crate::finalize::is_execution_summary_message(message))
-        .collect::<Vec<_>>();
-    if publishable_messages.is_empty() {
-        let answer = answer_text.trim();
-        if crate::finalize::is_execution_summary_message(answer) {
-            String::new()
-        } else {
-            answer.to_string()
-        }
-    } else {
-        publishable_messages.join("\n")
-    }
-}
-
-fn should_reinsert_execution_summaries_for_delivery(
-    route_result: &crate::RouteResult,
-    answer_text: &str,
-) -> bool {
-    let output_contract = route_result.effective_output_contract();
-    if (output_contract.response_shape == crate::OutputResponseShape::Scalar
-        || route_requests_config_validation(route_result))
-        && !answer_text.trim().is_empty()
-        && !crate::finalize::is_execution_summary_message(answer_text)
-    {
-        return false;
-    }
-    if strict_structured_final_answer_suppresses_execution_summary(route_result, answer_text) {
-        return false;
-    }
-    true
-}
-
-fn route_requests_config_validation(route_result: &crate::RouteResult) -> bool {
-    crate::finalize::route_matches_validation_verdict_output_contract(route_result)
-}
-
-fn drop_execution_summaries_when_delivery_is_scalar(
-    route_result: &crate::RouteResult,
-    answer_text: &str,
-    answer_messages: &mut Vec<String>,
-) {
-    if should_reinsert_execution_summaries_for_delivery(route_result, answer_text) {
-        return;
-    }
-    answer_messages.retain(|message| !crate::finalize::is_execution_summary_message(message));
-}
-
-fn strict_structured_final_answer_suppresses_execution_summary(
-    route_result: &crate::RouteResult,
-    answer_text: &str,
-) -> bool {
-    route_result.output_contract.response_shape == crate::OutputResponseShape::Strict
-        && !route_has_file_delivery_contract(route_result)
-        && structured_machine_final_answer(answer_text)
-}
-
-fn structured_machine_final_answer(answer_text: &str) -> bool {
-    let trimmed = answer_text.trim();
-    if trimmed.is_empty() || crate::finalize::is_execution_summary_message(trimmed) {
-        return false;
-    }
-    if serde_json::from_str::<Value>(trimmed)
-        .ok()
-        .is_some_and(|value| value.is_object() || value.is_array())
-    {
-        return true;
-    }
-    let lines = trimmed
-        .split_whitespace()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>();
-    !lines.is_empty()
-        && lines.iter().all(|line| {
-            let Some((key, value)) = line.split_once('=') else {
-                return false;
-            };
-            !key.trim().is_empty()
-                && !value.trim().is_empty()
-                && key
-                    .trim()
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-        })
-}
-
-fn journal_has_missing_file_search_evidence(
-    journal: Option<&crate::task_journal::TaskJournal>,
-) -> bool {
-    journal
-        .into_iter()
-        .flat_map(|journal| journal.step_results.iter().rev())
-        .any(|step| {
-            step.output_excerpt
-                .as_deref()
-                .is_some_and(crate::finalize::loop_reply::output_excerpt_has_missing_file_evidence)
-                || step
-                    .error_excerpt
-                    .as_deref()
-                    .is_some_and(text_looks_like_missing_file_target)
-        })
-}
-
-fn journal_has_non_control_step(journal: &crate::task_journal::TaskJournal) -> bool {
-    journal.step_results.iter().any(|step| {
-        !matches!(
-            step.skill.as_str(),
-            "respond" | "synthesize_answer" | "think" | "answer_verifier"
-        )
-    })
-}
-
-fn delivery_path_gap_should_finalize_as_clarify(
-    route_result: &crate::RouteResult,
-    answer_text: &str,
-    answer_messages: &[String],
-    journal: &crate::task_journal::TaskJournal,
-) -> bool {
-    route_has_file_delivery_contract(route_result)
-        && !has_any_delivery_file_token(answer_text, answer_messages)
-        && !journal_has_non_control_step(journal)
-        && journal
-            .answer_verifier_summary
-            .as_ref()
-            .is_some_and(|summary| {
-                !summary.pass
-                    && summary
-                        .missing_evidence_fields
-                        .iter()
-                        .any(|field| field.trim() == "path")
-            })
-}
-
-fn should_use_missing_file_delivery_reply(
-    route_result: &crate::RouteResult,
-    answer: &crate::AskReply,
-) -> bool {
-    route_has_file_delivery_contract(route_result)
-        && !answer.should_fail_task
-        && !has_any_delivery_file_token(&answer.text, &answer.messages)
-        && journal_has_missing_file_search_evidence(answer.task_journal.as_ref())
-}
-
-async fn missing_file_delivery_reply_text(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    prompt: &str,
-    route_result: &crate::RouteResult,
-    answer: &crate::AskReply,
-) -> Option<String> {
-    if !should_use_missing_file_delivery_reply(route_result, answer) {
-        return None;
-    }
-    let language_hint = crate::language_policy::first_clear_request_language_hint([
-        prompt,
-        route_result.resolved_intent.as_str(),
-    ])
-    .unwrap_or_else(|| crate::language_policy::task_response_language_hint(state, task, prompt));
-    Some(
-        crate::fallback::compose_missing_file_delivery_response(
-            state,
-            task,
-            prompt,
-            &route_result.resolved_intent,
-            Some(route_result.output_contract.locator_hint.as_str()),
-            &language_hint,
-        )
-        .await,
-    )
-}
-
-fn spawn_memory_intent_llm_extraction(state: &AppState, task: &crate::ClaimedTask, prompt: &str) {
-    let state = state.clone();
-    let mut task = task.clone();
-    let parent_task_id = task.task_id.clone();
-    task.task_id = format!("{parent_task_id}:memory_intent");
-    let metrics_task_id = task.task_id.clone();
-    let prompt = prompt.to_string();
-    tokio::spawn(async move {
-        if let Err(err) =
-            crate::memory::maybe_extract_memory_intent_with_llm(&state, &task, &prompt).await
-        {
-            warn!(
-                "memory intent llm extraction failed task_id={} parent_task_id={} err={}",
-                task.task_id, parent_task_id, err
-            );
-        }
-        state.clear_task_llm_call_count(&metrics_task_id);
-    });
-}
-
-fn insert_ask_memory_pair(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    prompt: &str,
-    answer_text: &str,
-    answer_messages: &[String],
-    is_llm_reply: bool,
-    agent_display_name_hint: &str,
-) {
-    let _ = crate::memory::upsert_user_preferences_from_route_hint(
-        state,
-        task.user_id,
-        task.chat_id,
-        task.user_key.as_deref(),
-        agent_display_name_hint,
-    );
-    spawn_memory_intent_llm_extraction(state, task, prompt);
-    if should_skip_ask_memory_pair(state, answer_text, answer_messages) {
-        return;
-    }
-    let _ = crate::memory::service::insert_memory(
-        state,
-        task.user_id,
-        task.chat_id,
-        task.user_key.as_deref(),
-        &task.channel,
-        task.external_chat_id.as_deref(),
-        crate::memory::MEMORY_ROLE_USER,
-        prompt,
-        state.policy.memory.item_max_chars.max(256),
-    );
-    let assistant_source_text = assistant_memory_source_text(answer_text, answer_messages);
-    if assistant_source_text.trim().is_empty() {
-        return;
-    }
-    let assistant_memory_text = if is_llm_reply && state.policy.memory.mark_llm_reply_in_short_term
-    {
-        format!(
-            "{}{}",
-            crate::memory::LLM_SHORT_TERM_MEMORY_PREFIX,
-            assistant_source_text
-        )
-    } else {
-        assistant_source_text
-    };
-    let _ = crate::memory::service::insert_memory_with_kind(
-        state,
-        task.user_id,
-        task.chat_id,
-        task.user_key.as_deref(),
-        &task.channel,
-        task.external_chat_id.as_deref(),
-        crate::memory::MEMORY_ROLE_ASSISTANT,
-        &assistant_memory_text,
-        state.policy.memory.item_max_chars.max(256),
-        crate::memory::MemoryWriteKind::AssistantOutcome,
-    );
-}
-
-fn build_unfinished_goal_memory_text(prompt: &str, blocker: &str) -> String {
-    format!(
-        "Unfinished goal\nUser request: {}\nCurrent blocker: {}",
-        prompt.trim(),
-        blocker.trim()
-    )
-}
-
-fn insert_unfinished_goal_memory(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    prompt: &str,
-    blocker: &str,
-) {
-    let text = build_unfinished_goal_memory_text(prompt, blocker);
-    let _ = crate::memory::service::insert_memory_with_kind(
-        state,
-        task.user_id,
-        task.chat_id,
-        task.user_key.as_deref(),
-        &task.channel,
-        task.external_chat_id.as_deref(),
-        crate::memory::MEMORY_ROLE_SYSTEM,
-        &text,
-        state.policy.memory.item_max_chars.max(256),
-        crate::memory::MemoryWriteKind::UnfinishedGoal,
-    );
 }
 
 async fn finalize_ask_success(

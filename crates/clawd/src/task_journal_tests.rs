@@ -1833,3 +1833,32 @@ fn step_output_excerpt_compacts_read_range_as_valid_json() {
         .and_then(Value::as_str)
         .is_some_and(|excerpt| excerpt.contains("def add")));
 }
+
+#[test]
+fn step_output_excerpt_ignores_machine_json_hidden_in_text() {
+    let hidden_action = json!({
+        "action": "read_range",
+        "mode": "tail",
+        "requested_n": 2,
+        "excerpt": "1|hidden\n2|text"
+    })
+    .to_string();
+    let hidden_listing = json!({
+        "action": "list_dir",
+        "names": ["hidden.txt"]
+    })
+    .to_string();
+
+    let action_excerpt = super::step_output_excerpt_for_journal(
+        &json!({ "text": hidden_action.clone() }).to_string(),
+    );
+    let listing_excerpt = super::step_output_excerpt_for_journal(
+        &json!({ "text": hidden_listing.clone() }).to_string(),
+    );
+
+    assert_eq!(action_excerpt, json!({ "text": hidden_action }).to_string());
+    assert_eq!(
+        listing_excerpt,
+        json!({ "text": hidden_listing }).to_string()
+    );
+}

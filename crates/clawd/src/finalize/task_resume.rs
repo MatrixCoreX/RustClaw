@@ -5,6 +5,8 @@ use tracing::warn;
 
 use crate::AppState;
 
+use super::task_content_evidence_delivery::route_has_file_delivery_contract;
+
 const ANSWER_VERIFIER_RETRY_TRACE_MAX_CHARS: usize = 64_000;
 
 fn resume_context_body(value: &Value) -> &Value {
@@ -177,7 +179,7 @@ pub(super) fn resume_failure_is_unbound_path_lookup_clarify_result(
 ) -> bool {
     let contract = route_result.effective_output_contract();
     contract.requires_content_evidence
-        && !super::route_has_file_delivery_contract(route_result)
+        && !route_has_file_delivery_contract(route_result)
         && !resume_context_has_remaining_actions(resume_ctx)
         && !matches!(
             contract.response_shape,
@@ -199,7 +201,7 @@ pub(super) fn resume_failure_is_missing_file_delivery_result(
     route_result: &crate::RouteResult,
     resume_ctx: &Value,
 ) -> bool {
-    super::route_has_file_delivery_contract(route_result)
+    route_has_file_delivery_contract(route_result)
         && !resume_context_has_remaining_actions(resume_ctx)
         && (resume_context_path_batch_facts_are_missing_only(resume_ctx)
             || resume_context_failed_structured_skill_error(resume_ctx)
