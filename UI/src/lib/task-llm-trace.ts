@@ -75,6 +75,24 @@ const MODEL_CATALOG_ENTRY_BOOL_FIELDS = [
   "dry_run_supported",
 ];
 
+const MODEL_CATALOG_ENTRY_SCALAR_FIELDS = [
+  "schema_version",
+  "provider",
+  "model",
+  "api_style",
+  "base_url_kind",
+  "credential_state",
+  "context_window_tokens",
+  "timeout_seconds",
+  "active_text_provider",
+];
+
+const MODEL_CATALOG_ENTRY_ARRAY_FIELDS: Array<[string, number]> = [
+  ["models", 8],
+  ["input_modalities", 8],
+  ["output_modalities", 8],
+];
+
 function modelCatalogEntryTokens(trace: Record<string, unknown>, limit: number): string[] {
   const entries = Array.isArray(trace.entries) ? trace.entries : [];
   return entries.slice(0, limit).flatMap((entry, index) => {
@@ -82,12 +100,8 @@ function modelCatalogEntryTokens(trace: Record<string, unknown>, limit: number):
     if (!record) return [];
     const prefix = `entries.${index + 1}`;
     return [
-      fieldTraceToken(record, `${prefix}.provider`, "provider"),
-      fieldTraceToken(record, `${prefix}.model`, "model"),
-      fieldTraceToken(record, `${prefix}.credential_state`, "credential_state"),
-      fieldTraceToken(record, `${prefix}.active_text_provider`, "active_text_provider"),
-      arrayTraceToken(record, `${prefix}.input_modalities`, "input_modalities", 8),
-      arrayTraceToken(record, `${prefix}.output_modalities`, "output_modalities", 8),
+      ...MODEL_CATALOG_ENTRY_SCALAR_FIELDS.map((field) => fieldTraceToken(record, `${prefix}.${field}`, field)),
+      ...MODEL_CATALOG_ENTRY_ARRAY_FIELDS.map(([field, fieldLimit]) => arrayTraceToken(record, `${prefix}.${field}`, field, fieldLimit)),
       ...MODEL_CATALOG_ENTRY_BOOL_FIELDS.map((field) => fieldTraceToken(record, `${prefix}.${field}`, field)),
     ].filter((item): item is string => Boolean(item));
   });
