@@ -28,6 +28,10 @@ need_cmd() {
 
 need_cmd jq
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" "$1"
+}
+
 if [[ ! -x "$RUNNER" ]]; then
   echo "skill-runner not found: $RUNNER"
   echo "Build first: cargo build -p skill-runner --release"
@@ -35,6 +39,7 @@ if [[ ! -x "$RUNNER" ]]; then
 fi
 
 TMP_DIR="$(mktemp -d /tmp/skills-upgrade-regression-XXXXXX)"
+WRAPPER_SMOKE_STDOUT="$TMP_DIR/wrapper_smoke.log"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 while [[ $# -gt 0 ]]; do
@@ -274,14 +279,14 @@ if [[ "$INCLUDE_WRAPPER_SMOKE" == "1" ]]; then
   bash "$ROOT_DIR/scripts/smoke_skill_calls.sh" \
     --profile "$WRAPPER_SMOKE_PROFILE" \
     --timeout "$WRAPPER_SMOKE_TIMEOUT" \
-    --exclude "audio_transcribe,audio_synthesize,image_generate,image_edit,image_vision,crypto,stock,weather,browser_web,web_search_extract,service_control,task_control,chat" >/tmp/rustclaw_wrapper_smoke.log 2>&1
+    --exclude "audio_transcribe,audio_synthesize,image_generate,image_edit,image_vision,crypto,stock,weather,browser_web,web_search_extract,service_control,task_control,chat" >"$WRAPPER_SMOKE_STDOUT" 2>&1
   wrapper_rc=$?
   set -e
   if [[ "$wrapper_rc" -eq 0 ]]; then
-    pass "wrapper smoke completed successfully (report: $WRAPPER_SMOKE_REPORT)"
+    pass "wrapper smoke completed successfully (report_ref: $(path_ref "$WRAPPER_SMOKE_REPORT"))"
   else
-    fail "wrapper smoke reported failures (report: $WRAPPER_SMOKE_REPORT)"
-    echo "  smoke log: /tmp/rustclaw_wrapper_smoke.log"
+    fail "wrapper smoke reported failures (report_ref: $(path_ref "$WRAPPER_SMOKE_REPORT"))"
+    echo "  smoke_log_ref: $(path_ref "$WRAPPER_SMOKE_STDOUT")"
   fi
 fi
 
@@ -314,10 +319,10 @@ mkdir -p "$(dirname "$REPORT_PATH")"
   echo "- FAIL: $FAIL"
   echo "- SKIP: $SKIP"
   if [[ -n "$WRAPPER_SMOKE_REPORT" ]]; then
-    echo "- Wrapper smoke report: \`$WRAPPER_SMOKE_REPORT\`"
+    echo "- Wrapper smoke report ref: \`$(path_ref "$WRAPPER_SMOKE_REPORT")\`"
   fi
   if [[ -n "$BASE_CONTRACTS_REPORT" ]]; then
-    echo "- Base contract report: \`$BASE_CONTRACTS_REPORT\`"
+    echo "- Base contract report ref: \`$(path_ref "$BASE_CONTRACTS_REPORT")\`"
   fi
   echo
   for line in "${RESULT_LINES[@]}"; do
@@ -327,16 +332,16 @@ mkdir -p "$(dirname "$REPORT_PATH")"
     echo
     echo "## Wrapper Smoke Report"
     echo
-    echo "See: \`$WRAPPER_SMOKE_REPORT\`"
+    echo "See ref: \`$(path_ref "$WRAPPER_SMOKE_REPORT")\`"
   fi
   if [[ -n "$BASE_CONTRACTS_REPORT" ]]; then
     echo
     echo "## Base Skill Response Contract Report"
     echo
-    echo "See: \`$BASE_CONTRACTS_REPORT\`"
+    echo "See ref: \`$(path_ref "$BASE_CONTRACTS_REPORT")\`"
   fi
 } >"$REPORT_PATH"
-echo "Report saved: $REPORT_PATH"
+echo "Report saved ref: $(path_ref "$REPORT_PATH")"
 
 if [[ "$FAIL" -gt 0 ]]; then
   exit 1
