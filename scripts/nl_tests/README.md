@@ -95,7 +95,10 @@ The gate writes `agent_loop_static_contracts.txt` from the route-authority
 legacy-key guard, legacy route boundary guard, pre-planner removal guard, NL
 hard-match scanner, and historical hardcoded-language scanner. `gate_summary.env`
 records `agent_loop_static_contracts=1`, so artifact readers can tell the
-Codex/Claude-style agent-loop boundary checks were part of the run.
+Codex/Claude-style agent-loop boundary checks were part of the run. The artifact
+also records `AGENT_LOOP_STATIC_SELF_TEST ...` labels before the main checks, so
+the route-authority, legacy-route, pre-planner, NL-hardmatch, and hardcoded
+language guards prove their self-tests before the run is trusted.
 It also writes `evidence_extractor_contracts.txt` from
 `scripts/check_evidence_extractor_contracts.py --self-test` plus the main check.
 `gate_summary.env` records `evidence_extractor_contracts=1`, and the artifact
@@ -163,6 +166,9 @@ scope, then checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
 the static agent-loop, evidence-extractor, secret-scan, wrapper, no-agent-mode,
 suite-artifact self-test, and raw LLM trace contracts participated in the run.
+For `agent_loop_static_contracts.txt`, the required content includes the five
+`AGENT_LOOP_STATIC_SELF_TEST ...` labels as well as the main guard success
+tokens.
 It also checks
 that gate summary path fields use portable refs such as `out_dir_ref=out_dir`
 and never host absolute paths. It also checks artifact content: text reports

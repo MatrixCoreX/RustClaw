@@ -264,6 +264,16 @@ echo "AGENT_PARITY_GATE_STEP no_agent_mode_payload"
 
 echo "AGENT_PARITY_GATE_STEP agent_loop_static_contracts"
 {
+  echo "AGENT_LOOP_STATIC_SELF_TEST check_route_authority_legacy_keys.py"
+  python3 "${ROOT_DIR}/scripts/check_route_authority_legacy_keys.py" --self-test
+  echo "AGENT_LOOP_STATIC_SELF_TEST check_legacy_route_boundary.py"
+  python3 "${ROOT_DIR}/scripts/check_legacy_route_boundary.py" --self-test
+  echo "AGENT_LOOP_STATIC_SELF_TEST check_pre_planner_exit_inventory.py"
+  python3 "${ROOT_DIR}/scripts/check_pre_planner_exit_inventory.py" --self-test
+  echo "AGENT_LOOP_STATIC_SELF_TEST check_no_nl_hardmatch.py"
+  python3 "${ROOT_DIR}/scripts/check_no_nl_hardmatch.py" --self-test
+  echo "AGENT_LOOP_STATIC_SELF_TEST check_historical_hardcoded_language.py"
+  python3 "${ROOT_DIR}/scripts/check_historical_hardcoded_language.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_route_authority_legacy_keys.py"
   python3 "${ROOT_DIR}/scripts/check_legacy_route_boundary.py"
   python3 "${ROOT_DIR}/scripts/check_pre_planner_exit_inventory.py"

@@ -71,6 +71,11 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
         "NO_AGENT_MODE_PAYLOAD ok",
     },
     "agent_parity_gate/agent_loop_static_contracts.txt": {
+        "AGENT_LOOP_STATIC_SELF_TEST check_route_authority_legacy_keys.py",
+        "AGENT_LOOP_STATIC_SELF_TEST check_legacy_route_boundary.py",
+        "AGENT_LOOP_STATIC_SELF_TEST check_pre_planner_exit_inventory.py",
+        "AGENT_LOOP_STATIC_SELF_TEST check_no_nl_hardmatch.py",
+        "AGENT_LOOP_STATIC_SELF_TEST check_historical_hardcoded_language.py",
         "ROUTE_AUTHORITY_LEGACY_KEY_CHECK findings=0",
         "LEGACY_ROUTE_BOUNDARY_CHECK findings=0",
         "PRE_PLANNER_EXIT_REMOVAL_CHECK findings=0",
