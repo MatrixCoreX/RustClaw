@@ -4,6 +4,7 @@ pub mod channel_commands;
 pub mod channel_i18n;
 pub mod config;
 pub mod hard_rules;
+pub mod model_catalog;
 pub mod prompt_layers;
 pub mod secrets;
 pub mod skill_registry;

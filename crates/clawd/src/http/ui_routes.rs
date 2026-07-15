@@ -207,6 +207,7 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/skills/uninstall", post(uninstall_external_skill))
         .route("/llm/config", get(get_llm_config).post(update_llm_config))
         .route("/llm/test", post(test_llm_config))
+        .route("/models/catalog", get(get_model_catalog))
         .route("/nni/device/status", get(nni_device_status))
         .route("/nni/device/action", post(nni_device_action))
         .route("/nni/config", get(get_nni_config).post(update_nni_config))

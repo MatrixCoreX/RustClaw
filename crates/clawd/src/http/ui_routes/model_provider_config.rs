@@ -577,6 +577,37 @@ fn read_model_config(state: &AppState) -> anyhow::Result<ModelConfigResponse> {
     })
 }
 
+async fn get_model_catalog(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err(resp) = require_ui_identity(&state, &headers) {
+        return resp;
+    }
+    match claw_core::model_catalog::build_model_catalog_from_workspace(&state.skill_rt.workspace_root)
+    {
+        Ok(catalog) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(serde_json::to_value(catalog).unwrap_or_else(|_| json!({}))),
+                error: None,
+            }),
+        ),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                ok: false,
+                data: Some(json!({
+                    "error_code": "model_catalog_unavailable",
+                    "error_detail": error.to_string(),
+                })),
+                error: Some("model_catalog_unavailable".to_string()),
+            }),
+        ),
+    }
+}
+
 fn write_model_config(state: &AppState, req: &ModelConfigUpdateRequest) -> anyhow::Result<()> {
     let root = &state.skill_rt.workspace_root;
 

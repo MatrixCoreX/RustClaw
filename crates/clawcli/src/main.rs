@@ -234,6 +234,12 @@ enum Command {
         command: PermissionCommand,
     },
 
+    /// Inspect provider/model capability metadata.
+    Models {
+        #[command(subcommand)]
+        command: ModelsCommand,
+    },
+
     /// POST /v1/tasks/active
     Active {
         #[arg(long)]
@@ -387,6 +393,17 @@ enum PermissionCommand {
         skill: Option<String>,
         #[arg(long)]
         capability: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ModelsCommand {
+    /// GET /v1/models/catalog
+    Catalog {
+        #[arg(long)]
+        provider: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1078,6 +1095,12 @@ fn main() -> Result<()> {
                     capability.as_deref(),
                     *json,
                 )
+            }
+        },
+        Command::Models { command } => match command {
+            ModelsCommand::Catalog { provider, json } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_models_catalog(base_url, k, provider.as_deref(), *json)
             }
         },
         Command::Active {
