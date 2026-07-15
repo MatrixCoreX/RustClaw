@@ -782,8 +782,16 @@ fn append_lifecycle_product_contract_fields(
     let Ok(checkpoint) = serde_json::from_value::<TaskCheckpoint>(checkpoint_payload) else {
         return;
     };
+    obj.entry("last_stable_checkpoint_id".to_string())
+        .or_insert(json!(checkpoint.checkpoint_id.as_str()));
     obj.entry("resume_entrypoint".to_string())
-        .or_insert(json!(checkpoint.resume_entrypoint));
+        .or_insert(json!(checkpoint.resume_entrypoint.as_str()));
+    obj.entry("last_stable_resume_entrypoint".to_string())
+        .or_insert(json!(checkpoint.resume_entrypoint.as_str()));
+    if let Some(round) = checkpoint.last_successful_round {
+        obj.entry("last_successful_round".to_string())
+            .or_insert(json!(round));
+    }
     let completed_side_effect_count = checkpoint.completed_side_effect_refs.len();
     let visible_completed_side_effect_refs = checkpoint
         .completed_side_effect_refs
@@ -816,6 +824,15 @@ fn append_lifecycle_product_contract_fields(
     }
     obj.entry("evidence_ref_count".to_string())
         .or_insert(json!(checkpoint.evidence_refs.len()));
+    obj.entry("artifact_ref_count".to_string())
+        .or_insert(json!(checkpoint.artifact_refs.len()));
+    append_bounded_string_ref_projection(
+        obj,
+        "artifact_refs",
+        "artifact_refs_truncated",
+        &checkpoint.artifact_refs,
+        8,
+    );
     if let Some(last_evidence_ref) = checkpoint
         .evidence_refs
         .iter()
@@ -838,7 +855,142 @@ fn append_lifecycle_product_contract_fields(
         obj.entry("async_job_message_key".to_string())
             .or_insert(json!(job.message_key.as_str()));
     }
+    append_lifecycle_open_issue_fields(obj, &checkpoint);
     append_lifecycle_provider_blocker_fields(obj, &checkpoint);
+}
+
+fn append_bounded_string_ref_projection(
+    obj: &mut serde_json::Map<String, Value>,
+    refs_key: &str,
+    truncated_key: &str,
+    refs: &[String],
+    limit: usize,
+) {
+    let visible_refs = refs
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .take(limit)
+        .collect::<Vec<_>>();
+    if visible_refs.is_empty() {
+        return;
+    }
+    obj.entry(refs_key.to_string())
+        .or_insert(json!(visible_refs));
+    obj.entry(truncated_key.to_string())
+        .or_insert(json!(refs.len() > limit));
+}
+
+fn append_lifecycle_open_issue_fields(
+    obj: &mut serde_json::Map<String, Value>,
+    checkpoint: &TaskCheckpoint,
+) {
+    let Some(fields) = checkpoint_open_issue_fields(checkpoint) else {
+        return;
+    };
+    for (key, value) in fields {
+        obj.entry(key).or_insert(value);
+    }
+}
+
+fn checkpoint_open_issue_fields(
+    checkpoint: &TaskCheckpoint,
+) -> Option<serde_json::Map<String, Value>> {
+    if let Some(signal) = checkpoint.repair_signal.as_ref() {
+        if let Some(fields) = open_issue_fields_from_signal(signal, None) {
+            return Some(fields);
+        }
+    }
+    let Some(entries) = checkpoint.attempt_ledger.as_ref().and_then(Value::as_array) else {
+        return None;
+    };
+    for entry in entries.iter().rev() {
+        let Some(signal) = entry.get("repair_signal") else {
+            continue;
+        };
+        if let Some(fields) = open_issue_fields_from_signal(signal, Some(entry)) {
+            return Some(fields);
+        }
+    }
+    None
+}
+
+fn open_issue_fields_from_signal(
+    signal: &Value,
+    attempt_entry: Option<&Value>,
+) -> Option<serde_json::Map<String, Value>> {
+    let issue_codes = string_array_values(signal.pointer("/repair_envelope/issue_codes"));
+    let missing_fields = string_array_values(signal.get("missing_fields"))
+        .into_iter()
+        .chain(string_array_values(
+            signal.pointer("/repair_envelope/missing_evidence"),
+        ))
+        .collect::<Vec<_>>();
+    let next_recovery_kind = string_value(signal.get("next_recovery_kind"))
+        .or_else(|| string_value(signal.pointer("/repair_envelope/next_recovery_kind")));
+    let status_code = string_value(signal.get("status_code"));
+    let reason_code = string_value(signal.get("reason_code"));
+    let has_issue = !issue_codes.is_empty()
+        || !missing_fields.is_empty()
+        || status_code.is_some()
+        || reason_code.is_some();
+    if !has_issue {
+        return None;
+    }
+
+    let mut deduped_missing_fields = missing_fields;
+    deduped_missing_fields.sort();
+    deduped_missing_fields.dedup();
+    let open_issue_count = if issue_codes.is_empty() {
+        1
+    } else {
+        issue_codes.len()
+    };
+    let mut fields = serde_json::Map::new();
+    fields.insert("open_issue_count".to_string(), json!(open_issue_count));
+    insert_string_projection(
+        &mut fields,
+        "open_issue_status_code",
+        status_code.as_deref(),
+    );
+    insert_string_projection(
+        &mut fields,
+        "open_issue_reason_code",
+        reason_code.as_deref(),
+    );
+    insert_string_projection(
+        &mut fields,
+        "open_issue_next_recovery_kind",
+        next_recovery_kind.as_deref(),
+    );
+    insert_string_projection(
+        &mut fields,
+        "open_issue_source",
+        string_value(signal.get("source")).as_deref(),
+    );
+    if let Some(retryable) = signal.get("retryable").and_then(Value::as_bool) {
+        fields.insert("open_issue_retryable".to_string(), json!(retryable));
+    }
+    insert_string_array_projection(&mut fields, "open_issue_codes", &issue_codes, 8);
+    insert_string_array_projection(
+        &mut fields,
+        "open_issue_missing_fields",
+        &deduped_missing_fields,
+        8,
+    );
+    if let Some(entry) = attempt_entry {
+        insert_string_projection(
+            &mut fields,
+            "open_issue_action_ref",
+            string_value(entry.get("action_ref")).as_deref(),
+        );
+        insert_string_projection(
+            &mut fields,
+            "open_issue_recovery_action",
+            string_value(entry.get("recovery_action")).as_deref(),
+        );
+    }
+    Some(fields)
 }
 
 fn append_lifecycle_provider_blocker_fields(
@@ -1005,6 +1157,24 @@ fn insert_string_projection(
     obj.insert(key.to_string(), json!(value));
 }
 
+fn insert_string_array_projection(
+    obj: &mut serde_json::Map<String, Value>,
+    key: &str,
+    values: &[String],
+    limit: usize,
+) {
+    let visible_values = values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .take(limit)
+        .collect::<Vec<_>>();
+    if visible_values.is_empty() {
+        return;
+    }
+    obj.insert(key.to_string(), json!(visible_values));
+}
+
 fn append_lifecycle_reason_code_field(obj: &mut serde_json::Map<String, Value>, state: &str) {
     let reason_code = string_field(obj, "reason_code")
         .or_else(|| string_field(obj, "resume_reason"))
@@ -1099,6 +1269,21 @@ fn string_value(value: Option<&Value>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn string_array_values(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn first_nested_string_field(
