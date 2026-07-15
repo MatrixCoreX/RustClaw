@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -59,6 +59,7 @@ struct CatalogInputs {
     audio: toml::Value,
     video: toml::Value,
     music: toml::Value,
+    env_values: BTreeMap<String, String>,
 }
 
 pub fn build_model_catalog_from_workspace(
@@ -71,6 +72,7 @@ pub fn build_model_catalog_from_workspace(
         audio: read_optional_toml(&root.join("configs/audio.toml"))?,
         video: read_optional_toml(&root.join("configs/video.toml"))?,
         music: read_optional_toml(&root.join("configs/music.toml"))?,
+        env_values: read_runtime_env_values(root),
     };
     Ok(build_model_catalog(&inputs))
 }
@@ -169,7 +171,7 @@ fn catalog_entry(
         base_url_kind: base_url_kind(&string_field(llm_table, "base_url")),
         context_window_tokens: usize_field(llm_table, "context_window_tokens"),
         timeout_seconds: u64_field(llm_table, "timeout_seconds"),
-        credential_state: credential_state(llm_table, provider),
+        credential_state: credential_state(llm_table, provider, &inputs.env_values),
         supports_text: true,
         supports_image_input,
         supports_video_input,
@@ -284,17 +286,82 @@ fn u64_field(table: &toml::map::Map<String, toml::Value>, key: &str) -> Option<u
         .filter(|value| *value > 0)
 }
 
-fn credential_state(table: &toml::map::Map<String, toml::Value>, provider: &str) -> String {
+fn credential_state(
+    table: &toml::map::Map<String, toml::Value>,
+    provider: &str,
+    env_values: &BTreeMap<String, String>,
+) -> String {
     if !string_field(table, "api_key").is_empty() {
         return "configured_inline".to_string();
     }
-    if provider_credential_env_vars(provider)
-        .iter()
-        .any(|name| std::env::var(name).is_ok_and(|value| !value.trim().is_empty()))
-    {
+    if provider_credential_env_vars(provider).iter().any(|name| {
+        std::env::var(name).is_ok_and(|value| !value.trim().is_empty())
+            || env_values
+                .get(*name)
+                .is_some_and(|value| !value.trim().is_empty())
+    }) {
         return "configured_env".to_string();
     }
     "missing".to_string()
+}
+
+fn read_runtime_env_values(workspace_root: &Path) -> BTreeMap<String, String> {
+    runtime_env_file_candidates(workspace_root)
+        .into_iter()
+        .find_map(|path| {
+            let raw = std::fs::read_to_string(path).ok()?;
+            Some(parse_runtime_env_file(&raw))
+        })
+        .unwrap_or_default()
+}
+
+fn runtime_env_file_candidates(workspace_root: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(path) = std::env::var("CHINESE_PROVIDER_ENV_FILE") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            candidates.push(PathBuf::from(trimmed));
+        }
+    }
+    candidates.push(workspace_root.join("../runtime_env_filled.sh"));
+    candidates.push(PathBuf::from("/home/guagua/runtime_env_filled.sh"));
+    candidates
+}
+
+fn parse_runtime_env_file(raw: &str) -> BTreeMap<String, String> {
+    raw.lines()
+        .filter_map(parse_runtime_env_line)
+        .collect::<BTreeMap<_, _>>()
+}
+
+fn parse_runtime_env_line(raw: &str) -> Option<(String, String)> {
+    let line = raw.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let line = line.strip_prefix("export ").unwrap_or(line).trim();
+    let (key, value) = line.split_once('=')?;
+    let key = key.trim();
+    if key.is_empty()
+        || !key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    {
+        return None;
+    }
+    Some((key.to_string(), unquote_env_value(value.trim()).to_string()))
+}
+
+fn unquote_env_value(value: &str) -> &str {
+    if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        let first = bytes[0];
+        let last = bytes[value.len() - 1];
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            return &value[1..value.len() - 1];
+        }
+    }
+    value
 }
 
 fn provider_credential_env_vars(provider: &str) -> &'static [&'static str] {
