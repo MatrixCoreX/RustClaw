@@ -140,14 +140,15 @@ prompt-truncation, provider-error, and average-LLM-call thresholds. When
 provider smoke is enabled, the contract also checks the case coverage artifact,
 provider summary JSONL, and each MiniMax/MiMo/Qwen/DeepSeek matrix row for the
 expected dry-run or `provider_not_in_live_scope` reason based on
-`chinese_provider_live_providers`. `gate_summary.env` keeps `metrics=1` as the
-compatibility flag for "the metrics gate was not disabled"; `live_metrics=1`
-means run directories were provided and `run_metrics.json` / `run_metrics.txt`
-were actually generated and content-checked. Runs without run directories keep
-`live_metrics=0` even when `metrics=1`.
+`chinese_provider_live_providers`. `live_metrics` is a required
+`gate_summary.env` machine field. `metrics=1` remains the compatibility flag for
+"the metrics gate was not disabled"; `live_metrics=1` means run directories were
+provided and `run_metrics.json` / `run_metrics.txt` were actually generated and
+content-checked. Runs without run directories keep `live_metrics=0` even when
+`metrics=1`.
 The JSON report includes `agent_parity_gate_contract.checked=true` plus the
-required artifact, flag, and content-check counts when this suite-specific
-validation runs.
+required artifact, flag, machine-field, and content-check counts when this
+suite-specific validation runs.
 
 For rerun shards, use:
 
