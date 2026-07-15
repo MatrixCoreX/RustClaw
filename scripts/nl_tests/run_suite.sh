@@ -184,13 +184,32 @@ finalize_wrapped_suite() {
   local status="$4"
   local exit_code="$5"
   local artifact_index="${run_dir}/artifact_index.txt"
+  local contract_report="${run_dir}/suite_artifact_contract.json"
+  local contract_tmp
   local artifact_finalize_status="ok"
 
   write_suite_summary "$suite_name" "$run_dir" "$status" "$exit_code" "$artifact_finalize_status" \
     || artifact_finalize_status="error"
   write_artifact_index "$run_dir" || artifact_finalize_status="error"
+  contract_tmp="$(mktemp)"
+  if python3 "${SCRIPT_DIR}/check_suite_artifact_contract.py" "$run_dir" --json > "$contract_tmp"; then
+    mv "$contract_tmp" "$contract_report" || artifact_finalize_status="error"
+  else
+    artifact_finalize_status="error"
+    mv "$contract_tmp" "$contract_report" || true
+  fi
+  write_artifact_index "$run_dir" || artifact_finalize_status="error"
+  contract_tmp="$(mktemp)"
+  if python3 "${SCRIPT_DIR}/check_suite_artifact_contract.py" "$run_dir" --json > "$contract_tmp"; then
+    mv "$contract_tmp" "$contract_report" || artifact_finalize_status="error"
+  else
+    artifact_finalize_status="error"
+    mv "$contract_tmp" "$contract_report" || true
+  fi
   if [[ "$artifact_finalize_status" != "ok" ]]; then
     write_suite_summary "$suite_name" "$run_dir" "$status" "$exit_code" "$artifact_finalize_status" || true
+    write_artifact_index "$run_dir" || true
+    python3 "${SCRIPT_DIR}/check_suite_artifact_contract.py" "$run_dir" --json > "$contract_report" || true
   fi
 
   echo
@@ -199,6 +218,7 @@ finalize_wrapped_suite() {
   echo "  - ${run_log}"
   echo "  - ${artifact_index}"
   echo "  - ${run_dir}/suite_summary.env"
+  echo "  - ${contract_report}"
   return 0
 }
 

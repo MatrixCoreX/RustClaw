@@ -109,6 +109,8 @@ later task can resume from the run root without parsing prose logs. `status` and
 `exit_code` reflect the wrapped command; `artifact_finalize_status` reflects the
 summary/index write step. Validate a wrapped run root with
 `python3 scripts/nl_tests/check_suite_artifact_contract.py <run_dir> --json`.
+Wrapped runs also write this validation result to
+`suite_artifact_contract.json` and list it in `artifact_index.txt`.
 
 For rerun shards, use:
 
