@@ -5,7 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
-OUT_DIR="${ROOT_DIR}/logs/agent_parity_gate/${RUN_STAMP}"
+if [[ -n "${NL_SUITE_RUN_DIR:-}" ]]; then
+  OUT_DIR="${NL_SUITE_RUN_DIR}/agent_parity_gate"
+else
+  OUT_DIR="${ROOT_DIR}/logs/agent_parity_gate/${RUN_STAMP}"
+fi
 RUN_DIRS=()
 SKIP_COVERAGE=0
 SKIP_MODEL_CATALOG=0

@@ -648,6 +648,12 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         findings,
         "agent parity gate summary must record the shared secret scan contract state",
     )
+    require(
+        'if [[ -n "${NL_SUITE_RUN_DIR:-}" ]]' in parity_text
+        and 'OUT_DIR="${NL_SUITE_RUN_DIR}/agent_parity_gate"' in parity_text,
+        findings,
+        "agent parity gate must co-locate artifacts under NL_SUITE_RUN_DIR when wrapped by run_suite",
+    )
 
 
 def build_report(env_file: Path | None = None) -> dict[str, Any]:
