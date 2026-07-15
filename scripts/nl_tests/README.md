@@ -132,7 +132,11 @@ the static agent-loop, secret-scan, wrapper, no-agent-mode, and raw LLM trace
 contracts participated in the run. It also checks artifact content: text reports
 must contain their success tokens, and JSON reports such as
 `secret_scan_contract.json` and `suite_wrapper_contract.json` must expose
-`ok=true`.
+`ok=true`. Enabled optional steps are also content-checked from
+`gate_summary.env`: compact coverage must have no missing/forbidden rows,
+Chinese model catalog must report `status=ok` with all Chinese providers, and
+the coding repair fixture metrics must satisfy the configured pass-rate,
+prompt-truncation, provider-error, and average-LLM-call thresholds.
 The JSON report includes `agent_parity_gate_contract.checked=true` plus the
 required artifact, flag, and content-check counts when this suite-specific
 validation runs.
