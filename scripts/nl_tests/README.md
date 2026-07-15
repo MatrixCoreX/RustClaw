@@ -96,6 +96,10 @@ The gate also writes `secret_scan_contract.json` from
 forbidden-field and secret-like-value finding shapes. `gate_summary.env`
 records `secret_scan_contract=1` as a non-secret machine token so gate artifact
 readers can tell the contract was part of the run.
+When launched through `run_suite.sh agent_parity_gate`, the gate stores its JSON
+artifacts under the same suite run directory at `agent_parity_gate/`; direct
+runs still default to `logs/agent_parity_gate/<timestamp>` unless `--out-dir` is
+provided.
 
 For rerun shards, use:
 
