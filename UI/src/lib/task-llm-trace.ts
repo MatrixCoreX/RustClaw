@@ -36,11 +36,45 @@ function traceToken(record: Record<string, unknown>, key: string): string | null
   return value ? `${key}=${value}` : null;
 }
 
+function fieldTraceToken(record: Record<string, unknown>, tokenKey: string, valueKey: string): string | null {
+  const value = compactValue(record[valueKey] as string | number | boolean | null | undefined);
+  return value ? `${tokenKey}=${value}` : null;
+}
+
 function nestedTraceToken(record: Record<string, unknown>, parentKey: string, childKey: string): string | null {
   const parent = asRecord(record[parentKey]);
   if (!parent) return null;
   const value = compactValue(parent[childKey] as string | number | boolean | null | undefined);
   return value ? `${parentKey}.${childKey}=${value}` : null;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => compactValue(item as string | number | boolean | null | undefined))
+    .filter((item): item is string => Boolean(item));
+}
+
+function arrayTraceToken(record: Record<string, unknown>, tokenKey: string, valueKey: string, limit: number): string | null {
+  const values = asStringArray(record[valueKey]).slice(0, limit);
+  return values.length > 0 ? `${tokenKey}=${values.join(",")}` : null;
+}
+
+function modelCatalogEntryTokens(trace: Record<string, unknown>, limit: number): string[] {
+  const entries = Array.isArray(trace.entries) ? trace.entries : [];
+  return entries.slice(0, limit).flatMap((entry, index) => {
+    const record = asRecord(entry);
+    if (!record) return [];
+    const prefix = `entries.${index + 1}`;
+    return [
+      fieldTraceToken(record, `${prefix}.provider`, "provider"),
+      fieldTraceToken(record, `${prefix}.model`, "model"),
+      fieldTraceToken(record, `${prefix}.credential_state`, "credential_state"),
+      fieldTraceToken(record, `${prefix}.active_text_provider`, "active_text_provider"),
+      arrayTraceToken(record, `${prefix}.input_modalities`, "input_modalities", 8),
+      arrayTraceToken(record, `${prefix}.output_modalities`, "output_modalities", 8),
+    ].filter((item): item is string => Boolean(item));
+  });
 }
 
 function sortedCounterEntries(counts: Record<string, number> | null | undefined, limit: number): string[] {
@@ -99,6 +133,7 @@ export function modelCatalogTraceMachineTokens(trace: unknown): string[] {
     traceToken(record, "entry_count"),
     nestedTraceToken(record, "catalog_guard_status", "status"),
     nestedTraceToken(record, "catalog_guard_status", "finding_count"),
+    ...modelCatalogEntryTokens(record, 3),
   ].filter((item): item is string => Boolean(item));
 }
 

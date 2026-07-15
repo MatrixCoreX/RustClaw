@@ -164,12 +164,26 @@ test("builds model catalog trace machine tokens", () => {
       status: "ok",
       finding_count: 0,
     },
+    entries: [
+      {
+        provider: "minimax",
+        model: "MiniMax-M3",
+        credential_state: "configured_env",
+        active_text_provider: true,
+        input_modalities: ["text", "image", "video"],
+        output_modalities: ["text"],
+      },
+    ],
   });
 
   assert.ok(tokens.includes("trace_kind=model_catalog_decision"));
   assert.ok(tokens.includes("selected_provider=minimax"));
   assert.ok(tokens.includes("selected_model=MiniMax-M3"));
   assert.ok(tokens.includes("catalog_guard_status.status=ok"));
+  assert.ok(tokens.includes("entries.1.provider=minimax"));
+  assert.ok(tokens.includes("entries.1.active_text_provider=true"));
+  assert.ok(tokens.includes("entries.1.input_modalities=text,image,video"));
+  assert.ok(tokens.includes("entries.1.output_modalities=text"));
 });
 
 test("builds resume trace machine tokens", () => {
