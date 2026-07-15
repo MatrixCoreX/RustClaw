@@ -61,6 +61,8 @@ SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_self_test_report_override": "stored_report_override",
     "agent_parity_text_token_validator": "validate_text_artifact_tokens",
     "agent_parity_json_ok_validator": "validate_json_artifact_ok",
+    "agent_parity_json_ok_bad_shape_finding": "agent_parity_gate_artifact_bad_shape",
+    "agent_parity_json_ok_bad_shape_self_test": "json-ok-artifact-bad-shape",
     "agent_parity_compact_coverage_validator": "validate_compact_coverage_artifact",
     "agent_parity_chinese_catalog_validator": "validate_chinese_model_catalog_artifact",
     "agent_parity_provider_smoke_validator": "validate_provider_smoke_artifacts",

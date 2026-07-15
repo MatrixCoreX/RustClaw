@@ -287,6 +287,8 @@ def validate_json_artifact_ok(run_dir: Path, rel_path: str) -> list[str]:
         payload = json.loads(text)
     except json.JSONDecodeError:
         return [f"agent_parity_gate_artifact_bad_json:{rel_path}"]
+    if not isinstance(payload, dict):
+        return [f"agent_parity_gate_artifact_bad_shape:{rel_path}"]
     if payload.get("ok") is not True:
         return [f"agent_parity_gate_artifact_not_ok:{rel_path}:{payload.get('ok')}"]
     return []
@@ -845,6 +847,26 @@ def run_self_test() -> int:
             print(
                 "SELF_TEST_FAIL agent_parity_missing_gate_summary:"
                 f"{agent_summary_missing_report.get('findings')}",
+                file=sys.stderr,
+            )
+            return 1
+
+        json_bad_shape_run = root / "json-ok-artifact-bad-shape"
+        write_minimal_self_test_run(json_bad_shape_run, content_checked=True)
+        json_bad_shape_rel = "agent_parity_gate/secret_scan_contract.json"
+        json_bad_shape_path = json_bad_shape_run / json_bad_shape_rel
+        json_bad_shape_path.parent.mkdir(parents=True, exist_ok=True)
+        json_bad_shape_path.write_text("[]\n", encoding="utf-8")
+        json_bad_shape_findings = validate_json_artifact_ok(
+            json_bad_shape_run,
+            json_bad_shape_rel,
+        )
+        if (
+            f"agent_parity_gate_artifact_bad_shape:{json_bad_shape_rel}"
+            not in set(json_bad_shape_findings)
+        ):
+            print(
+                f"SELF_TEST_FAIL json_ok_artifact_bad_shape:{json_bad_shape_findings}",
                 file=sys.stderr,
             )
             return 1
