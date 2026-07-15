@@ -18,6 +18,7 @@ ASK_PREPARE_FILE = SRC_ROOT / "worker/ask_prepare.rs"
 ASK_PIPELINE_FILE = SRC_ROOT / "worker/ask_pipeline.rs"
 TASK_JOURNAL_EVIDENCE_COVERAGE_FILE = SRC_ROOT / "task_journal_evidence_coverage.rs"
 TASK_JOURNAL_FILE = SRC_ROOT / "task_journal.rs"
+TASK_JOURNAL_SUMMARY_TRACE_FILE = SRC_ROOT / "task_journal/summary_trace.rs"
 INTENT_ROUTER_OBSERVATION_REPAIR_FILE = SRC_ROOT / "intent_router_observation_repair.rs"
 INTENT_ROUTER_CONTRACT_HINT_FILE = SRC_ROOT / "intent_router_contract_hint.rs"
 INTENT_ROUTER_EXECUTION_CONTRACT_FILE = SRC_ROOT / "intent_router_execution_contract.rs"
@@ -919,8 +920,8 @@ def scan_contract_matrix_trace_contract_marker() -> list[Finding]:
 
 
 def scan_task_journal_step_contract_marker() -> list[Finding]:
-    rel_path = rel(TASK_JOURNAL_FILE)
-    text = TASK_JOURNAL_FILE.read_text(encoding="utf-8")
+    rel_path = rel(TASK_JOURNAL_SUMMARY_TRACE_FILE)
+    text = TASK_JOURNAL_SUMMARY_TRACE_FILE.read_text(encoding="utf-8")
     fn_start = text.find("fn step_contract_trace_json(")
     if fn_start < 0:
         return [
