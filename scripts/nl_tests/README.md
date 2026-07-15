@@ -139,7 +139,8 @@ self-test, and raw LLM trace contracts participated in the run. It also checks
 artifact content: text reports must contain their success tokens, and JSON reports such as
 `secret_scan_contract.json` and `suite_wrapper_contract.json` must expose
 `ok=true` from a top-level object. The suite-artifact self-test covers missing,
-unreadable, malformed, and non-object contract reports; non-object JSON ok
+unreadable, malformed, and non-object contract reports; bad UTF-8 artifact
+payloads; non-object JSON ok
 artifacts; non-object loader-backed artifacts such as compact coverage; base report fields (`ok`, `run_dir`,
 `require_contract_report`, `findings`); bad UTF-8 suite metadata; unchecked final reports; summary
 mismatch; nested `agent_parity_gate_contract` mismatch; and unexpected nested

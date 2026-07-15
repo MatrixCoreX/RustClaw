@@ -903,6 +903,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "AGENT_PARITY_GATE_OPTIONAL_ARTIFACTS_BY_FLAG" in suite_artifact_contract_text
         and "AGENT_PARITY_CHINESE_MODEL_PROVIDERS" in suite_artifact_contract_text
         and "validate_text_artifact_tokens" in suite_artifact_contract_text
+        and "agent_parity_gate_artifact_decode_failed" in suite_artifact_contract_text
+        and "text-artifact-decode-failed" in suite_artifact_contract_text
         and "validate_json_artifact_ok" in suite_artifact_contract_text
         and "agent_parity_gate_artifact_bad_shape" in suite_artifact_contract_text
         and "json-ok-artifact-bad-shape" in suite_artifact_contract_text
@@ -916,6 +918,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "validate_rollout_metrics_artifact" in suite_artifact_contract_text
         and "load_json_artifact" in suite_artifact_contract_text
         and "load-json-artifact-bad-shape" in suite_artifact_contract_text
+        and "load-json-artifact-decode-failed" in suite_artifact_contract_text
         and "summary_decode_failed" in suite_artifact_contract_text
         and "artifact_index_decode_failed" in suite_artifact_contract_text
         and "summary-decode-failed" in suite_artifact_contract_text

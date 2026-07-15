@@ -944,6 +944,46 @@ def run_self_test() -> int:
             )
             return 1
 
+        text_artifact_decode_run = root / "text-artifact-decode-failed"
+        write_minimal_self_test_run(text_artifact_decode_run, content_checked=True)
+        text_artifact_decode_rel = "agent_parity_gate/agent_loop_static_contracts.txt"
+        text_artifact_decode_path = text_artifact_decode_run / text_artifact_decode_rel
+        text_artifact_decode_path.parent.mkdir(parents=True, exist_ok=True)
+        text_artifact_decode_path.write_bytes(b"\xff\n")
+        text_artifact_decode_findings = validate_text_artifact_tokens(
+            text_artifact_decode_run,
+            text_artifact_decode_rel,
+            {"AGENT_LOOP_STATIC_CONTRACTS ok"},
+        )
+        if (
+            f"agent_parity_gate_artifact_decode_failed:{text_artifact_decode_rel}"
+            not in set(text_artifact_decode_findings)
+        ):
+            print(
+                f"SELF_TEST_FAIL text_artifact_decode_failed:{text_artifact_decode_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        load_json_decode_run = root / "load-json-artifact-decode-failed"
+        write_minimal_self_test_run(load_json_decode_run, content_checked=True)
+        load_json_decode_rel = "agent_parity_gate/compact_coverage.json"
+        load_json_decode_path = load_json_decode_run / load_json_decode_rel
+        load_json_decode_path.parent.mkdir(parents=True, exist_ok=True)
+        load_json_decode_path.write_bytes(b"\xff\n")
+        load_json_decode_findings, _ = validate_compact_coverage_artifact(
+            load_json_decode_run
+        )
+        if (
+            f"agent_parity_gate_artifact_decode_failed:{load_json_decode_rel}"
+            not in set(load_json_decode_findings)
+        ):
+            print(
+                f"SELF_TEST_FAIL load_json_artifact_decode_failed:{load_json_decode_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
         agent_contract_run = root / "agent-contract-mismatch"
         write_minimal_self_test_run(
             agent_contract_run,
