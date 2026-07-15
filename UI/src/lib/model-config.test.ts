@@ -135,6 +135,8 @@ test("builds model catalog views from structured capability fields", () => {
           context_window_tokens: 1_000_000,
           timeout_seconds: 180,
           credential_state: "configured_inline",
+          input_modalities: ["text", "image", "video"],
+          output_modalities: ["text"],
           supports_text: true,
           supports_image_input: true,
           supports_video_input: true,
@@ -161,6 +163,8 @@ test("builds model catalog views from structured capability fields", () => {
   assert.ok(!views[0].capabilityBadges.includes("audio / input"));
   assert.ok(views[0].metaBadges.includes("Context: 1M"));
   assert.ok(views[0].metaBadges.includes("credential_state=configured / inline"));
+  assert.ok(views[0].metaBadges.includes("Input: text, image, video"));
+  assert.ok(views[0].metaBadges.includes("Output: text"));
   assert.ok(views[0].metaBadges.includes("async_required=1"));
   assert.ok(views[0].metaBadges.some((badge) => badge.includes("MiniMax-M3")));
 });

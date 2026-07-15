@@ -200,6 +200,12 @@ export function buildModelCatalogEntryViews(
     if (entry.credential_state) {
       metaBadges.push(`credential_state=${formatMultimodalToken(entry.credential_state)}`);
     }
+    if ((entry.input_modalities ?? []).length > 0) {
+      metaBadges.push(`${copy(lang, "输入", "Input")}: ${(entry.input_modalities ?? []).map(formatMultimodalToken).join(", ")}`);
+    }
+    if ((entry.output_modalities ?? []).length > 0) {
+      metaBadges.push(`${copy(lang, "输出", "Output")}: ${(entry.output_modalities ?? []).map(formatMultimodalToken).join(", ")}`);
+    }
     metaBadges.push(entry.async_required ? "async_required=1" : "async_required=0");
     metaBadges.push(entry.dry_run_supported ? "dry_run_supported=1" : "dry_run_supported=0");
     if (entry.models.length > 0) {

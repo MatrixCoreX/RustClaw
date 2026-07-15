@@ -163,6 +163,8 @@ models = [
     "deepseek-chat",
     "deepseek-reasoner",
 ]
+input_modalities = ["text"]
+output_modalities = ["text"]
 timeout_seconds = 60
 
 # 用途/Purpose: Qwen 提供商连接与模型池.
@@ -178,6 +180,8 @@ models = [
     "qwen-plus-latest",
     "qwen-turbo-latest",
 ]
+input_modalities = ["text"]
+output_modalities = ["text"]
 timeout_seconds = 60
 # Phase 2.5: per-vendor 默认参数（可选）。不写就沿用 vendor 默认；写了会
 # 在 chat 调用没显式传 hints 时生效。例：
@@ -220,6 +224,8 @@ models = [
     "MiniMax-M2.1-highspeed",
     "MiniMax-M2",
 ]
+input_modalities = ["text", "image", "video"]
+output_modalities = ["text"]
 # MiniMax text routing/model calls can be slow under load; keep the per-request
 # window aligned with worker.llm_total_timeout_seconds instead of cutting off
 # normal responses at 60s.
@@ -239,6 +245,8 @@ models = [
     "mimo-v2.5-pro",
     "mimo-v2.5",
 ]
+input_modalities = ["text"]
+output_modalities = ["text"]
 # MiMo 在 planner / synthesis 长上下文下响应可能超过 60s；
 # 单次请求超时调高，整体任务仍由 [worker].llm_total_timeout_seconds 兜底。
 timeout_seconds = 180

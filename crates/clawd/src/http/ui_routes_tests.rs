@@ -495,6 +495,8 @@ base_url = "https://api.minimaxi.com/v1"
 api_key = "catalog-secret"
 model = "MiniMax-M3"
 models = ["MiniMax-M3", "MiniMax-M2.7"]
+input_modalities = ["text", "image", "video"]
+output_modalities = ["text"]
 context_window_tokens = 1000000
 timeout_seconds = 60
 "#,
@@ -553,6 +555,11 @@ minimax_models = ["music-2.6"]
         .find(|entry| entry["provider"] == "minimax")
         .expect("minimax entry");
     assert_eq!(minimax["model"], "MiniMax-M3");
+    assert_eq!(
+        minimax["input_modalities"],
+        json!(["text", "image", "video"])
+    );
+    assert_eq!(minimax["output_modalities"], json!(["text"]));
     assert_eq!(minimax["supports_text"], true);
     assert_eq!(minimax["supports_image_input"], true);
     assert_eq!(minimax["supports_video_input"], true);

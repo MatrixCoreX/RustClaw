@@ -45,6 +45,8 @@ TEXT_PROVIDER_FIELDS = [
     "base_url",
     "model",
     "models",
+    "input_modalities",
+    "output_modalities",
     "context_window_tokens",
     "timeout_seconds",
 ]
@@ -54,24 +56,32 @@ CHINESE_TEXT_PROVIDERS = {
         "base_url": "https://api.deepseek.com/v1",
         "model": "deepseek-chat",
         "models": {"deepseek-chat", "deepseek-reasoner"},
+        "input_modalities": {"text"},
+        "output_modalities": {"text"},
         "timeout_min": 60,
     },
     "qwen": {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "model": "qwen-max-latest",
         "models": {"qwen-max-latest", "qwen-plus-latest", "qwen-turbo-latest"},
+        "input_modalities": {"text"},
+        "output_modalities": {"text"},
         "timeout_min": 60,
     },
     "minimax": {
         "base_url": "https://api.minimaxi.com/v1",
         "model": "MiniMax-M3",
         "models": {"MiniMax-M3", "MiniMax-M2.7"},
+        "input_modalities": {"text", "image", "video"},
+        "output_modalities": {"text"},
         "timeout_min": 180,
         "context_window_min": 1_000_000,
     },
     "mimo": {
         "model": "mimo-v2.5-pro",
         "models": {"mimo-v2.5-pro", "mimo-v2.5"},
+        "input_modalities": {"text"},
+        "output_modalities": {"text"},
         "timeout_min": 180,
     },
 }
@@ -117,8 +127,10 @@ RUNTIME_CATALOG_ENTRY_FIELDS = {
     "context_window_tokens",
     "credential_state",
     "dry_run_supported",
+    "input_modalities",
     "model",
     "models",
+    "output_modalities",
     "provider",
     "schema_version",
     "supports_audio_generation",
@@ -212,6 +224,17 @@ def provider_models(section: dict[str, Any], provider: str) -> set[str]:
     return set(as_list(section.get(f"{provider}_models")))
 
 
+def modality_list(llm_table: dict[str, Any], key: str, fallback: list[str]) -> list[str]:
+    values = [value.strip().lower() for value in as_list(llm_table.get(key)) if value.strip()]
+    if not values:
+        return fallback
+    out: list[str] = []
+    for value in values:
+        if value not in out:
+            out.append(value)
+    return out
+
+
 def credential_state(llm_table: dict[str, Any], provider: str, env_values: dict[str, str]) -> str:
     if str(llm_table.get("api_key") or "").strip():
         return "configured_inline"
@@ -247,9 +270,16 @@ def catalog_entry(
     model = str(llm_table.get("model") or "")
     image_understanding_models = provider_models(image_vision, provider)
     audio_transcription_models = provider_models(stt, provider)
-    supports_image_input = model in image_understanding_models
-    supports_video_input = provider == "minimax" and model == "MiniMax-M3"
-    supports_audio_input = model in audio_transcription_models
+    fallback_inputs = ["text"]
+    if model in image_understanding_models:
+        fallback_inputs.append("image")
+    if model in audio_transcription_models:
+        fallback_inputs.append("audio")
+    input_modalities = modality_list(llm_table, "input_modalities", fallback_inputs)
+    output_modalities = modality_list(llm_table, "output_modalities", ["text"])
+    supports_image_input = "image" in input_modalities
+    supports_video_input = "video" in input_modalities
+    supports_audio_input = "audio" in input_modalities
     supports_image_understanding = bool(image_understanding_models)
     supports_audio_transcription = bool(audio_transcription_models)
     supports_image_generation = bool(
@@ -277,6 +307,8 @@ def catalog_entry(
         "context_window_tokens": llm_table.get("context_window_tokens"),
         "timeout_seconds": llm_table.get("timeout_seconds"),
         "credential_state": credential_state(llm_table, provider, env_values),
+        "input_modalities": input_modalities,
+        "output_modalities": output_modalities,
         "supports_text": True,
         "supports_image_input": supports_image_input,
         "supports_video_input": supports_video_input,
@@ -378,6 +410,18 @@ def check_text_provider_config(
             not missing_models,
             findings,
             f"{label}: [llm.{provider}].models missing {missing_models}",
+        )
+        input_modalities = set(as_list(table.get("input_modalities")))
+        output_modalities = set(as_list(table.get("output_modalities")))
+        require(
+            input_modalities == expected["input_modalities"],
+            findings,
+            f"{label}: [llm.{provider}].input_modalities expected {sorted(expected['input_modalities'])}",
+        )
+        require(
+            output_modalities == expected["output_modalities"],
+            findings,
+            f"{label}: [llm.{provider}].output_modalities expected {sorted(expected['output_modalities'])}",
         )
         timeout = table.get("timeout_seconds")
         require(
