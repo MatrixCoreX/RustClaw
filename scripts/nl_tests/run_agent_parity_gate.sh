@@ -390,6 +390,22 @@ echo "AGENT_PARITY_GATE_STEP semantic_boundary_contracts"
   python3 "${ROOT_DIR}/scripts/check_output_semantic_kind_write_boundary.py"
 } > "${OUT_DIR}/semantic_boundary_contracts.txt"
 
+echo "AGENT_PARITY_GATE_STEP agent_architecture_boundary_contracts"
+{
+  python3 "${ROOT_DIR}/scripts/check_boundary_envelope_schema.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_boundary_envelope_schema.py"
+  python3 "${ROOT_DIR}/scripts/check_intent_normalizer_boundary_schema.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_intent_normalizer_boundary_schema.py"
+  python3 "${ROOT_DIR}/scripts/check_planner_no_pre_llm_deterministic_fast_path.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_planner_no_pre_llm_deterministic_fast_path.py"
+  python3 "${ROOT_DIR}/scripts/check_capability_resolver_registry_only.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_capability_resolver_registry_only.py"
+  python3 "${ROOT_DIR}/scripts/check_finalizer_boundary.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_finalizer_boundary.py"
+  python3 "${ROOT_DIR}/scripts/check_evidence_policy_facade_boundary.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_evidence_policy_facade_boundary.py"
+} > "${OUT_DIR}/agent_architecture_boundary_contracts.txt"
+
 echo "AGENT_PARITY_GATE_STEP evidence_extractor_contracts"
 {
   python3 "${ROOT_DIR}/scripts/check_evidence_extractor_contracts.py" --self-test
@@ -497,6 +513,7 @@ fi
   echo "no_agent_mode_payload=1"
   echo "agent_loop_static_contracts=1"
   echo "semantic_boundary_contracts=1"
+  echo "agent_architecture_boundary_contracts=1"
   echo "evidence_extractor_contracts=1"
   echo "secret_scan_contract=1"
   echo "suite_wrapper_contract=1"
