@@ -147,12 +147,16 @@ write_artifact_index() {
   local artifact_index="${run_dir}/artifact_index.txt"
   local tmp
   tmp="$(mktemp)"
-  find "$run_dir" \
-    -mindepth 1 \
-    -maxdepth 4 \
-    -type f \
-    ! -name "artifact_index.txt" \
-    | sort > "$tmp"
+  (
+    cd "$run_dir"
+    find . \
+      -mindepth 1 \
+      -maxdepth 4 \
+      -type f \
+      ! -name "artifact_index.txt" \
+      -printf '%P\n' \
+      | sort > "$tmp"
+  )
   mv "$tmp" "$artifact_index"
 }
 

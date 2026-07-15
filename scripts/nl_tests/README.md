@@ -100,7 +100,8 @@ When launched through `run_suite.sh agent_parity_gate`, the gate stores its JSON
 artifacts under the same suite run directory at `agent_parity_gate/`; direct
 runs still default to `logs/agent_parity_gate/<timestamp>` unless `--out-dir` is
 provided. Wrapped suite runs also write `artifact_index.txt` at the suite run
-root, listing nested artifacts such as `agent_parity_gate/gate_summary.env` and
+root, listing run-root-relative nested artifacts such as
+`agent_parity_gate/gate_summary.env` and
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
 
 For rerun shards, use:
