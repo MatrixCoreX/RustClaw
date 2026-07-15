@@ -114,6 +114,8 @@ struct WorkspaceUpdateStatus {
     stderr_tail: String,
     error: Option<String>,
     next_step: Option<String>,
+    next_step_key: Option<String>,
+    next_step_args: BTreeMap<String, Value>,
 }
 
 impl Default for WorkspaceUpdateStatus {
@@ -132,6 +134,8 @@ impl Default for WorkspaceUpdateStatus {
             stderr_tail: String::new(),
             error: None,
             next_step: None,
+            next_step_key: None,
+            next_step_args: BTreeMap::new(),
         }
     }
 }

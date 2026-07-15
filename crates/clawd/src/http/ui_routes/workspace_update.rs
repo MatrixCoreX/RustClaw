@@ -33,6 +33,28 @@ fn workspace_update_control_lock(
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn clear_workspace_update_next_step(status: &mut WorkspaceUpdateStatus) {
+    status.next_step = None;
+    status.next_step_key = None;
+    status.next_step_args.clear();
+}
+
+fn set_workspace_update_next_step(status: &mut WorkspaceUpdateStatus, key: &str) {
+    status.next_step = None;
+    status.next_step_key = Some(key.to_string());
+    status.next_step_args.clear();
+}
+
+fn set_workspace_update_next_step_args(
+    status: &mut WorkspaceUpdateStatus,
+    key: &str,
+    args: BTreeMap<String, Value>,
+) {
+    status.next_step = None;
+    status.next_step_key = Some(key.to_string());
+    status.next_step_args = args;
+}
+
 fn workspace_update_api_error(
     status: StatusCode,
     error_code: &'static str,
@@ -133,12 +155,12 @@ async fn refresh_workspace_update_versions(
                 guard.status = "up_to_date".to_string();
                 guard.step = "already_latest".to_string();
                 guard.error = None;
-                guard.next_step = None;
+                clear_workspace_update_next_step(&mut guard);
             }
             (Some(_), Some(_)) => {
                 guard.status = "idle".to_string();
                 guard.step = "idle".to_string();
-                guard.next_step = None;
+                clear_workspace_update_next_step(&mut guard);
             }
             _ => {}
         }
@@ -289,7 +311,7 @@ async fn cancel_workspace_update(
         }
         control_guard.cancel_requested = true;
         status_guard.step = "cancel_requested".to_string();
-        status_guard.next_step = Some("正在停止当前编译进程。".to_string());
+        set_workspace_update_next_step(&mut status_guard, "workspace_update.cancel_requested");
         control_guard.active_child_pid
     };
 
@@ -344,7 +366,7 @@ async fn run_workspace_update_job(
             fail_workspace_update(
                 &shared,
                 "git rev-parse failed",
-                "请确认 RustClaw 目录是有效 Git 仓库。",
+                "workspace_update.invalid_git_repo",
                 out,
             );
             return;
@@ -353,7 +375,7 @@ async fn run_workspace_update_job(
             fail_workspace_update_with_error(
                 &shared,
                 err,
-                "请确认当前用户可以在 RustClaw 目录中运行 git。",
+                "workspace_update.git_unavailable",
             );
             return;
         }
@@ -378,7 +400,7 @@ async fn run_workspace_update_job(
             fail_workspace_update(
                 &shared,
                 "git fetch failed",
-                "更新要求以远端为准；远端检查失败时不会继续编译本地代码。请确认网络、Git remote 和 SSH key 后重试。",
+                "workspace_update.remote_fetch_required_failed",
                 out,
             );
             return;
@@ -387,7 +409,7 @@ async fn run_workspace_update_job(
             fail_workspace_update_with_error(
                 &shared,
                 err,
-                "更新要求以远端为准；远端检查失败时不会继续编译本地代码。请确认网络、Git remote 和 SSH key 后重试。",
+                "workspace_update.remote_fetch_required_failed",
             );
             return;
         }
@@ -409,7 +431,7 @@ async fn run_workspace_update_job(
             fail_workspace_update(
                 &shared,
                 "git rev-parse upstream failed",
-                "未能读取 upstream，无法确认远端目标版本。请确认当前分支已设置 upstream 后重试。",
+                "workspace_update.upstream_missing",
                 out,
             );
             return;
@@ -418,7 +440,7 @@ async fn run_workspace_update_job(
             fail_workspace_update_with_error(
                 &shared,
                 err,
-                "未能读取 upstream，无法确认远端目标版本。请确认当前分支已设置 upstream 后重试。",
+                "workspace_update.upstream_missing",
             );
             return;
         }
@@ -454,7 +476,7 @@ async fn run_workspace_update_job(
                             fail_workspace_update_with_error(
                             &shared,
                             err,
-                            "拉取失败，且无法可靠识别冲突文件；已保留本地文件，请手动处理后重试。",
+                            "workspace_update.pull_conflict_detection_failed",
                         );
                             return;
                         }
@@ -463,7 +485,7 @@ async fn run_workspace_update_job(
                     fail_workspace_update(
                         &shared,
                         "git pull --ff-only failed",
-                        "拉取失败，但没有发现远端变更与本地未提交文件的直接冲突；已保留本地文件，请手动检查分支是否分叉或权限是否正常。",
+                        "workspace_update.pull_failed_no_conflicts",
                         first_pull_out,
                     );
                     return;
@@ -477,16 +499,19 @@ async fn run_workspace_update_job(
                     fail_workspace_update_with_error(
                         &shared,
                         err,
-                        "覆盖冲突文件失败；未冲突的本地文件已保持不动，请手动处理后重试。",
+                        "workspace_update.conflict_overwrite_failed",
                     );
                     return;
                 }
                 {
                     let mut guard = workspace_update_status_lock(shared.as_ref());
-                    guard.next_step = Some(format!(
-                        "已只覆盖 {} 个冲突路径；其他本地改动和额外文件保持不动，正在重新拉取远端。",
-                        conflict_paths.len()
-                    ));
+                    let mut args = BTreeMap::new();
+                    args.insert("count".to_string(), json!(conflict_paths.len()));
+                    set_workspace_update_next_step_args(
+                        &mut guard,
+                        "workspace_update.conflicts_overwritten_retrying_pull",
+                        args,
+                    );
                 }
 
                 set_workspace_update_step(&shared, "pulling_latest_code");
@@ -508,7 +533,7 @@ async fn run_workspace_update_job(
                         fail_workspace_update(
                             &shared,
                             "git pull --ff-only failed after resolving conflicts",
-                            "已覆盖识别到的冲突文件，但重新拉取仍失败；其他本地文件未动，请查看 Git 输出后手动处理。",
+                            "workspace_update.pull_failed_after_conflict_overwrite",
                             out,
                         );
                         return;
@@ -517,7 +542,7 @@ async fn run_workspace_update_job(
                         fail_workspace_update_with_error(
                             &shared,
                             err,
-                            "已覆盖识别到的冲突文件，但重新拉取仍失败；其他本地文件未动，请查看 Git 输出后手动处理。",
+                            "workspace_update.pull_failed_after_conflict_overwrite",
                         );
                         return;
                     }
@@ -527,7 +552,7 @@ async fn run_workspace_update_job(
                 fail_workspace_update_with_error(
                     &shared,
                     err,
-                    "拉取远端失败；已保留本地文件，请确认 Git 和网络状态后重试。",
+                    "workspace_update.pull_failed_preserved",
                 );
                 return;
             }
@@ -539,8 +564,10 @@ async fn run_workspace_update_job(
         let mut guard = workspace_update_status_lock(shared.as_ref());
         guard.step = "skipping_pull_latest_code".to_string();
         if old_commit.is_some() && remote_commit.is_some() {
-            guard.next_step =
-                Some("远端没有新版本；本地文件保持不动，将继续执行完整编译。".to_string());
+            set_workspace_update_next_step(
+                &mut guard,
+                "workspace_update.no_remote_changes_building",
+            );
         }
     }
 
@@ -568,7 +595,7 @@ async fn run_workspace_update_job(
         guard.exit_code = None;
         guard.stdout_tail.clear();
         guard.stderr_tail.clear();
-        guard.next_step = Some("正在编译，编译日志会持续刷新。".to_string());
+        set_workspace_update_next_step(&mut guard, "workspace_update.build_logs_refreshing");
     }
     match run_workspace_update_command_streaming(
         "bash",
@@ -590,7 +617,7 @@ async fn run_workspace_update_job(
             fail_workspace_update(
                 &shared,
                 "./build-all.sh failed",
-                "请查看构建日志摘要；修复依赖或编译错误后再重试。",
+                "workspace_update.full_build_failed",
                 out,
             );
             return;
@@ -604,7 +631,7 @@ async fn run_workspace_update_job(
             fail_workspace_update_with_error(
                 &shared,
                 err,
-                "请确认服务器依赖完整，并查看构建日志。",
+                "workspace_update.full_build_dependency_check",
             );
             return;
         }
@@ -636,13 +663,13 @@ async fn run_workspace_update_job(
             guard.step = "restart_scheduled".to_string();
             guard.finished_ts = Some(current_unix_ts());
             guard.error = None;
-            guard.next_step = Some("RustClaw 正在重启，请等待 10-20 秒后刷新页面。".to_string());
+            set_workspace_update_next_step(&mut guard, "workspace_update.restart_wait");
         }
         Err(err) => {
             fail_workspace_update_with_error(
                 &shared,
                 format!("failed to schedule clawd restart: {err}"),
-                "构建已完成，但自动重启失败。请在服务器上手动重启 clawd。",
+                "workspace_update.full_restart_failed",
             );
         }
     }
@@ -677,7 +704,7 @@ async fn run_workspace_update_ui_only_job(
             fail_workspace_update(
                 &shared,
                 "./build-ui-nginx.sh failed",
-                "请查看 UI 编译日志；修复依赖或编译错误后再重试。",
+                "workspace_update.ui_build_failed",
                 out,
             );
         }
@@ -690,7 +717,7 @@ async fn run_workspace_update_ui_only_job(
             fail_workspace_update_with_error(
                 &shared,
                 err,
-                "请确认 UI 依赖完整，并查看编译日志。",
+                "workspace_update.ui_dependency_check",
             );
         }
     }
@@ -731,7 +758,7 @@ async fn run_workspace_update_clawd_only_job(
             fail_workspace_update(
                 &shared,
                 "cargo build -p clawd --release failed",
-                "请查看 clawd 编译日志；修复 Rust 编译错误后再重试。",
+                "workspace_update.clawd_build_failed",
                 out,
             );
             return;
@@ -742,7 +769,11 @@ async fn run_workspace_update_clawd_only_job(
             {
                 return;
             }
-            fail_workspace_update_with_error(&shared, err, "请确认 Rust 依赖完整，并查看编译日志。");
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "workspace_update.clawd_dependency_check",
+            );
             return;
         }
     }
@@ -758,13 +789,13 @@ async fn run_workspace_update_clawd_only_job(
             guard.step = "clawd_restart_scheduled".to_string();
             guard.finished_ts = Some(current_unix_ts());
             guard.error = None;
-            guard.next_step = Some("RustClaw 正在重启，请等待 10-20 秒后刷新页面。".to_string());
+            set_workspace_update_next_step(&mut guard, "workspace_update.restart_wait");
         }
         Err(err) => {
             fail_workspace_update_with_error(
                 &shared,
                 err,
-                "clawd 构建已完成，但自动重启失败。请在服务器上手动重启 clawd。",
+                "workspace_update.clawd_restart_failed",
             );
         }
     }
@@ -784,7 +815,10 @@ async fn run_workspace_update_release_deploy_job(
     reset_workspace_update_build_logs(&shared);
     {
         let mut guard = workspace_update_status_lock(shared.as_ref());
-        guard.next_step = Some("release_deploy_downloading".to_string());
+        set_workspace_update_next_step(
+            &mut guard,
+            "workspace_update.release_deploy_downloading",
+        );
     }
     match run_workspace_update_command_streaming(
         "bash",
@@ -806,7 +840,7 @@ async fn run_workspace_update_release_deploy_job(
             fail_workspace_update(
                 &shared,
                 "release deploy failed",
-                "release_deploy_check_network_or_permissions",
+                "workspace_update.release_deploy_check_network_or_permissions",
                 out,
             );
             return;
@@ -820,7 +854,7 @@ async fn run_workspace_update_release_deploy_job(
             fail_workspace_update_with_error(
                 &shared,
                 err,
-                "release_deploy_check_network_or_permissions",
+                "workspace_update.release_deploy_check_network_or_permissions",
             );
             return;
         }
@@ -837,13 +871,16 @@ async fn run_workspace_update_release_deploy_job(
             guard.step = "release_restart_scheduled".to_string();
             guard.finished_ts = Some(current_unix_ts());
             guard.error = None;
-            guard.next_step = Some("release_deploy_restart_scheduled".to_string());
+            set_workspace_update_next_step(
+                &mut guard,
+                "workspace_update.release_deploy_restart_scheduled",
+            );
         }
         Err(err) => {
             fail_workspace_update_with_error(
                 &shared,
                 err,
-                "release_deploy_restart_failed",
+                "workspace_update.release_deploy_restart_failed",
             );
         }
     }
@@ -1047,7 +1084,7 @@ fn reset_workspace_update_build_logs(shared: &Arc<Mutex<WorkspaceUpdateStatus>>)
     guard.exit_code = None;
     guard.stdout_tail.clear();
     guard.stderr_tail.clear();
-    guard.next_step = Some("正在编译，编译日志会持续刷新。".to_string());
+    set_workspace_update_next_step(&mut guard, "workspace_update.build_logs_refreshing");
 }
 
 fn finish_workspace_update_succeeded(
@@ -1063,7 +1100,7 @@ fn finish_workspace_update_succeeded(
     guard.stdout_tail = output.stdout_tail;
     guard.stderr_tail = output.stderr_tail;
     guard.error = None;
-    guard.next_step = None;
+    clear_workspace_update_next_step(&mut guard);
 }
 
 fn schedule_workspace_update_clawd_restart(workspace_root: &Path) -> Result<(), String> {
@@ -1142,13 +1179,13 @@ fn finish_workspace_update_canceled(
     guard.finished_ts = Some(current_unix_ts());
     guard.exit_code = None;
     guard.error = Some("workspace update canceled by user".to_string());
-    guard.next_step = Some("编译已停止；可以修复问题后重新编译。".to_string());
+    set_workspace_update_next_step(&mut guard, "workspace_update.canceled");
 }
 
 fn fail_workspace_update(
     shared: &Arc<Mutex<WorkspaceUpdateStatus>>,
     error: &str,
-    next_step: &str,
+    next_step_key: &str,
     output: WorkspaceUpdateCommandOutput,
 ) {
     let mut guard = workspace_update_status_lock(shared.as_ref());
@@ -1158,19 +1195,19 @@ fn fail_workspace_update(
     guard.stdout_tail = output.stdout_tail;
     guard.stderr_tail = output.stderr_tail;
     guard.error = Some(error.to_string());
-    guard.next_step = Some(next_step.to_string());
+    set_workspace_update_next_step(&mut guard, next_step_key);
 }
 
 fn fail_workspace_update_with_error(
     shared: &Arc<Mutex<WorkspaceUpdateStatus>>,
     error: impl Into<String>,
-    next_step: &str,
+    next_step_key: &str,
 ) {
     let mut guard = workspace_update_status_lock(shared.as_ref());
     guard.status = "failed".to_string();
     guard.finished_ts = Some(current_unix_ts());
     guard.error = Some(error.into());
-    guard.next_step = Some(next_step.to_string());
+    set_workspace_update_next_step(&mut guard, next_step_key);
 }
 
 async fn detect_workspace_update_conflict_paths(
