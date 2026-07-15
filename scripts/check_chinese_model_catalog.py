@@ -118,6 +118,112 @@ def require(condition: bool, findings: list[str], message: str) -> None:
         fail(findings, message)
 
 
+def base_url_kind(base_url: str) -> str:
+    if "api.minimaxi.com" in base_url:
+        return "minimax_official_openai_compat"
+    if "xiaomimimo.com" in base_url:
+        return "mimo_token_plan_openai_compat"
+    if "dashscope.aliyuncs.com/compatible-mode" in base_url:
+        return "qwen_dashscope_openai_compat"
+    if "api.deepseek.com" in base_url:
+        return "deepseek_official_openai_compat"
+    if "dashscope.aliyuncs.com/api/v1" in base_url:
+        return "qwen_dashscope_native"
+    return "custom_or_unknown"
+
+
+def provider_models(section: dict[str, Any], provider: str) -> set[str]:
+    return set(as_list(section.get(f"{provider}_models")))
+
+
+def catalog_entry(
+    provider: str,
+    llm_table: dict[str, Any],
+    image: dict[str, Any],
+    audio: dict[str, Any],
+    video: dict[str, Any],
+    music: dict[str, Any],
+) -> dict[str, Any]:
+    image_edit = image.get("image_edit", {}) if isinstance(image.get("image_edit"), dict) else {}
+    image_generation = (
+        image.get("image_generation", {}) if isinstance(image.get("image_generation"), dict) else {}
+    )
+    image_vision = image.get("image_vision", {}) if isinstance(image.get("image_vision"), dict) else {}
+    tts = audio.get("audio_synthesize", {}) if isinstance(audio.get("audio_synthesize"), dict) else {}
+    stt = audio.get("audio_transcribe", {}) if isinstance(audio.get("audio_transcribe"), dict) else {}
+    video_gen = video.get("video_generation", {}) if isinstance(video.get("video_generation"), dict) else {}
+    music_gen = music.get("music_generation", {}) if isinstance(music.get("music_generation"), dict) else {}
+
+    model = str(llm_table.get("model") or "")
+    image_understanding_models = provider_models(image_vision, provider)
+    audio_transcription_models = provider_models(stt, provider)
+    supports_image_input = model in image_understanding_models
+    supports_video_input = provider == "minimax" and model == "MiniMax-M3"
+    supports_audio_input = model in audio_transcription_models
+    supports_image_understanding = bool(image_understanding_models)
+    supports_audio_transcription = bool(audio_transcription_models)
+    supports_image_generation = bool(
+        provider_models(image_generation, provider) or provider_models(image_edit, provider)
+    )
+    supports_audio_generation = bool(provider_models(tts, provider))
+    supports_video_generation = bool(provider_models(video_gen, provider))
+    supports_music_generation = bool(provider_models(music_gen, provider))
+    media_support = any(
+        [
+            supports_image_generation,
+            supports_audio_generation,
+            supports_video_generation,
+            supports_music_generation,
+        ]
+    )
+
+    return {
+        "schema_version": 1,
+        "provider": provider,
+        "model": model,
+        "models": as_list(llm_table.get("models")),
+        "api_style": "openai_compatible",
+        "base_url_kind": base_url_kind(str(llm_table.get("base_url") or "")),
+        "context_window_tokens": llm_table.get("context_window_tokens"),
+        "timeout_seconds": llm_table.get("timeout_seconds"),
+        "supports_text": True,
+        "supports_image_input": supports_image_input,
+        "supports_video_input": supports_video_input,
+        "supports_audio_input": supports_audio_input,
+        "supports_image_understanding": supports_image_understanding,
+        "supports_audio_transcription": supports_audio_transcription,
+        "supports_image_generation": supports_image_generation,
+        "supports_audio_generation": supports_audio_generation,
+        "supports_video_generation": supports_video_generation,
+        "supports_music_generation": supports_music_generation,
+        "async_required": media_support,
+        "dry_run_supported": media_support,
+        "config_source": [
+            "configs/config.toml",
+            "configs/image.toml",
+            "configs/audio.toml",
+            "configs/video.toml",
+            "configs/music.toml",
+            f"prompts/layers/vendor_patches/{provider}",
+        ],
+    }
+
+
+def build_catalog(main: dict[str, Any]) -> list[dict[str, Any]]:
+    llm = main.get("llm") if isinstance(main.get("llm"), dict) else {}
+    image = load_toml(IMAGE_CONFIG)
+    audio = load_toml(AUDIO_CONFIG)
+    video = load_toml(VIDEO_CONFIG)
+    music = load_toml(MUSIC_CONFIG)
+    catalog: list[dict[str, Any]] = []
+    for provider in sorted(CHINESE_TEXT_PROVIDERS):
+        table = llm.get(provider) if isinstance(llm, dict) else None
+        if not isinstance(table, dict):
+            continue
+        catalog.append(catalog_entry(provider, table, image, audio, video, music))
+    return catalog
+
+
 def check_text_provider_config(
     findings: list[str],
     label: str,
@@ -327,21 +433,26 @@ def build_report() -> dict[str, Any]:
     check_media_config(findings)
     check_vendor_patches(findings)
     check_chinese_case_gate(findings)
+    catalog = build_catalog(main)
     return {
         "schema_version": 1,
         "status": "ok" if not findings else "error",
         "finding_count": len(findings),
         "findings": findings,
+        "catalog": catalog,
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true", help="print machine-readable JSON report")
+    parser.add_argument("--catalog-only", action="store_true", help="print only the model catalog JSON array")
     args = parser.parse_args()
 
     report = build_report()
-    if args.json:
+    if args.catalog_only:
+        print(json.dumps(report["catalog"], ensure_ascii=False, indent=2, sort_keys=True))
+    elif args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     elif report["status"] == "ok":
         print("CHINESE_MODEL_CATALOG_CHECK ok")
