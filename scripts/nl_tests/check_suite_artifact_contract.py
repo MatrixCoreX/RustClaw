@@ -885,6 +885,52 @@ def run_self_test() -> int:
             )
             return 1
 
+        report_shape_cases = (
+            (
+                "missing-contract-report",
+                None,
+                "contract_report_missing",
+            ),
+            (
+                "bad-json",
+                "{not-json",
+                "contract_report_bad_json",
+            ),
+            (
+                "bad-shape",
+                "[]",
+                "contract_report_bad_shape",
+            ),
+        )
+        for label, stored_report_text, expected_finding in report_shape_cases:
+            case_run = root / label
+            write_minimal_self_test_run(case_run, content_checked=True)
+            report_path = case_run / "suite_artifact_contract.json"
+            if stored_report_text is None:
+                report_path.unlink()
+            else:
+                report_path.write_text(stored_report_text + "\n", encoding="utf-8")
+            case_findings = validate_existing_contract_report(
+                case_run,
+                {
+                    "summary": {
+                        "suite": "manual",
+                        "status": "ok",
+                        "exit_code": "0",
+                        "artifact_finalize_status": "ok",
+                        "run_log": "run.log",
+                        "artifact_index": "artifact_index.txt",
+                    },
+                },
+                require_content_checked=True,
+            )
+            if expected_finding not in set(case_findings):
+                print(
+                    f"SELF_TEST_FAIL {label}:{case_findings}",
+                    file=sys.stderr,
+                )
+                return 1
+
         base_field_cases = (
             (
                 "not-ok",
