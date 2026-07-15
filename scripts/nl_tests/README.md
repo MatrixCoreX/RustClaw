@@ -74,7 +74,7 @@ Agent parity gate:
 
 This is the default lightweight gate after a Codex/Claude-style agent-loop
 implementation batch. It runs the static compact coverage check, the
-shared secret scan contract, Chinese-provider model catalog guard, a dry-run
+shared secret scan contract, Chinese-provider model catalog guard and self-test, a dry-run
 Chinese-provider smoke matrix with MiniMax as the default live scope, the
 offline coding-loop repair fixture expectations, and bounded rollout metrics
 for that fixture. MiMo, Qwen, and DeepSeek remain in the metadata matrix but
@@ -148,7 +148,8 @@ agent parity contracts in non-agent-parity reports. If the nested agent parity
 gate summary is missing, the checker returns the structured
 `agent_parity_gate_summary_missing` finding instead of crashing. Enabled optional steps are also content-checked from
 `gate_summary.env`: compact coverage must have no missing/forbidden rows,
-Chinese model catalog must report `status=ok` with all Chinese providers, and
+Chinese model catalog must report `status=ok` with all Chinese providers, its
+`chinese_model_catalog_self_test.txt` must include `CHINESE_MODEL_CATALOG_SELF_TEST ok`, and
 the coding repair fixture metrics must satisfy the configured pass-rate,
 prompt-truncation, provider-error, and average-LLM-call thresholds. When
 provider smoke is enabled, the contract also checks the case coverage artifact,

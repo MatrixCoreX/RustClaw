@@ -80,6 +80,7 @@ AGENT_PARITY_GATE_OPTIONAL_ARTIFACTS_BY_FLAG = {
         "agent_parity_gate/compact_coverage.json",
     },
     "model_catalog": {
+        "agent_parity_gate/chinese_model_catalog_self_test.txt",
         "agent_parity_gate/chinese_model_catalog.json",
     },
     "provider_smoke": {
@@ -587,6 +588,13 @@ def validate_enabled_agent_parity_optional_artifacts(
         findings.extend(coverage_findings)
         checks += coverage_checks
     if gate_summary.get("model_catalog") == "1":
+        self_test_findings = validate_text_artifact_tokens(
+            run_dir,
+            "agent_parity_gate/chinese_model_catalog_self_test.txt",
+            {"CHINESE_MODEL_CATALOG_SELF_TEST ok"},
+        )
+        findings.extend(self_test_findings)
+        checks += 0 if self_test_findings else 1
         catalog_findings, catalog_checks = validate_chinese_model_catalog_artifact(run_dir)
         findings.extend(catalog_findings)
         checks += catalog_checks

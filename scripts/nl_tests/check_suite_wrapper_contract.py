@@ -66,6 +66,8 @@ SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_json_ok_bad_shape_self_test": "json-ok-artifact-bad-shape",
     "agent_parity_compact_coverage_validator": "validate_compact_coverage_artifact",
     "agent_parity_chinese_catalog_validator": "validate_chinese_model_catalog_artifact",
+    "agent_parity_chinese_catalog_self_test_artifact": "chinese_model_catalog_self_test.txt",
+    "agent_parity_chinese_catalog_self_test_token": "CHINESE_MODEL_CATALOG_SELF_TEST ok",
     "agent_parity_chinese_catalog_bad_catalog_shape": "agent_parity_gate_chinese_model_catalog_bad_catalog_shape",
     "agent_parity_chinese_catalog_bad_catalog_shape_self_test": "chinese-model-catalog-bad-catalog-shape",
     "agent_parity_provider_smoke_validator": "validate_provider_smoke_artifacts",

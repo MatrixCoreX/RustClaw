@@ -13,6 +13,7 @@ import json
 import os
 import shlex
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -174,8 +175,31 @@ STALE_MINIMAX_ENDPOINT_SCAN_ROOTS = (
 STALE_MINIMAX_ENDPOINT_SCAN_SUFFIXES = (".toml", ".ts", ".tsx", ".rs", ".py", ".sh")
 
 
-def load_toml(path: Path) -> dict[str, Any]:
-    return tomllib.loads(path.read_text(encoding="utf-8"))
+def relative_path_label(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+def load_toml(path: Path, findings: list[str]) -> dict[str, Any]:
+    label = relative_path_label(path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        fail(findings, f"toml_missing:{label}")
+        return {}
+    except OSError as exc:
+        fail(findings, f"toml_read_failed:{label}:{exc.__class__.__name__}")
+        return {}
+    except UnicodeDecodeError:
+        fail(findings, f"toml_decode_failed:{label}")
+        return {}
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        fail(findings, f"toml_parse_failed:{label}")
+        return {}
 
 
 def as_list(value: Any) -> list[str]:
@@ -368,14 +392,18 @@ def catalog_entry(
     }
 
 
-def build_catalog(main: dict[str, Any], env_values: dict[str, str]) -> list[dict[str, Any]]:
+def build_catalog(
+    main: dict[str, Any],
+    env_values: dict[str, str],
+    findings: list[str],
+) -> list[dict[str, Any]]:
     llm = main.get("llm") if isinstance(main.get("llm"), dict) else {}
     selected_provider = str(llm.get("selected_vendor") or "") if isinstance(llm, dict) else ""
     selected_model = str(llm.get("selected_model") or "") if isinstance(llm, dict) else ""
-    image = load_toml(IMAGE_CONFIG)
-    audio = load_toml(AUDIO_CONFIG)
-    video = load_toml(VIDEO_CONFIG)
-    music = load_toml(MUSIC_CONFIG)
+    image = load_toml(IMAGE_CONFIG, findings)
+    audio = load_toml(AUDIO_CONFIG, findings)
+    video = load_toml(VIDEO_CONFIG, findings)
+    music = load_toml(MUSIC_CONFIG, findings)
     catalog: list[dict[str, Any]] = []
     for provider in sorted(CHINESE_TEXT_PROVIDERS):
         table = llm.get(provider) if isinstance(llm, dict) else None
@@ -506,10 +534,10 @@ def check_main_docker_text_parity(findings: list[str], main: dict[str, Any], doc
 
 
 def check_media_config(findings: list[str], main: dict[str, Any]) -> None:
-    image = load_toml(IMAGE_CONFIG)
-    audio = load_toml(AUDIO_CONFIG)
-    video = load_toml(VIDEO_CONFIG)
-    music = load_toml(MUSIC_CONFIG)
+    image = load_toml(IMAGE_CONFIG, findings)
+    audio = load_toml(AUDIO_CONFIG, findings)
+    video = load_toml(VIDEO_CONFIG, findings)
+    music = load_toml(MUSIC_CONFIG, findings)
     main_llm = main.get("llm") if isinstance(main.get("llm"), dict) else {}
     minimax_table = main_llm.get("minimax") if isinstance(main_llm, dict) else {}
     active_minimax_text_model = (
@@ -789,6 +817,14 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate must pass Chinese-provider env-file args to catalog and smoke checks",
     )
     require(
+        "AGENT_PARITY_GATE_STEP chinese_model_catalog_self_test" in parity_text
+        and "check_chinese_model_catalog.py" in parity_text
+        and "--self-test" in parity_text
+        and "chinese_model_catalog_self_test.txt" in parity_text,
+        findings,
+        "agent parity gate must run the Chinese model catalog self-test artifact",
+    )
+    require(
         "chinese_provider_live_providers=${CHINESE_PROVIDER_LIVE_PROVIDERS}" in parity_text,
         findings,
         "agent parity gate summary must record the Chinese-provider live scope",
@@ -910,6 +946,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "json-ok-artifact-bad-shape" in suite_artifact_contract_text
         and "validate_compact_coverage_artifact" in suite_artifact_contract_text
         and "validate_chinese_model_catalog_artifact" in suite_artifact_contract_text
+        and "chinese_model_catalog_self_test.txt" in suite_artifact_contract_text
+        and "CHINESE_MODEL_CATALOG_SELF_TEST ok" in suite_artifact_contract_text
         and (
             "agent_parity_gate_chinese_model_catalog_bad_catalog_shape"
             in suite_artifact_contract_text
@@ -1034,6 +1072,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             and "no_agent_mode_payload.txt" in readme_body
             and "suite_artifact_contract.json" in readme_body
             and "suite_artifact_contract_self_test.txt" in readme_body
+            and "chinese_model_catalog_self_test.txt" in readme_body
             and "agent_parity_gate_contract.checked=true" in readme_body
             and "--validate-contract-report-content" in readme_body
             and "--require-contract-report-content-checked" in readme_body
@@ -1074,22 +1113,77 @@ def check_no_stale_minimax_endpoints(findings: list[str]) -> None:
                     )
 
 
+def check_toml_loader_contract(findings: list[str]) -> None:
+    try:
+        source = Path(__file__).read_text(encoding="utf-8")
+    except OSError as exc:
+        fail(findings, f"toml_loader_contract_read_failed:{exc.__class__.__name__}")
+        return
+    require(
+        "toml_missing" in source
+        and "toml_read_failed" in source
+        and "toml_decode_failed" in source
+        and "toml_parse_failed" in source
+        and "CHINESE_MODEL_CATALOG_SELF_TEST ok" in source
+        and "--self-test" in source,
+        findings,
+        "Chinese model catalog TOML loader must expose structured failure findings and self-test",
+    )
+
+
+def run_self_test() -> int:
+    with tempfile.TemporaryDirectory(prefix="chinese-model-catalog-") as tmp:
+        root = Path(tmp)
+        cases: list[tuple[str, Path, str]] = []
+
+        missing_path = root / "missing.toml"
+        cases.append(("missing", missing_path, f"toml_missing:{missing_path}"))
+
+        read_failed_path = root / "read-failed.toml"
+        read_failed_path.mkdir()
+        cases.append(("read_failed", read_failed_path, f"toml_read_failed:{read_failed_path}:"))
+
+        decode_failed_path = root / "decode-failed.toml"
+        decode_failed_path.write_bytes(b"\xff\n")
+        cases.append(("decode_failed", decode_failed_path, f"toml_decode_failed:{decode_failed_path}"))
+
+        parse_failed_path = root / "parse-failed.toml"
+        parse_failed_path.write_text("llm = [\n", encoding="utf-8")
+        cases.append(("parse_failed", parse_failed_path, f"toml_parse_failed:{parse_failed_path}"))
+
+        for label, path, expected_prefix in cases:
+            findings: list[str] = []
+            payload = load_toml(path, findings)
+            if payload != {} or not any(
+                finding.startswith(expected_prefix) for finding in findings
+            ):
+                print(
+                    f"SELF_TEST_FAIL {label}:payload={payload} findings={findings}",
+                    file=sys.stderr,
+                )
+                return 1
+
+    print("CHINESE_MODEL_CATALOG_SELF_TEST ok")
+    return 0
+
+
 def build_report(env_file: Path | None = None) -> dict[str, Any]:
     findings: list[str] = []
     env_values = load_env_file(env_file, findings)
-    main = load_toml(MAIN_CONFIG)
-    docker = load_toml(DOCKER_CONFIG)
+    main = load_toml(MAIN_CONFIG, findings)
+    docker = load_toml(DOCKER_CONFIG, findings)
     check_text_provider_config(findings, "configs/config.toml", main)
     check_text_provider_config(findings, "docker/config/config.toml", docker)
     check_main_docker_text_parity(findings, main, docker)
     check_media_config(findings, main)
     check_vendor_patches(findings)
     check_chinese_case_gate(findings)
-    catalog = build_catalog(main, env_values)
+    catalog = build_catalog(main, env_values, findings)
     check_runtime_catalog_shape(findings, catalog)
     check_model_catalog_teaching_projection(findings)
     check_chinese_provider_smoke_live_scope(findings)
     check_no_stale_minimax_endpoints(findings)
+    check_toml_loader_contract(findings)
     findings.extend(secret_scan_findings(catalog, "$.catalog"))
     return {
         "schema_version": 1,
@@ -1105,7 +1199,11 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="print machine-readable JSON report")
     parser.add_argument("--catalog-only", action="store_true", help="print only the model catalog JSON array")
     parser.add_argument("--env-file", type=Path, help="optional env file used only for credential_state detection")
+    parser.add_argument("--self-test", action="store_true", help="run local contract self-test")
     args = parser.parse_args()
+
+    if args.self_test:
+        return run_self_test()
 
     report = build_report(args.env_file)
     if args.catalog_only:
