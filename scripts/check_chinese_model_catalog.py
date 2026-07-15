@@ -36,6 +36,8 @@ IMAGE_CONFIG = ROOT / "configs/image.toml"
 AUDIO_CONFIG = ROOT / "configs/audio.toml"
 VIDEO_CONFIG = ROOT / "configs/video.toml"
 MUSIC_CONFIG = ROOT / "configs/music.toml"
+README = ROOT / "README.md"
+README_ZH_CN = ROOT / "README.zh-CN.md"
 CHINESE_CASE_FILE = ROOT / "scripts/nl_tests/cases/nl_cases_chinese_model_adapter_20260715.txt"
 CHINESE_PROVIDER_SMOKE_RUNNER = ROOT / "scripts/nl_tests/run_chinese_provider_smoke_matrix.sh"
 AGENT_PARITY_GATE_RUNNER = ROOT / "scripts/nl_tests/run_agent_parity_gate.sh"
@@ -699,11 +701,23 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         findings,
         f"missing {SUITE_ARTIFACT_CONTRACT_CHECKER.relative_to(ROOT)}",
     )
+    require(
+        README.exists(),
+        findings,
+        f"missing {README.relative_to(ROOT)}",
+    )
+    require(
+        README_ZH_CN.exists(),
+        findings,
+        f"missing {README_ZH_CN.relative_to(ROOT)}",
+    )
     if not CHINESE_PROVIDER_SMOKE_RUNNER.exists() or not AGENT_PARITY_GATE_RUNNER.exists():
         return
 
     smoke_text = CHINESE_PROVIDER_SMOKE_RUNNER.read_text(encoding="utf-8")
     parity_text = AGENT_PARITY_GATE_RUNNER.read_text(encoding="utf-8")
+    readme_text = README.read_text(encoding="utf-8") if README.exists() else ""
+    readme_zh_text = README_ZH_CN.read_text(encoding="utf-8") if README_ZH_CN.exists() else ""
     suite_wrapper_text = (
         SUITE_WRAPPER_CONTRACT_CHECKER.read_text(encoding="utf-8")
         if SUITE_WRAPPER_CONTRACT_CHECKER.exists()
@@ -905,6 +919,16 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         findings,
         "agent parity gate must co-locate artifacts under NL_SUITE_RUN_DIR when wrapped by run_suite",
     )
+    for label, readme_body in (("README.md", readme_text), ("README.zh-CN.md", readme_zh_text)):
+        require(
+            "agent_loop_static_contracts.txt" in readme_body
+            and "no_agent_mode_payload.txt" in readme_body
+            and "suite_artifact_contract.json" in readme_body
+            and "agent_parity_gate_contract.checked=true" in readme_body
+            and "llm_raw_trace_runner_contract.txt" in readme_body,
+            findings,
+            f"{label} must document agent parity nested/static/raw-trace gate artifacts",
+        )
 
 
 def check_no_stale_minimax_endpoints(findings: list[str]) -> None:
