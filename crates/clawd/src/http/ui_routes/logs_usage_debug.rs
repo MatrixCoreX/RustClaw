@@ -1127,19 +1127,26 @@ async fn task_debug_detail(
     });
     let calls = numbered_task_debug_calls(&entries);
     let flow_summary = build_task_debug_flow_summary(&calls);
-    let memory_trace = match read_task_memory_trace_for_debug(&state, normalized_task_id) {
-        Ok(trace) => trace,
+    let task_result_json = match read_task_result_json_for_debug(&state, normalized_task_id) {
+        Ok(value) => value,
         Err(err) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse {
                     ok: false,
                     data: None,
-                    error: Some(format!("debug_task_memory_trace_read_failed:{err}")),
+                    error: Some(format!("debug_task_result_read_failed:{err}")),
                 }),
             );
         }
     };
+    let memory_trace = task_result_json
+        .as_ref()
+        .and_then(|(_, result_json)| extract_memory_trace_for_debug(result_json));
+    let resume_trace = task_result_json
+        .as_ref()
+        .and_then(|(db_status, result_json)| extract_resume_trace_for_debug(db_status, result_json));
+    let model_catalog_trace = build_model_catalog_trace_for_debug(&state, &entries);
     (
         StatusCode::OK,
         Json(ApiResponse {
@@ -1151,35 +1158,12 @@ async fn task_debug_detail(
                 "calls": calls,
                 "entries": entries,
                 "memory_trace": memory_trace,
+                "model_catalog_trace": model_catalog_trace,
+                "resume_trace": resume_trace,
             })),
             error: None,
         }),
     )
-}
-
-fn read_task_memory_trace_for_debug(
-    state: &AppState,
-    task_id: &str,
-) -> anyhow::Result<Option<Value>> {
-    let db = state
-        .core
-        .db
-        .get()
-        .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
-    let raw_result_json = db
-        .query_row(
-            "SELECT result_json FROM tasks WHERE task_id = ?1 LIMIT 1",
-            [task_id],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    let Some(raw_result_json) = raw_result_json else {
-        return Ok(None);
-    };
-    let Ok(result_json) = serde_json::from_str::<Value>(&raw_result_json) else {
-        return Ok(None);
-    };
-    Ok(extract_memory_trace_for_debug(&result_json))
 }
 
 fn extract_memory_trace_for_debug(result_json: &Value) -> Option<Value> {
@@ -1447,4 +1431,5 @@ mod logs_usage_debug_tests {
         assert_eq!(trace["stages"][0]["stage"], "route");
         assert_eq!(trace["stages"][1]["stage"], "execution");
     }
+
 }

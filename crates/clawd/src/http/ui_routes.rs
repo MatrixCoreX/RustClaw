@@ -347,6 +347,7 @@ include!("ui_routes/nni_remote_join.rs");
 include!("ui_routes/auth_feishu_bind.rs");
 include!("ui_routes/factory_reset.rs");
 include!("ui_routes/channel_config.rs");
+include!("ui_routes/task_debug_trace.rs");
 include!("ui_routes/logs_usage_debug.rs");
 include!("ui_routes/service_control.rs");
 include!("ui_routes/workspace_update.rs");

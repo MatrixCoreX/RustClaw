@@ -142,6 +142,8 @@ export interface TaskLlmDebugResponse {
   calls?: TaskLlmDebugCall[] | null;
   entries?: TaskLlmDebugCall[] | null;
   memory_trace?: unknown | null;
+  model_catalog_trace?: unknown | null;
+  resume_trace?: unknown | null;
 }
 
 export interface ActiveTaskItem {
