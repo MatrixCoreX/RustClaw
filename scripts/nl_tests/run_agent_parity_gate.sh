@@ -8,6 +8,7 @@ RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
 OUT_DIR="${ROOT_DIR}/logs/agent_parity_gate/${RUN_STAMP}"
 RUN_DIRS=()
 SKIP_COVERAGE=0
+SKIP_MODEL_CATALOG=0
 SKIP_CODING_FIXTURE=0
 SKIP_METRICS=0
 DEDUPE_LATEST_CASE=0
@@ -35,6 +36,7 @@ Options:
   --run-dir PATH                  Add a client-like run directory to summarize.
   --out-dir PATH                  Gate artifact directory. Default: logs/agent_parity_gate/<timestamp>
   --skip-coverage                 Skip compact metadata coverage.
+  --skip-model-catalog            Skip Chinese-provider model catalog guard.
   --skip-coding-fixture           Skip offline coding-loop repair fixture.
   --skip-metrics                  Skip metrics gates for provided run dirs.
   --dedupe-latest-case            For rerun shards, keep latest valid turn per numeric case id.
@@ -66,6 +68,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-coverage)
       SKIP_COVERAGE=1
+      shift
+      ;;
+    --skip-model-catalog)
+      SKIP_MODEL_CATALOG=1
       shift
       ;;
     --skip-coding-fixture)
@@ -175,6 +181,12 @@ if [[ "$SKIP_COVERAGE" -eq 0 ]]; then
     > "${OUT_DIR}/compact_coverage.json"
 fi
 
+if [[ "$SKIP_MODEL_CATALOG" -eq 0 ]]; then
+  echo "AGENT_PARITY_GATE_STEP chinese_model_catalog"
+  python3 "${ROOT_DIR}/scripts/check_chinese_model_catalog.py" --json \
+    > "${OUT_DIR}/chinese_model_catalog.json"
+fi
+
 if [[ "$SKIP_CODING_FIXTURE" -eq 0 ]]; then
   echo "AGENT_PARITY_GATE_STEP coding_loop_repair_fixture"
   python3 "${SCRIPT_DIR}/evaluate_client_like_run.py" \
@@ -199,6 +211,7 @@ fi
 {
   echo "out_dir=${OUT_DIR}"
   echo "coverage=$((1 - SKIP_COVERAGE))"
+  echo "model_catalog=$((1 - SKIP_MODEL_CATALOG))"
   echo "coding_fixture=$((1 - SKIP_CODING_FIXTURE))"
   echo "run_dir_count=${#RUN_DIRS[@]}"
   echo "metrics=$((1 - SKIP_METRICS))"
