@@ -273,6 +273,10 @@ echo "AGENT_PARITY_GATE_STEP agent_loop_static_contracts"
     --fail-on-ui-visible
 } > "${OUT_DIR}/agent_loop_static_contracts.txt"
 
+echo "AGENT_PARITY_GATE_STEP evidence_extractor_contracts"
+python3 "${ROOT_DIR}/scripts/check_evidence_extractor_contracts.py" \
+  > "${OUT_DIR}/evidence_extractor_contracts.txt"
+
 echo "AGENT_PARITY_GATE_STEP secret_scan_contract"
 python3 "${SCRIPT_DIR}/check_secret_scan_contract.py" --json \
   > "${OUT_DIR}/secret_scan_contract.json"
@@ -357,6 +361,7 @@ fi
   echo "out_dir_ref=$(path_ref "$OUT_DIR")"
   echo "no_agent_mode_payload=1"
   echo "agent_loop_static_contracts=1"
+  echo "evidence_extractor_contracts=1"
   echo "secret_scan_contract=1"
   echo "suite_wrapper_contract=1"
   echo "runner_path_ref_contract=1"

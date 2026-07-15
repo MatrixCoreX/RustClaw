@@ -31,6 +31,7 @@ AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
     "agent_parity_gate/runtime_hard_reply_baseline.txt",
     "agent_parity_gate/no_agent_mode_payload.txt",
     "agent_parity_gate/agent_loop_static_contracts.txt",
+    "agent_parity_gate/evidence_extractor_contracts.txt",
     "agent_parity_gate/secret_scan_contract.json",
     "agent_parity_gate/suite_wrapper_contract.json",
     "agent_parity_gate/runner_path_ref_contract.json",
@@ -42,6 +43,7 @@ AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
 AGENT_PARITY_GATE_REQUIRED_FLAGS = {
     "no_agent_mode_payload": "1",
     "agent_loop_static_contracts": "1",
+    "evidence_extractor_contracts": "1",
     "secret_scan_contract": "1",
     "suite_wrapper_contract": "1",
     "runner_path_ref_contract": "1",
@@ -74,6 +76,9 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
         "PRE_PLANNER_EXIT_REMOVAL_CHECK findings=0",
         "NL_HARDMATCH_SCAN unknown=0 known_legacy=0",
         "HISTORICAL_HARDCODED_LANGUAGE_SCAN total=",
+    },
+    "agent_parity_gate/evidence_extractor_contracts.txt": {
+        "EVIDENCE_EXTRACTOR_CONTRACT_CHECK findings=0",
     },
     "agent_parity_gate/llm_raw_trace_runner_contract.txt": {
         "SELF_TEST_OK",
