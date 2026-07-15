@@ -57,6 +57,7 @@ SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_chinese_providers": "AGENT_PARITY_CHINESE_MODEL_PROVIDERS",
     "agent_parity_suite_artifact_self_test": "suite_artifact_contract_self_test",
     "agent_parity_suite_artifact_self_test_token": "SUITE_ARTIFACT_CONTRACT_SELF_TEST ok",
+    "agent_parity_self_test_stored_contract": "stored_agent_contract",
     "agent_parity_text_token_validator": "validate_text_artifact_tokens",
     "agent_parity_json_ok_validator": "validate_json_artifact_ok",
     "agent_parity_compact_coverage_validator": "validate_compact_coverage_artifact",
