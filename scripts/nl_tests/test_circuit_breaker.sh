@@ -61,6 +61,10 @@ Pre-requisites:
 EOF
 }
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" --anchor "$1" "$2"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --case-count) CASE_COUNT="$2"; shift 2 ;;
@@ -76,7 +80,9 @@ SUMMARY_JSON="${RUN_DIR}/summary.json"
 exec > >(tee -a "$RUN_LOG") 2>&1
 
 echo "Circuit breaker probe"
-echo "  run_dir:    $RUN_DIR"
+echo "  run_dir_ref: $(path_ref "$RUN_DIR" "$RUN_DIR")"
+echo "  run_log_ref: $(path_ref "$RUN_DIR" "$RUN_LOG")"
+echo "  summary_json_ref: $(path_ref "$RUN_DIR" "$SUMMARY_JSON")"
 echo "  base_url:   $BASE_URL"
 echo "  case_count: $CASE_COUNT"
 echo
@@ -348,6 +354,6 @@ PY
 
 echo
 echo "Artifacts:"
-echo "  - $RUN_DIR"
-echo "  - $RUN_LOG"
-echo "  - $SUMMARY_JSON"
+echo "  - run_dir_ref=$(path_ref "$RUN_DIR" "$RUN_DIR")"
+echo "  - run_log_ref=$(path_ref "$RUN_DIR" "$RUN_LOG")"
+echo "  - summary_json_ref=$(path_ref "$RUN_DIR" "$SUMMARY_JSON")"

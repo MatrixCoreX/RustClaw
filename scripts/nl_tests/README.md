@@ -105,6 +105,10 @@ It also writes `suite_wrapper_contract.json` from
 `scripts/nl_tests/check_suite_wrapper_contract.py`, locking the wrapped-suite
 summary/index/report finalizer wiring and the agent parity nested artifact
 contract checker.
+It also writes `runner_path_ref_contract.json` from
+`scripts/nl_tests/check_runner_path_ref_contract.py`, locking the full/manual,
+multi-turn, ops, and circuit-breaker runner console outputs to portable path
+refs rather than host absolute paths.
 When launched through `run_suite.sh agent_parity_gate`, the gate stores its JSON
 artifacts under the same suite run directory at `agent_parity_gate/`; direct
 runs still default to `logs/agent_parity_gate/<timestamp>` unless `--out-dir` is
@@ -142,6 +146,7 @@ contract counts. The final confirmation uses
 carry `contract_report_content_checked=true`. For wrapped `agent_parity_gate`
 runs, the artifact contract also validates nested gate artifacts such as
 `agent_parity_gate/agent_loop_static_contracts.txt` and
+`agent_parity_gate/runner_path_ref_contract.json`,
 `agent_parity_gate/suite_artifact_contract_self_test.txt`,
 `agent_parity_gate/rollout_metrics_contract.txt`, statically guards
 the artifact checker's dynamic machine fields such as the Chinese provider live
@@ -152,7 +157,8 @@ self-test, and raw LLM trace contracts participated in the run. It also checks
 that gate summary path fields use portable refs such as `out_dir_ref=out_dir`
 and never host absolute paths. It also checks artifact content: text reports
 must contain their success tokens, and JSON reports such as
-`secret_scan_contract.json` and `suite_wrapper_contract.json` must expose
+`secret_scan_contract.json`, `suite_wrapper_contract.json`, and
+`runner_path_ref_contract.json` must expose
 `ok=true` from a top-level object. The suite-artifact self-test covers missing,
 unreadable, malformed, and non-object contract reports; invalid Chinese live-provider scope; invalid env-file state/source; unsafe Chinese-provider smoke path refs; unsafe rollout metrics source/output refs; bad UTF-8 artifact
 payloads; non-object JSON ok
