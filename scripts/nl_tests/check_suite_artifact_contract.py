@@ -322,9 +322,12 @@ def load_json_artifact(run_dir: Path, rel_path: str) -> tuple[Any, list[str]]:
     if findings:
         return None, findings
     try:
-        return json.loads(text), []
+        payload = json.loads(text)
     except json.JSONDecodeError:
         return None, [f"agent_parity_gate_artifact_bad_json:{rel_path}"]
+    if not isinstance(payload, dict):
+        return None, [f"agent_parity_gate_artifact_bad_shape:{rel_path}"]
+    return payload, []
 
 
 def parse_provider_summary_jsonl(run_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
@@ -867,6 +870,25 @@ def run_self_test() -> int:
         ):
             print(
                 f"SELF_TEST_FAIL json_ok_artifact_bad_shape:{json_bad_shape_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        load_json_bad_shape_run = root / "load-json-artifact-bad-shape"
+        write_minimal_self_test_run(load_json_bad_shape_run, content_checked=True)
+        load_json_bad_shape_rel = "agent_parity_gate/compact_coverage.json"
+        load_json_bad_shape_path = load_json_bad_shape_run / load_json_bad_shape_rel
+        load_json_bad_shape_path.parent.mkdir(parents=True, exist_ok=True)
+        load_json_bad_shape_path.write_text("[]\n", encoding="utf-8")
+        load_json_bad_shape_findings, _ = validate_compact_coverage_artifact(
+            load_json_bad_shape_run
+        )
+        if (
+            f"agent_parity_gate_artifact_bad_shape:{load_json_bad_shape_rel}"
+            not in set(load_json_bad_shape_findings)
+        ):
+            print(
+                f"SELF_TEST_FAIL load_json_artifact_bad_shape:{load_json_bad_shape_findings}",
                 file=sys.stderr,
             )
             return 1

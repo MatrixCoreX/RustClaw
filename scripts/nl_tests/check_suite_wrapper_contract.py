@@ -71,6 +71,8 @@ SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_provider_live_scope_helper": "expected_live_scope_providers",
     "agent_parity_provider_scope_skip_reason": "provider_not_in_live_scope",
     "agent_parity_rollout_metrics_validator": "validate_rollout_metrics_artifact",
+    "agent_parity_json_loader": "load_json_artifact",
+    "agent_parity_json_loader_bad_shape_self_test": "load-json-artifact-bad-shape",
     "agent_parity_live_metrics_summary_flag": '"live_metrics"',
     "agent_parity_live_metrics_strict_gate": 'live_metrics_enabled = gate_summary.get("live_metrics") == "1"',
     "agent_parity_bad_machine_field_finding": "agent_parity_gate_summary_bad_machine_field",
