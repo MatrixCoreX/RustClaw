@@ -754,6 +754,8 @@ flowchart TD
     DBI --> DBIA[Agent parity gate artifact<br/>deterministic_boundary_inventory_contracts.txt]
     O --> MSC[可维护性 + 技能合同<br/>long files + skill prompts + registry parity]
     MSC --> MSCA[Agent parity gate artifact<br/>maintainability_skill_contracts.txt]
+    O --> GIC[Agent parity gate inventory 合同<br/>top-level check scripts gated or exempt]
+    GIC --> GICA[Agent parity gate artifact<br/>agent_parity_gate_inventory_contracts.txt]
     O --> EE[Evidence extractor 合同<br/>结构化 evidence + text-legacy fallback guard]
     EE --> EEA[Agent parity gate artifact<br/>evidence_extractor_contracts.txt]
     O --> SC[密钥扫描合同<br/>check_secret_scan_contract.py]
@@ -793,6 +795,8 @@ Agent parity gate 还会运行 `scripts/check_agent_loop_guard_final_scope.py --
 同一 gate 还会写入 `deterministic_boundary_inventory_contracts.txt` 并记录 `deterministic_boundary_inventory_contracts=1`。该 artifact 必须包含 `ANSWER_VERIFIER_BOUNDARY_CHECK ok`、`OBSERVED_OUTPUT_BOUNDARY_CHECK ok`、`DETERMINISTIC_DECISION_INVENTORY_CHECK ok`、`REPAIR_BOUNDARY_INVENTORY_CHECK ok` 和 `REPAIR_BOUNDARY_INVENTORY_COVERAGE_CHECK required=... missing=0`，保证 answer verifier、observed-output、确定性 branch inventory 和 repair inventory 不会继续膨胀成隐藏路由器、固定 prose 渲染器或未登记兼容路径。
 
 同一 gate 还会写入 `maintainability_skill_contracts.txt` 并记录 `maintainability_skill_contracts=1`。该 artifact 必须包含 `LONG_FILE_CHECK ok`、`OK: all ... registry skills have a generated layered prompt body` 和 `REGISTRY_PARITY mode=all ... differences=0`，保证长文件上限、生成式分层 skill prompt 和主 registry/docker registry 元数据一致性都作为 release gate 证据。
+
+同一 gate 还会写入 `agent_parity_gate_inventory_contracts.txt` 并记录 `agent_parity_gate_inventory_contracts=1`。该 artifact 必须包含 `AGENT_PARITY_GATE_INVENTORY_SELF_TEST ok` 与 `AGENT_PARITY_GATE_INVENTORY_CHECK ok`，保证 top-level `scripts/check_*.py` 守卫要么进入默认 release gate，要么因 live-run-only 兼容原因显式豁免。
 
 同一 gate 也会写入 `task_lifecycle_contracts.txt` 并记录 `task_lifecycle_contracts=1`。该 artifact 来自 `scripts/check_task_lifecycle_contracts.py --self-test` 和主检查，必须包含 `TASK_LIFECYCLE_CONTRACT_SELF_TEST ok` 与 `TASK_LIFECYCLE_CONTRACT_CHECK findings=0`。它把后台执行、checkpoint/resume、resume executor lease、seeded agent-loop resume、async poll/cancel projection 以及 CLI/UI task lifecycle 展示都固定在机器字段上，而不是本地化 `text/error_text`。
 
