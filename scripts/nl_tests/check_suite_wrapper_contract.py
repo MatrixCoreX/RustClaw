@@ -40,11 +40,28 @@ RUN_SUITE_REQUIRED_SNIPPETS = {
     "checker_uses_dot": 'check_suite_artifact_contract.py" "${checker_args[@]}"',
     "checker_requires_contract_report": "--require-contract-report",
     "contract_report_pending_placeholder": "contract_report_pending",
-    "contract_report_printed": 'echo "  - ${contract_report}"',
-    "suite_summary_printed": 'echo "  - ${run_dir}/suite_summary.env"',
+    "path_ref_fn": "path_ref()",
+    "path_ref_run_dir_ref": 'print("run_dir" if str(rel) == "." else f"run_dir/{rel.as_posix()}")',
+    "run_dir_ref_printed": 'echo "  run_dir_ref: $(path_ref "$run_dir" "$run_dir")"',
+    "run_log_ref_printed": 'echo "  run_log_ref: $(path_ref "$run_dir" "$run_log")"',
+    "artifact_run_dir_ref_printed": 'echo "  - run_dir_ref=$(path_ref "$run_dir" "$run_dir")"',
+    "artifact_run_log_ref_printed": 'echo "  - run_log_ref=$(path_ref "$run_dir" "$run_log")"',
+    "artifact_index_ref_printed": 'echo "  - artifact_index_ref=$(path_ref "$run_dir" "$artifact_index")"',
+    "suite_summary_ref_printed": 'echo "  - suite_summary_ref=$(path_ref "$run_dir" "${run_dir}/suite_summary.env")"',
+    "contract_report_ref_printed": 'echo "  - suite_artifact_contract_ref=$(path_ref "$run_dir" "$contract_report")"',
     "trap_captures_exit_code": "trap 'exit_code=$?",
     "trap_preserves_exit_code": 'exit "$exit_code"',
     "finalizer_does_not_replace_exit": 'finalize_wrapped_suite "$name" "$run_dir" "$run_log" "$suite_status" "$exit_code" || true',
+}
+
+RUN_SUITE_FORBIDDEN_SNIPPETS = {
+    "run_dir_absolute_print": 'echo "  run_dir: ${run_dir}"',
+    "run_log_absolute_print": 'echo "  run_log: ${run_log}"',
+    "artifact_run_dir_absolute_print": 'echo "  - ${run_dir}"',
+    "artifact_run_log_absolute_print": 'echo "  - ${run_log}"',
+    "artifact_index_absolute_print": 'echo "  - ${artifact_index}"',
+    "suite_summary_absolute_print": 'echo "  - ${run_dir}/suite_summary.env"',
+    "contract_report_absolute_print": 'echo "  - ${contract_report}"',
 }
 
 SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
@@ -101,6 +118,15 @@ SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_env_file_state_bad_finding": "agent_parity_gate_summary_bad_env_file_state",
     "agent_parity_env_file_source_bad_finding": "agent_parity_gate_summary_bad_env_file_source",
     "agent_parity_env_file_summary_self_test": "env_file_summary",
+    "agent_parity_summary_path_validator": "validate_gate_summary_no_host_paths",
+    "agent_parity_summary_path_finding": "agent_parity_gate_summary_host_path",
+    "agent_parity_summary_legacy_out_dir_finding": "agent_parity_gate_summary_legacy_out_dir",
+    "agent_parity_summary_bad_out_dir_ref_finding": "agent_parity_gate_summary_bad_out_dir_ref",
+    "agent_parity_summary_path_self_test": "gate-summary-host-path",
+    "agent_parity_summary_out_dir_ref": "out_dir_ref",
+    "agent_parity_run_log_no_host_path": 'validate_text_artifact_no_host_paths(run_dir, "run.log")',
+    "agent_parity_run_log_host_path_finding": "agent_parity_gate_artifact_host_path:run.log",
+    "agent_parity_run_log_host_path_self_test": "agent-parity-run-log-host-path",
     "agent_parity_rollout_metrics_validator": "validate_rollout_metrics_artifact",
     "agent_parity_rollout_metrics_host_path": "agent_parity_gate_metrics_host_path",
     "agent_parity_rollout_metrics_bad_source": "agent_parity_gate_metrics_bad_source_run_dir",
@@ -205,6 +231,13 @@ def build_report() -> dict[str, Any]:
         path_findings, path_checked_count = check_required_snippets(path, snippets, prefix)
         findings.extend(path_findings)
         checked_count += path_checked_count
+    run_suite_forbidden_findings, run_suite_forbidden_count = check_forbidden_snippets(
+        RUN_SUITE,
+        RUN_SUITE_FORBIDDEN_SNIPPETS,
+        "run_suite",
+    )
+    findings.extend(run_suite_forbidden_findings)
+    checked_count += run_suite_forbidden_count
     forbidden_findings, forbidden_checked_count = check_forbidden_snippets(
         SUITE_ARTIFACT_CONTRACT,
         SUITE_ARTIFACT_CONTRACT_FORBIDDEN_SNIPPETS,

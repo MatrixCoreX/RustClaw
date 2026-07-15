@@ -203,6 +203,46 @@ write_suite_artifact_contract_report() {
   fi
 }
 
+path_ref() {
+  local run_dir="$1"
+  local value="$2"
+  python3 - "$ROOT_DIR" "$run_dir" "$value" <<'PY'
+import sys
+from pathlib import Path, PurePosixPath
+
+root = Path(sys.argv[1]).resolve()
+run_dir = Path(sys.argv[2]).resolve()
+raw = sys.argv[3]
+
+try:
+    candidate = Path(raw).resolve()
+except OSError:
+    print("external_path")
+    raise SystemExit
+
+try:
+    rel = candidate.relative_to(run_dir)
+    print("run_dir" if str(rel) == "." else f"run_dir/{rel.as_posix()}")
+    raise SystemExit
+except ValueError:
+    pass
+
+try:
+    print(candidate.relative_to(root).as_posix())
+    raise SystemExit
+except ValueError:
+    pass
+
+if not raw.startswith("/") and "\\" not in raw:
+    rel = PurePosixPath(raw)
+    if rel.parts and all(part not in {"", ".", ".."} for part in rel.parts):
+        print(rel.as_posix())
+        raise SystemExit
+
+print("external_path")
+PY
+}
+
 finalize_wrapped_suite() {
   local suite_name="$1"
   local run_dir="$2"
@@ -230,11 +270,11 @@ finalize_wrapped_suite() {
 
   echo
   echo "Artifacts:"
-  echo "  - ${run_dir}"
-  echo "  - ${run_log}"
-  echo "  - ${artifact_index}"
-  echo "  - ${run_dir}/suite_summary.env"
-  echo "  - ${contract_report}"
+  echo "  - run_dir_ref=$(path_ref "$run_dir" "$run_dir")"
+  echo "  - run_log_ref=$(path_ref "$run_dir" "$run_log")"
+  echo "  - artifact_index_ref=$(path_ref "$run_dir" "$artifact_index")"
+  echo "  - suite_summary_ref=$(path_ref "$run_dir" "${run_dir}/suite_summary.env")"
+  echo "  - suite_artifact_contract_ref=$(path_ref "$run_dir" "$contract_report")"
   return 0
 }
 
@@ -252,8 +292,8 @@ run_wrapped_suite() {
     exec > >(tee -a "$run_log") 2>&1
     trap 'exit_code=$?; suite_status=ok; if [[ "$exit_code" -ne 0 ]]; then suite_status=error; fi; finalize_wrapped_suite "$name" "$run_dir" "$run_log" "$suite_status" "$exit_code" || true; exit "$exit_code"' EXIT
     echo "NL suite: ${name}"
-    echo "  run_dir: ${run_dir}"
-    echo "  run_log: ${run_log}"
+    echo "  run_dir_ref: $(path_ref "$run_dir" "$run_dir")"
+    echo "  run_log_ref: $(path_ref "$run_dir" "$run_log")"
     echo
     NL_SUITE_RUN_DIR="${run_dir}" "$@"
   )

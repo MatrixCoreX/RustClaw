@@ -961,6 +961,17 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "validate_chinese_provider_env_file_summary" in suite_wrapper_text
         and "agent_parity_gate_summary_bad_env_file_state" in suite_wrapper_text
         and "agent_parity_gate_summary_bad_env_file_source" in suite_wrapper_text
+        and "validate_gate_summary_no_host_paths" in suite_wrapper_text
+        and "agent_parity_gate_summary_host_path" in suite_wrapper_text
+        and "agent_parity_gate_summary_legacy_out_dir" in suite_wrapper_text
+        and "agent_parity_gate_summary_bad_out_dir_ref" in suite_wrapper_text
+        and "gate-summary-host-path" in suite_wrapper_text
+        and "out_dir_ref" in suite_wrapper_text
+        and "RUN_SUITE_FORBIDDEN_SNIPPETS" in suite_wrapper_text
+        and "run_dir_ref" in suite_wrapper_text
+        and "run_log_ref" in suite_wrapper_text
+        and "suite_artifact_contract_ref" in suite_wrapper_text
+        and "agent-parity-run-log-host-path" in suite_wrapper_text
         and "validate_provider_smoke_path_refs" in suite_wrapper_text
         and "agent_parity_gate_provider_smoke_bad_path_ref" in suite_wrapper_text
         and "agent_parity_gate_provider_smoke_case_coverage_bad_case_file" in suite_wrapper_text
@@ -1032,6 +1043,16 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "agent_parity_gate_summary_bad_env_file_state" in suite_artifact_contract_text
         and "agent_parity_gate_summary_bad_env_file_source" in suite_artifact_contract_text
         and "env_file_summary" in suite_artifact_contract_text
+        and "validate_gate_summary_no_host_paths" in suite_artifact_contract_text
+        and "agent_parity_gate_summary_host_path" in suite_artifact_contract_text
+        and "agent_parity_gate_summary_legacy_out_dir" in suite_artifact_contract_text
+        and "agent_parity_gate_summary_bad_out_dir_ref" in suite_artifact_contract_text
+        and "gate-summary-host-path" in suite_artifact_contract_text
+        and "out_dir_ref" in suite_artifact_contract_text
+        and 'validate_text_artifact_no_host_paths(run_dir, "run.log")'
+        in suite_artifact_contract_text
+        and "agent_parity_gate_artifact_host_path:run.log" in suite_artifact_contract_text
+        and "agent-parity-run-log-host-path" in suite_artifact_contract_text
         and "expected_live_scope_providers" in suite_artifact_contract_text
         and "provider_not_in_live_scope" in suite_artifact_contract_text
         and "validate_rollout_metrics_artifact" in suite_artifact_contract_text
@@ -1143,6 +1164,15 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         findings,
         "agent parity gate must co-locate artifacts under NL_SUITE_RUN_DIR when wrapped by run_suite",
     )
+    require(
+        "path_ref()" in parity_text
+        and 'AGENT_PARITY_GATE out_dir_ref=$(path_ref "$OUT_DIR")' in parity_text
+        and 'echo "out_dir_ref=$(path_ref "$OUT_DIR")"' in parity_text
+        and 'AGENT_PARITY_GATE_OK out_dir_ref=$(path_ref "$OUT_DIR")' in parity_text
+        and 'out_dir=${OUT_DIR}' not in parity_text,
+        findings,
+        "agent parity gate must report portable out_dir refs instead of host paths",
+    )
     for label, readme_body in (("README.md", readme_text), ("README.zh-CN.md", readme_zh_text)):
         require(
             "agent_loop_static_contracts.txt" in readme_body
@@ -1157,6 +1187,9 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             and "live_metrics=0|1" in readme_body
             and "metrics=1" in readme_body
             and "live_metrics=1" in readme_body
+            and "out_dir_ref" in readme_body
+            and "run_dir_ref" in readme_body
+            and "run_log_ref" in readme_body
             and "llm_raw_trace_runner_contract.txt" in readme_body,
             findings,
             f"{label} must document agent parity nested/static/raw-trace gate artifacts",

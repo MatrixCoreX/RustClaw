@@ -209,7 +209,46 @@ run_metrics_gate() {
   python3 "${SCRIPT_DIR}/summarize_rollout_metrics.py" "${args[@]}"
 }
 
-echo "AGENT_PARITY_GATE out_dir=${OUT_DIR}"
+path_ref() {
+  local value="$1"
+  python3 - "$ROOT_DIR" "$OUT_DIR" "$value" <<'PY'
+import sys
+from pathlib import Path, PurePosixPath
+
+root = Path(sys.argv[1]).resolve()
+out_dir = Path(sys.argv[2]).resolve()
+raw = sys.argv[3]
+
+try:
+    candidate = Path(raw).resolve()
+except OSError:
+    print("external_path")
+    raise SystemExit
+
+try:
+    rel = candidate.relative_to(out_dir)
+    print("out_dir" if str(rel) == "." else f"out_dir/{rel.as_posix()}")
+    raise SystemExit
+except ValueError:
+    pass
+
+try:
+    print(candidate.relative_to(root).as_posix())
+    raise SystemExit
+except ValueError:
+    pass
+
+if not raw.startswith("/") and "\\" not in raw:
+    rel = PurePosixPath(raw)
+    if rel.parts and all(part not in {"", ".", ".."} for part in rel.parts):
+        print(rel.as_posix())
+        raise SystemExit
+
+print("external_path")
+PY
+}
+
+echo "AGENT_PARITY_GATE out_dir_ref=$(path_ref "$OUT_DIR")"
 
 echo "AGENT_PARITY_GATE_STEP runtime_hard_reply_baseline"
 python3 "${ROOT_DIR}/scripts/check_no_runtime_hard_reply.py" --all \
@@ -311,7 +350,7 @@ elif [[ "${#RUN_DIRS[@]}" -eq 0 ]]; then
 fi
 
 {
-  echo "out_dir=${OUT_DIR}"
+  echo "out_dir_ref=$(path_ref "$OUT_DIR")"
   echo "no_agent_mode_payload=1"
   echo "agent_loop_static_contracts=1"
   echo "secret_scan_contract=1"
@@ -335,4 +374,4 @@ fi
   echo "chinese_provider_env_file_source=${CHINESE_PROVIDER_ENV_FILE_SOURCE}"
 } > "${OUT_DIR}/gate_summary.env"
 
-echo "AGENT_PARITY_GATE_OK out_dir=${OUT_DIR}"
+echo "AGENT_PARITY_GATE_OK out_dir_ref=$(path_ref "$OUT_DIR")"
