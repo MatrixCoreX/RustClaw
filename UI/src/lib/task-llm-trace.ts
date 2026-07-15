@@ -60,6 +60,21 @@ function arrayTraceToken(record: Record<string, unknown>, tokenKey: string, valu
   return values.length > 0 ? `${tokenKey}=${values.join(",")}` : null;
 }
 
+const MODEL_CATALOG_ENTRY_BOOL_FIELDS = [
+  "supports_text",
+  "supports_image_input",
+  "supports_video_input",
+  "supports_audio_input",
+  "supports_image_understanding",
+  "supports_audio_transcription",
+  "supports_image_generation",
+  "supports_audio_generation",
+  "supports_video_generation",
+  "supports_music_generation",
+  "async_required",
+  "dry_run_supported",
+];
+
 function modelCatalogEntryTokens(trace: Record<string, unknown>, limit: number): string[] {
   const entries = Array.isArray(trace.entries) ? trace.entries : [];
   return entries.slice(0, limit).flatMap((entry, index) => {
@@ -73,6 +88,7 @@ function modelCatalogEntryTokens(trace: Record<string, unknown>, limit: number):
       fieldTraceToken(record, `${prefix}.active_text_provider`, "active_text_provider"),
       arrayTraceToken(record, `${prefix}.input_modalities`, "input_modalities", 8),
       arrayTraceToken(record, `${prefix}.output_modalities`, "output_modalities", 8),
+      ...MODEL_CATALOG_ENTRY_BOOL_FIELDS.map((field) => fieldTraceToken(record, `${prefix}.${field}`, field)),
     ].filter((item): item is string => Boolean(item));
   });
 }
