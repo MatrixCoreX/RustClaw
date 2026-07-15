@@ -93,6 +93,32 @@ const MODEL_CATALOG_ENTRY_ARRAY_FIELDS: Array<[string, number]> = [
   ["output_modalities", 8],
 ];
 
+const MODEL_CATALOG_READINESS_SCALAR_FIELDS = [
+  "schema_version",
+  "selected_provider",
+  "selected_model",
+  "selected_entry_status",
+  "entry_count",
+  "matched_entry_count",
+  "credential_state",
+];
+
+const MODEL_CATALOG_READINESS_BOOL_FIELDS = [
+  "ready",
+  "text_generation",
+  "image_input",
+  "image_understanding",
+  "image_generation",
+  "audio_input",
+  "audio_transcription",
+  "audio_generation",
+  "video_input",
+  "video_generation",
+  "music_generation",
+  "async_required",
+  "dry_run",
+];
+
 function modelCatalogEntryTokens(trace: Record<string, unknown>, limit: number): string[] {
   const entries = Array.isArray(trace.entries) ? trace.entries : [];
   return entries.slice(0, limit).flatMap((entry, index) => {
@@ -105,6 +131,15 @@ function modelCatalogEntryTokens(trace: Record<string, unknown>, limit: number):
       ...MODEL_CATALOG_ENTRY_BOOL_FIELDS.map((field) => fieldTraceToken(record, `${prefix}.${field}`, field)),
     ].filter((item): item is string => Boolean(item));
   });
+}
+
+function modelCatalogReadinessTokens(trace: Record<string, unknown>): string[] {
+  const readiness = asRecord(trace.readiness);
+  if (!readiness) return [];
+  return [
+    ...MODEL_CATALOG_READINESS_SCALAR_FIELDS.map((field) => fieldTraceToken(readiness, `readiness.${field}`, field)),
+    ...MODEL_CATALOG_READINESS_BOOL_FIELDS.map((field) => fieldTraceToken(readiness, `readiness.${field}`, field)),
+  ].filter((item): item is string => Boolean(item));
 }
 
 function sortedCounterEntries(counts: Record<string, number> | null | undefined, limit: number): string[] {
@@ -163,6 +198,7 @@ export function modelCatalogTraceMachineTokens(trace: unknown): string[] {
     traceToken(record, "entry_count"),
     nestedTraceToken(record, "catalog_guard_status", "status"),
     nestedTraceToken(record, "catalog_guard_status", "finding_count"),
+    ...modelCatalogReadinessTokens(record),
     ...modelCatalogEntryTokens(record, 3),
   ].filter((item): item is string => Boolean(item));
 }
