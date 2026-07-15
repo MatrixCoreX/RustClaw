@@ -237,7 +237,7 @@ def main() -> int:
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     elif result["ok"]:
         print(
-            "CHINESE_PROVIDER_SMOKE_SUMMARY ok "
+            "CHINESE_PROVIDER_SMOKE_SUMMARY_CHECK ok "
             f"provider_count={result.get('provider_count')}"
         )
     else:

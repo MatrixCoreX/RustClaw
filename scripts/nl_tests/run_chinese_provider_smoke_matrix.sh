@@ -421,6 +421,11 @@ mkdir -p "$OUT_DIR"
 : > "${OUT_DIR}/provider_summary.jsonl"
 
 python3 "${ROOT_DIR}/scripts/nl_tests/check_chinese_provider_smoke_matrix.py" \
+  --self-test
+python3 "${ROOT_DIR}/scripts/nl_tests/check_chinese_provider_smoke_summary.py" \
+  --self-test
+
+python3 "${ROOT_DIR}/scripts/nl_tests/check_chinese_provider_smoke_matrix.py" \
   --case-file "$CASE_FILE" \
   --json > "${OUT_DIR}/case_coverage.json"
 

@@ -771,9 +771,15 @@ def validate_provider_smoke_artifacts(
     )
     findings.extend(text_findings)
     if not text_findings:
-        checks += 1
-        if "CHINESE_PROVIDER_SMOKE_MATRIX" not in text:
-            findings.append("agent_parity_gate_provider_smoke_missing_runner_token")
+        required_tokens = {
+            "CHINESE_PROVIDER_SMOKE_MATRIX_SELF_TEST ok",
+            "CHINESE_PROVIDER_SMOKE_SUMMARY_SELF_TEST ok",
+            "CHINESE_PROVIDER_SMOKE_SUMMARY_CHECK ok",
+        }
+        checks += len(required_tokens)
+        for token in sorted(required_tokens):
+            if token not in text:
+                findings.append(f"agent_parity_gate_provider_smoke_missing_runner_token:{token}")
     return findings, checks
 
 
