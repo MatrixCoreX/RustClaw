@@ -45,6 +45,7 @@ CHINESE_PROVIDER_SMOKE_MATRIX_CHECKER = ROOT / "scripts/nl_tests/check_chinese_p
 AGENT_PARITY_GATE_RUNNER = ROOT / "scripts/nl_tests/run_agent_parity_gate.sh"
 SUITE_WRAPPER_CONTRACT_CHECKER = ROOT / "scripts/nl_tests/check_suite_wrapper_contract.py"
 SUITE_ARTIFACT_CONTRACT_CHECKER = ROOT / "scripts/nl_tests/check_suite_artifact_contract.py"
+ROLLOUT_METRICS_SUMMARY = ROOT / "scripts/nl_tests/summarize_rollout_metrics.py"
 VENDOR_PATCH_ROOT = ROOT / "prompts/layers/vendor_patches"
 TASK_DEBUG_TRACE_SOURCE = ROOT / "crates/clawd/src/http/ui_routes/task_debug_trace.rs"
 UI_TASK_LLM_TRACE_SOURCE = ROOT / "UI/src/lib/task-llm-trace.ts"
@@ -765,6 +766,11 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         if SUITE_ARTIFACT_CONTRACT_CHECKER.exists()
         else ""
     )
+    rollout_metrics_text = (
+        ROLLOUT_METRICS_SUMMARY.read_text(encoding="utf-8")
+        if ROLLOUT_METRICS_SUMMARY.exists()
+        else ""
+    )
     require(
         'DEFAULT_LIVE_PROVIDERS="${CHINESE_PROVIDER_LIVE_PROVIDERS:-minimax}"'
         in smoke_text,
@@ -807,6 +813,13 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "external_path" in smoke_matrix_text,
         findings,
         "Chinese provider smoke case coverage must write portable case_file refs and self-test them",
+    )
+    require(
+        "portable_path_ref" in rollout_metrics_text
+        and "rollout_metrics_ok_line" in rollout_metrics_text
+        and "ROLLOUT_METRICS_SELF_TEST ok" in rollout_metrics_text,
+        findings,
+        "rollout metrics summary must write portable source/output refs and self-test them",
     )
     require(
         'CHINESE_PROVIDER_LIVE_PROVIDERS="${CHINESE_PROVIDER_LIVE_PROVIDERS:-minimax}"'
@@ -951,6 +964,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "validate_provider_smoke_path_refs" in suite_wrapper_text
         and "agent_parity_gate_provider_smoke_bad_path_ref" in suite_wrapper_text
         and "agent_parity_gate_provider_smoke_case_coverage_bad_case_file" in suite_wrapper_text
+        and "rollout_metrics_contract" in suite_wrapper_text
+        and "agent_parity_gate_metrics_host_path" in suite_wrapper_text
         and "--validate-contract-report-content" in suite_wrapper_text
         and "--require-contract-report-content-checked" in suite_wrapper_text
         and "validate_existing_contract_report" in suite_wrapper_text
@@ -1020,6 +1035,11 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "expected_live_scope_providers" in suite_artifact_contract_text
         and "provider_not_in_live_scope" in suite_artifact_contract_text
         and "validate_rollout_metrics_artifact" in suite_artifact_contract_text
+        and "rollout_metrics_contract.txt" in suite_artifact_contract_text
+        and "ROLLOUT_METRICS_SELF_TEST ok" in suite_artifact_contract_text
+        and "agent_parity_gate_metrics_host_path" in suite_artifact_contract_text
+        and "agent_parity_gate_metrics_bad_source_run_dir" in suite_artifact_contract_text
+        and "rollout_metrics_text_host_path" in suite_artifact_contract_text
         and "load_json_artifact" in suite_artifact_contract_text
         and "load-json-artifact-bad-shape" in suite_artifact_contract_text
         and "load-json-artifact-decode-failed" in suite_artifact_contract_text
@@ -1102,6 +1122,14 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "llm_raw_trace_runner_contract=1" in parity_text,
         findings,
         "agent parity gate summary must record the NL raw LLM trace runner contract state",
+    )
+    require(
+        "AGENT_PARITY_GATE_STEP rollout_metrics_contract" in parity_text
+        and "summarize_rollout_metrics.py\" --self-test" in parity_text
+        and "rollout_metrics_contract.txt" in parity_text
+        and "rollout_metrics_contract=1" in parity_text,
+        findings,
+        "agent parity gate must run and record the rollout metrics path contract self-test",
     )
     require(
         "LIVE_METRICS_RAN=1" in parity_text

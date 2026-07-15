@@ -24,6 +24,7 @@ REQUIRED_SUMMARY_FIELDS = {
 ALLOWED_STATUSES = {"ok", "error"}
 ALLOWED_ARTIFACT_FINALIZE_STATUSES = {"ok", "error"}
 MACHINE_TOKEN_RE = re.compile(r"^[a-z0-9_.-]+$")
+HOST_PATH_MARKERS = ("/home/", "/tmp/", "/root/", "/Users/")
 
 AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
     "agent_parity_gate/gate_summary.env",
@@ -34,6 +35,7 @@ AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
     "agent_parity_gate/suite_wrapper_contract.json",
     "agent_parity_gate/suite_artifact_contract_self_test.txt",
     "agent_parity_gate/llm_raw_trace_runner_contract.txt",
+    "agent_parity_gate/rollout_metrics_contract.txt",
 }
 
 AGENT_PARITY_GATE_REQUIRED_FLAGS = {
@@ -43,6 +45,7 @@ AGENT_PARITY_GATE_REQUIRED_FLAGS = {
     "suite_wrapper_contract": "1",
     "suite_artifact_contract_self_test": "1",
     "llm_raw_trace_runner_contract": "1",
+    "rollout_metrics_contract": "1",
 }
 
 AGENT_PARITY_GATE_REQUIRED_MACHINE_FIELDS = {
@@ -76,6 +79,9 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
     },
     "agent_parity_gate/suite_artifact_contract_self_test.txt": {
         "SUITE_ARTIFACT_CONTRACT_SELF_TEST ok",
+    },
+    "agent_parity_gate/rollout_metrics_contract.txt": {
+        "ROLLOUT_METRICS_SELF_TEST ok",
     },
 }
 
@@ -292,6 +298,15 @@ def validate_text_artifact_tokens(run_dir: Path, rel_path: str, tokens: set[str]
     for token in sorted(tokens):
         if token not in text:
             findings.append(f"agent_parity_gate_artifact_missing_token:{rel_path}:{token}")
+    return findings
+
+
+def validate_text_artifact_no_host_paths(run_dir: Path, rel_path: str) -> list[str]:
+    text, findings = read_text_artifact(run_dir / rel_path, rel_path)
+    if findings:
+        return findings
+    if any(marker in text for marker in HOST_PATH_MARKERS):
+        findings.append(f"agent_parity_gate_artifact_host_path:{rel_path}")
     return findings
 
 
@@ -598,11 +613,21 @@ def validate_rollout_metrics_artifact(
     checks = 0
     if findings:
         return findings, checks
+    if any(marker in json.dumps(payload, ensure_ascii=False) for marker in HOST_PATH_MARKERS):
+        findings.append(f"agent_parity_gate_metrics_host_path:{rel_path}")
+    if not provider_smoke_path_ref_is_safe(payload.get("source_run_dir")):
+        findings.append(f"agent_parity_gate_metrics_bad_source_run_dir:{rel_path}")
+    source_run_dirs = payload.get("source_run_dirs")
+    if source_run_dirs is not None:
+        if not isinstance(source_run_dirs, list) or any(
+            not provider_smoke_path_ref_is_safe(item) for item in source_run_dirs
+        ):
+            findings.append(f"agent_parity_gate_metrics_bad_source_run_dirs:{rel_path}")
     min_pass_rate = safe_float(gate_summary.get("min_pass_rate"), 1.0)
     max_avg_llm_calls = safe_float(gate_summary.get("max_avg_llm_calls"), 4.0)
     max_prompt_truncations = safe_int(gate_summary.get("max_prompt_truncations"), 0)
     max_provider_final_errors = safe_int(gate_summary.get("max_provider_final_errors"), 0)
-    checks += 7
+    checks += 10
     if safe_int(payload.get("turns_total")) <= 0:
         findings.append(f"agent_parity_gate_metrics_bad_turns:{rel_path}")
     if safe_float(payload.get("pass_rate")) < min_pass_rate:
@@ -633,6 +658,12 @@ def validate_coding_fixture_artifacts(
         artifact_findings = validate_text_artifact_tokens(run_dir, rel_path, {token})
         findings.extend(artifact_findings)
         checks += 0 if artifact_findings else 1
+    text_path_findings = validate_text_artifact_no_host_paths(
+        run_dir,
+        "agent_parity_gate/coding_loop_repair_metrics.txt",
+    )
+    findings.extend(text_path_findings)
+    checks += 0 if text_path_findings else 1
     metrics_findings, metrics_checks = validate_rollout_metrics_artifact(
         run_dir,
         "agent_parity_gate/coding_loop_repair_metrics.json",
@@ -688,6 +719,9 @@ def validate_enabled_agent_parity_optional_artifacts(
             artifact_findings = validate_text_artifact_tokens(run_dir, rel_path, {token})
             findings.extend(artifact_findings)
             checks += 0 if artifact_findings else 1
+            text_path_findings = validate_text_artifact_no_host_paths(run_dir, rel_path)
+            findings.extend(text_path_findings)
+            checks += 0 if text_path_findings else 1
         metrics_findings, metrics_checks = validate_rollout_metrics_artifact(
             run_dir,
             "agent_parity_gate/run_metrics.json",
@@ -1370,6 +1404,74 @@ def run_self_test() -> int:
             print(
                 "SELF_TEST_FAIL provider_smoke_bad_providers_shape:"
                 f"{provider_matrix_shape_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        metrics_path_run = root / "rollout-metrics-host-path"
+        write_minimal_self_test_run(metrics_path_run, content_checked=True)
+        metrics_path = metrics_path_run / "agent_parity_gate/coding_loop_repair_metrics.json"
+        metrics_path.parent.mkdir(parents=True, exist_ok=True)
+        metrics_path.write_text(
+            json.dumps(
+                {
+                    "source_run_dir": "/tmp/client-like-run",
+                    "source_run_dirs": ["/tmp/client-like-run"],
+                    "turns_total": 1,
+                    "pass_rate": 1.0,
+                    "parse_errors": 0,
+                    "metric_gate": {"passed": True},
+                    "llm": {
+                        "avg_calls_per_turn": 1.0,
+                        "prompt_truncation_count": 0,
+                        "provider_final_error_count": 0,
+                    },
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        metrics_path_findings, _ = validate_rollout_metrics_artifact(
+            metrics_path_run,
+            "agent_parity_gate/coding_loop_repair_metrics.json",
+            {},
+        )
+        metrics_path_finding_set = set(metrics_path_findings)
+        if (
+            "agent_parity_gate_metrics_host_path:agent_parity_gate/coding_loop_repair_metrics.json"
+            not in metrics_path_finding_set
+            or "agent_parity_gate_metrics_bad_source_run_dir:agent_parity_gate/coding_loop_repair_metrics.json"
+            not in metrics_path_finding_set
+            or "agent_parity_gate_metrics_bad_source_run_dirs:agent_parity_gate/coding_loop_repair_metrics.json"
+            not in metrics_path_finding_set
+        ):
+            print(
+                "SELF_TEST_FAIL rollout_metrics_host_path:"
+                f"{metrics_path_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        metrics_text_run = root / "rollout-metrics-text-host-path"
+        write_minimal_self_test_run(metrics_text_run, content_checked=True)
+        metrics_text_path = metrics_text_run / "agent_parity_gate/coding_loop_repair_metrics.txt"
+        metrics_text_path.parent.mkdir(parents=True, exist_ok=True)
+        metrics_text_path.write_text(
+            "ROLLOUT_METRICS_OK output=/tmp/metrics.json turns=1 pass_rate=1.0\n",
+            encoding="utf-8",
+        )
+        metrics_text_findings = validate_text_artifact_no_host_paths(
+            metrics_text_run,
+            "agent_parity_gate/coding_loop_repair_metrics.txt",
+        )
+        if (
+            "agent_parity_gate_artifact_host_path:agent_parity_gate/coding_loop_repair_metrics.txt"
+            not in set(metrics_text_findings)
+        ):
+            print(
+                "SELF_TEST_FAIL rollout_metrics_text_host_path:"
+                f"{metrics_text_findings}",
                 file=sys.stderr,
             )
             return 1
