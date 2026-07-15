@@ -209,6 +209,46 @@ def validate_artifact_index_entries(
     return findings
 
 
+def validate_existing_contract_report(
+    run_dir: Path,
+    expected_report: dict[str, Any],
+) -> list[str]:
+    findings: list[str] = []
+    report_path = run_dir / "suite_artifact_contract.json"
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return ["contract_report_missing"]
+    except OSError as exc:
+        return [f"contract_report_read_failed:{exc.__class__.__name__}"]
+    except json.JSONDecodeError:
+        return ["contract_report_bad_json"]
+    if not isinstance(payload, dict):
+        return ["contract_report_bad_shape"]
+
+    if payload.get("ok") is not True:
+        findings.append(f"contract_report_not_ok:{payload.get('ok')}")
+    if payload.get("run_dir") != ".":
+        findings.append(f"contract_report_bad_run_dir:{payload.get('run_dir')}")
+    if payload.get("require_contract_report") is not True:
+        findings.append(
+            f"contract_report_bad_require_contract_report:{payload.get('require_contract_report')}"
+        )
+    if payload.get("findings") != []:
+        findings.append("contract_report_findings_not_empty")
+    if payload.get("summary") != expected_report.get("summary"):
+        findings.append("contract_report_summary_mismatch")
+
+    expected_agent_contract = expected_report.get("agent_parity_gate_contract")
+    actual_agent_contract = payload.get("agent_parity_gate_contract")
+    if expected_agent_contract is not None:
+        if actual_agent_contract != expected_agent_contract:
+            findings.append("contract_report_agent_parity_contract_mismatch")
+    elif actual_agent_contract is not None:
+        findings.append("contract_report_unexpected_agent_parity_contract")
+    return findings
+
+
 def read_text_artifact(path: Path, label: str) -> tuple[str, list[str]]:
     try:
         return path.read_text(encoding="utf-8"), []
@@ -592,7 +632,11 @@ def validate_agent_parity_gate_artifacts(run_dir: Path, entries: set[str]) -> tu
     return findings, content_checks
 
 
-def validate_run_dir(run_dir: Path, require_contract_report: bool = False) -> dict[str, Any]:
+def validate_run_dir(
+    run_dir: Path,
+    require_contract_report: bool = False,
+    validate_contract_report_content: bool = False,
+) -> dict[str, Any]:
     findings: list[str] = []
     if not run_dir.exists():
         findings.append("run_dir_missing")
@@ -634,11 +678,20 @@ def validate_run_dir(run_dir: Path, require_contract_report: bool = False) -> di
         "ok": not findings,
         "run_dir": str(run_dir),
         "require_contract_report": require_contract_report,
+        "contract_report_content_checked": False,
         "summary": summary,
         "findings": findings,
     }
     if agent_parity_gate_contract is not None:
         report["agent_parity_gate_contract"] = agent_parity_gate_contract
+    if validate_contract_report_content:
+        expected_report = dict(report)
+        expected_report["findings"] = list(findings)
+        contract_report_findings = validate_existing_contract_report(run_dir, expected_report)
+        findings.extend(contract_report_findings)
+        report["ok"] = not findings
+        report["contract_report_content_checked"] = True
+        report["findings"] = findings
     return report
 
 
@@ -647,9 +700,15 @@ def main() -> int:
     parser.add_argument("run_dir", type=Path)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--require-contract-report", action="store_true")
+    parser.add_argument("--validate-contract-report-content", action="store_true")
     args = parser.parse_args()
 
-    report = validate_run_dir(args.run_dir, require_contract_report=args.require_contract_report)
+    require_contract_report = args.require_contract_report or args.validate_contract_report_content
+    report = validate_run_dir(
+        args.run_dir,
+        require_contract_report=require_contract_report,
+        validate_contract_report_content=args.validate_contract_report_content,
+    )
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     elif report["ok"]:

@@ -881,6 +881,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "SUITE_ARTIFACT_CONTRACT" in suite_wrapper_text
         and "AGENT_PARITY_GATE_REQUIRED_ARTIFACTS" in suite_wrapper_text
         and "AGENT_PARITY_GATE_REQUIRED_FLAGS" in suite_wrapper_text
+        and "--validate-contract-report-content" in suite_wrapper_text
+        and "validate_existing_contract_report" in suite_wrapper_text
         and "agent_parity_gate_contract" in suite_wrapper_text,
         findings,
         "wrapped suite contract guard must statically protect agent parity nested artifact checks",
@@ -906,6 +908,11 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "provider_not_in_live_scope" in suite_artifact_contract_text
         and "validate_rollout_metrics_artifact" in suite_artifact_contract_text
         and "validate_enabled_agent_parity_optional_artifacts" in suite_artifact_contract_text
+        and "validate_existing_contract_report" in suite_artifact_contract_text
+        and "--validate-contract-report-content" in suite_artifact_contract_text
+        and '"contract_report_content_checked"' in suite_artifact_contract_text
+        and "contract_report_summary_mismatch" in suite_artifact_contract_text
+        and "contract_report_agent_parity_contract_mismatch" in suite_artifact_contract_text
         and '"agent_loop_static_contracts": "1"' in suite_artifact_contract_text
         and '"suite_wrapper_contract": "1"' in suite_artifact_contract_text
         and '"live_metrics": {"0", "1"}' in suite_artifact_contract_text
