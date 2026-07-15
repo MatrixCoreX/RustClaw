@@ -84,7 +84,11 @@ metrics gates to the real NL run. The defaults require
 `pass_rate=1.0`, `avg_llm_calls_per_turn<=4`, no prompt truncation, and no final
 provider errors. Override with `--min-pass-rate`, `--max-avg-llm-calls`,
 `--max-prompt-truncations`, `--max-provider-final-errors`, or environment
-variables with the same uppercase names.
+variables with the same uppercase names. The Chinese-provider smoke preflight
+uses `CHINESE_PROVIDER_ENV_FILE` or `../runtime_env_filled.sh` when present, and
+records only env-file state plus secret-free credential metadata. Use
+`--chinese-env-file <path>` to override it, or `--no-chinese-env-file` for a
+pure missing-credential preflight.
 
 For rerun shards, use:
 
@@ -214,7 +218,9 @@ safe aggregate.
   this checks provider rows, readiness counters, live-scope counters, and
   secret-free credential metadata. The default live scope is MiniMax because it
   is the current purchased provider; use `--live-providers all` only when all
-  provider accounts are intentionally in scope.
+  provider accounts are intentionally in scope. For parity-gate runs, the
+  parent `run_agent_parity_gate.sh` passes `CHINESE_PROVIDER_ENV_FILE` or
+  `../runtime_env_filled.sh` when present.
 - Task execution async lifecycle: `scripts/nl_tests/cases/nl_cases_task_execution_async_lifecycle_20260626.txt`
   covers representative async start, local-process poll, cancel contract,
   timeout expiry, terminal projection, and media async dry-run handoff without

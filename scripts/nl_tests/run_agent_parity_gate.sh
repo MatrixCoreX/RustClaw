@@ -23,6 +23,8 @@ MAX_PROVIDER_RETRYABLE_ERRORS="${MAX_PROVIDER_RETRYABLE_ERRORS:-}"
 MAX_VERIFIER_CALLS="${MAX_VERIFIER_CALLS:-}"
 MAX_PROMPT_BYTES_BEFORE="${MAX_PROMPT_BYTES_BEFORE:-}"
 CHINESE_PROVIDER_LIVE_PROVIDERS="${CHINESE_PROVIDER_LIVE_PROVIDERS:-minimax}"
+CHINESE_PROVIDER_ENV_FILE="${CHINESE_PROVIDER_ENV_FILE:-${ROOT_DIR}/../runtime_env_filled.sh}"
+CHINESE_PROVIDER_ENV_FILE_STATE="auto"
 
 usage() {
   cat <<'EOF'
@@ -52,6 +54,8 @@ Options:
   --max-verifier-calls N
   --max-prompt-bytes-before N
   --chinese-live-providers CSV  Chinese-provider live scope for smoke matrix. Default: CHINESE_PROVIDER_LIVE_PROVIDERS or minimax. Use all for every requested provider.
+  --chinese-env-file PATH       Env file passed to Chinese-provider smoke preflight. Default: CHINESE_PROVIDER_ENV_FILE or ../runtime_env_filled.sh when present.
+  --no-chinese-env-file         Do not pass an env file to Chinese-provider smoke preflight.
   -h, --help
 EOF
 }
@@ -130,6 +134,16 @@ while [[ $# -gt 0 ]]; do
       CHINESE_PROVIDER_LIVE_PROVIDERS="${2:-}"
       shift 2
       ;;
+    --chinese-env-file)
+      CHINESE_PROVIDER_ENV_FILE="${2:-}"
+      CHINESE_PROVIDER_ENV_FILE_STATE="explicit"
+      shift 2
+      ;;
+    --no-chinese-env-file)
+      CHINESE_PROVIDER_ENV_FILE=""
+      CHINESE_PROVIDER_ENV_FILE_STATE="disabled"
+      shift
+      ;;
     -*)
       echo "Unknown option: $1" >&2
       exit 2
@@ -201,10 +215,19 @@ fi
 
 if [[ "$SKIP_PROVIDER_SMOKE" -eq 0 ]]; then
   echo "AGENT_PARITY_GATE_STEP chinese_provider_smoke_dry_run"
-  bash "${SCRIPT_DIR}/run_chinese_provider_smoke_matrix.sh" \
+  chinese_provider_smoke_args=(
     --dry-run \
     --live-providers "$CHINESE_PROVIDER_LIVE_PROVIDERS" \
-    --out-dir "${OUT_DIR}/chinese_provider_smoke" \
+    --out-dir "${OUT_DIR}/chinese_provider_smoke"
+  )
+  if [[ -n "$CHINESE_PROVIDER_ENV_FILE" && -f "$CHINESE_PROVIDER_ENV_FILE" ]]; then
+    chinese_provider_smoke_args+=(--env-file "$CHINESE_PROVIDER_ENV_FILE")
+    CHINESE_PROVIDER_ENV_FILE_STATE="present"
+  elif [[ "$CHINESE_PROVIDER_ENV_FILE_STATE" != "disabled" ]]; then
+    CHINESE_PROVIDER_ENV_FILE_STATE="missing"
+  fi
+  bash "${SCRIPT_DIR}/run_chinese_provider_smoke_matrix.sh" \
+    "${chinese_provider_smoke_args[@]}" \
     > "${OUT_DIR}/chinese_provider_smoke.txt"
 fi
 
@@ -242,6 +265,8 @@ fi
   echo "max_prompt_truncations=${MAX_PROMPT_TRUNCATIONS}"
   echo "max_provider_final_errors=${MAX_PROVIDER_FINAL_ERRORS}"
   echo "chinese_provider_live_providers=${CHINESE_PROVIDER_LIVE_PROVIDERS}"
+  echo "chinese_provider_env_file_state=${CHINESE_PROVIDER_ENV_FILE_STATE}"
+  echo "chinese_provider_env_file=${CHINESE_PROVIDER_ENV_FILE}"
 } > "${OUT_DIR}/gate_summary.env"
 
 echo "AGENT_PARITY_GATE_OK out_dir=${OUT_DIR}"
