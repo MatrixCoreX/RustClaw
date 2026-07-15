@@ -199,6 +199,66 @@ fn catalog_reports_env_credential_state_without_secret_values() {
 }
 
 #[test]
+fn catalog_reports_env_file_credential_state_without_secret_values() {
+    let _guard = ENV_LOCK.lock().expect("env lock");
+    let _restore_catalog_env = EnvRestore::capture("CHINESE_PROVIDER_ENV_FILE");
+    let _restore_mimo = EnvRestore::capture("MIMO_API_KEY");
+    let _restore_xiaomi = EnvRestore::capture("XIAOMI_API_KEY");
+    unsafe {
+        std::env::remove_var("MIMO_API_KEY");
+        std::env::remove_var("XIAOMI_API_KEY");
+    }
+
+    let root = temp_workspace_root();
+    write_fixture(&root);
+    let env_file = root.join("runtime_env_filled.sh");
+    std::fs::write(
+        &env_file,
+        r#"
+# comment
+export MIMO_API_KEY='secret-env-file-mimo'
+"#,
+    )
+    .expect("write env file");
+    unsafe {
+        std::env::set_var("CHINESE_PROVIDER_ENV_FILE", env_file.as_os_str());
+    }
+
+    let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
+    let mimo = catalog
+        .entries
+        .iter()
+        .find(|entry| entry.provider == "mimo")
+        .expect("mimo entry");
+    let serialized = serde_json::to_string(&catalog).expect("json");
+
+    assert_eq!(mimo.credential_state, "configured_env");
+    assert!(!serialized.contains("secret-env-file-mimo"));
+    assert!(!serialized.contains("runtime_env_filled.sh"));
+}
+
+#[test]
+fn catalog_ignores_missing_env_file_path() {
+    let _guard = ENV_LOCK.lock().expect("env lock");
+    let _restore_catalog_env = EnvRestore::capture("CHINESE_PROVIDER_ENV_FILE");
+    unsafe {
+        std::env::set_var(
+            "CHINESE_PROVIDER_ENV_FILE",
+            "/tmp/rustclaw-definitely-missing-env-file.sh",
+        );
+    }
+
+    let root = temp_workspace_root();
+    write_fixture(&root);
+    let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
+
+    assert!(catalog
+        .entries
+        .iter()
+        .any(|entry| entry.provider == "fixture_missing" && entry.credential_state == "missing"));
+}
+
+#[test]
 fn catalog_output_does_not_serialize_secret_values() {
     let root = temp_workspace_root();
     write_fixture(&root);
