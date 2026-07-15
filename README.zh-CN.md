@@ -318,7 +318,7 @@ POST   /v1/memory/settings
 
 ### 追踪与排障
 
-Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use policy、召回 source refs、纳入原因和字符预算，但不复制原始记忆文本，便于排查“为什么这次任务用了记忆”，同时降低敏感内容泄露风险。浏览器教学模式的 trace 面板和 `/v1/debug/tasks/{task_id}` 还会在编号 LLM 调用上方展示紧凑的 `flow_summary`，包含 stage、module、retry、verifier、finalizer、provider-error 等机器计数，并把结构化 memory/KB 策略放在原始请求/响应细节旁边。教学模式里，当前选中的对话轮次会展示 task id、状态、LLM 调用次数、stage 数、verifier/finalizer 次数，并基于 `flow_stage`、`flow_node`、`code_module`、`code_entrypoint` 和调用编号生成 agent 过程时间线。
+Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use policy、召回 source refs、纳入原因和字符预算，但不复制原始记忆文本，便于排查“为什么这次任务用了记忆”，同时降低敏感内容泄露风险。浏览器教学模式的 trace 面板和 `/v1/debug/tasks/{task_id}` 还会在编号 LLM 调用上方展示紧凑的 `flow_summary`，包含 stage、module、retry、verifier、finalizer、provider-error 等机器计数，并把结构化 memory/KB 策略、`model_catalog_trace` 和 `resume_trace` 放在原始请求/响应细节旁边。教学模式里，当前选中的对话轮次会展示 task id、状态、LLM 调用次数、stage 数、verifier/finalizer 次数、目标/上下文/team/coding/checkpoint 事件时间线、模型/厂商能力决策、后台续跑/checkpoint 决策，并基于 `flow_stage`、`flow_node`、`code_module`、`code_entrypoint` 和调用编号生成 agent 过程时间线。
 
 常用代码和配置入口：
 
@@ -640,10 +640,13 @@ rustclaw -key disable rk-xxxx
 - `POST /v1/tasks`
 - `GET /v1/tasks/{task_id}`
 - `POST /v1/tasks/cancel`
+- `POST /v1/tasks/cancel-by-task-id`
+- `POST /v1/tasks/cancel-one`：按 active-list index 取消的兼容接口
 - `POST /v1/services/{service}/{action}`：浏览器控制台服务启动/停止/重启；失败时返回 `error_code`、`status_code`、`message_key`、`service`、`action` 等机器字段
 - `GET /v1/auth/me`
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`：按当前 `X-RustClaw-Key` 作用域读取或覆盖当前 key 自己的交易所凭据
+- `GET /v1/models/catalog`：返回不含密钥的模型/厂商能力目录，供 UI Models 页面和教学模式 `model_catalog_trace` 使用
 - `GET /v1/nni/device/status`：返回 NNI helper 状态、支持的操作，以及是否检测到设备签名芯片
 - `POST /v1/nni/device/action`：执行 `pubkey`、`sign_timestamp`、`tng_device_pubkey`、`tng_device_cert`、`tng_signer_cert` 或 `tng_root_cert`
 
@@ -658,6 +661,32 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
   -H "X-RustClaw-Key: rk-xxxx" \
   -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello","agent_mode":true}}'
 ```
+
+## 模型能力目录与中文 Provider 验证
+
+模型能力目录是配置派生的机器事实，不是运行时临时猜测。它从 `configs/config.toml` 的 LLM provider 表，以及 `configs/image.toml`、`configs/audio.toml`、`configs/video.toml`、`configs/music.toml` 的多模态模型配置生成，输出不含密钥的能力字段：文本、图片/视频/音频输入、图片/语音/视频/音乐生成、是否需要 async、是否支持 dry-run、timeout、context window、当前激活文本 provider 和配置来源。
+
+```mermaid
+flowchart TD
+    A[configs/config.toml<br/>llm provider tables] --> B[ModelCatalog builder]
+    C[configs/image.toml] --> B
+    D[configs/audio.toml] --> B
+    E[configs/video.toml] --> B
+    F[configs/music.toml] --> B
+    G[prompts/layers/vendor_patches/*] --> B
+    B --> H[ModelCatalog entries<br/>provider + model + capability flags]
+    H --> I[GET /v1/models/catalog]
+    H --> J[clawcli models catalog]
+    H --> K[UI Models 页面]
+    H --> L[Task debug model_catalog_trace]
+    L --> M[教学模式面板<br/>无密钥 selected provider/model + observed calls]
+    H --> N[python3 scripts/check_chinese_model_catalog.py]
+    N --> O[静态门禁<br/>MiniMax/MiMo/Qwen/DeepSeek metadata + vendor patches + case tags]
+    O --> P[scripts/nl_tests/run_chinese_provider_smoke_matrix.sh]
+    P --> Q[Live 或 dry-run provider matrix<br/>凭据预检 + 结构化 skip]
+```
+
+MiniMax M3/M2.7、MiMo、Qwen 和 DeepSeek 的中文 provider 元数据由 `scripts/check_chinese_model_catalog.py` 守住；`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` 可只验证 case 与凭据状态，不调用 provider。需要 live 验证时，必须确保当前运行中的 `clawd` 已按对应 provider/config 启动，runner 的 `RUSTCLAW_PROVIDER_OVERRIDE` 只用于元数据和同环境启动 wrapper，不会重写已经运行的进程。
 
 ## NL 回归快捷入口
 

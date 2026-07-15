@@ -352,7 +352,7 @@ Recent records with safety flags are hidden by default in the UI. Fact-card deta
 
 ### Trace And Troubleshooting
 
-Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content. The browser teaching-mode trace and `/v1/debug/tasks/{task_id}` also show a compact `flow_summary` above numbered LLM calls, with stage/module/retry/verifier/finalizer/provider-error machine counts and the structured memory/KB policy next to raw request/response details. Each browser chat turn keeps a lightweight task/trace index. When teaching mode is selected, clicking either the user's question or the assistant's reply selects that turn and shows the corresponding task id, status, LLM call count, stage count, verifier/finalizer counts, goal/context/team/coding/checkpoint event timeline, and numbered raw LLM request/response details. When teaching mode is not selected, message clicks do not change the teaching trace.
+Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content. The browser teaching-mode trace and `/v1/debug/tasks/{task_id}` also show a compact `flow_summary` above numbered LLM calls, with stage/module/retry/verifier/finalizer/provider-error machine counts, structured memory/KB policy, `model_catalog_trace`, and `resume_trace` next to raw request/response details. Each browser chat turn keeps a lightweight task/trace index. When teaching mode is selected, clicking either the user's question or the assistant's reply selects that turn and shows the corresponding task id, status, LLM call count, stage count, verifier/finalizer counts, goal/context/team/coding/checkpoint event timeline, model/provider capability decision, resume/checkpoint decision, and numbered raw LLM request/response details. When teaching mode is not selected, message clicks do not change the teaching trace.
 
 When debugging memory behavior, check these questions in order:
 
@@ -503,6 +503,8 @@ flowchart TD
     N --> O[Teaching panel]
     O --> P[Agent process timeline<br/>goal/context/team/coding/checkpoint events]
     O --> Q[Numbered LLM calls<br/>request + response + raw fields]
+    O --> R[Model catalog decision<br/>provider/model capability tokens]
+    O --> S[Resume/checkpoint decision<br/>state + side-effect + provider blocker tokens]
 ```
 
 Task event stream projection flow:
@@ -735,6 +737,30 @@ flowchart TD
     N --> P[Teaching mode + debug task trace]
 ```
 
+Model catalog and Chinese-provider validation flow:
+
+```mermaid
+flowchart TD
+    A[configs/config.toml<br/>llm provider tables] --> B[ModelCatalog builder]
+    C[configs/image.toml] --> B
+    D[configs/audio.toml] --> B
+    E[configs/video.toml] --> B
+    F[configs/music.toml] --> B
+    G[prompts/layers/vendor_patches/*] --> B
+    B --> H[ModelCatalog entries<br/>provider + model + capability flags]
+    H --> I[GET /v1/models/catalog]
+    H --> J[clawcli models catalog]
+    H --> K[UI Models page]
+    H --> L[Task debug model_catalog_trace]
+    L --> M[Teaching mode panel<br/>secret-free selected provider/model + observed calls]
+    H --> N[python3 scripts/check_chinese_model_catalog.py]
+    N --> O[Static guard<br/>MiniMax/MiMo/Qwen/DeepSeek metadata + vendor patches + case tags]
+    O --> P[scripts/nl_tests/run_chinese_provider_smoke_matrix.sh]
+    P --> Q[Live or dry-run provider matrix<br/>credential preflight + structured skip]
+```
+
+The catalog is config-derived, not a live model-discovery API. It exposes secret-free capability facts such as text support, image/video/audio input, image/audio/video/music generation, async/dry-run requirements, timeout, context window, active text provider, and config source. Chinese provider metadata for MiniMax M3/M2.7, MiMo, Qwen, and DeepSeek is guarded by `scripts/check_chinese_model_catalog.py`; the smoke matrix runner can validate cases without provider calls through `--dry-run`, or run live against a currently started `clawd` when credentials and provider startup match.
+
 ## Main Components
 
 - `crates/clawd`: core runtime, HTTP API, routing, memory, scheduling, auth, task queue
@@ -952,6 +978,7 @@ Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 - `GET /v1/auth/me`
 - `POST /v1/auth/channel/bind`
 - `GET/POST /v1/auth/crypto-credentials`: reads or overwrites exchange credentials scoped to the current `X-RustClaw-Key`
+- `GET /v1/models/catalog`: returns the secret-free model/provider capability catalog used by the UI Models page and teaching-mode `model_catalog_trace`
 - `GET /v1/nni/device/status`: reports NNI helper status, supported actions, and whether a device-signing chip is present
 - `POST /v1/nni/device/action`: runs one of `pubkey`, `sign_timestamp`, `tng_device_pubkey`, `tng_device_cert`, `tng_signer_cert`, or `tng_root_cert`
 - NNI request, heartbeat, and device-helper events are written as JSONL to `logs/nni.log`; `configs/config.toml` keeps only current NNI state and legacy record fallback.
