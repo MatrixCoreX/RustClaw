@@ -368,6 +368,31 @@ def parse_provider_summary_jsonl(run_dir: Path) -> tuple[list[dict[str, Any]], l
     return rows, findings
 
 
+def provider_smoke_path_ref_is_safe(value: Any, *, allow_empty: bool = False) -> bool:
+    if not isinstance(value, str):
+        return False
+    if value == "":
+        return allow_empty
+    if value.startswith("/") or "\\" in value or any(ch.isspace() for ch in value):
+        return False
+    path = PurePosixPath(value)
+    return all(part not in {"", ".", ".."} for part in path.parts)
+
+
+def validate_provider_smoke_path_refs(
+    rows: list[dict[str, Any]],
+    source: str,
+) -> list[str]:
+    findings: list[str] = []
+    for index, row in enumerate(rows):
+        for field in ("case_file", "output_file", "run_dir"):
+            if not provider_smoke_path_ref_is_safe(row.get(field), allow_empty=(field == "run_dir")):
+                findings.append(
+                    f"agent_parity_gate_provider_smoke_bad_path_ref:{source}:{index}:{field}"
+                )
+    return findings
+
+
 def parse_live_provider_scope(raw: str | None) -> tuple[set[str], list[str]]:
     if raw is None:
         return set(), ["agent_parity_gate_summary_missing_live_provider_scope"]
@@ -508,6 +533,7 @@ def validate_provider_smoke_artifacts(
             findings.append("agent_parity_gate_provider_smoke_bad_providers_shape")
             provider_rows_raw = []
         provider_rows = [entry for entry in provider_rows_raw if isinstance(entry, dict)]
+        findings.extend(validate_provider_smoke_path_refs(provider_rows, "matrix_summary"))
         providers = {entry.get("provider") for entry in provider_rows}
         missing = sorted(AGENT_PARITY_CHINESE_MODEL_PROVIDERS - providers)
         if missing:
@@ -540,6 +566,7 @@ def validate_provider_smoke_artifacts(
             findings.append("agent_parity_gate_provider_smoke_missing_dry_run_reason")
         rows, row_findings = parse_provider_summary_jsonl(run_dir)
         findings.extend(row_findings)
+        findings.extend(validate_provider_smoke_path_refs(rows, "provider_summary"))
         row_providers = {row.get("provider") for row in rows}
         row_missing = sorted(AGENT_PARITY_CHINESE_MODEL_PROVIDERS - row_providers)
         if row_missing:
@@ -1177,6 +1204,30 @@ def run_self_test() -> int:
             print(
                 "SELF_TEST_FAIL provider_summary_jsonl_row_errors:"
                 f"rows={provider_summary_rows} findings={provider_summary_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        provider_path_ref_findings = validate_provider_smoke_path_refs(
+            [
+                {
+                    "case_file": "scripts/nl_tests/cases/cases.txt",
+                    "output_file": "/tmp/run.output.txt",
+                    "run_dir": "out_dir\\minimax",
+                }
+            ],
+            "self_test",
+        )
+        provider_path_ref_finding_set = set(provider_path_ref_findings)
+        if (
+            "agent_parity_gate_provider_smoke_bad_path_ref:self_test:0:output_file"
+            not in provider_path_ref_finding_set
+            or "agent_parity_gate_provider_smoke_bad_path_ref:self_test:0:run_dir"
+            not in provider_path_ref_finding_set
+        ):
+            print(
+                "SELF_TEST_FAIL provider_path_ref_errors:"
+                f"{provider_path_ref_findings}",
                 file=sys.stderr,
             )
             return 1

@@ -787,6 +787,15 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "Chinese provider smoke runner must report the effective live scope as a machine token",
     )
     require(
+        "path_ref()" in smoke_text
+        and '"case_file": path_ref(case_file)' in smoke_text
+        and '"output_file": path_ref(output_file)' in smoke_text
+        and '"run_dir": path_ref(run_dir)' in smoke_text
+        and 'CHINESE_PROVIDER_SMOKE_MATRIX out_dir_ref=$(path_ref "$OUT_DIR")' in smoke_text,
+        findings,
+        "Chinese provider smoke runner must write portable path refs instead of host paths",
+    )
+    require(
         'CHINESE_PROVIDER_LIVE_PROVIDERS="${CHINESE_PROVIDER_LIVE_PROVIDERS:-minimax}"'
         in parity_text,
         findings,
@@ -926,6 +935,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "validate_chinese_provider_env_file_summary" in suite_wrapper_text
         and "agent_parity_gate_summary_bad_env_file_state" in suite_wrapper_text
         and "agent_parity_gate_summary_bad_env_file_source" in suite_wrapper_text
+        and "validate_provider_smoke_path_refs" in suite_wrapper_text
+        and "agent_parity_gate_provider_smoke_bad_path_ref" in suite_wrapper_text
         and "--validate-contract-report-content" in suite_wrapper_text
         and "--require-contract-report-content-checked" in suite_wrapper_text
         and "validate_existing_contract_report" in suite_wrapper_text
@@ -979,6 +990,9 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "agent_parity_gate_provider_summary_bad_json_line" in suite_artifact_contract_text
         and "agent_parity_gate_provider_summary_bad_row" in suite_artifact_contract_text
         and "provider-summary-jsonl-row-errors" in suite_artifact_contract_text
+        and "validate_provider_smoke_path_refs" in suite_artifact_contract_text
+        and "agent_parity_gate_provider_smoke_bad_path_ref" in suite_artifact_contract_text
+        and "provider_path_ref_errors" in suite_artifact_contract_text
         and "parse_live_provider_scope" in suite_artifact_contract_text
         and "validate_live_provider_scope" in suite_artifact_contract_text
         and "agent_parity_gate_summary_bad_live_provider_scope" in suite_artifact_contract_text

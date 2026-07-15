@@ -141,7 +141,7 @@ self-test, and raw LLM trace contracts participated in the run. It also checks
 artifact content: text reports must contain their success tokens, and JSON reports such as
 `secret_scan_contract.json` and `suite_wrapper_contract.json` must expose
 `ok=true` from a top-level object. The suite-artifact self-test covers missing,
-unreadable, malformed, and non-object contract reports; invalid Chinese live-provider scope; invalid env-file state/source; bad UTF-8 artifact
+unreadable, malformed, and non-object contract reports; invalid Chinese live-provider scope; invalid env-file state/source; unsafe Chinese-provider smoke path refs; bad UTF-8 artifact
 payloads; non-object JSON ok
 artifacts; non-object loader-backed artifacts such as compact coverage; base report fields (`ok`, `run_dir`,
 `require_contract_report`, `findings`); bad UTF-8 suite metadata; unchecked final reports; summary
@@ -161,7 +161,10 @@ summary JSONL row shape/JSON errors, and each MiniMax/MiMo/Qwen/DeepSeek matrix 
 expected dry-run or `provider_not_in_live_scope` reason based on
 `chinese_provider_live_providers`. That scope field must be `all` or a CSV of
 known Chinese provider machine tokens, and env-file state/source must remain in
-their allowed machine-token sets. `live_metrics` is a required
+their allowed machine-token sets. Provider smoke metadata path fields
+(`case_file`, `output_file`, `run_dir`) must be portable refs such as
+repo-relative paths, `out_dir/...`, or `external_path`, never host absolute
+paths. `live_metrics` is a required
 `gate_summary.env` machine field. `metrics=1` only means "the metrics gate was
 not disabled"; it does not substitute for `live_metrics`. `live_metrics=1`
 means run directories were provided and `run_metrics.json` / `run_metrics.txt`

@@ -122,6 +122,50 @@ live_scope_csv() {
   printf '%s' "$out"
 }
 
+path_ref() {
+  local value="$1"
+  python3 - "$ROOT_DIR" "$OUT_DIR" "$value" <<'PY'
+import sys
+from pathlib import Path, PurePosixPath
+
+root = Path(sys.argv[1]).resolve()
+out_dir = Path(sys.argv[2]).resolve()
+raw = sys.argv[3]
+
+
+def safe_relative_text(text: str) -> str | None:
+    normalized = text.replace("\\", "/")
+    if not normalized or normalized.startswith("/") or any(ch.isspace() for ch in normalized):
+        return None
+    path = PurePosixPath(normalized)
+    if any(part in {"", ".", ".."} for part in path.parts):
+        return None
+    return path.as_posix()
+
+
+def path_ref(raw_value: str) -> str:
+    if not raw_value:
+        return ""
+    path = Path(raw_value)
+    if path.is_absolute():
+        resolved = path.resolve()
+        for base, prefix in ((out_dir, "out_dir"), (root, "")):
+            try:
+                rel = resolved.relative_to(base)
+            except ValueError:
+                continue
+            rel_text = rel.as_posix()
+            if rel_text == ".":
+                return prefix or "."
+            return f"{prefix}/{rel_text}" if prefix else rel_text
+        return "external_path"
+    return safe_relative_text(raw_value) or "external_path"
+
+
+print(path_ref(raw))
+PY
+}
+
 provider_required_env_vars() {
   case "$1" in
     minimax)
@@ -204,10 +248,10 @@ write_metadata() {
       live_scope="excluded"
     fi
   fi
-  python3 - "$path" "$provider" "$status" "$reason" "$run_dir" "$output_file" "$exit_code" "$CASE_FILE" "$live_scope" "$(live_scope_csv)" "$credential_state" "$credential_required_env" <<'PY'
+  python3 - "$path" "$provider" "$status" "$reason" "$run_dir" "$output_file" "$exit_code" "$CASE_FILE" "$live_scope" "$(live_scope_csv)" "$credential_state" "$credential_required_env" "$ROOT_DIR" "$OUT_DIR" <<'PY'
 import json
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 path = Path(sys.argv[1])
 provider = sys.argv[2]
@@ -221,6 +265,39 @@ live_scope = sys.argv[9]
 live_scope_providers = [item for item in sys.argv[10].split(",") if item]
 credential_state = sys.argv[11]
 credential_required_env = [item for item in sys.argv[12].split(",") if item]
+root = Path(sys.argv[13]).resolve()
+out_dir = Path(sys.argv[14]).resolve()
+
+
+def safe_relative_text(text: str) -> str | None:
+    normalized = text.replace("\\", "/")
+    if not normalized or normalized.startswith("/") or any(ch.isspace() for ch in normalized):
+        return None
+    posix_path = PurePosixPath(normalized)
+    if any(part in {"", ".", ".."} for part in posix_path.parts):
+        return None
+    return posix_path.as_posix()
+
+
+def path_ref(raw_value: str) -> str:
+    if not raw_value:
+        return ""
+    raw_path = Path(raw_value)
+    if raw_path.is_absolute():
+        resolved = raw_path.resolve()
+        for base, prefix in ((out_dir, "out_dir"), (root, "")):
+            try:
+                rel = resolved.relative_to(base)
+            except ValueError:
+                continue
+            rel_text = rel.as_posix()
+            if rel_text == ".":
+                return prefix or "."
+            return f"{prefix}/{rel_text}" if prefix else rel_text
+        return "external_path"
+    return safe_relative_text(raw_value) or "external_path"
+
+
 payload = {
     "provider": provider,
     "status": status,
@@ -229,10 +306,10 @@ payload = {
     "live_scope_providers": live_scope_providers,
     "credential_state": credential_state,
     "credential_required_env": credential_required_env,
-    "run_dir": run_dir,
-    "output_file": output_file,
+    "run_dir": path_ref(run_dir),
+    "output_file": path_ref(output_file),
     "exit_code": exit_code,
-    "case_file": case_file,
+    "case_file": path_ref(case_file),
 }
 path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
 print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
@@ -347,8 +424,8 @@ python3 "${ROOT_DIR}/scripts/nl_tests/check_chinese_provider_smoke_matrix.py" \
   --case-file "$CASE_FILE" \
   --json > "${OUT_DIR}/case_coverage.json"
 
-echo "CHINESE_PROVIDER_SMOKE_MATRIX out_dir=${OUT_DIR}"
-echo "case_file=${CASE_FILE}"
+echo "CHINESE_PROVIDER_SMOKE_MATRIX out_dir_ref=$(path_ref "$OUT_DIR")"
+echo "case_file=$(path_ref "$CASE_FILE")"
 echo "providers=${PROVIDERS[*]}"
 echo "live_scope_providers=$(live_scope_csv)"
 echo "dry_run=${DRY_RUN}"
