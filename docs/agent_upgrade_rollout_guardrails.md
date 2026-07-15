@@ -1,6 +1,6 @@
 # Agent Upgrade Rollout Guardrails
 
-Last updated: 2026-07-01
+Last updated: 2026-07-15
 
 This document is the P0 rollout guardrail for the agent generalization plan. It records what can be safely changed now, what is only planned, how to test each change, and how to roll it back.
 
@@ -42,11 +42,11 @@ These controls are read from `configs/agent_guard.toml` and logged as machine to
 
 | Control | Current Default | Intended Effect | Required Before Behavior Use |
 | --- | --- | --- | --- |
-| `answer_verifier_enforce_required_scope` | `all` | Convert high-confidence required-evidence verifier failures into structured block/retry outcomes. | Focused Rust tests and compressed release-gate-equivalent NL passed before defaulting to `all`; keep attribution review active and roll back to `selected_agent_loop` or `off` if false verifier blocks appear. |
+| `answer_verifier_enforce_required_scope` | `all` | Convert high-confidence required-evidence verifier failures into structured block/retry outcomes. | Final always-on boundary; false verifier blocks must be fixed through evidence contracts, extractors, registry metadata, or planner prompts, not by disabling the guard. |
 | `answer_verifier_enforce_required` | ignored | Historical bool name; current runtime config load does not parse it. | Do not add it to new configs; use `answer_verifier_enforce_required_scope` instead. |
 | `semantic_route_authority` | retired | Historical route-authority key; current runtime config load must not parse it. | Do not add it to new configs; use static route-authority guard and replay/NL evidence instead of a semantic route switch. |
 | `agent_loop_canary_bucket` | retired | Historical canary bucket key; current runtime config load must not parse it. | Do not add it to new configs; use focused test subsets and replay diff artifacts for targeted debugging. |
-| `registry_idempotency_guard_scope` | `all` | Drive once/dedup/idempotency from registry metadata. | Focused tests and compressed release-gate-equivalent NL passed before defaulting to `all`; keep repeat-block attribution review active and roll back to `selected_agent_loop` or `off` if false repeat blocks appear. |
+| `registry_idempotency_guard_scope` | `all` | Drive once/dedup/idempotency from registry metadata. | Final always-on boundary; false repeat blocks must be fixed through registry `effect`, `once_per_task`, `dedup_scope`, or verifier policy, not by disabling the guard. |
 | `registry_idempotency_guard` | ignored | Historical bool name; current runtime config load does not parse it. | Do not add it to new configs; use `registry_idempotency_guard_scope` instead. |
 | `structured_evidence_required_for_selected_contracts` | `true` | Require structured evidence for selected agent-loop contracts before final answer. | Keep route-delta and verifier attribution in canary runs; temporarily disable only as a rollback if selected contracts show false evidence gaps. |
 
@@ -169,12 +169,12 @@ Rollback procedure:
 
 ## Current Known Risks
 
-- `answer_verifier_enforce_required_scope` is now config-read and current config uses `all`. The required-evidence failure payload is structured and behavior attribution is available in `rollout_attribution[]`; if false blocks appear, roll back to `selected_agent_loop` or `off`.
+- `answer_verifier_enforce_required_scope` is now a final `all` boundary. The required-evidence failure payload is structured and behavior attribution is available in `rollout_attribution[]`; if false blocks appear, fix the evidence contract, extractor, registry metadata, or planner prompt that produced the mismatch.
 - Route-authority runtime rollback switches are retired. Remaining compatibility deletion work is still release-gated: do not remove a residual ordinary semantic fallback until focused tests, compressed release-gate-equivalent NL coverage, and route-delta/replay review show no unexplained mismatch.
 - Some finalizer paths still emit structured machine fields directly. This is allowed for exact machine contracts, but directory/user-summary classes need continued audit under P1/P5.
 - Directory summary requests have a focused repair for non-explicit command-output routes with machine `directory_purpose` repair markers, and `system_basic.inventory_dir` now exposes `size_summary`. Composite directory requests can still straddle `directory_entry_groups` and `directory_purpose_summary`; keep this boundary under P1/P2 review before expanding directory-summary canaries.
 - The `prompts/schemas` focused case now passes by emitting structured `largest.*`, `size_bytes`, `content_excerpt`, and `directory_purpose_summary` evidence when model synthesis conflicts with observed file sizes. This is safer than a wrong prose answer, but user-facing readability remains a P1/P5 follow-up; do not solve it with runtime zh/en fixed templates.
-- Registry `effect`, `once_per_task`, `dedup_scope`, and `idempotent` parse through `claw-core`; both main and docker registries explicitly declare those action-level governance fields for existing `planner_capabilities`. Execution-loop consumption now uses `registry_idempotency_guard_scope=all` and records rollout attribution when it blocks action-level repeats; roll back to `selected_agent_loop` or `off` if false repeat blocks appear.
+- Registry `effect`, `once_per_task`, `dedup_scope`, and `idempotent` parse through `claw-core`; both main and docker registries explicitly declare those action-level governance fields for existing `planner_capabilities`. Execution-loop consumption now uses the final `registry_idempotency_guard_scope=all` boundary and records rollout attribution when it blocks action-level repeats; if false repeat blocks appear, fix the registry policy metadata or verifier policy that produced the mismatch.
 - `execution_recipe::classify_skill_action_effect()` remains registry-first for `planner_capabilities[].effect`; it now also uses registry `side_effect=false` as a read-only fallback before legacy skill-name compatibility branches. Keep `run_cmd` / `http_basic` / `service_control` protocol-specific effect detection until equivalent registry metadata and tests exist.
 - `configs/agent_guard.toml` domain action lists are now marked `DEPRECATED` and covered by a support test proving they do not affect `AgentLoopGuardPolicy`. Prompt text / `dynamic_rules` still need P4 ownership cleanup before any runtime use.
 - Crypto account access failures now prefer skill-provided structured fields (`extra.error_kind`, `message_key`, `exchange`, `detail`, `status_code`) and deterministic runtime output uses machine fields instead of fixed English reply templates. Legacy sentinel parsing remains only as compatibility fallback.
@@ -247,7 +247,7 @@ Do not run these as real external calls in the current NL canary:
 - `cargo test -p claw-core skill_registry -- --nocapture`: passed after adding registry action governance fields `once_per_task`, `dedup_scope`, and `idempotent`.
 - `python3 scripts/sync_registry_governance_fields.py`: passed with `missing=0` for both `configs/skills_registry.toml` and `docker/config/skills_registry.toml`.
 - `cargo test -p clawd registry_idempotency_guard -- --nocapture`, `cargo test -p clawd execution_loop -- --nocapture`, and `cargo test -p clawd rollout_attribution -- --nocapture`: passed after registry idempotency guard consumption and rollout attribution; this originally validated selected-scope canary behavior, and current config has since advanced to `registry_idempotency_guard_scope=all`.
-- `cargo test -p clawd support --quiet`, `cargo test -p clawd answer_verifier --quiet`, `cargo test -p clawd execution_loop --quiet`, and `cargo test -p clawd finalize --quiet`: passed after adding `answer_verifier_enforce_required_scope=selected_agent_loop`; this originally validated selected-scope canary behavior, and current config has since advanced to `answer_verifier_enforce_required_scope=all`.
+- `cargo test -p clawd support --quiet`, `cargo test -p clawd answer_verifier --quiet`, `cargo test -p clawd execution_loop --quiet`, and `cargo test -p clawd finalize --quiet`: historical canary tests passed before the verifier scope advanced to the final `answer_verifier_enforce_required_scope=all` boundary; current runtime normalizes non-`all` historical values to `all`.
 - `scripts/nl_suite_logs/client_like_continuous/run_20260617_223640` and `run_20260617_223838`: MiniMax verifier selected-scope canary passed 3/3; rollout metrics at `logs/agent_rollout_metrics/multi_2_run_20260617_223640_to_run_20260617_223838_rollout_metrics.json`, route-delta `unexplained_mismatch_count=0`, verifier pass count 3.
 - `cargo test -p clawd market_quote_scalar -- --nocapture`: passed after replacing the `crypto|stock` observed-output skill-name branch with registry `semantic_tags=["market_quote_scalar"]`.
 - `cargo test -p crypto-skill account_access -- --nocapture`, `cargo test -p clawd account_access -- --nocapture`, and `cargo test -p clawd crypto_account_error -- --nocapture`: passed after moving crypto account errors to structured `extra.error_kind/message_key` and machine-field deterministic output.

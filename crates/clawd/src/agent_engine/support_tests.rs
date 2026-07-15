@@ -1383,7 +1383,7 @@ structured_evidence_required_for_selected_contracts = true
 }
 
 #[test]
-fn answer_verifier_required_scope_accepts_selected_agent_loop_token() {
+fn answer_verifier_required_scope_legacy_token_normalizes_to_all() {
     let root = temp_support_workspace("answer-verifier-scope-config");
     let config_dir = root.join("configs");
     std::fs::create_dir_all(&config_dir).expect("create config dir");
@@ -1402,11 +1402,12 @@ answer_verifier_enforce_required_scope = "selected_agent_loop"
 
     assert_eq!(
         policy.effective_answer_verifier_required_evidence_scope(),
-        AnswerVerifierRequiredEvidenceScope::SelectedAgentLoop
+        AnswerVerifierRequiredEvidenceScope::All
     );
     assert!(policy
         .enabled_rollout_switches()
         .contains(&"answer_verifier_enforce_required_scope"));
+    assert!(policy.answer_verifier_required_evidence_enabled_for_route(None));
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1444,10 +1445,9 @@ answer_verifier_enforce_required_scope = "all"
 }
 
 #[test]
-fn answer_verifier_required_scope_only_enables_selected_agent_loop_routes() {
+fn answer_verifier_required_scope_final_all_does_not_depend_on_route_class() {
     let mut policy = base_policy();
-    policy.answer_verifier_enforce_required_scope =
-        AnswerVerifierRequiredEvidenceScope::SelectedAgentLoop;
+    policy.answer_verifier_enforce_required_scope = AnswerVerifierRequiredEvidenceScope::All;
     let selected_route =
         route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
     let mut blocked_route =
@@ -1455,8 +1455,8 @@ fn answer_verifier_required_scope_only_enables_selected_agent_loop_routes() {
     blocked_route.risk_ceiling = RiskCeiling::High;
 
     assert!(policy.answer_verifier_required_evidence_enabled_for_route(Some(&selected_route)));
-    assert!(!policy.answer_verifier_required_evidence_enabled_for_route(Some(&blocked_route)));
-    assert!(!policy.answer_verifier_required_evidence_enabled_for_route(None));
+    assert!(policy.answer_verifier_required_evidence_enabled_for_route(Some(&blocked_route)));
+    assert!(policy.answer_verifier_required_evidence_enabled_for_route(None));
 }
 
 #[test]
@@ -1475,7 +1475,7 @@ fn answer_verifier_required_scope_all_enables_all_routes() {
 }
 
 #[test]
-fn registry_idempotency_guard_scope_accepts_selected_agent_loop_token() {
+fn registry_idempotency_guard_scope_legacy_token_normalizes_to_all() {
     let root = temp_support_workspace("registry-scope-config");
     let config_dir = root.join("configs");
     std::fs::create_dir_all(&config_dir).expect("create config dir");
@@ -1494,11 +1494,12 @@ registry_idempotency_guard_scope = "selected_agent_loop"
 
     assert_eq!(
         policy.effective_registry_idempotency_guard_scope(),
-        RegistryIdempotencyGuardScope::SelectedAgentLoop
+        RegistryIdempotencyGuardScope::All
     );
     assert!(policy
         .enabled_rollout_switches()
         .contains(&"registry_idempotency_guard_scope"));
+    assert!(policy.registry_idempotency_guard_enabled_for_route(None));
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1536,10 +1537,10 @@ registry_idempotency_guard_scope = "all"
 }
 
 #[test]
-fn registry_idempotency_guard_scope_only_changes_selected_agent_loop_routes() {
+fn registry_idempotency_guard_scope_final_all_does_not_depend_on_route_class() {
     let state = state_with_registry(registry_governance_fixture(), &["config_edit"]);
     let mut policy = base_policy();
-    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::SelectedAgentLoop;
+    policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
     let selected_route =
         route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
     let mut blocked_route =
@@ -1563,7 +1564,7 @@ fn registry_idempotency_guard_scope_only_changes_selected_agent_loop_routes() {
     };
 
     assert!(policy.registry_idempotency_guard_enabled_for_route(Some(&selected_route)));
-    assert!(!policy.registry_idempotency_guard_enabled_for_route(Some(&blocked_route)));
+    assert!(policy.registry_idempotency_guard_enabled_for_route(Some(&blocked_route)));
     assert_eq!(
         action_fingerprint_for_policy(&state, &policy, &left, Some(&selected_route)),
         "skill:config_edit:action:apply_config_change"
@@ -1572,7 +1573,7 @@ fn registry_idempotency_guard_scope_only_changes_selected_agent_loop_routes() {
         action_fingerprint_for_policy(&state, &policy, &left, Some(&selected_route)),
         action_fingerprint_for_policy(&state, &policy, &right, Some(&selected_route))
     );
-    assert_ne!(
+    assert_eq!(
         action_fingerprint_for_policy(&state, &policy, &left, Some(&blocked_route)),
         action_fingerprint_for_policy(&state, &policy, &right, Some(&blocked_route))
     );

@@ -123,6 +123,12 @@ It also writes `policy_decision_tokens.txt` from
 contain `POLICY_DECISION_TOKEN_SELF_TEST ok` and
 `POLICY_DECISION_TOKEN_CHECK ok`, so permission, confirmation, and background
 wait decisions keep flowing through the `PolicyDecision` machine-token enum.
+It also writes `agent_loop_guard_final_scope.txt` from
+`scripts/check_agent_loop_guard_final_scope.py --self-test` plus the main check.
+`gate_summary.env` records `agent_loop_guard_final_scope=1`, and the artifact
+must contain `AGENT_LOOP_GUARD_FINAL_SCOPE_SELF_TEST ok` and
+`AGENT_LOOP_GUARD_FINAL_SCOPE_CHECK findings=0`, so answer-verifier evidence
+and registry idempotency scopes stay final `all` machine boundaries.
 It also writes `registry_policy_contracts.txt`,
 `skill_registry_aliases.txt`, and `long_tail_skill_contracts.txt` from
 `scripts/check_registry_policy_contracts.py --self-test`,
@@ -168,6 +174,7 @@ root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/policy_boundary_hard_reply.txt`,
 `agent_parity_gate/repair_no_user_text_fields.txt`,
 `agent_parity_gate/policy_decision_tokens.txt`,
+`agent_parity_gate/agent_loop_guard_final_scope.txt`,
 `agent_parity_gate/registry_policy_contracts.txt`,
 `agent_parity_gate/skill_registry_aliases.txt`,
 `agent_parity_gate/long_tail_skill_contracts.txt`,
@@ -221,6 +228,9 @@ For `repair_no_user_text_fields.txt`, the required content includes
 `SELF_TEST_OK` and `REPAIR_USER_TEXT_FIELD_CHECK ok`.
 For `policy_decision_tokens.txt`, the required content includes
 `POLICY_DECISION_TOKEN_SELF_TEST ok` and `POLICY_DECISION_TOKEN_CHECK ok`.
+For `agent_loop_guard_final_scope.txt`, the required content includes
+`AGENT_LOOP_GUARD_FINAL_SCOPE_SELF_TEST ok` and
+`AGENT_LOOP_GUARD_FINAL_SCOPE_CHECK findings=0`.
 For `registry_policy_contracts.txt`, `skill_registry_aliases.txt`, and
 `long_tail_skill_contracts.txt`, the required content includes their self-test
 tokens plus `REGISTRY_POLICY_CONTRACT_CHECK ok`, `SKILL_REGISTRY_ALIAS_CHECK ok`,

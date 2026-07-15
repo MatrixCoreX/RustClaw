@@ -276,6 +276,12 @@ echo "AGENT_PARITY_GATE_STEP policy_decision_tokens"
   python3 "${ROOT_DIR}/scripts/check_policy_decision_tokens.py"
 } > "${OUT_DIR}/policy_decision_tokens.txt"
 
+echo "AGENT_PARITY_GATE_STEP agent_loop_guard_final_scope"
+{
+  python3 "${ROOT_DIR}/scripts/check_agent_loop_guard_final_scope.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_agent_loop_guard_final_scope.py"
+} > "${OUT_DIR}/agent_loop_guard_final_scope.txt"
+
 echo "AGENT_PARITY_GATE_STEP registry_policy_contracts"
 {
   python3 "${ROOT_DIR}/scripts/check_registry_policy_contracts.py" --self-test
@@ -413,6 +419,7 @@ fi
   echo "policy_boundary_hard_reply=1"
   echo "repair_no_user_text_fields=1"
   echo "policy_decision_tokens=1"
+  echo "agent_loop_guard_final_scope=1"
   echo "registry_policy_contracts=1"
   echo "skill_registry_aliases=1"
   echo "long_tail_skill_contracts=1"

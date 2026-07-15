@@ -44,37 +44,61 @@ impl LoopBudgetProfile {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RegistryIdempotencyGuardScope {
+    #[cfg(test)]
     Off,
-    SelectedAgentLoop,
     All,
 }
 
 impl RegistryIdempotencyGuardScope {
-    fn from_token(token: &str) -> Option<Self> {
-        match token.trim() {
-            "off" => Some(Self::Off),
-            "selected_agent_loop" => Some(Self::SelectedAgentLoop),
-            "all" => Some(Self::All),
-            _ => None,
+    fn from_token(key: &'static str, token: &str) -> Self {
+        if token.trim() != "all" {
+            warn!(
+                key,
+                configured_scope = token,
+                effective_scope = "all",
+                reason_code = "legacy_guard_scope_normalized_to_all",
+                "agent_loop_guard_final_scope_normalized"
+            );
         }
+        Self::All
+    }
+
+    fn enabled(self) -> bool {
+        #[cfg(test)]
+        if matches!(self, Self::Off) {
+            return false;
+        }
+        true
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AnswerVerifierRequiredEvidenceScope {
+    #[cfg(test)]
     Off,
-    SelectedAgentLoop,
     All,
 }
 
 impl AnswerVerifierRequiredEvidenceScope {
-    fn from_token(token: &str) -> Option<Self> {
-        match token.trim() {
-            "off" => Some(Self::Off),
-            "selected_agent_loop" => Some(Self::SelectedAgentLoop),
-            "all" => Some(Self::All),
-            _ => None,
+    fn from_token(key: &'static str, token: &str) -> Self {
+        if token.trim() != "all" {
+            warn!(
+                key,
+                configured_scope = token,
+                effective_scope = "all",
+                reason_code = "legacy_guard_scope_normalized_to_all",
+                "agent_loop_guard_final_scope_normalized"
+            );
         }
+        Self::All
+    }
+
+    fn enabled(self) -> bool {
+        #[cfg(test)]
+        if matches!(self, Self::Off) {
+            return false;
+        }
+        true
     }
 }
 
@@ -100,19 +124,14 @@ pub(super) struct AgentLoopGuardPolicy {
 impl AgentLoopGuardPolicy {
     pub(super) fn enabled_rollout_switches(&self) -> Vec<&'static str> {
         let mut switches = Vec::new();
-        match self.effective_answer_verifier_required_evidence_scope() {
-            AnswerVerifierRequiredEvidenceScope::Off => {}
-            AnswerVerifierRequiredEvidenceScope::SelectedAgentLoop
-            | AnswerVerifierRequiredEvidenceScope::All => {
-                switches.push("answer_verifier_enforce_required_scope")
-            }
+        if self
+            .effective_answer_verifier_required_evidence_scope()
+            .enabled()
+        {
+            switches.push("answer_verifier_enforce_required_scope");
         }
-        match self.effective_registry_idempotency_guard_scope() {
-            RegistryIdempotencyGuardScope::Off => {}
-            RegistryIdempotencyGuardScope::SelectedAgentLoop
-            | RegistryIdempotencyGuardScope::All => {
-                switches.push("registry_idempotency_guard_scope")
-            }
+        if self.effective_registry_idempotency_guard_scope().enabled() {
+            switches.push("registry_idempotency_guard_scope");
         }
         if self.structured_evidence_required_for_selected_contracts {
             switches.push("structured_evidence_required_for_selected_contracts");
@@ -128,15 +147,10 @@ impl AgentLoopGuardPolicy {
 
     pub(super) fn answer_verifier_required_evidence_enabled_for_route(
         &self,
-        route_result: Option<&crate::RouteResult>,
+        _route_result: Option<&crate::RouteResult>,
     ) -> bool {
-        match self.effective_answer_verifier_required_evidence_scope() {
-            AnswerVerifierRequiredEvidenceScope::Off => false,
-            AnswerVerifierRequiredEvidenceScope::All => true,
-            AnswerVerifierRequiredEvidenceScope::SelectedAgentLoop => {
-                route_result.is_some_and(|route| self.selected_agent_loop_route(route))
-            }
-        }
+        self.effective_answer_verifier_required_evidence_scope()
+            .enabled()
     }
 
     pub(super) fn effective_registry_idempotency_guard_scope(
@@ -147,25 +161,9 @@ impl AgentLoopGuardPolicy {
 
     pub(super) fn registry_idempotency_guard_enabled_for_route(
         &self,
-        route_result: Option<&crate::RouteResult>,
+        _route_result: Option<&crate::RouteResult>,
     ) -> bool {
-        match self.effective_registry_idempotency_guard_scope() {
-            RegistryIdempotencyGuardScope::Off => false,
-            RegistryIdempotencyGuardScope::All => true,
-            RegistryIdempotencyGuardScope::SelectedAgentLoop => {
-                route_result.is_some_and(|route| self.selected_agent_loop_route(route))
-            }
-        }
-    }
-
-    fn selected_agent_loop_route(&self, route: &crate::RouteResult) -> bool {
-        if route.risk_ceiling == crate::RiskCeiling::High
-            || route.schedule_kind != crate::ScheduleKind::None
-        {
-            return false;
-        }
-        let eligible = super::migration_class::agent_decides_eligible_migration_class(route);
-        eligible != "none"
+        self.effective_registry_idempotency_guard_scope().enabled()
     }
 
     pub(super) fn budget_profile_for_context(
@@ -356,26 +354,36 @@ fn parse_bool_from_toml(root: &TomlValue, path: &[&str], fallback: bool) -> bool
 
 fn parse_answer_verifier_required_evidence_scope(
     root: &TomlValue,
-) -> Option<AnswerVerifierRequiredEvidenceScope> {
+) -> AnswerVerifierRequiredEvidenceScope {
     let mut cursor = root;
     for key in [
         "agent",
         "loop_guard",
         "answer_verifier_enforce_required_scope",
     ] {
-        cursor = cursor.get(key)?;
+        let Some(next) = cursor.get(key) else {
+            return AnswerVerifierRequiredEvidenceScope::All;
+        };
+        cursor = next;
     }
-    AnswerVerifierRequiredEvidenceScope::from_token(cursor.as_str().unwrap_or("off"))
+    AnswerVerifierRequiredEvidenceScope::from_token(
+        "answer_verifier_enforce_required_scope",
+        cursor.as_str().unwrap_or(""),
+    )
 }
 
-fn parse_registry_idempotency_guard_scope(
-    root: &TomlValue,
-) -> Option<RegistryIdempotencyGuardScope> {
+fn parse_registry_idempotency_guard_scope(root: &TomlValue) -> RegistryIdempotencyGuardScope {
     let mut cursor = root;
     for key in ["agent", "loop_guard", "registry_idempotency_guard_scope"] {
-        cursor = cursor.get(key)?;
+        let Some(next) = cursor.get(key) else {
+            return RegistryIdempotencyGuardScope::All;
+        };
+        cursor = next;
     }
-    RegistryIdempotencyGuardScope::from_token(cursor.as_str().unwrap_or("off"))
+    RegistryIdempotencyGuardScope::from_token(
+        "registry_idempotency_guard_scope",
+        cursor.as_str().unwrap_or(""),
+    )
 }
 
 fn parse_loop_recipe_overrides(root: &TomlValue, path: &[&str]) -> LoopRecipeOverrides {
@@ -421,10 +429,8 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
         .and_then(|raw| toml::from_str::<TomlValue>(&raw).ok())
         .unwrap_or(TomlValue::Table(Default::default()));
     let answer_verifier_enforce_required_scope =
-        parse_answer_verifier_required_evidence_scope(&parsed)
-            .unwrap_or(AnswerVerifierRequiredEvidenceScope::Off);
-    let registry_idempotency_guard_scope = parse_registry_idempotency_guard_scope(&parsed)
-        .unwrap_or(RegistryIdempotencyGuardScope::Off);
+        parse_answer_verifier_required_evidence_scope(&parsed);
+    let registry_idempotency_guard_scope = parse_registry_idempotency_guard_scope(&parsed);
     let policy = AgentLoopGuardPolicy {
         max_steps: parse_usize_from_toml(
             &parsed,

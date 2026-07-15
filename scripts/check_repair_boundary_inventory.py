@@ -27,7 +27,6 @@ KNOWN_DELETION_GATES = {
 
 LOOP_MIGRATION_TARGETS = {
     "migrate_to_agent_loop_followup_recovery",
-    "defer_selected_agent_loop_routes_to_loop",
 }
 
 
