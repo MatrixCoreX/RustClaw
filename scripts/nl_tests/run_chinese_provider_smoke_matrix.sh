@@ -134,6 +134,21 @@ provider_has_credentials() {
   return 1
 }
 
+provider_credential_state() {
+  local provider="$1"
+  local required_env
+  required_env="$(required_env_csv "$provider")"
+  if [[ -z "$required_env" ]]; then
+    printf '%s' "unknown"
+    return 0
+  fi
+  if provider_has_credentials "$provider"; then
+    printf '%s' "configured_env"
+  else
+    printf '%s' "missing"
+  fi
+}
+
 required_env_csv() {
   local provider="$1"
   local env_name
@@ -157,6 +172,10 @@ write_metadata() {
   local output_file="$6"
   local exit_code="$7"
   local live_scope="all"
+  local credential_state
+  local credential_required_env
+  credential_state="$(provider_credential_state "$provider")"
+  credential_required_env="$(required_env_csv "$provider")"
   if [[ "${#LIVE_PROVIDERS[@]}" -gt 0 ]]; then
     if provider_in_live_scope "$provider"; then
       live_scope="included"
@@ -164,7 +183,7 @@ write_metadata() {
       live_scope="excluded"
     fi
   fi
-  python3 - "$path" "$provider" "$status" "$reason" "$run_dir" "$output_file" "$exit_code" "$CASE_FILE" "$live_scope" "$(live_scope_csv)" <<'PY'
+  python3 - "$path" "$provider" "$status" "$reason" "$run_dir" "$output_file" "$exit_code" "$CASE_FILE" "$live_scope" "$(live_scope_csv)" "$credential_state" "$credential_required_env" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -179,12 +198,16 @@ exit_code = int(sys.argv[7])
 case_file = sys.argv[8]
 live_scope = sys.argv[9]
 live_scope_providers = [item for item in sys.argv[10].split(",") if item]
+credential_state = sys.argv[11]
+credential_required_env = [item for item in sys.argv[12].split(",") if item]
 payload = {
     "provider": provider,
     "status": status,
     "reason_code": reason,
     "live_scope": live_scope,
     "live_scope_providers": live_scope_providers,
+    "credential_state": credential_state,
+    "credential_required_env": credential_required_env,
     "run_dir": run_dir,
     "output_file": output_file,
     "exit_code": exit_code,
