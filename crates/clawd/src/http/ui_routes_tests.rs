@@ -425,6 +425,36 @@ models = ["video-01", "video-02"]
 }
 
 #[test]
+fn model_catalog_guard_status_reads_latest_gate_artifact() {
+    let root = temp_workspace_root();
+    let older = root.join("logs/agent_parity_gate/older");
+    let newer = root.join("logs/agent_parity_gate/newer");
+    std::fs::create_dir_all(&older).expect("older dir");
+    std::fs::create_dir_all(&newer).expect("newer dir");
+    std::fs::write(
+        older.join("chinese_model_catalog.json"),
+        r#"{"status":"error","finding_count":2}"#,
+    )
+    .expect("older guard");
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    std::fs::write(
+        newer.join("chinese_model_catalog.json"),
+        r#"{"status":"ok","finding_count":0}"#,
+    )
+    .expect("newer guard");
+
+    let status = read_model_catalog_guard_status(&root);
+
+    assert_eq!(status["available"], true);
+    assert_eq!(status["status"], "ok");
+    assert_eq!(status["finding_count"], 0);
+    assert_eq!(
+        status["path"],
+        "logs/agent_parity_gate/newer/chinese_model_catalog.json"
+    );
+}
+
+#[test]
 fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
     let skill = SkillListItem {
         name: "video_generate".to_string(),

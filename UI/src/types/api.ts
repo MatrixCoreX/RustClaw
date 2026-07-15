@@ -683,6 +683,13 @@ export interface ModelCatalogResponse {
   selected_provider: string;
   selected_model: string;
   entries: ModelCatalogEntry[];
+  last_guard_status?: {
+    available: boolean;
+    status: string;
+    finding_count?: number;
+    path?: string;
+    modified_ts?: number | null;
+  };
 }
 
 export interface LogLatestResponse {
