@@ -773,6 +773,22 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate summary must not record the Chinese-provider env-file path",
     )
     require(
+        "AGENT_PARITY_GATE_STEP no_agent_mode_payload" in parity_text,
+        findings,
+        "agent parity gate must run the no-agent-mode payload guard step",
+    )
+    require(
+        "check_no_agent_mode_payload.py" in parity_text
+        and "no_agent_mode_payload.txt" in parity_text,
+        findings,
+        "agent parity gate must write the no-agent-mode payload guard artifact",
+    )
+    require(
+        "no_agent_mode_payload=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the no-agent-mode payload guard state",
+    )
+    require(
         "AGENT_PARITY_GATE_STEP secret_scan_contract" in parity_text,
         findings,
         "agent parity gate must run the shared secret scan contract step",

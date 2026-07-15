@@ -216,6 +216,10 @@ python3 "${ROOT_DIR}/scripts/check_no_runtime_hard_reply.py" --all \
   --fail-on-new \
   > "${OUT_DIR}/runtime_hard_reply_baseline.txt"
 
+echo "AGENT_PARITY_GATE_STEP no_agent_mode_payload"
+python3 "${ROOT_DIR}/scripts/check_no_agent_mode_payload.py" \
+  > "${OUT_DIR}/no_agent_mode_payload.txt"
+
 echo "AGENT_PARITY_GATE_STEP secret_scan_contract"
 python3 "${SCRIPT_DIR}/check_secret_scan_contract.py" --json \
   > "${OUT_DIR}/secret_scan_contract.json"
@@ -280,6 +284,7 @@ fi
 
 {
   echo "out_dir=${OUT_DIR}"
+  echo "no_agent_mode_payload=1"
   echo "secret_scan_contract=1"
   echo "suite_wrapper_contract=1"
   echo "llm_raw_trace_runner_contract=1"
