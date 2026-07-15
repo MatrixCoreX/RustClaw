@@ -131,11 +131,12 @@ contract counts. The final confirmation uses
 `--require-contract-report-content-checked`, so the stored report must already
 carry `contract_report_content_checked=true`. For wrapped `agent_parity_gate`
 runs, the artifact contract also validates nested gate artifacts such as
-`agent_parity_gate/agent_loop_static_contracts.txt` and checks
+`agent_parity_gate/agent_loop_static_contracts.txt` and
+`agent_parity_gate/suite_artifact_contract_self_test.txt`, then checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
-the static agent-loop, secret-scan, wrapper, no-agent-mode, and raw LLM trace
-contracts participated in the run. It also checks artifact content: text reports
-must contain their success tokens, and JSON reports such as
+the static agent-loop, secret-scan, wrapper, no-agent-mode, suite-artifact
+self-test, and raw LLM trace contracts participated in the run. It also checks
+artifact content: text reports must contain their success tokens, and JSON reports such as
 `secret_scan_contract.json` and `suite_wrapper_contract.json` must expose
 `ok=true`. Enabled optional steps are also content-checked from
 `gate_summary.env`: compact coverage must have no missing/forbidden rows,

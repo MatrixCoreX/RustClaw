@@ -892,6 +892,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "AGENT_PARITY_GATE_REQUIRED_ARTIFACTS" in suite_artifact_contract_text
         and "agent_parity_gate/agent_loop_static_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/suite_wrapper_contract.json" in suite_artifact_contract_text
+        and "agent_parity_gate/suite_artifact_contract_self_test.txt" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_REQUIRED_FLAGS" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_REQUIRED_MACHINE_FIELDS" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS" in suite_artifact_contract_text
@@ -918,6 +919,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "contract_report_agent_parity_contract_mismatch" in suite_artifact_contract_text
         and '"agent_loop_static_contracts": "1"' in suite_artifact_contract_text
         and '"suite_wrapper_contract": "1"' in suite_artifact_contract_text
+        and '"suite_artifact_contract_self_test": "1"' in suite_artifact_contract_text
+        and "SUITE_ARTIFACT_CONTRACT_SELF_TEST ok" in suite_artifact_contract_text
         and '"live_metrics": {"0", "1"}' in suite_artifact_contract_text
         and "agent_parity_gate_summary_bad_machine_field" in suite_artifact_contract_text
         and '"required_machine_field_count"' in suite_artifact_contract_text
@@ -931,6 +934,18 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "AGENT_PARITY_GATE_STEP llm_raw_trace_runner_contract" in parity_text,
         findings,
         "agent parity gate must run the NL raw LLM trace runner contract step",
+    )
+    require(
+        "AGENT_PARITY_GATE_STEP suite_artifact_contract_self_test" in parity_text
+        and "check_suite_artifact_contract.py\" --self-test" in parity_text
+        and "suite_artifact_contract_self_test.txt" in parity_text,
+        findings,
+        "agent parity gate must run the suite artifact contract checker self-test",
+    )
+    require(
+        "suite_artifact_contract_self_test=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the suite artifact contract self-test state",
     )
     require(
         "print_llm_raw_trace.py\" --self-test" in parity_text
@@ -961,6 +976,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             "agent_loop_static_contracts.txt" in readme_body
             and "no_agent_mode_payload.txt" in readme_body
             and "suite_artifact_contract.json" in readme_body
+            and "suite_artifact_contract_self_test.txt" in readme_body
             and "agent_parity_gate_contract.checked=true" in readme_body
             and "--validate-contract-report-content" in readme_body
             and "--require-contract-report-content-checked" in readme_body
