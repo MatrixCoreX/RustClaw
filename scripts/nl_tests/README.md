@@ -103,7 +103,8 @@ records `secret_scan_contract=1` as a non-secret machine token so gate artifact
 readers can tell the contract was part of the run.
 It also writes `suite_wrapper_contract.json` from
 `scripts/nl_tests/check_suite_wrapper_contract.py`, locking the wrapped-suite
-summary/index/report finalizer wiring.
+summary/index/report finalizer wiring and the agent parity nested artifact
+contract checker.
 When launched through `run_suite.sh agent_parity_gate`, the gate stores its JSON
 artifacts under the same suite run directory at `agent_parity_gate/`; direct
 runs still default to `logs/agent_parity_gate/<timestamp>` unless `--out-dir` is
