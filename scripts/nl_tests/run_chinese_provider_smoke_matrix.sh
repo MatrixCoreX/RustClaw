@@ -44,6 +44,8 @@ Notes:
   RUSTCLAW_PROVIDER_OVERRIDE is startup-scoped for clawd. This runner exports it
   for metadata and wrappers that start clawd from the same environment; it does
   not rewrite a running clawd process in place.
+  Live provider quota, account, auth, and model-access failures are recorded
+  with structured provider_* reason_code values instead of generic runner_failed.
 EOF
 }
 
@@ -142,6 +144,16 @@ PY
 append_summary() {
   local metadata_file="$1"
   cat "$metadata_file" >> "${OUT_DIR}/provider_summary.jsonl"
+}
+
+classify_failure_reason() {
+  local output_file="$1"
+  python3 "${ROOT_DIR}/scripts/nl_tests/classify_provider_failure.py" --reason-only "$output_file"
+}
+
+classify_failure_status() {
+  local output_file="$1"
+  python3 "${ROOT_DIR}/scripts/nl_tests/classify_provider_failure.py" --status-only "$output_file"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -285,8 +297,10 @@ for provider in "${PROVIDERS[@]}"; do
     echo "CHINESE_PROVIDER_SMOKE_PASS provider=${provider}"
   else
     matrix_status=1
-    write_metadata "$metadata_file" "$provider" "failed" "runner_failed" "$provider_dir" "$output_file" "$run_status"
-    echo "CHINESE_PROVIDER_SMOKE_FAIL provider=${provider} exit_code=${run_status}" >&2
+    failure_reason="$(classify_failure_reason "$output_file")"
+    failure_status="$(classify_failure_status "$output_file")"
+    write_metadata "$metadata_file" "$provider" "$failure_status" "$failure_reason" "$provider_dir" "$output_file" "$run_status"
+    echo "CHINESE_PROVIDER_SMOKE_FAIL provider=${provider} reason_code=${failure_reason} exit_code=${run_status}" >&2
   fi
   append_summary "$metadata_file"
 done
