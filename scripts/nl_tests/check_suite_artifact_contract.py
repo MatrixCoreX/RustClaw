@@ -55,6 +55,7 @@ AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
     "agent_parity_gate/secret_scan_contract.json",
     "agent_parity_gate/suite_wrapper_contract.json",
     "agent_parity_gate/runner_path_ref_contract.json",
+    "agent_parity_gate/nl_suite_checker_self_tests.txt",
     "agent_parity_gate/suite_artifact_contract_self_test.txt",
     "agent_parity_gate/llm_raw_trace_runner_contract.txt",
     "agent_parity_gate/rollout_metrics_contract.txt",
@@ -88,6 +89,7 @@ AGENT_PARITY_GATE_REQUIRED_FLAGS = {
     "secret_scan_contract": "1",
     "suite_wrapper_contract": "1",
     "runner_path_ref_contract": "1",
+    "nl_suite_checker_self_tests": "1",
     "suite_artifact_contract_self_test": "1",
     "llm_raw_trace_runner_contract": "1",
     "rollout_metrics_contract": "1",
@@ -233,6 +235,11 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
     "agent_parity_gate/evidence_extractor_contracts.txt": {
         "EVIDENCE_EXTRACTOR_CONTRACT_SELF_TEST ok",
         "EVIDENCE_EXTRACTOR_CONTRACT_CHECK findings=0",
+    },
+    "agent_parity_gate/nl_suite_checker_self_tests.txt": {
+        "SUITE_WRAPPER_CONTRACT_SELF_TEST ok",
+        "RUNNER_PATH_REF_CONTRACT_SELF_TEST ok",
+        "COMPACT_COVERAGE_SELF_TEST ok",
     },
     "agent_parity_gate/llm_raw_trace_runner_contract.txt": {
         "SELF_TEST_OK",

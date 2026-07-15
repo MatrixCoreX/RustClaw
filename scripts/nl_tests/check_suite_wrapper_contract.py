@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +100,9 @@ SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_runner_path_ref_artifact": "agent_parity_gate/runner_path_ref_contract.json",
     "agent_parity_runner_path_ref_flag": '"runner_path_ref_contract": "1"',
     "agent_parity_runner_path_ref_json_ok": "runner_path_ref_contract.json",
+    "agent_parity_nl_suite_checker_self_tests_artifact": "agent_parity_gate/nl_suite_checker_self_tests.txt",
+    "agent_parity_nl_suite_checker_self_tests_flag": '"nl_suite_checker_self_tests": "1"',
+    "agent_parity_nl_suite_checker_self_tests_token": "COMPACT_COVERAGE_SELF_TEST ok",
     "agent_parity_env_file_state_dynamic_field": "chinese_provider_env_file_state",
     "agent_parity_env_file_source_dynamic_field": "chinese_provider_env_file_source",
     "agent_parity_text_content_tokens": "AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS",
@@ -296,10 +300,65 @@ def build_report() -> dict[str, Any]:
     }
 
 
+def run_self_test() -> int:
+    tmp_parent = ROOT / "tmp"
+    tmp_parent.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=tmp_parent) as tmp:
+        root = Path(tmp)
+        ok_path = root / "ok.sh"
+        forbidden_path = root / "forbidden.sh"
+        missing_path = root / "missing.sh"
+
+        ok_path.write_text("write_artifact_index()\n", encoding="utf-8")
+        forbidden_path.write_text('echo "  run_dir: ${run_dir}"\n', encoding="utf-8")
+
+        findings, checked = check_required_snippets(
+            ok_path,
+            {"write_artifact_index_fn": "write_artifact_index()"},
+            "self",
+        )
+        if findings or checked != 1:
+            print(f"SUITE_WRAPPER_CONTRACT_SELF_TEST_FAIL positive:{findings}")
+            return 1
+
+        findings, _ = check_required_snippets(
+            ok_path,
+            {"missing": "not_present"},
+            "self",
+        )
+        if "missing_snippet:self:missing" not in findings:
+            print(f"SUITE_WRAPPER_CONTRACT_SELF_TEST_FAIL missing:{findings}")
+            return 1
+
+        findings, _ = check_forbidden_snippets(
+            forbidden_path,
+            {"run_dir_absolute_print": "${run_dir}"},
+            "self",
+        )
+        if "forbidden_snippet:self:run_dir_absolute_print" not in findings:
+            print(f"SUITE_WRAPPER_CONTRACT_SELF_TEST_FAIL forbidden:{findings}")
+            return 1
+
+        findings, _ = check_required_snippets(
+            missing_path,
+            {"needle": "needle"},
+            "self",
+        )
+        if not any(item.startswith("self_read_failed:") for item in findings):
+            print(f"SUITE_WRAPPER_CONTRACT_SELF_TEST_FAIL read_failed:{findings}")
+            return 1
+    print("SUITE_WRAPPER_CONTRACT_SELF_TEST ok")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
+
+    if args.self_test:
+        return run_self_test()
 
     report = build_report()
     if args.json:

@@ -279,6 +279,11 @@ It also writes `runner_path_ref_contract.json` from
 multi-turn, client-like, provider A/B, dynamic-guard, ops, task-termination,
 and circuit-breaker runner console outputs to portable path refs rather than
 host absolute paths.
+It also writes `nl_suite_checker_self_tests.txt` from
+`check_suite_wrapper_contract.py --self-test`,
+`check_runner_path_ref_contract.py --self-test`, and
+`check_compact_coverage.py --self-test`, proving the checker rejection paths
+before their JSON reports are trusted.
 When launched through `run_suite.sh agent_parity_gate`, the gate stores its JSON
 artifacts under the same suite run directory at `agent_parity_gate/`; direct
 runs still default to `logs/agent_parity_gate/<timestamp>` unless `--out-dir` is
@@ -339,6 +344,7 @@ runs, the artifact contract also validates nested gate artifacts such as
 `agent_parity_gate/agent_loop_static_contracts.txt` and
 `agent_parity_gate/evidence_extractor_contracts.txt`,
 `agent_parity_gate/runner_path_ref_contract.json`,
+`agent_parity_gate/nl_suite_checker_self_tests.txt`,
 `agent_parity_gate/suite_artifact_contract_self_test.txt`,
 `agent_parity_gate/rollout_metrics_contract.txt`, statically guards
 the artifact checker's dynamic machine fields such as the Chinese provider live
@@ -452,6 +458,10 @@ For `agent_parity_gate_inventory_contracts.txt`, the required content includes
 `AGENT_PARITY_GATE_INVENTORY_CHECK ok`, plus
 `NL_TEST_CHECKER_INVENTORY_SELF_TEST ok` and
 `NL_TEST_CHECKER_INVENTORY_CHECK ok`.
+For `nl_suite_checker_self_tests.txt`, the required content includes
+`SUITE_WRAPPER_CONTRACT_SELF_TEST ok`,
+`RUNNER_PATH_REF_CONTRACT_SELF_TEST ok`, and
+`COMPACT_COVERAGE_SELF_TEST ok`.
 It also checks
 that gate summary path fields use portable refs such as `out_dir_ref=out_dir`
 and never host absolute paths. It also checks artifact content: text reports

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -243,49 +244,105 @@ FORBIDDEN_SNIPPETS: dict[Path, dict[str, str]] = {
 }
 
 
-def read_text(path: Path, findings: list[str]) -> str:
+def relative_path(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def read_text(path: Path, findings: list[str], root: Path = ROOT) -> str:
     try:
         return path.read_text(encoding="utf-8")
     except OSError as exc:
-        findings.append(f"read_failed:{path.relative_to(ROOT)}:{exc.__class__.__name__}")
+        findings.append(f"read_failed:{relative_path(path, root)}:{exc.__class__.__name__}")
     except UnicodeDecodeError:
-        findings.append(f"decode_failed:{path.relative_to(ROOT)}")
+        findings.append(f"decode_failed:{relative_path(path, root)}")
     return ""
 
 
-def build_report() -> dict[str, Any]:
+def build_report(
+    required_snippets: dict[Path, dict[str, str]] | None = None,
+    forbidden_snippets: dict[Path, dict[str, str]] | None = None,
+    root: Path = ROOT,
+) -> dict[str, Any]:
+    required_snippets = REQUIRED_SNIPPETS if required_snippets is None else required_snippets
+    forbidden_snippets = FORBIDDEN_SNIPPETS if forbidden_snippets is None else forbidden_snippets
     findings: list[str] = []
     checked_count = 0
 
-    for path, snippets in REQUIRED_SNIPPETS.items():
-        text = read_text(path, findings)
+    for path, snippets in required_snippets.items():
+        text = read_text(path, findings, root)
         for label, snippet in snippets.items():
             checked_count += 1
             if snippet not in text:
-                findings.append(f"missing_snippet:{path.relative_to(ROOT)}:{label}")
+                findings.append(f"missing_snippet:{relative_path(path, root)}:{label}")
 
-    for path, snippets in FORBIDDEN_SNIPPETS.items():
-        text = read_text(path, findings)
+    for path, snippets in forbidden_snippets.items():
+        text = read_text(path, findings, root)
         for label, snippet in snippets.items():
             checked_count += 1
             if snippet in text:
-                findings.append(f"forbidden_snippet:{path.relative_to(ROOT)}:{label}")
+                findings.append(f"forbidden_snippet:{relative_path(path, root)}:{label}")
 
     return {
         "ok": not findings,
         "checked_count": checked_count,
         "paths": sorted(
-            str(path.relative_to(ROOT))
-            for path in set(REQUIRED_SNIPPETS) | set(FORBIDDEN_SNIPPETS)
+            relative_path(path, root)
+            for path in set(required_snippets) | set(forbidden_snippets)
         ),
         "findings": findings,
     }
 
 
+def run_self_test() -> int:
+    tmp_parent = ROOT / "tmp"
+    tmp_parent.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=tmp_parent) as tmp:
+        root = Path(tmp)
+        ok_path = root / "ok.sh"
+        forbidden_path = root / "forbidden.sh"
+        missing_path = root / "missing.sh"
+
+        ok_path.write_text("path_ref()\nrun_dir_ref:\n", encoding="utf-8")
+        forbidden_path.write_text('echo "  run_dir:          $RUN_DIR"\n', encoding="utf-8")
+
+        positive = build_report(
+            {ok_path: {"path_ref_fn": "path_ref()", "run_dir_ref": "run_dir_ref:"}},
+            {ok_path: {"absolute_print": 'echo "  run_dir:          $RUN_DIR"'}},
+            root,
+        )
+        if not positive["ok"]:
+            print(f"RUNNER_PATH_REF_CONTRACT_SELF_TEST_FAIL positive:{positive['findings']}")
+            return 1
+
+        missing = build_report({ok_path: {"missing": "not_present"}}, {}, root)
+        if "missing_snippet:ok.sh:missing" not in missing["findings"]:
+            print(f"RUNNER_PATH_REF_CONTRACT_SELF_TEST_FAIL missing:{missing['findings']}")
+            return 1
+
+        forbidden = build_report({}, {forbidden_path: {"absolute_print": "$RUN_DIR"}}, root)
+        if "forbidden_snippet:forbidden.sh:absolute_print" not in forbidden["findings"]:
+            print(f"RUNNER_PATH_REF_CONTRACT_SELF_TEST_FAIL forbidden:{forbidden['findings']}")
+            return 1
+
+        read_failed = build_report({missing_path: {"needle": "needle"}}, {}, root)
+        if not any(item.startswith("read_failed:missing.sh:") for item in read_failed["findings"]):
+            print(f"RUNNER_PATH_REF_CONTRACT_SELF_TEST_FAIL read_failed:{read_failed['findings']}")
+            return 1
+    print("RUNNER_PATH_REF_CONTRACT_SELF_TEST ok")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
+
+    if args.self_test:
+        return run_self_test()
 
     report = build_report()
     if args.json:
