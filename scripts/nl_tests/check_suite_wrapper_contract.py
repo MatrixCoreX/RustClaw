@@ -44,10 +44,15 @@ RUN_SUITE_REQUIRED_SNIPPETS = {
 SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_required_artifacts": "AGENT_PARITY_GATE_REQUIRED_ARTIFACTS",
     "agent_parity_required_flags": "AGENT_PARITY_GATE_REQUIRED_FLAGS",
+    "agent_parity_text_content_tokens": "AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS",
+    "agent_parity_json_ok_artifacts": "AGENT_PARITY_GATE_JSON_OK_ARTIFACTS",
+    "agent_parity_text_token_validator": "validate_text_artifact_tokens",
+    "agent_parity_json_ok_validator": "validate_json_artifact_ok",
     "agent_parity_nested_validator": "validate_agent_parity_gate_artifacts",
     "agent_parity_suite_branch": 'summary.get("suite") == "agent_parity_gate"',
     "agent_parity_contract_report_field": '"agent_parity_gate_contract"',
     "agent_parity_checked_flag": '"checked": True',
+    "agent_parity_content_check_count": '"content_check_count"',
 }
 
 
