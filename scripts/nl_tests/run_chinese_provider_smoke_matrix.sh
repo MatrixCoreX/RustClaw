@@ -426,4 +426,7 @@ out_path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\
 print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 PY
 
+python3 "${ROOT_DIR}/scripts/nl_tests/check_chinese_provider_smoke_summary.py" \
+  "${OUT_DIR}/matrix_summary.json"
+
 exit "$matrix_status"
