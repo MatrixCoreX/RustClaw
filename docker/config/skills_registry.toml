@@ -694,6 +694,7 @@ semantic_tags = ["image.describe", "image.extract", "image.compare", "screenshot
 capabilities = [
     "llm",
     "net",
+    "secrets.image_vision_minimax_api_key",
 ]
 risk_level = "low"
 auto_invocable = true
@@ -766,6 +767,7 @@ capabilities = [
     "llm",
     "net",
     "fs.write",
+    "secrets.image_edit_minimax_api_key",
 ]
 # §P4.2 shape consistency R3：fs.write 隐含写盘副作用 → 必须 side_effect=true。
 side_effect = true
