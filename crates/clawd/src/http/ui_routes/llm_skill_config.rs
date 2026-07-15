@@ -913,12 +913,10 @@ async fn test_llm_config(
                     "vendor": selected_vendor,
                     "model": selected_model,
                     "provider_type": provider.config.provider_type,
-                    "message": crate::i18n_t_with_default_vars(
-                        &state,
-                        "clawd.msg.provider_connection_test_ok",
-                        "连接测试通过：{provider_name} 可正常响应。",
-                        &[("provider_name", &provider.config.name)],
-                    ),
+                    "message_key": "clawd.msg.provider_connection_test_ok",
+                    "message_args": {
+                        "provider_name": provider.config.name,
+                    },
                     "response_text": resp.text,
                 })),
                 error: None,

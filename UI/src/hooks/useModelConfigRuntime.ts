@@ -7,6 +7,7 @@ import {
 import {
   buildMultimodalDraft,
   buildMultimodalSavePayload,
+  formatLlmTestMessage,
   hasUnsavedMultimodalDraftChanges,
   updateMultimodalDraftField,
   type MultimodalKey,
@@ -212,12 +213,13 @@ export function useModelConfigRuntime({
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `LLM connection test failed (${res.status})`);
       }
+      const responseMessage = formatLlmTestMessage(body.data, t);
       const message = hasUnsavedLlmChanges
-        ? `${body.data.message}${t(
+        ? `${responseMessage}${t(
             " 这是页面里的临时草稿；确认没问题后，再点“保存模型设置”。",
             " This used the current draft values; save the settings once you're happy with them.",
           )}`
-        : body.data.message;
+        : responseMessage;
       setLlmTestMessage(message);
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");

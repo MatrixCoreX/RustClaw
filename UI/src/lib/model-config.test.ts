@@ -9,6 +9,7 @@ import {
   buildMultimodalMetaView,
   buildMultimodalSavePayload,
   formatContextWindow,
+  formatLlmTestMessage,
   formatMultimodalToken,
   hasUnsavedMultimodalDraftChanges,
   providerUnsupportedLabel,
@@ -69,6 +70,52 @@ test("formats provider unsupported labels", () => {
   assert.equal(providerUnsupportedLabel("provider_not_configured", "en"), "Provider not configured");
   assert.equal(providerUnsupportedLabel("model_not_configured", "zh"), "未选择模型");
   assert.equal(providerUnsupportedLabel("unknown", "en"), "Provider unavailable");
+});
+
+test("formats LLM test messages from machine keys", () => {
+  const en = (zh: string, value: string) => value;
+  const zh = (value: string) => value;
+  assert.equal(
+    formatLlmTestMessage(
+      {
+        success: true,
+        vendor: "minimax",
+        model: "MiniMax-M3",
+        provider_type: "minimax",
+        message_key: "clawd.msg.provider_connection_test_ok",
+        message_args: { provider_name: "MiniMax" },
+      },
+      en,
+    ),
+    "Connection test passed: MiniMax responded successfully.",
+  );
+  assert.equal(
+    formatLlmTestMessage(
+      {
+        success: true,
+        vendor: "minimax",
+        model: "MiniMax-M3",
+        provider_type: "minimax",
+        message_key: "clawd.msg.provider_connection_test_ok",
+        message_args: { provider_name: "MiniMax" },
+      },
+      zh,
+    ),
+    "连接测试通过：MiniMax 可正常响应。",
+  );
+  assert.equal(
+    formatLlmTestMessage(
+      {
+        success: true,
+        vendor: "legacy",
+        model: "legacy-model",
+        provider_type: "legacy",
+        message: "legacy message",
+      },
+      en,
+    ),
+    "legacy message",
+  );
 });
 
 test("builds multimodal meta view from structured model fields", () => {

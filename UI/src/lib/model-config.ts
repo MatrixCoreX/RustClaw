@@ -1,4 +1,10 @@
-import type { ModelCatalogEntry, ModelCatalogResponse, ModelConfigItem, ModelConfigResponse } from "../types/api";
+import type {
+  LlmTestResponse,
+  ModelCatalogEntry,
+  ModelCatalogResponse,
+  ModelConfigItem,
+  ModelConfigResponse,
+} from "../types/api";
 
 export type UiLanguage = "zh" | "en";
 
@@ -33,6 +39,25 @@ export interface ModelCatalogEntryView {
 
 function copy(lang: UiLanguage, zh: string, en: string): string {
   return lang === "zh" ? zh : en;
+}
+
+export type Translate = (zh: string, en: string) => string;
+
+export function formatLlmTestMessage(response: LlmTestResponse, t: Translate): string {
+  const key = response.message_key?.trim();
+  const providerName = stringArg(response.message_args, "provider_name") || response.provider_type || response.vendor;
+  if (key === "clawd.msg.provider_connection_test_ok") {
+    return t(
+      `连接测试通过：${providerName} 可正常响应。`,
+      `Connection test passed: ${providerName} responded successfully.`,
+    );
+  }
+  return response.message || t("连接测试通过。", "Connection test passed.");
+}
+
+function stringArg(args: Record<string, unknown> | null | undefined, key: string): string | null {
+  const value = args?.[key];
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 export function buildMultimodalDraft(config: ModelConfigResponse): MultimodalDraft {

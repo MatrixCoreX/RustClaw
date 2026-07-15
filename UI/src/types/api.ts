@@ -430,7 +430,9 @@ export interface LlmTestResponse {
   vendor: string;
   model: string;
   provider_type: string;
-  message: string;
+  message?: string | null;
+  message_key?: string | null;
+  message_args?: Record<string, unknown> | null;
   response_text?: string;
 }
 
