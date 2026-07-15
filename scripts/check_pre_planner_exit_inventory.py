@@ -36,6 +36,23 @@ FORBIDDEN_PRODUCTION_TOKENS = (
     "direct_answer_gate_boundary_class_is_boundary_owned",
 )
 
+DOC_FORBIDDEN_STALE_TOKENS = {
+    "docs/legacy_semantic_route_inventory.md": (
+        "Can answer before tool loop",
+        "`keep_boundary` for fallback safety; `delete_after_canary`",
+    ),
+    "docs/compat_cleanup_inventory.md": (
+        "PRE_PLANNER_EXIT_INVENTORY_CHECK ok calls=",
+        "Non-deleting direct-answer gate exits",
+        "Ordinary semantic exits carry",
+        "direct-answer gate promotion/chat fallback",
+    ),
+    "docs/planner_loop_pre_agent_gate_audit.md": (
+        "If a new direct-answer gate reason is introduced",
+        "when a new gate is added",
+    ),
+}
+
 
 def rel(path: Path) -> str:
     return path.resolve().relative_to(ROOT).as_posix()
@@ -66,12 +83,27 @@ def scan_repo() -> list[str]:
         for token in FORBIDDEN_PRODUCTION_TOKENS:
             if token in raw:
                 findings.append(f"{rel(path)}: forbidden_pre_planner_token:{token}")
+    for rel_path, tokens in DOC_FORBIDDEN_STALE_TOKENS.items():
+        path = ROOT / rel_path
+        if not path.exists():
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            findings.append(f"{rel_path}: docs_read_failed:{exc.__class__.__name__}")
+            continue
+        for token in tokens:
+            if token in raw:
+                findings.append(f"{rel_path}: stale_pre_planner_docs_token:{token}")
     return findings
 
 
 def run_self_test() -> int:
     assert "direct_answer_gate_boundary_class" in FORBIDDEN_PRODUCTION_TOKENS
     assert "crates/clawd/src/ask_flow_pre_planner_exit.rs" in REMOVED_FILES
+    assert "Can answer before tool loop" in DOC_FORBIDDEN_STALE_TOKENS[
+        "docs/legacy_semantic_route_inventory.md"
+    ]
     print("SELF_TEST_OK")
     return 0
 
