@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -30,7 +31,38 @@ def rust_files() -> list[Path]:
     return sorted(SRC_ROOT.rglob("*.rs"))
 
 
-def main() -> int:
+def scan_text(relative: str, raw: str) -> list[str]:
+    findings: list[str] = []
+    for match in DECISION_LITERAL_RE.finditer(raw):
+        line = raw.count("\n", 0, match.start()) + 1
+        token = match.group(1)
+        findings.append(f"{relative}:{line}: hardcoded_decision={token}")
+    return findings
+
+
+def run_self_test() -> int:
+    hardcoded = 'let payload = json!({"decision": "allow"});'
+    enum_token = (
+        'let payload = json!({"decision": '
+        'crate::policy_decision::PolicyDecision::Allow.as_token()});'
+    )
+    if not scan_text("crates/clawd/src/verifier.rs", hardcoded):
+        print("SELF_TEST_FAIL missing_hardcoded_decision_match", file=sys.stderr)
+        return 1
+    if scan_text("crates/clawd/src/verifier.rs", enum_token):
+        print("SELF_TEST_FAIL policy_decision_enum_false_positive", file=sys.stderr)
+        return 1
+    print("POLICY_DECISION_TOKEN_SELF_TEST ok")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args(argv)
+    if args.self_test:
+        return run_self_test()
+
     findings: list[str] = []
     scanned = 0
     for path in rust_files():
@@ -38,10 +70,7 @@ def main() -> int:
             continue
         scanned += 1
         raw = path.read_text(encoding="utf-8")
-        for match in DECISION_LITERAL_RE.finditer(raw):
-            line = raw.count("\n", 0, match.start()) + 1
-            token = match.group(1)
-            findings.append(f"{path.relative_to(ROOT)}:{line}: hardcoded_decision={token}")
+        findings.extend(scan_text(path.relative_to(ROOT).as_posix(), raw))
     if findings:
         print(f"POLICY_DECISION_TOKEN_CHECK findings={len(findings)}")
         for finding in findings:
@@ -52,4 +81,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
