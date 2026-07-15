@@ -149,6 +149,14 @@ contain `TASK_LIFECYCLE_CONTRACT_SELF_TEST ok` and
 `TASK_LIFECYCLE_CONTRACT_CHECK findings=0`, so background task lifecycle,
 checkpoint/resume, resume executor lease, and seeded agent-loop resume stay
 machine-field driven.
+It also writes `task_event_context_team_contracts.txt` from
+`scripts/check_task_event_context_team_contracts.py --self-test` plus the main
+check. `gate_summary.env` records `task_event_context_team_contracts=1`, and
+the artifact must contain `TASK_EVENT_CONTEXT_TEAM_CONTRACT_SELF_TEST ok` and
+`TASK_EVENT_CONTEXT_TEAM_CONTRACT_CHECK findings=0`, so `task_goal`,
+`context_budget`, `context_compaction`, provider prompt-budget metrics, coding
+evidence, and read-only subagent/team events remain structured event-stream
+fields.
 It also writes `semantic_boundary_contracts.txt` from
 `scripts/check_runtime_semantic_rewrite_boundary.py --self-test`,
 `scripts/check_contract_repair_loop_observation_boundary.py --self-test`,
@@ -198,6 +206,7 @@ root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/skill_registry_aliases.txt`,
 `agent_parity_gate/long_tail_skill_contracts.txt`,
 `agent_parity_gate/task_lifecycle_contracts.txt`,
+`agent_parity_gate/task_event_context_team_contracts.txt`,
 `agent_parity_gate/agent_loop_static_contracts.txt`,
 `agent_parity_gate/evidence_extractor_contracts.txt`, and
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
@@ -237,7 +246,7 @@ scope, then checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
 the runtime hard-reply, policy-boundary hard-reply, repair no-user-text,
 policy-decision-token, registry-policy, registry-alias, long-tail-skill,
-task-lifecycle, static agent-loop, evidence-extractor, secret-scan, wrapper, no-agent-mode,
+task-lifecycle, task-event/context/team, static agent-loop, evidence-extractor, secret-scan, wrapper, no-agent-mode,
 suite-artifact self-test, and raw LLM trace contracts participated in the run.
 For `runtime_hard_reply_baseline.txt`, the required content includes
 `SELF_TEST_OK`, `RUNTIME_HARD_REPLY_ALL_SCAN`, and `new=0`.
@@ -261,6 +270,12 @@ For `task_lifecycle_contracts.txt`, the required content includes
 resume executor leases, seeded agent-loop resume, async poll/cancel projection,
 and CLI/UI task lifecycle display still use machine fields instead of
 user-visible `text/error_text` as protocol.
+For `task_event_context_team_contracts.txt`, the required content includes
+`TASK_EVENT_CONTEXT_TEAM_CONTRACT_SELF_TEST ok` and
+`TASK_EVENT_CONTEXT_TEAM_CONTRACT_CHECK findings=0`. This proves task goal,
+context budget/compaction, provider prompt budget metrics, coding evidence, and
+subagent/team lifecycle events stay machine-readable for CLI, UI, teaching mode,
+and replay tooling.
 For `agent_loop_static_contracts.txt`, the required content includes the six
 route/frontdoor/static `AGENT_LOOP_STATIC_SELF_TEST ...` labels as well as the
 main guard success tokens, including

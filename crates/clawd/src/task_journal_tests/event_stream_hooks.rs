@@ -470,6 +470,12 @@ fn trace_json_projects_provider_prompt_metrics_as_provider_events() {
     );
     assert_eq!(
         event
+            .pointer("/payload/prompt_truncation_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        event
             .pointer("/payload/prompt_bytes_after_max")
             .and_then(Value::as_u64),
         Some(125_180)
