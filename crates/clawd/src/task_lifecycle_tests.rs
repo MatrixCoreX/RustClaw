@@ -773,7 +773,9 @@ fn task_query_lifecycle_preserves_checkpoint_waiting_fields() {
 fn task_query_lifecycle_projects_checkpoint_product_contract_fields() {
     let mut checkpoint = checkpoint_value("ckpt-product", vec!["write_file:tmp/a.txt"]);
     checkpoint["last_successful_step"] = json!("step_2");
+    checkpoint["last_successful_round"] = json!(2);
     checkpoint["evidence_refs"] = json!(["step_2:evidence:1"]);
+    checkpoint["artifact_refs"] = json!(["changed_file:tmp/a.txt"]);
     checkpoint["resume_entrypoint"] = json!("poll_async_job");
     checkpoint["pending_async_job"] = json!({
         "job_id": "job-product",
@@ -802,7 +804,10 @@ fn task_query_lifecycle_projects_checkpoint_product_contract_fields() {
     assert_eq!(lifecycle["waiting_reason_code"], "async_job_poll");
     assert_eq!(lifecycle["next_poll_after"], 1781800400);
     assert_eq!(lifecycle["resume_owner"], "worker_recovery_resume_executor");
+    assert_eq!(lifecycle["last_stable_checkpoint_id"], "ckpt-product");
     assert_eq!(lifecycle["resume_entrypoint"], "poll_async_job");
+    assert_eq!(lifecycle["last_stable_resume_entrypoint"], "poll_async_job");
+    assert_eq!(lifecycle["last_successful_round"], 2);
     assert_eq!(lifecycle["completed_side_effect_count"], 1);
     assert_eq!(lifecycle["requires_idempotency_guard"], true);
     assert_eq!(
@@ -812,6 +817,12 @@ fn task_query_lifecycle_projects_checkpoint_product_contract_fields() {
     assert_eq!(lifecycle["completed_side_effect_refs_truncated"], false);
     assert_eq!(lifecycle["last_safe_step_id"], "step_2");
     assert_eq!(lifecycle["evidence_ref_count"], 1);
+    assert_eq!(lifecycle["artifact_ref_count"], 1);
+    assert_eq!(
+        lifecycle["artifact_refs"],
+        json!(["changed_file:tmp/a.txt"])
+    );
+    assert_eq!(lifecycle["artifact_refs_truncated"], false);
     assert_eq!(
         lifecycle["last_successful_evidence_ref"],
         "step_2:evidence:1"
@@ -903,6 +914,68 @@ fn task_query_lifecycle_projects_provider_blocker_machine_fields() {
         lifecycle["recommended_user_action_kind"],
         "wait_for_worker_resume"
     );
+    assert_eq!(lifecycle["open_issue_count"], 1);
+    assert_eq!(
+        lifecycle["open_issue_status_code"],
+        "provider_retryable_response"
+    );
+    assert_eq!(
+        lifecycle["open_issue_next_recovery_kind"],
+        "wait_background"
+    );
+    assert_eq!(lifecycle["open_issue_action_ref"], "image_generate");
+}
+
+#[test]
+fn task_query_lifecycle_projects_open_issue_machine_fields() {
+    let mut checkpoint = checkpoint_value("ckpt-open-issue", vec![]);
+    checkpoint["repair_signal"] = json!({
+        "source": "answer_verifier",
+        "status_code": "missing_required_evidence",
+        "reason_code": "answer_verifier_missing_evidence_repair",
+        "next_recovery_kind": "replan",
+        "retryable": true,
+        "missing_fields": ["content_excerpt", "path"],
+        "repair_envelope": {
+            "issue_codes": ["answer_verifier_missing_evidence_repair"],
+            "missing_evidence": ["content_excerpt", "path"],
+            "next_recovery_kind": "replan"
+        }
+    });
+    let result = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "waiting",
+            "resume_reason": "agent_loop_no_progress_limit",
+            "next_check_after": 1781800460,
+            "checkpoint_id": "ckpt-open-issue"
+        },
+        "task_checkpoint": checkpoint
+    });
+
+    let lifecycle = task_query_lifecycle_projection("running", Some(&result), Some(4567));
+
+    assert_eq!(lifecycle["last_stable_checkpoint_id"], "ckpt-open-issue");
+    assert_eq!(lifecycle["open_issue_count"], 1);
+    assert_eq!(
+        lifecycle["open_issue_codes"],
+        json!(["answer_verifier_missing_evidence_repair"])
+    );
+    assert_eq!(
+        lifecycle["open_issue_missing_fields"],
+        json!(["content_excerpt", "path"])
+    );
+    assert_eq!(lifecycle["open_issue_source"], "answer_verifier");
+    assert_eq!(
+        lifecycle["open_issue_status_code"],
+        "missing_required_evidence"
+    );
+    assert_eq!(
+        lifecycle["open_issue_reason_code"],
+        "answer_verifier_missing_evidence_repair"
+    );
+    assert_eq!(lifecycle["open_issue_next_recovery_kind"], "replan");
+    assert_eq!(lifecycle["open_issue_retryable"], true);
 }
 
 #[test]
