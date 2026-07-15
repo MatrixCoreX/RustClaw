@@ -212,13 +212,16 @@ def load_env_file(path: Path | None, findings: list[str]) -> dict[str, str]:
     if path is None:
         return {}
     if not path.exists():
-        fail(findings, f"env_file_missing:{path}")
+        fail(findings, "env_file_missing")
         return {}
     values: dict[str, str] = {}
     try:
         raw_lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
-        fail(findings, f"env_file_read_failed:{path}:{exc.__class__.__name__}")
+        fail(findings, f"env_file_read_failed:{exc.__class__.__name__}")
+        return {}
+    except UnicodeDecodeError:
+        fail(findings, "env_file_decode_failed")
         return {}
     for raw in raw_lines:
         line = raw.strip()
@@ -1124,10 +1127,13 @@ def check_toml_loader_contract(findings: list[str]) -> None:
         and "toml_read_failed" in source
         and "toml_decode_failed" in source
         and "toml_parse_failed" in source
+        and "env_file_missing" in source
+        and "env_file_read_failed" in source
+        and "env_file_decode_failed" in source
         and "CHINESE_MODEL_CATALOG_SELF_TEST ok" in source
         and "--self-test" in source,
         findings,
-        "Chinese model catalog TOML loader must expose structured failure findings and self-test",
+        "Chinese model catalog config loaders must expose structured failure findings and self-test",
     )
 
 
@@ -1162,6 +1168,43 @@ def run_self_test() -> int:
                     file=sys.stderr,
                 )
                 return 1
+
+        env_missing_findings: list[str] = []
+        env_missing = load_env_file(root / "missing.env", env_missing_findings)
+        if env_missing != {} or "env_file_missing" not in env_missing_findings:
+            print(
+                "SELF_TEST_FAIL env_file_missing:"
+                f"payload={env_missing} findings={env_missing_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        env_read_failed_findings: list[str] = []
+        env_read_failed_path = root / "read-failed.env"
+        env_read_failed_path.mkdir()
+        env_read_failed = load_env_file(env_read_failed_path, env_read_failed_findings)
+        if env_read_failed != {} or not any(
+            finding.startswith("env_file_read_failed:")
+            for finding in env_read_failed_findings
+        ):
+            print(
+                "SELF_TEST_FAIL env_file_read_failed:"
+                f"payload={env_read_failed} findings={env_read_failed_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        env_decode_failed_findings: list[str] = []
+        env_decode_failed_path = root / "decode-failed.env"
+        env_decode_failed_path.write_bytes(b"\xff\n")
+        env_decode_failed = load_env_file(env_decode_failed_path, env_decode_failed_findings)
+        if env_decode_failed != {} or "env_file_decode_failed" not in env_decode_failed_findings:
+            print(
+                "SELF_TEST_FAIL env_file_decode_failed:"
+                f"payload={env_decode_failed} findings={env_decode_failed_findings}",
+                file=sys.stderr,
+            )
+            return 1
 
     print("CHINESE_MODEL_CATALOG_SELF_TEST ok")
     return 0
