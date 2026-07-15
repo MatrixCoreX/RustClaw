@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shlex
 import sys
 from pathlib import Path
 from typing import Any
@@ -126,6 +128,13 @@ RUNTIME_CATALOG_ENTRY_FIELDS = {
     "timeout_seconds",
 }
 
+PROVIDER_CREDENTIAL_ENV_VARS = {
+    "deepseek": ["DEEPSEEK_API_KEY"],
+    "minimax": ["MINIMAX_API_KEY"],
+    "mimo": ["MIMO_API_KEY", "XIAOMI_API_KEY"],
+    "qwen": ["QWEN_API_KEY", "DASHSCOPE_API_KEY"],
+}
+
 
 def load_toml(path: Path) -> dict[str, Any]:
     return tomllib.loads(path.read_text(encoding="utf-8"))
@@ -135,6 +144,31 @@ def as_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
     return []
+
+
+def load_env_file(path: Path | None) -> dict[str, str]:
+    if path is None:
+        return {}
+    values: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        try:
+            parsed = shlex.split(raw_value, posix=True)
+            value = parsed[0] if parsed else ""
+        except ValueError:
+            value = raw_value.strip().strip('"').strip("'")
+        values[key] = value
+    return values
 
 
 def fail(findings: list[str], message: str) -> None:
@@ -164,6 +198,17 @@ def provider_models(section: dict[str, Any], provider: str) -> set[str]:
     return set(as_list(section.get(f"{provider}_models")))
 
 
+def credential_state(llm_table: dict[str, Any], provider: str, env_values: dict[str, str]) -> str:
+    if str(llm_table.get("api_key") or "").strip():
+        return "configured_inline"
+    for env_name in PROVIDER_CREDENTIAL_ENV_VARS.get(provider, []):
+        if str(os.environ.get(env_name) or "").strip():
+            return "configured_env"
+        if str(env_values.get(env_name) or "").strip():
+            return "configured_env"
+    return "missing"
+
+
 def catalog_entry(
     provider: str,
     llm_table: dict[str, Any],
@@ -173,6 +218,7 @@ def catalog_entry(
     music: dict[str, Any],
     selected_provider: str,
     selected_model: str,
+    env_values: dict[str, str],
 ) -> dict[str, Any]:
     image_edit = image.get("image_edit", {}) if isinstance(image.get("image_edit"), dict) else {}
     image_generation = (
@@ -185,7 +231,6 @@ def catalog_entry(
     music_gen = music.get("music_generation", {}) if isinstance(music.get("music_generation"), dict) else {}
 
     model = str(llm_table.get("model") or "")
-    credential_state = "configured_inline" if str(llm_table.get("api_key") or "").strip() else "missing"
     image_understanding_models = provider_models(image_vision, provider)
     audio_transcription_models = provider_models(stt, provider)
     supports_image_input = model in image_understanding_models
@@ -217,7 +262,7 @@ def catalog_entry(
         "base_url_kind": base_url_kind(str(llm_table.get("base_url") or "")),
         "context_window_tokens": llm_table.get("context_window_tokens"),
         "timeout_seconds": llm_table.get("timeout_seconds"),
-        "credential_state": credential_state,
+        "credential_state": credential_state(llm_table, provider, env_values),
         "supports_text": True,
         "supports_image_input": supports_image_input,
         "supports_video_input": supports_video_input,
@@ -242,7 +287,7 @@ def catalog_entry(
     }
 
 
-def build_catalog(main: dict[str, Any]) -> list[dict[str, Any]]:
+def build_catalog(main: dict[str, Any], env_values: dict[str, str]) -> list[dict[str, Any]]:
     llm = main.get("llm") if isinstance(main.get("llm"), dict) else {}
     selected_provider = str(llm.get("selected_vendor") or "") if isinstance(llm, dict) else ""
     selected_model = str(llm.get("selected_model") or "") if isinstance(llm, dict) else ""
@@ -265,6 +310,7 @@ def build_catalog(main: dict[str, Any]) -> list[dict[str, Any]]:
                 music,
                 selected_provider,
                 selected_model,
+                env_values,
             )
         )
     return catalog
@@ -542,9 +588,15 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate must expose explicit Chinese-provider env-file override and disable options",
     )
     require(
-        '--env-file "$CHINESE_PROVIDER_ENV_FILE"' in parity_text,
+        'chinese_provider_env_file_args+=(--env-file "$CHINESE_PROVIDER_ENV_FILE")'
+        in parity_text,
         findings,
-        "agent parity gate must pass an existing Chinese-provider env file to the smoke runner",
+        "agent parity gate must build reusable Chinese-provider env-file args",
+    )
+    require(
+        '"${chinese_provider_env_file_args[@]}"' in parity_text,
+        findings,
+        "agent parity gate must pass Chinese-provider env-file args to catalog and smoke checks",
     )
     require(
         "chinese_provider_live_providers=${CHINESE_PROVIDER_LIVE_PROVIDERS}" in parity_text,
@@ -558,8 +610,9 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
     )
 
 
-def build_report() -> dict[str, Any]:
+def build_report(env_file: Path | None = None) -> dict[str, Any]:
     findings: list[str] = []
+    env_values = load_env_file(env_file)
     main = load_toml(MAIN_CONFIG)
     docker = load_toml(DOCKER_CONFIG)
     check_text_provider_config(findings, "configs/config.toml", main)
@@ -568,7 +621,7 @@ def build_report() -> dict[str, Any]:
     check_media_config(findings)
     check_vendor_patches(findings)
     check_chinese_case_gate(findings)
-    catalog = build_catalog(main)
+    catalog = build_catalog(main, env_values)
     check_runtime_catalog_shape(findings, catalog)
     check_chinese_provider_smoke_live_scope(findings)
     return {
@@ -584,9 +637,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true", help="print machine-readable JSON report")
     parser.add_argument("--catalog-only", action="store_true", help="print only the model catalog JSON array")
+    parser.add_argument("--env-file", type=Path, help="optional env file used only for credential_state detection")
     args = parser.parse_args()
 
-    report = build_report()
+    report = build_report(args.env_file)
     if args.catalog_only:
         print(json.dumps(report["catalog"], ensure_ascii=False, indent=2, sort_keys=True))
     elif args.json:
