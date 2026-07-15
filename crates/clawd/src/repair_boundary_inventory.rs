@@ -66,6 +66,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
             "crates/clawd/src/intent_router_normalizer_boundary_repair.rs",
             "crates/clawd/src/intent_router_contract_repair_report.rs",
             "crates/clawd/src/intent_router_contract_repair_judge.rs",
+            "crates/clawd/src/prompt_utils_json_repair.rs",
         ],
         entrypoints: &[
             "run_intent_normalizer_model_step",
