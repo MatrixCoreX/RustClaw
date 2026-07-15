@@ -3,6 +3,34 @@ use serde_json::Value;
 
 use crate::{client, output};
 
+const MODEL_READINESS_SCALAR_FIELDS: &[&str] = &[
+    "schema_version",
+    "selected_provider",
+    "selected_model",
+    "selected_entry_status",
+    "entry_count",
+    "matched_entry_count",
+    "credential_state",
+];
+
+const MODEL_READINESS_BOOL_FIELDS: &[&str] = &[
+    "ready",
+    "text_generation",
+    "image_input",
+    "image_understanding",
+    "image_generation",
+    "audio_input",
+    "audio_transcription",
+    "audio_generation",
+    "video_input",
+    "video_generation",
+    "music_generation",
+    "async_required",
+    "dry_run",
+];
+
+const MODEL_READINESS_LINE_TOKEN: &str = "llm_trace_model_readiness:";
+
 pub(crate) fn run_llm_trace(
     base_url: &str,
     key: &str,
@@ -95,6 +123,9 @@ pub(super) fn llm_trace_text_lines(
             summary.get("provider_error_count"),
         );
     }
+    if let Some(line) = llm_trace_model_readiness_line(debug) {
+        lines.push(line);
+    }
 
     let call_limit = limit.unwrap_or(usize::MAX);
     for (fallback_index, call) in debug_calls(debug).into_iter().take(call_limit).enumerate() {
@@ -128,6 +159,27 @@ pub(super) fn llm_trace_text_lines(
         }
     }
     lines
+}
+
+fn llm_trace_model_readiness_line(debug: &Value) -> Option<String> {
+    let readiness = debug.pointer("/model_catalog_trace/readiness")?;
+    if !readiness.is_object() {
+        return None;
+    }
+    let mut tokens = vec!["trace_ref=model_catalog_trace.readiness".to_string()];
+    for key in MODEL_READINESS_SCALAR_FIELDS
+        .iter()
+        .chain(MODEL_READINESS_BOOL_FIELDS.iter())
+    {
+        push_token(&mut tokens, key, readiness.get(*key));
+    }
+    if tokens.len() <= 1 {
+        return None;
+    }
+    let mut line = String::from(MODEL_READINESS_LINE_TOKEN);
+    line.push(' ');
+    line.push_str(&tokens.join(" "));
+    Some(line)
 }
 
 fn debug_calls(debug: &Value) -> Vec<&Value> {

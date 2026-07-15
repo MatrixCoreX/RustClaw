@@ -199,10 +199,10 @@ It also writes `clawcli_models_readiness_contracts.txt` from
 check. `gate_summary.env` records `clawcli_models_readiness_contracts=1`, and
 the artifact must contain `CLAWCLI_MODELS_READINESS_CONTRACT_SELF_TEST ok` and
 `CLAWCLI_MODELS_READINESS_CONTRACT_CHECK findings=0`, so `clawcli models
-readiness`, `model_readiness_summary`, `selected_entry_status`,
-`model_catalog_trace.readiness`, `credential_state`, `ready`, capability flags,
-async/dry-run metadata, UI teaching trace tokens, and missing selected-entry
-behavior remain secret-free machine-field contracts.
+readiness`, `clawcli llm-trace`, `model_readiness_summary`,
+`selected_entry_status`, `model_catalog_trace.readiness`, `credential_state`,
+`ready`, capability flags, async/dry-run metadata, UI teaching trace tokens, and
+missing selected-entry behavior remain secret-free machine-field contracts.
 It also writes `semantic_boundary_contracts.txt` from
 `scripts/check_runtime_semantic_rewrite_boundary.py --self-test`,
 `scripts/check_contract_repair_loop_observation_boundary.py --self-test`,
@@ -366,8 +366,9 @@ For `clawcli_models_readiness_contracts.txt`, the required content includes
 `CLAWCLI_MODELS_READINESS_CONTRACT_CHECK findings=0`. This proves `clawcli
 models readiness` keeps `model_readiness_summary`,
 `model_catalog_trace.readiness`, `selected_entry_status`, `credential_state`,
-`ready`, capability flags, async/dry-run metadata, UI teaching trace tokens, and
-missing selected-entry behavior as secret-free machine fields.
+`ready`, capability flags, async/dry-run metadata, `clawcli llm-trace` readiness
+tokens, UI teaching trace tokens, and missing selected-entry behavior as
+secret-free machine fields.
 For `agent_loop_static_contracts.txt`, the required content includes the six
 route/frontdoor/static `AGENT_LOOP_STATIC_SELF_TEST ...` labels as well as the
 main guard success tokens, including

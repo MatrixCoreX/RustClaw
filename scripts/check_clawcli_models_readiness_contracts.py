@@ -63,6 +63,23 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "model_readiness_json",
         "model_readiness_text_lines",
     ),
+    "crates/clawcli/src/commands/llm_trace.rs": (
+        "llm_trace_model_readiness_line",
+        "llm_trace_model_readiness:",
+        "trace_ref=model_catalog_trace.readiness",
+        "MODEL_READINESS_SCALAR_FIELDS",
+        "MODEL_READINESS_BOOL_FIELDS",
+        "model_catalog_trace/readiness",
+        "selected_entry_status",
+        "matched_entry_count",
+        "credential_state",
+        "ready",
+        "text_generation",
+        "image_understanding",
+        "video_generation",
+        "music_generation",
+        "dry_run",
+    ),
     "crates/clawcli/src/main.rs": (
         "ModelsCommand::Readiness",
         "commands::run_models_readiness",
@@ -86,6 +103,17 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "video_generation=1",
         "music_generation=1",
         "dry_run=1",
+    ),
+    "crates/clawcli/src/commands_llm_trace_tests.rs": (
+        "llm_trace_text_lines_project_missing_model_readiness",
+        "llm_trace_model_readiness:",
+        "trace_ref=model_catalog_trace.readiness",
+        "selected_entry_status=found",
+        "selected_entry_status=missing",
+        "credential_state=configured_env",
+        "credential_state=null",
+        "ready=true",
+        "ready=false",
     ),
     "crates/clawd/src/http/ui_routes/task_debug_trace.rs": (
         "build_model_catalog_trace_for_debug",
@@ -139,6 +167,7 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     ),
     "README.md": (
         "clawcli models readiness",
+        "clawcli llm-trace",
         "model_readiness_summary",
         "model_catalog_trace.readiness",
         "clawcli_models_readiness_contracts.txt",
@@ -148,6 +177,7 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     ),
     "README.zh-CN.md": (
         "clawcli models readiness",
+        "clawcli llm-trace",
         "model_readiness_summary",
         "model_catalog_trace.readiness",
         "clawcli_models_readiness_contracts.txt",
@@ -162,6 +192,7 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "CLAWCLI_MODELS_READINESS_CONTRACT_CHECK findings=0",
         "model_readiness_summary",
         "model_catalog_trace.readiness",
+        "clawcli llm-trace",
         "selected_entry_status",
     ),
     "AGENTS.md": (
@@ -172,6 +203,7 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "CLAWCLI_MODELS_READINESS_CONTRACT_CHECK findings=0",
         "model_readiness_summary",
         "model_catalog_trace.readiness",
+        "clawcli llm-trace",
     ),
     "scripts/nl_tests/run_agent_parity_gate.sh": (
         "AGENT_PARITY_GATE_STEP clawcli_models_readiness_contracts",
@@ -226,6 +258,20 @@ def scan_texts(texts: dict[str, str | None]) -> list[str]:
     if models_text.count("bool_value(entry") < 12:
         findings.append("models_readiness_capability_projection_too_weak")
 
+    llm_trace = texts.get("crates/clawcli/src/commands/llm_trace.rs") or ""
+    for token in (
+        "llm_trace_model_readiness_line",
+        "llm_trace_model_readiness:",
+        "trace_ref=model_catalog_trace.readiness",
+        "selected_entry_status",
+        "matched_entry_count",
+        "credential_state",
+        "ready",
+        "dry_run",
+    ):
+        if token not in llm_trace:
+            findings.append(f"missing_llm_trace_model_readiness_token:{token}")
+
     tests = texts.get("crates/clawcli/src/commands_models_tests.rs") or ""
     for token in (
         "model_readiness_summary",
@@ -237,6 +283,17 @@ def scan_texts(texts: dict[str, str | None]) -> list[str]:
     ):
         if token not in tests:
             findings.append(f"missing_models_readiness_test_token:{token}")
+
+    llm_trace_tests = texts.get("crates/clawcli/src/commands_llm_trace_tests.rs") or ""
+    for token in (
+        "llm_trace_text_lines_project_missing_model_readiness",
+        "llm_trace_model_readiness:",
+        "selected_entry_status=missing",
+        "credential_state=null",
+        "ready=false",
+    ):
+        if token not in llm_trace_tests:
+            findings.append(f"missing_llm_trace_model_readiness_test_token:{token}")
 
     task_debug = texts.get("crates/clawd/src/http/ui_routes/task_debug_trace.rs") or ""
     for token in (
@@ -296,6 +353,13 @@ def run_self_test() -> None:
     ).replace('matches!(credential_state.as_str(), "missing" | "null" | "")', "")
     findings = scan_texts(missing_ready_gate)
     assert any("ready_gate" in item for item in findings), findings
+
+    missing_llm_trace = dict(good)
+    missing_llm_trace["crates/clawcli/src/commands/llm_trace.rs"] = (
+        missing_llm_trace["crates/clawcli/src/commands/llm_trace.rs"] or ""
+    ).replace("llm_trace_model_readiness:", "")
+    findings = scan_texts(missing_llm_trace)
+    assert any("missing_llm_trace_model_readiness_token" in item for item in findings), findings
 
     missing_gate = dict(good)
     missing_gate["scripts/nl_tests/run_agent_parity_gate.sh"] = "agent parity"

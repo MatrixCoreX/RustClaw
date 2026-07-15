@@ -15,6 +15,30 @@ fn llm_trace_text_lines_number_calls_and_flow_tokens() {
             "finalizer_call_count": 0,
             "provider_error_count": 0
         },
+        "model_catalog_trace": {
+            "readiness": {
+                "schema_version": 1,
+                "selected_provider": "minimax",
+                "selected_model": "MiniMax-M3",
+                "selected_entry_status": "found",
+                "entry_count": 2,
+                "matched_entry_count": 1,
+                "credential_state": "configured_env",
+                "ready": true,
+                "text_generation": true,
+                "image_input": true,
+                "image_understanding": true,
+                "image_generation": false,
+                "audio_input": false,
+                "audio_transcription": false,
+                "audio_generation": false,
+                "video_input": true,
+                "video_generation": false,
+                "music_generation": false,
+                "async_required": false,
+                "dry_run": false
+            }
+        },
         "calls": [
             {
                 "call_index": 1,
@@ -62,6 +86,19 @@ fn llm_trace_text_lines_number_calls_and_flow_tokens() {
     assert!(lines.contains(&"llm_trace_call_count: 2".to_string()));
     assert!(lines.contains(&"llm_trace_flow_stage_count: 2".to_string()));
     assert!(lines.iter().any(|line| {
+        line.contains("llm_trace_model_readiness:")
+            && line.contains("trace_ref=model_catalog_trace.readiness")
+            && line.contains("selected_provider=minimax")
+            && line.contains("selected_model=MiniMax-M3")
+            && line.contains("selected_entry_status=found")
+            && line.contains("matched_entry_count=1")
+            && line.contains("credential_state=configured_env")
+            && line.contains("ready=true")
+            && line.contains("image_understanding=true")
+            && line.contains("video_input=true")
+            && line.contains("dry_run=false")
+    }));
+    assert!(lines.iter().any(|line| {
         line == "llm_trace_call: llm_call_ref=LLM#1 index=1 status=ok vendor=minimax provider=minimax model=MiniMax-M3 prompt_label=plan flow_stage=agent_loop.planner flow_node=planner_round code_module=crates/clawd/src/agent_engine/planning.rs code_entrypoint=plan_round_actions trigger_kind=normal prompt_tokens=11 completion_tokens=7 total_tokens=18"
     }));
     assert!(lines.iter().any(|line| {
@@ -69,6 +106,51 @@ fn llm_trace_text_lines_number_calls_and_flow_tokens() {
             && line.contains("index=2")
             && line.contains("prompt_label=answer_verifier")
             && line.contains("flow_stage=agent_loop.answer_verifier")
+    }));
+}
+
+#[test]
+fn llm_trace_text_lines_project_missing_model_readiness() {
+    let debug = serde_json::json!({
+        "task_id": "task-llm-missing-model",
+        "call_count": 0,
+        "model_catalog_trace": {
+            "readiness": {
+                "schema_version": 1,
+                "selected_provider": "minimax",
+                "selected_model": "missing-model",
+                "selected_entry_status": "missing",
+                "entry_count": 1,
+                "matched_entry_count": 0,
+                "credential_state": "null",
+                "ready": false,
+                "text_generation": false,
+                "image_input": false,
+                "image_understanding": false,
+                "image_generation": false,
+                "audio_input": false,
+                "audio_transcription": false,
+                "audio_generation": false,
+                "video_input": false,
+                "video_generation": false,
+                "music_generation": false,
+                "async_required": false,
+                "dry_run": false
+            }
+        },
+        "calls": []
+    });
+
+    let lines = llm_trace_text_lines(&debug, false, None);
+
+    assert!(lines.iter().any(|line| {
+        line.contains("llm_trace_model_readiness:")
+            && line.contains("selected_model=missing-model")
+            && line.contains("selected_entry_status=missing")
+            && line.contains("matched_entry_count=0")
+            && line.contains("credential_state=null")
+            && line.contains("ready=false")
+            && line.contains("text_generation=false")
     }));
 }
 
