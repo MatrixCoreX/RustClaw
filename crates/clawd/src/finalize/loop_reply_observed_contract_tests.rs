@@ -1191,7 +1191,7 @@ fn exact_observed_answer_does_not_replace_mixed_failure_summary() {
 }
 
 #[test]
-fn scalar_contract_prefers_latest_structured_observed_value_over_planned_delivery() {
+fn scalar_contract_preserves_structured_observed_payload_over_planned_delivery() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
@@ -1244,10 +1244,30 @@ fn scalar_contract_prefers_latest_structured_observed_value_over_planned_deliver
         &mut finalizer_summary,
     );
 
-    assert_eq!(delivery, vec!["0.1.7".to_string()]);
+    assert_eq!(delivery.len(), 1);
+    let payload: serde_json::Value =
+        serde_json::from_str(&delivery[0]).expect("delivery should remain structured JSON");
+    assert_eq!(
+        payload
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.config_edit.read_guard")
+    );
+    assert_eq!(
+        payload
+            .pointer("/field_path")
+            .and_then(serde_json::Value::as_str),
+        Some("workspace.package.version")
+    );
+    assert_eq!(
+        payload
+            .pointer("/current_value")
+            .and_then(serde_json::Value::as_str),
+        Some("0.1.7")
+    );
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
-        Some("0.1.7")
+        Some(delivery[0].as_str())
     );
     assert!(finalizer_summary.is_some());
 }
