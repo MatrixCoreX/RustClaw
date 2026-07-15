@@ -217,7 +217,7 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "CLAWCLI_MODELS_READINESS_CONTRACT_SELF_TEST ok",
         "CLAWCLI_MODELS_READINESS_CONTRACT_CHECK findings=0",
     ),
-    "scripts/check_chinese_model_catalog.py": (
+    "scripts/chinese_model_catalog_gate_checks.py": (
         "AGENT_PARITY_GATE_STEP clawcli_models_readiness_contracts",
         "check_clawcli_models_readiness_contracts.py",
         "clawcli_models_readiness_contracts.txt",
