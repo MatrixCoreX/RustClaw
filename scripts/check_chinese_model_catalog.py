@@ -1053,11 +1053,13 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "check_route_authority_legacy_keys.py" in parity_text
         and "check_legacy_route_boundary.py" in parity_text
         and "check_pre_planner_exit_inventory.py" in parity_text
+        and "check_frontdoor_boundary_dispatch.py" in parity_text
         and "check_no_nl_hardmatch.py" in parity_text
         and "check_historical_hardcoded_language.py" in parity_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_route_authority_legacy_keys.py" in parity_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_legacy_route_boundary.py" in parity_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_pre_planner_exit_inventory.py" in parity_text
+        and "AGENT_LOOP_STATIC_SELF_TEST check_frontdoor_boundary_dispatch.py" in parity_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_no_nl_hardmatch.py" in parity_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_historical_hardcoded_language.py" in parity_text
         and "agent_loop_static_contracts.txt" in parity_text,
@@ -1223,6 +1225,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "AGENT_LOOP_STATIC_SELF_TEST check_route_authority_legacy_keys.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_legacy_route_boundary.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_pre_planner_exit_inventory.py" in suite_artifact_contract_text
+        and "AGENT_LOOP_STATIC_SELF_TEST check_frontdoor_boundary_dispatch.py" in suite_artifact_contract_text
+        and "FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_no_nl_hardmatch.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_historical_hardcoded_language.py" in suite_artifact_contract_text
         and '"evidence_extractor_contracts": "1"' in suite_artifact_contract_text
@@ -1443,6 +1447,12 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             findings,
             f"{label} must document agent parity nested/static/raw-trace gate artifacts",
         )
+        require(
+            "check_frontdoor_boundary_dispatch.py" in readme_body
+            and "FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0" in readme_body,
+            findings,
+            f"{label} must document the frontdoor boundary static guard",
+        )
     require(
         "runtime_hard_reply_baseline.txt" in nl_tests_readme_text
         and "runtime_hard_reply_baseline=1" in nl_tests_readme_text
@@ -1509,6 +1519,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
     require(
         "evidence_extractor_contracts.txt" in nl_tests_readme_text
         and "AGENT_LOOP_STATIC_SELF_TEST" in nl_tests_readme_text
+        and "check_frontdoor_boundary_dispatch.py" in nl_tests_readme_text
+        and "FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0" in nl_tests_readme_text
         and "evidence_extractor_contracts=1" in nl_tests_readme_text
         and "EVIDENCE_EXTRACTOR_CONTRACT_SELF_TEST ok" in nl_tests_readme_text
         and "EVIDENCE_EXTRACTOR_CONTRACT_CHECK findings=0" in nl_tests_readme_text
