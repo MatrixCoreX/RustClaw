@@ -98,6 +98,7 @@ pub(super) fn machine_payload_observed_facts(payload_text: &str) -> Vec<String> 
     push_json_scalar_fact(&mut facts, &obj, "provider_http_status");
     push_json_scalar_fact(&mut facts, &obj, "provider_error_code");
     push_json_scalar_fact(&mut facts, &obj, "provider_error_type");
+    push_json_scalar_fact(&mut facts, &obj, "provider_error_kind");
     push_json_scalar_fact(&mut facts, &obj, "raw_error_present");
     push_json_array_fact(&mut facts, &obj, "missing_evidence_fields");
     push_json_scalar_fact(&mut facts, &obj, "answer_incomplete_reason");
