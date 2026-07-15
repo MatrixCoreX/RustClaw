@@ -157,12 +157,12 @@ custom_keep = "yes"
 fn llm_runtime_differs_when_only_api_key_changes() {
     assert!(llm_runtime_differs(
         "minimax",
-        "MiniMax-M2.7",
+        "MiniMax-M3",
         "openai_compat",
         "https://api.minimaxi.com/v1",
         "old-key",
         "minimax",
-        "MiniMax-M2.7",
+        "MiniMax-M3",
         "openai_compat",
         "https://api.minimaxi.com/v1",
         "new-key",
@@ -173,14 +173,14 @@ fn llm_runtime_differs_when_only_api_key_changes() {
 fn llm_runtime_differs_when_only_base_url_changes() {
     assert!(llm_runtime_differs(
         "minimax",
-        "MiniMax-M2.7",
+        "MiniMax-M3",
         "openai_compat",
         "https://api.minimaxi.com/v1",
         "same-key",
         "minimax",
-        "MiniMax-M2.7",
+        "MiniMax-M3",
         "openai_compat",
-        "https://api.minimax.cn/v1",
+        "https://proxy.example/minimax/v1",
         "same-key",
     ));
 }
@@ -189,12 +189,12 @@ fn llm_runtime_differs_when_only_base_url_changes() {
 fn llm_runtime_differs_is_false_when_runtime_matches_saved_config() {
     assert!(!llm_runtime_differs(
         "minimax",
-        "MiniMax-M2.7",
+        "MiniMax-M3",
         "openai_compat",
         "https://api.minimaxi.com/v1",
         "same-key",
         "minimax",
-        "MiniMax-M2.7",
+        "MiniMax-M3",
         "openai_compat",
         "https://api.minimaxi.com/v1",
         "same-key",
@@ -205,12 +205,12 @@ fn llm_runtime_differs_is_false_when_runtime_matches_saved_config() {
 fn llm_runtime_differs_when_only_minimax_provider_type_changes() {
     assert!(llm_runtime_differs(
         "minimax",
-        "MiniMax-M2.7",
+        "MiniMax-M3",
         "anthropic_claude",
         "https://api.minimaxi.com/v1",
         "same-key",
         "minimax",
-        "MiniMax-M2.7",
+        "MiniMax-M3",
         "openai_compat",
         "https://api.minimaxi.com/v1",
         "same-key",

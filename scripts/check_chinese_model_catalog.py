@@ -159,6 +159,16 @@ PROVIDER_CREDENTIAL_ENV_VARS = {
     "qwen": ["QWEN_API_KEY", "DASHSCOPE_API_KEY"],
 }
 
+STALE_MINIMAX_ENDPOINT_TOKENS = ("api.minimax.io", "api.minimax.cn")
+STALE_MINIMAX_ENDPOINT_SCAN_ROOTS = (
+    ROOT / "configs",
+    ROOT / "docker/config",
+    ROOT / "UI/src",
+    ROOT / "crates/clawd/src/http",
+    ROOT / "scripts",
+)
+STALE_MINIMAX_ENDPOINT_SCAN_SUFFIXES = (".toml", ".ts", ".tsx", ".rs", ".py", ".sh")
+
 
 def load_toml(path: Path) -> dict[str, Any]:
     return tomllib.loads(path.read_text(encoding="utf-8"))
@@ -802,6 +812,33 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
     )
 
 
+def check_no_stale_minimax_endpoints(findings: list[str]) -> None:
+    for root in STALE_MINIMAX_ENDPOINT_SCAN_ROOTS:
+        if root.is_file():
+            paths = [root]
+        elif root.is_dir():
+            paths = sorted(
+                path
+                for path in root.rglob("*")
+                if path.is_file() and path.suffix in STALE_MINIMAX_ENDPOINT_SCAN_SUFFIXES
+            )
+        else:
+            continue
+        for path in paths:
+            if path.resolve() == Path(__file__).resolve():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            for token in STALE_MINIMAX_ENDPOINT_TOKENS:
+                if token in text:
+                    fail(
+                        findings,
+                        f"stale MiniMax endpoint token {token!r} in {path.relative_to(ROOT)}; use https://api.minimaxi.com/v1 or a neutral non-official test URL",
+                    )
+
+
 def build_report(env_file: Path | None = None) -> dict[str, Any]:
     findings: list[str] = []
     env_values = load_env_file(env_file, findings)
@@ -817,6 +854,7 @@ def build_report(env_file: Path | None = None) -> dict[str, Any]:
     check_runtime_catalog_shape(findings, catalog)
     check_model_catalog_teaching_projection(findings)
     check_chinese_provider_smoke_live_scope(findings)
+    check_no_stale_minimax_endpoints(findings)
     findings.extend(secret_scan_findings(catalog, "$.catalog"))
     return {
         "schema_version": 1,
