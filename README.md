@@ -758,10 +758,11 @@ flowchart TD
     H --> N[python3 scripts/check_chinese_model_catalog.py]
     N --> O[Static guard<br/>MiniMax/MiMo/Qwen/DeepSeek metadata + vendor patches + case tags]
     O --> P[scripts/nl_tests/run_chinese_provider_smoke_matrix.sh]
-    P --> Q[Live or dry-run provider matrix<br/>credential preflight + structured skip]
+    P --> PS[Current live scope<br/>--live-providers minimax]
+    PS --> Q[Live or dry-run provider matrix<br/>scope skip + credential preflight + structured result]
 ```
 
-The catalog is config-derived, not a live model-discovery API. It exposes secret-free capability facts such as text support, image/video/audio input, image/audio/video/music generation, async/dry-run requirements, timeout, context window, active text provider, and config source. Chinese provider metadata for MiniMax M3/M2.7, MiMo, Qwen, and DeepSeek is guarded by `scripts/check_chinese_model_catalog.py`; the smoke matrix runner can validate cases without provider calls through `--dry-run`, or run live against a currently started `clawd` when credentials and provider startup match.
+The catalog is config-derived, not a live model-discovery API. It exposes secret-free capability facts such as text support, image/video/audio input, image/audio/video/music generation, async/dry-run requirements, timeout, context window, active text provider, and config source. Chinese provider metadata for MiniMax M3/M2.7, MiMo, Qwen, and DeepSeek is guarded by `scripts/check_chinese_model_catalog.py`; the smoke matrix runner can validate cases without provider calls through `--dry-run`, or run live against a currently started `clawd` when credentials and provider startup match. If the current account has only purchased/enabled part of the provider set, pass `--live-providers minimax` or another machine-token CSV so out-of-scope providers are recorded as `provider_not_in_live_scope` instead of being treated as unfinished code work.
 
 ## Main Components
 

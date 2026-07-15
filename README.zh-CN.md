@@ -683,10 +683,11 @@ flowchart TD
     H --> N[python3 scripts/check_chinese_model_catalog.py]
     N --> O[静态门禁<br/>MiniMax/MiMo/Qwen/DeepSeek metadata + vendor patches + case tags]
     O --> P[scripts/nl_tests/run_chinese_provider_smoke_matrix.sh]
-    P --> Q[Live 或 dry-run provider matrix<br/>凭据预检 + 结构化 skip]
+    P --> PS[当前 live scope<br/>--live-providers minimax]
+    PS --> Q[Live 或 dry-run provider matrix<br/>scope skip + 凭据预检 + 结构化结果]
 ```
 
-MiniMax M3/M2.7、MiMo、Qwen 和 DeepSeek 的中文 provider 元数据由 `scripts/check_chinese_model_catalog.py` 守住；`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` 可只验证 case 与凭据状态，不调用 provider。需要 live 验证时，必须确保当前运行中的 `clawd` 已按对应 provider/config 启动，runner 的 `RUSTCLAW_PROVIDER_OVERRIDE` 只用于元数据和同环境启动 wrapper，不会重写已经运行的进程。
+MiniMax M3/M2.7、MiMo、Qwen 和 DeepSeek 的中文 provider 元数据由 `scripts/check_chinese_model_catalog.py` 守住；`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` 可只验证 case 与凭据状态，不调用 provider。需要 live 验证时，必须确保当前运行中的 `clawd` 已按对应 provider/config 启动，runner 的 `RUSTCLAW_PROVIDER_OVERRIDE` 只用于元数据和同环境启动 wrapper，不会重写已经运行的进程。如果当前账号只购买/启用了一部分 provider，用 `--live-providers minimax` 或其他机器 token CSV 明确当前验收范围，范围外 provider 会记录为 `provider_not_in_live_scope`，不再被当成代码未完成。
 
 ## NL 回归快捷入口
 
