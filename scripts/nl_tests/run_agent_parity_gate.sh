@@ -330,6 +330,18 @@ echo "AGENT_PARITY_GATE_STEP agent_loop_static_contracts"
     --fail-on-ui-visible
 } > "${OUT_DIR}/agent_loop_static_contracts.txt"
 
+echo "AGENT_PARITY_GATE_STEP semantic_boundary_contracts"
+{
+  python3 "${ROOT_DIR}/scripts/check_runtime_semantic_rewrite_boundary.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_runtime_semantic_rewrite_boundary.py"
+  python3 "${ROOT_DIR}/scripts/check_contract_repair_loop_observation_boundary.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_contract_repair_loop_observation_boundary.py"
+  python3 "${ROOT_DIR}/scripts/check_route_reason_marker_facade.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_route_reason_marker_facade.py"
+  python3 "${ROOT_DIR}/scripts/check_output_semantic_kind_write_boundary.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_output_semantic_kind_write_boundary.py"
+} > "${OUT_DIR}/semantic_boundary_contracts.txt"
+
 echo "AGENT_PARITY_GATE_STEP evidence_extractor_contracts"
 {
   python3 "${ROOT_DIR}/scripts/check_evidence_extractor_contracts.py" --self-test
@@ -428,6 +440,7 @@ fi
   echo "long_tail_skill_contracts=1"
   echo "no_agent_mode_payload=1"
   echo "agent_loop_static_contracts=1"
+  echo "semantic_boundary_contracts=1"
   echo "evidence_extractor_contracts=1"
   echo "secret_scan_contract=1"
   echo "suite_wrapper_contract=1"

@@ -1072,6 +1072,25 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate summary must record the agent-loop static contracts state",
     )
     require(
+        "AGENT_PARITY_GATE_STEP semantic_boundary_contracts" in parity_text
+        and "check_runtime_semantic_rewrite_boundary.py" in parity_text
+        and 'check_runtime_semantic_rewrite_boundary.py" --self-test' in parity_text
+        and "check_contract_repair_loop_observation_boundary.py" in parity_text
+        and 'check_contract_repair_loop_observation_boundary.py" --self-test' in parity_text
+        and "check_route_reason_marker_facade.py" in parity_text
+        and 'check_route_reason_marker_facade.py" --self-test' in parity_text
+        and "check_output_semantic_kind_write_boundary.py" in parity_text
+        and 'check_output_semantic_kind_write_boundary.py" --self-test' in parity_text
+        and "semantic_boundary_contracts.txt" in parity_text,
+        findings,
+        "agent parity gate must self-test and write the semantic boundary contracts artifact",
+    )
+    require(
+        "semantic_boundary_contracts=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the semantic boundary contracts state",
+    )
+    require(
         "AGENT_PARITY_GATE_STEP evidence_extractor_contracts" in parity_text
         and "check_evidence_extractor_contracts.py" in parity_text
         and 'check_evidence_extractor_contracts.py" --self-test' in parity_text
@@ -1229,6 +1248,14 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_no_nl_hardmatch.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_historical_hardcoded_language.py" in suite_artifact_contract_text
+        and "agent_parity_gate/semantic_boundary_contracts.txt" in suite_artifact_contract_text
+        and '"semantic_boundary_contracts": "1"' in suite_artifact_contract_text
+        and "RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings=0" in suite_artifact_contract_text
+        and "CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0" in suite_artifact_contract_text
+        and "ROUTE_REASON_MARKER_FACADE_SELF_TEST ok" in suite_artifact_contract_text
+        and "ROUTE_REASON_MARKER_FACADE_CHECK findings=0" in suite_artifact_contract_text
+        and "OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_SELF_TEST ok" in suite_artifact_contract_text
+        and "OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_CHECK findings=0" in suite_artifact_contract_text
         and '"evidence_extractor_contracts": "1"' in suite_artifact_contract_text
         and "EVIDENCE_EXTRACTOR_CONTRACT_SELF_TEST ok" in suite_artifact_contract_text
         and "EVIDENCE_EXTRACTOR_CONTRACT_CHECK findings=0" in suite_artifact_contract_text
@@ -1334,6 +1361,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "bad-json" in suite_artifact_contract_text
         and "bad-shape" in suite_artifact_contract_text
         and '"agent_loop_static_contracts": "1"' in suite_artifact_contract_text
+        and '"semantic_boundary_contracts": "1"' in suite_artifact_contract_text
         and '"agent_loop_guard_final_scope": "1"' in suite_artifact_contract_text
         and '"registry_policy_contracts": "1"' in suite_artifact_contract_text
         and '"skill_registry_aliases": "1"' in suite_artifact_contract_text
@@ -1426,6 +1454,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             and "skill_registry_aliases.txt" in readme_body
             and "long_tail_skill_contracts.txt" in readme_body
             and "no_agent_mode_payload.txt" in readme_body
+            and "semantic_boundary_contracts.txt" in readme_body
             and "evidence_extractor_contracts.txt" in readme_body
             and "self-test" in readme_body
             and "check_evidence_extractor_contracts.py --self-test" in readme_body
@@ -1452,6 +1481,15 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             and "FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0" in readme_body,
             findings,
             f"{label} must document the frontdoor boundary static guard",
+        )
+        require(
+            "semantic_boundary_contracts.txt" in readme_body
+            and "RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings=0" in readme_body
+            and "CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0" in readme_body
+            and "ROUTE_REASON_MARKER_FACADE_SELF_TEST ok" in readme_body
+            and "OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_SELF_TEST ok" in readme_body,
+            findings,
+            f"{label} must document the semantic boundary contracts artifact",
         )
     require(
         "runtime_hard_reply_baseline.txt" in nl_tests_readme_text
@@ -1527,6 +1565,18 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "agent_parity_gate/evidence_extractor_contracts.txt" in nl_tests_readme_text,
         findings,
         "scripts/nl_tests/README.md must document the evidence extractor gate artifact",
+    )
+    require(
+        "semantic_boundary_contracts.txt" in nl_tests_readme_text
+        and "semantic_boundary_contracts=1" in nl_tests_readme_text
+        and "RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings=0" in nl_tests_readme_text
+        and "CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0" in nl_tests_readme_text
+        and "ROUTE_REASON_MARKER_FACADE_SELF_TEST ok" in nl_tests_readme_text
+        and "ROUTE_REASON_MARKER_FACADE_CHECK findings=0" in nl_tests_readme_text
+        and "OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_SELF_TEST ok" in nl_tests_readme_text
+        and "OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_CHECK findings=0" in nl_tests_readme_text,
+        findings,
+        "NL tests README must document semantic boundary contract artifact content",
     )
 
 

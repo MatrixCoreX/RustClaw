@@ -142,6 +142,18 @@ contracts are release artifact contracts. The artifacts must contain
 `SKILL_REGISTRY_ALIAS_SELF_TEST ok`, `SKILL_REGISTRY_ALIAS_CHECK ok`,
 `LONG_TAIL_SKILL_CONTRACT_SELF_TEST ok`, and
 `LONG_TAIL_SKILL_CONTRACT_CHECK ok`.
+It also writes `semantic_boundary_contracts.txt` from
+`scripts/check_runtime_semantic_rewrite_boundary.py --self-test`,
+`scripts/check_contract_repair_loop_observation_boundary.py --self-test`,
+`scripts/check_route_reason_marker_facade.py --self-test`, and
+`scripts/check_output_semantic_kind_write_boundary.py --self-test` plus their
+main checks. `gate_summary.env` records `semantic_boundary_contracts=1`, and
+the artifact must contain `RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings=0`,
+`CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0`,
+`ROUTE_REASON_MARKER_FACADE_SELF_TEST ok`,
+`ROUTE_REASON_MARKER_FACADE_CHECK findings=0`,
+`OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_SELF_TEST ok`, and
+`OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_CHECK findings=0`.
 It also writes `evidence_extractor_contracts.txt` from
 `scripts/check_evidence_extractor_contracts.py --self-test` plus the main check.
 `gate_summary.env` records `evidence_extractor_contracts=1`, and the artifact
@@ -240,6 +252,13 @@ route/frontdoor/static `AGENT_LOOP_STATIC_SELF_TEST ...` labels as well as the
 main guard success tokens, including
 `AGENT_LOOP_STATIC_SELF_TEST check_frontdoor_boundary_dispatch.py` and
 `FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0`.
+For `semantic_boundary_contracts.txt`, the required content includes
+`RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings=0`,
+`CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0`,
+`ROUTE_REASON_MARKER_FACADE_SELF_TEST ok`,
+`ROUTE_REASON_MARKER_FACADE_CHECK findings=0`,
+`OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_SELF_TEST ok`, and
+`OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_CHECK findings=0`.
 It also checks
 that gate summary path fields use portable refs such as `out_dir_ref=out_dir`
 and never host absolute paths. It also checks artifact content: text reports
