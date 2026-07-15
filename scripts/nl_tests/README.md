@@ -91,6 +91,11 @@ guard and smoke preflight use `CHINESE_PROVIDER_ENV_FILE` or
 env-file source tokens plus secret-free credential metadata; artifacts do not
 write the env-file path or secret values. Use `--chinese-env-file <path>` to
 override it, or `--no-chinese-env-file` for a pure missing-credential preflight.
+The gate writes `agent_loop_static_contracts.txt` from the route-authority
+legacy-key guard, legacy route boundary guard, pre-planner removal guard, NL
+hard-match scanner, and historical hardcoded-language scanner. `gate_summary.env`
+records `agent_loop_static_contracts=1`, so artifact readers can tell the
+Codex/Claude-style agent-loop boundary checks were part of the run.
 The gate also writes `secret_scan_contract.json` from
 `scripts/nl_tests/check_secret_scan_contract.py`, locking the shared scanner's
 forbidden-field and secret-like-value finding shapes. `gate_summary.env`
@@ -104,7 +109,8 @@ artifacts under the same suite run directory at `agent_parity_gate/`; direct
 runs still default to `logs/agent_parity_gate/<timestamp>` unless `--out-dir` is
 provided. Wrapped suite runs also write `artifact_index.txt` at the suite run
 root, listing run-root-relative nested artifacts such as
-`agent_parity_gate/gate_summary.env` and
+`agent_parity_gate/gate_summary.env`,
+`agent_parity_gate/agent_loop_static_contracts.txt`, and
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
 They also write `suite_summary.env` with machine fields `suite`, `status`,
 `exit_code`, `artifact_finalize_status`, `run_log`, and `artifact_index` so a
