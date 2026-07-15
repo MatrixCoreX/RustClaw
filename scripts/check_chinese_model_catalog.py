@@ -41,6 +41,7 @@ README = ROOT / "README.md"
 README_ZH_CN = ROOT / "README.zh-CN.md"
 CHINESE_CASE_FILE = ROOT / "scripts/nl_tests/cases/nl_cases_chinese_model_adapter_20260715.txt"
 CHINESE_PROVIDER_SMOKE_RUNNER = ROOT / "scripts/nl_tests/run_chinese_provider_smoke_matrix.sh"
+CHINESE_PROVIDER_SMOKE_MATRIX_CHECKER = ROOT / "scripts/nl_tests/check_chinese_provider_smoke_matrix.py"
 AGENT_PARITY_GATE_RUNNER = ROOT / "scripts/nl_tests/run_agent_parity_gate.sh"
 SUITE_WRAPPER_CONTRACT_CHECKER = ROOT / "scripts/nl_tests/check_suite_wrapper_contract.py"
 SUITE_ARTIFACT_CONTRACT_CHECKER = ROOT / "scripts/nl_tests/check_suite_artifact_contract.py"
@@ -746,6 +747,11 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         return
 
     smoke_text = CHINESE_PROVIDER_SMOKE_RUNNER.read_text(encoding="utf-8")
+    smoke_matrix_text = (
+        CHINESE_PROVIDER_SMOKE_MATRIX_CHECKER.read_text(encoding="utf-8")
+        if CHINESE_PROVIDER_SMOKE_MATRIX_CHECKER.exists()
+        else ""
+    )
     parity_text = AGENT_PARITY_GATE_RUNNER.read_text(encoding="utf-8")
     readme_text = README.read_text(encoding="utf-8") if README.exists() else ""
     readme_zh_text = README_ZH_CN.read_text(encoding="utf-8") if README_ZH_CN.exists() else ""
@@ -794,6 +800,13 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and 'CHINESE_PROVIDER_SMOKE_MATRIX out_dir_ref=$(path_ref "$OUT_DIR")' in smoke_text,
         findings,
         "Chinese provider smoke runner must write portable path refs instead of host paths",
+    )
+    require(
+        "path_ref(case_file)" in smoke_matrix_text
+        and "CHINESE_PROVIDER_SMOKE_MATRIX_SELF_TEST ok" in smoke_matrix_text
+        and "external_path" in smoke_matrix_text,
+        findings,
+        "Chinese provider smoke case coverage must write portable case_file refs and self-test them",
     )
     require(
         'CHINESE_PROVIDER_LIVE_PROVIDERS="${CHINESE_PROVIDER_LIVE_PROVIDERS:-minimax}"'
@@ -937,6 +950,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "agent_parity_gate_summary_bad_env_file_source" in suite_wrapper_text
         and "validate_provider_smoke_path_refs" in suite_wrapper_text
         and "agent_parity_gate_provider_smoke_bad_path_ref" in suite_wrapper_text
+        and "agent_parity_gate_provider_smoke_case_coverage_bad_case_file" in suite_wrapper_text
         and "--validate-contract-report-content" in suite_wrapper_text
         and "--require-contract-report-content-checked" in suite_wrapper_text
         and "validate_existing_contract_report" in suite_wrapper_text
@@ -986,6 +1000,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             in suite_artifact_contract_text
         )
         and "provider-case-coverage-bad-provider-tags" in suite_artifact_contract_text
+        and "agent_parity_gate_provider_smoke_case_coverage_bad_case_file" in suite_artifact_contract_text
+        and "provider-case-coverage-bad-case-file" in suite_artifact_contract_text
         and "parse_provider_summary_jsonl" in suite_artifact_contract_text
         and "agent_parity_gate_provider_summary_bad_json_line" in suite_artifact_contract_text
         and "agent_parity_gate_provider_summary_bad_row" in suite_artifact_contract_text
