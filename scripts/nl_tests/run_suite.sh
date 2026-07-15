@@ -180,11 +180,15 @@ write_suite_summary() {
 write_suite_artifact_contract_report() {
   local run_dir="$1"
   local validate_content="${2:-0}"
+  local require_content_checked="${3:-0}"
   local contract_report="${run_dir}/suite_artifact_contract.json"
   local contract_tmp
   local checker_args=(. --json --require-contract-report)
   if [[ "$validate_content" == "1" ]]; then
     checker_args+=(--validate-contract-report-content)
+  fi
+  if [[ "$require_content_checked" == "1" ]]; then
+    checker_args+=(--require-contract-report-content-checked)
   fi
   contract_tmp="$(mktemp)"
   if (
@@ -217,10 +221,11 @@ finalize_wrapped_suite() {
   write_suite_artifact_contract_report "$run_dir" 0 || artifact_finalize_status="error"
   write_artifact_index "$run_dir" || artifact_finalize_status="error"
   write_suite_artifact_contract_report "$run_dir" 1 || artifact_finalize_status="error"
+  write_suite_artifact_contract_report "$run_dir" 1 1 || artifact_finalize_status="error"
   if [[ "$artifact_finalize_status" != "ok" ]]; then
     write_suite_summary "$suite_name" "$run_dir" "$status" "$exit_code" "$artifact_finalize_status" || true
     write_artifact_index "$run_dir" || true
-    write_suite_artifact_contract_report "$run_dir" 1 || true
+    write_suite_artifact_contract_report "$run_dir" 1 1 || true
   fi
 
   echo

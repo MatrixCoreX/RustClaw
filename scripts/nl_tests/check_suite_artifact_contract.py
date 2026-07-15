@@ -212,6 +212,7 @@ def validate_artifact_index_entries(
 def validate_existing_contract_report(
     run_dir: Path,
     expected_report: dict[str, Any],
+    require_content_checked: bool = False,
 ) -> list[str]:
     findings: list[str] = []
     report_path = run_dir / "suite_artifact_contract.json"
@@ -236,6 +237,10 @@ def validate_existing_contract_report(
         )
     if payload.get("findings") != []:
         findings.append("contract_report_findings_not_empty")
+    if require_content_checked and payload.get("contract_report_content_checked") is not True:
+        findings.append(
+            f"contract_report_content_checked_not_true:{payload.get('contract_report_content_checked')}"
+        )
     if payload.get("summary") != expected_report.get("summary"):
         findings.append("contract_report_summary_mismatch")
 
@@ -636,6 +641,7 @@ def validate_run_dir(
     run_dir: Path,
     require_contract_report: bool = False,
     validate_contract_report_content: bool = False,
+    require_contract_report_content_checked: bool = False,
 ) -> dict[str, Any]:
     findings: list[str] = []
     if not run_dir.exists():
@@ -687,7 +693,11 @@ def validate_run_dir(
     if validate_contract_report_content:
         expected_report = dict(report)
         expected_report["findings"] = list(findings)
-        contract_report_findings = validate_existing_contract_report(run_dir, expected_report)
+        contract_report_findings = validate_existing_contract_report(
+            run_dir,
+            expected_report,
+            require_content_checked=require_contract_report_content_checked,
+        )
         findings.extend(contract_report_findings)
         report["ok"] = not findings
         report["contract_report_content_checked"] = True
@@ -701,13 +711,18 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--require-contract-report", action="store_true")
     parser.add_argument("--validate-contract-report-content", action="store_true")
+    parser.add_argument("--require-contract-report-content-checked", action="store_true")
     args = parser.parse_args()
 
-    require_contract_report = args.require_contract_report or args.validate_contract_report_content
+    validate_contract_report_content = (
+        args.validate_contract_report_content or args.require_contract_report_content_checked
+    )
+    require_contract_report = args.require_contract_report or validate_contract_report_content
     report = validate_run_dir(
         args.run_dir,
         require_contract_report=require_contract_report,
-        validate_contract_report_content=args.validate_contract_report_content,
+        validate_contract_report_content=validate_contract_report_content,
+        require_contract_report_content_checked=args.require_contract_report_content_checked,
     )
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))

@@ -127,8 +127,10 @@ they are created with `--require-contract-report`, so the report must also be
 present in `artifact_index.txt`; the final write also uses
 `--validate-contract-report-content` so the existing report must be parseable,
 `ok=true`, finding-free, and aligned with the current summary and nested
-contract counts. For wrapped `agent_parity_gate` runs, the artifact contract
-also validates nested gate artifacts such as
+contract counts. The final confirmation uses
+`--require-contract-report-content-checked`, so the stored report must already
+carry `contract_report_content_checked=true`. For wrapped `agent_parity_gate`
+runs, the artifact contract also validates nested gate artifacts such as
 `agent_parity_gate/agent_loop_static_contracts.txt` and checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
 the static agent-loop, secret-scan, wrapper, no-agent-mode, and raw LLM trace
