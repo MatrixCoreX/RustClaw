@@ -359,11 +359,34 @@ def parse_provider_summary_jsonl(run_dir: Path) -> tuple[list[dict[str, Any]], l
     return rows, findings
 
 
+def parse_live_provider_scope(raw: str | None) -> tuple[set[str], list[str]]:
+    if raw is None:
+        return set(), ["agent_parity_gate_summary_missing_live_provider_scope"]
+    normalized = raw.strip().lower()
+    if normalized == "all":
+        return set(AGENT_PARITY_CHINESE_MODEL_PROVIDERS), []
+    if not normalized:
+        return set(), ["agent_parity_gate_summary_bad_live_provider_scope"]
+    providers = [item.strip() for item in normalized.split(",")]
+    if (
+        any(not item for item in providers)
+        or any(not MACHINE_TOKEN_RE.fullmatch(item) for item in providers)
+        or any(item not in AGENT_PARITY_CHINESE_MODEL_PROVIDERS for item in providers)
+    ):
+        return set(), ["agent_parity_gate_summary_bad_live_provider_scope"]
+    return set(providers), []
+
+
+def validate_live_provider_scope(gate_summary: dict[str, str]) -> tuple[list[str], int]:
+    _, findings = parse_live_provider_scope(gate_summary.get("chinese_provider_live_providers"))
+    return findings, 1
+
+
 def expected_live_scope_providers(gate_summary: dict[str, str]) -> set[str]:
-    raw = (gate_summary.get("chinese_provider_live_providers") or "").strip().lower()
-    if raw in {"", "all"}:
-        return set(AGENT_PARITY_CHINESE_MODEL_PROVIDERS)
-    return {item.strip() for item in raw.split(",") if item.strip()}
+    providers, findings = parse_live_provider_scope(gate_summary.get("chinese_provider_live_providers"))
+    if findings:
+        return set()
+    return providers
 
 
 def validate_compact_coverage_artifact(run_dir: Path) -> tuple[list[str], int]:
@@ -648,6 +671,9 @@ def validate_agent_parity_gate_artifacts(run_dir: Path, entries: set[str]) -> tu
         actual = gate_summary.get(key)
         if actual not in allowed_values:
             findings.append(f"agent_parity_gate_summary_bad_machine_field:{key}:{actual}")
+    scope_findings, scope_checks = validate_live_provider_scope(gate_summary)
+    findings.extend(scope_findings)
+    content_checks += scope_checks
     for rel_path, tokens in sorted(AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS.items()):
         token_findings = validate_text_artifact_tokens(run_dir, rel_path, tokens)
         findings.extend(token_findings)
@@ -889,6 +915,50 @@ def run_self_test() -> int:
                 file=sys.stderr,
             )
             return 1
+
+        live_scope_cases = (
+            ({"chinese_provider_live_providers": "minimax"}, set(), {"minimax"}),
+            (
+                {"chinese_provider_live_providers": "minimax,qwen"},
+                set(),
+                {"minimax", "qwen"},
+            ),
+            (
+                {"chinese_provider_live_providers": "all"},
+                set(),
+                set(AGENT_PARITY_CHINESE_MODEL_PROVIDERS),
+            ),
+            (
+                {"chinese_provider_live_providers": ""},
+                {"agent_parity_gate_summary_bad_live_provider_scope"},
+                set(),
+            ),
+            (
+                {"chinese_provider_live_providers": "minimax,unknown"},
+                {"agent_parity_gate_summary_bad_live_provider_scope"},
+                set(),
+            ),
+            (
+                {"chinese_provider_live_providers": "mini max"},
+                {"agent_parity_gate_summary_bad_live_provider_scope"},
+                set(),
+            ),
+            (
+                {},
+                {"agent_parity_gate_summary_missing_live_provider_scope"},
+                set(),
+            ),
+        )
+        for gate_summary, expected_findings, expected_providers in live_scope_cases:
+            scope_findings, scope_checks = validate_live_provider_scope(gate_summary)
+            scope_provider_set = expected_live_scope_providers(gate_summary)
+            if set(scope_findings) != expected_findings or scope_provider_set != expected_providers or scope_checks != 1:
+                print(
+                    "SELF_TEST_FAIL live_provider_scope:"
+                    f"summary={gate_summary} findings={scope_findings} providers={scope_provider_set}",
+                    file=sys.stderr,
+                )
+                return 1
 
         agent_summary_missing_run = root / "agent-parity-missing-gate-summary"
         write_minimal_self_test_run(agent_summary_missing_run, content_checked=True)
