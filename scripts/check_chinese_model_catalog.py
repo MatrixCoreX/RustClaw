@@ -146,11 +146,19 @@ def as_list(value: Any) -> list[str]:
     return []
 
 
-def load_env_file(path: Path | None) -> dict[str, str]:
+def load_env_file(path: Path | None, findings: list[str]) -> dict[str, str]:
     if path is None:
         return {}
+    if not path.exists():
+        fail(findings, f"env_file_missing:{path}")
+        return {}
     values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    try:
+        raw_lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        fail(findings, f"env_file_read_failed:{path}:{exc.__class__.__name__}")
+        return {}
+    for raw in raw_lines:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -622,7 +630,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
 
 def build_report(env_file: Path | None = None) -> dict[str, Any]:
     findings: list[str] = []
-    env_values = load_env_file(env_file)
+    env_values = load_env_file(env_file, findings)
     main = load_toml(MAIN_CONFIG)
     docker = load_toml(DOCKER_CONFIG)
     check_text_provider_config(findings, "configs/config.toml", main)
