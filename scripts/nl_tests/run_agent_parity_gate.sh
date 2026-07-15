@@ -220,6 +220,10 @@ echo "AGENT_PARITY_GATE_STEP secret_scan_contract"
 python3 "${SCRIPT_DIR}/check_secret_scan_contract.py" --json \
   > "${OUT_DIR}/secret_scan_contract.json"
 
+echo "AGENT_PARITY_GATE_STEP suite_wrapper_contract"
+python3 "${SCRIPT_DIR}/check_suite_wrapper_contract.py" --json \
+  > "${OUT_DIR}/suite_wrapper_contract.json"
+
 if [[ "$SKIP_COVERAGE" -eq 0 ]]; then
   echo "AGENT_PARITY_GATE_STEP compact_coverage"
   python3 "${SCRIPT_DIR}/check_compact_coverage.py" --report \
@@ -271,6 +275,7 @@ fi
 {
   echo "out_dir=${OUT_DIR}"
   echo "secret_scan_contract=1"
+  echo "suite_wrapper_contract=1"
   echo "coverage=$((1 - SKIP_COVERAGE))"
   echo "model_catalog=$((1 - SKIP_MODEL_CATALOG))"
   echo "provider_smoke=$((1 - SKIP_PROVIDER_SMOKE))"
