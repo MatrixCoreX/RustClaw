@@ -916,6 +916,10 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "validate_rollout_metrics_artifact" in suite_artifact_contract_text
         and "load_json_artifact" in suite_artifact_contract_text
         and "load-json-artifact-bad-shape" in suite_artifact_contract_text
+        and "summary_decode_failed" in suite_artifact_contract_text
+        and "artifact_index_decode_failed" in suite_artifact_contract_text
+        and "summary-decode-failed" in suite_artifact_contract_text
+        and "artifact-index-decode-failed" in suite_artifact_contract_text
         and "validate_enabled_agent_parity_optional_artifacts" in suite_artifact_contract_text
         and "agent_parity_gate_summary_missing" in suite_artifact_contract_text
         and "agent-parity-missing-gate-summary" in suite_artifact_contract_text
@@ -928,6 +932,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "stored_report_override" in suite_artifact_contract_text
         and "contract_report_missing" in suite_artifact_contract_text
         and "contract_report_read_failed" in suite_artifact_contract_text
+        and "contract_report_decode_failed" in suite_artifact_contract_text
+        and "contract-report-decode-failed" in suite_artifact_contract_text
         and "contract_report_bad_json" in suite_artifact_contract_text
         and "contract_report_bad_shape" in suite_artifact_contract_text
         and "contract_report_not_ok" in suite_artifact_contract_text

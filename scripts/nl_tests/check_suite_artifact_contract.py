@@ -105,6 +105,8 @@ def parse_env_file(path: Path) -> tuple[dict[str, str], list[str]]:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
         return values, [f"summary_read_failed:{exc.__class__.__name__}"]
+    except UnicodeDecodeError:
+        return values, ["summary_decode_failed"]
     for lineno, raw in enumerate(lines, 1):
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -184,6 +186,8 @@ def read_artifact_index(run_dir: Path, artifact_index_rel: str) -> tuple[set[str
         entries = artifact_index.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
         return set(), [f"artifact_index_read_failed:{exc.__class__.__name__}"]
+    except UnicodeDecodeError:
+        return set(), [f"artifact_index_decode_failed:{artifact_index_rel}"]
 
     seen: set[str] = set()
     for lineno, raw in enumerate(entries, 1):
@@ -228,6 +232,8 @@ def validate_existing_contract_report(
         return ["contract_report_missing"]
     except OSError as exc:
         return [f"contract_report_read_failed:{exc.__class__.__name__}"]
+    except UnicodeDecodeError:
+        return ["contract_report_decode_failed"]
     except json.JSONDecodeError:
         return ["contract_report_bad_json"]
     if not isinstance(payload, dict):
@@ -819,6 +825,51 @@ def run_self_test() -> int:
         if mismatch_report.get("ok") or "contract_report_summary_mismatch" not in mismatch_findings:
             print(
                 f"SELF_TEST_FAIL summary_mismatch:{mismatch_report.get('findings')}",
+                file=sys.stderr,
+            )
+            return 1
+
+        summary_decode_run = root / "summary-decode-failed"
+        write_minimal_self_test_run(summary_decode_run, content_checked=True)
+        (summary_decode_run / "suite_summary.env").write_bytes(b"\xff\n")
+        summary_decode_report = validate_run_dir(summary_decode_run)
+        if "summary_decode_failed" not in set(summary_decode_report.get("findings") or []):
+            print(
+                f"SELF_TEST_FAIL summary_decode_failed:{summary_decode_report.get('findings')}",
+                file=sys.stderr,
+            )
+            return 1
+
+        artifact_index_decode_run = root / "artifact-index-decode-failed"
+        write_minimal_self_test_run(artifact_index_decode_run, content_checked=True)
+        (artifact_index_decode_run / "artifact_index.txt").write_bytes(b"\xff\n")
+        artifact_index_decode_report = validate_run_dir(artifact_index_decode_run)
+        if (
+            "artifact_index_decode_failed:artifact_index.txt"
+            not in set(artifact_index_decode_report.get("findings") or [])
+        ):
+            print(
+                "SELF_TEST_FAIL artifact_index_decode_failed:"
+                f"{artifact_index_decode_report.get('findings')}",
+                file=sys.stderr,
+            )
+            return 1
+
+        contract_report_decode_run = root / "contract-report-decode-failed"
+        contract_report_decode_summary = write_minimal_self_test_run(
+            contract_report_decode_run,
+            content_checked=True,
+        )
+        (contract_report_decode_run / "suite_artifact_contract.json").write_bytes(b"\xff\n")
+        contract_report_decode_findings = validate_existing_contract_report(
+            contract_report_decode_run,
+            {"summary": contract_report_decode_summary},
+            require_content_checked=True,
+        )
+        if "contract_report_decode_failed" not in set(contract_report_decode_findings):
+            print(
+                "SELF_TEST_FAIL contract_report_decode_failed:"
+                f"{contract_report_decode_findings}",
                 file=sys.stderr,
             )
             return 1

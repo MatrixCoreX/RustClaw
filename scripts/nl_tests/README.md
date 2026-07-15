@@ -141,7 +141,7 @@ artifact content: text reports must contain their success tokens, and JSON repor
 `ok=true` from a top-level object. The suite-artifact self-test covers missing,
 unreadable, malformed, and non-object contract reports; non-object JSON ok
 artifacts; non-object loader-backed artifacts such as compact coverage; base report fields (`ok`, `run_dir`,
-`require_contract_report`, `findings`); unchecked final reports; summary
+`require_contract_report`, `findings`); bad UTF-8 suite metadata; unchecked final reports; summary
 mismatch; nested `agent_parity_gate_contract` mismatch; and unexpected nested
 agent parity contracts in non-agent-parity reports. If the nested agent parity
 gate summary is missing, the checker returns the structured
