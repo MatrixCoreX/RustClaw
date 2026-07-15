@@ -406,6 +406,18 @@ echo "AGENT_PARITY_GATE_STEP agent_architecture_boundary_contracts"
   python3 "${ROOT_DIR}/scripts/check_evidence_policy_facade_boundary.py"
 } > "${OUT_DIR}/agent_architecture_boundary_contracts.txt"
 
+echo "AGENT_PARITY_GATE_STEP deterministic_boundary_inventory_contracts"
+{
+  python3 "${ROOT_DIR}/scripts/check_answer_verifier_boundary.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_answer_verifier_boundary.py"
+  python3 "${ROOT_DIR}/scripts/check_observed_output_boundary.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_observed_output_boundary.py"
+  python3 "${ROOT_DIR}/scripts/check_deterministic_decision_inventory.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_deterministic_decision_inventory.py"
+  python3 "${ROOT_DIR}/scripts/check_repair_boundary_inventory.py"
+  python3 "${ROOT_DIR}/scripts/check_repair_boundary_inventory_coverage.py"
+} > "${OUT_DIR}/deterministic_boundary_inventory_contracts.txt"
+
 echo "AGENT_PARITY_GATE_STEP evidence_extractor_contracts"
 {
   python3 "${ROOT_DIR}/scripts/check_evidence_extractor_contracts.py" --self-test
@@ -514,6 +526,7 @@ fi
   echo "agent_loop_static_contracts=1"
   echo "semantic_boundary_contracts=1"
   echo "agent_architecture_boundary_contracts=1"
+  echo "deterministic_boundary_inventory_contracts=1"
   echo "evidence_extractor_contracts=1"
   echo "secret_scan_contract=1"
   echo "suite_wrapper_contract=1"

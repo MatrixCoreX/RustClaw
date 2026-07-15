@@ -230,6 +230,18 @@ checks. `gate_summary.env` records
 `CAPABILITY_RESOLVER_REGISTRY_ONLY_CHECK findings=0`,
 `FINALIZER_BOUNDARY_CHECK ok`, and
 `EVIDENCE_POLICY_FACADE_BOUNDARY_CHECK strict=false findings=0`.
+It also writes `deterministic_boundary_inventory_contracts.txt` from
+`scripts/check_answer_verifier_boundary.py --self-test`,
+`scripts/check_observed_output_boundary.py --self-test`,
+`scripts/check_deterministic_decision_inventory.py --self-test`,
+`scripts/check_repair_boundary_inventory.py`, and
+`scripts/check_repair_boundary_inventory_coverage.py` plus their main checks.
+`gate_summary.env` records `deterministic_boundary_inventory_contracts=1`, and
+the artifact must contain `ANSWER_VERIFIER_BOUNDARY_CHECK ok`,
+`OBSERVED_OUTPUT_BOUNDARY_CHECK ok`,
+`DETERMINISTIC_DECISION_INVENTORY_CHECK ok`,
+`REPAIR_BOUNDARY_INVENTORY_CHECK ok`, and
+`REPAIR_BOUNDARY_INVENTORY_COVERAGE_CHECK required=... missing=0`.
 It also writes `evidence_extractor_contracts.txt` from
 `scripts/check_evidence_extractor_contracts.py --self-test` plus the main check.
 `gate_summary.env` records `evidence_extractor_contracts=1`, and the artifact
@@ -276,6 +288,7 @@ root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/clawcli_models_readiness_contracts.txt`,
 `agent_parity_gate/agent_loop_static_contracts.txt`,
 `agent_parity_gate/agent_architecture_boundary_contracts.txt`,
+`agent_parity_gate/deterministic_boundary_inventory_contracts.txt`,
 `agent_parity_gate/evidence_extractor_contracts.txt`, and
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
 They also write `suite_summary.env` with machine fields `suite`, `status`,
@@ -404,6 +417,12 @@ For `agent_architecture_boundary_contracts.txt`, the required content includes
 `CAPABILITY_RESOLVER_REGISTRY_ONLY_CHECK findings=0`,
 `FINALIZER_BOUNDARY_CHECK ok`, and
 `EVIDENCE_POLICY_FACADE_BOUNDARY_CHECK strict=false findings=0`.
+For `deterministic_boundary_inventory_contracts.txt`, the required content
+includes `ANSWER_VERIFIER_BOUNDARY_CHECK ok`,
+`OBSERVED_OUTPUT_BOUNDARY_CHECK ok`,
+`DETERMINISTIC_DECISION_INVENTORY_CHECK ok`,
+`REPAIR_BOUNDARY_INVENTORY_CHECK ok`, and
+`REPAIR_BOUNDARY_INVENTORY_COVERAGE_CHECK required=... missing=0`.
 It also checks
 that gate summary path fields use portable refs such as `out_dir_ref=out_dir`
 and never host absolute paths. It also checks artifact content: text reports
