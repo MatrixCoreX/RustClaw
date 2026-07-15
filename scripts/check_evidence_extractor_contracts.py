@@ -8,6 +8,7 @@ machine evidence fields, and text-legacy extractors must stay fallback-only.
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -104,12 +105,8 @@ def check_explicit_text_legacy_strict_shape(text: str) -> list[str]:
     return findings
 
 
-def check_agents_rule() -> list[str]:
+def check_agents_rule_text(text: str) -> list[str]:
     findings: list[str] = []
-    try:
-        text = AGENTS.read_text(encoding="utf-8")
-    except OSError as exc:
-        return [f"agents_rule_read_failed:{exc.__class__.__name__}"]
     required_tokens = {
         "script": "python3 scripts/check_evidence_extractor_contracts.py",
         "stable_machine_fields": "stable machine evidence fields",
@@ -123,7 +120,71 @@ def check_agents_rule() -> list[str]:
     return findings
 
 
-def main() -> int:
+def check_agents_rule() -> list[str]:
+    try:
+        text = AGENTS.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"agents_rule_read_failed:{exc.__class__.__name__}"]
+    return check_agents_rule_text(text)
+
+
+def run_self_test() -> int:
+    positive_structured = (
+        'step_json_extractor("demo", "demo.structured_json_v1", &["field_value"])'
+    )
+    positive_findings = check_step_json_extractors(positive_structured)
+    if positive_findings:
+        print(f"SELF_TEST_FAIL positive_structured:{positive_findings}", file=sys.stderr)
+        return 1
+
+    missing_field_findings = check_step_json_extractors(
+        'step_json_extractor("demo", "demo.structured_json_v1", &[])'
+    )
+    if not any("missing_provided_evidence" in item for item in missing_field_findings):
+        print(
+            f"SELF_TEST_FAIL missing_structured_field:{missing_field_findings}",
+            file=sys.stderr,
+        )
+        return 1
+
+    new_text_legacy_findings = check_step_text_extractors(
+        'step_text_extractor("demo", "new_skill.text_legacy_v1", &["legacy_text_excerpt"])'
+    )
+    if not any(
+        "new_text_legacy_strict_extractor_not_allowed" in item
+        for item in new_text_legacy_findings
+    ):
+        print(
+            f"SELF_TEST_FAIL new_text_legacy:{new_text_legacy_findings}",
+            file=sys.stderr,
+        )
+        return 1
+
+    good_agents = (
+        "python3 scripts/check_evidence_extractor_contracts.py "
+        "stable machine evidence fields text_legacy text/error_text "
+        "machine-readable evidence protocol"
+    )
+    if check_agents_rule_text(good_agents):
+        print("SELF_TEST_FAIL positive_agents_rule", file=sys.stderr)
+        return 1
+
+    bad_agents_findings = check_agents_rule_text(
+        "python3 scripts/check_evidence_extractor_contracts.py text_legacy"
+    )
+    expected_agent_findings = {
+        "agents_rule_missing:stable_machine_fields",
+        "agents_rule_missing:text_error_text_boundary",
+    }
+    if not expected_agent_findings.issubset(set(bad_agents_findings)):
+        print(f"SELF_TEST_FAIL missing_agents_tokens:{bad_agents_findings}", file=sys.stderr)
+        return 1
+
+    print("EVIDENCE_EXTRACTOR_CONTRACT_SELF_TEST ok")
+    return 0
+
+
+def run_check() -> int:
     text = REGISTRY.read_text(encoding="utf-8")
     findings = check_step_json_extractors(text)
     findings.extend(check_step_text_extractors(text))
@@ -133,6 +194,15 @@ def main() -> int:
     for finding in findings:
         print(f"  - {finding}")
     return 1 if findings else 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args()
+    if args.self_test:
+        return run_self_test()
+    return run_check()
 
 
 if __name__ == "__main__":

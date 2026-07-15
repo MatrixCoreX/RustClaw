@@ -78,6 +78,7 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
         "HISTORICAL_HARDCODED_LANGUAGE_SCAN total=",
     },
     "agent_parity_gate/evidence_extractor_contracts.txt": {
+        "EVIDENCE_EXTRACTOR_CONTRACT_SELF_TEST ok",
         "EVIDENCE_EXTRACTOR_CONTRACT_CHECK findings=0",
     },
     "agent_parity_gate/llm_raw_trace_runner_contract.txt": {

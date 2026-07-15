@@ -274,8 +274,10 @@ echo "AGENT_PARITY_GATE_STEP agent_loop_static_contracts"
 } > "${OUT_DIR}/agent_loop_static_contracts.txt"
 
 echo "AGENT_PARITY_GATE_STEP evidence_extractor_contracts"
-python3 "${ROOT_DIR}/scripts/check_evidence_extractor_contracts.py" \
-  > "${OUT_DIR}/evidence_extractor_contracts.txt"
+{
+  python3 "${ROOT_DIR}/scripts/check_evidence_extractor_contracts.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_evidence_extractor_contracts.py"
+} > "${OUT_DIR}/evidence_extractor_contracts.txt"
 
 echo "AGENT_PARITY_GATE_STEP secret_scan_contract"
 python3 "${SCRIPT_DIR}/check_secret_scan_contract.py" --json \

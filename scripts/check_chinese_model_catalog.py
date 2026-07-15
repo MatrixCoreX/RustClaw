@@ -931,6 +931,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
     require(
         "AGENT_PARITY_GATE_STEP evidence_extractor_contracts" in parity_text
         and "check_evidence_extractor_contracts.py" in parity_text
+        and 'check_evidence_extractor_contracts.py" --self-test' in parity_text
         and "evidence_extractor_contracts.txt" in parity_text,
         findings,
         "agent parity gate must write the evidence extractor contract artifact",
@@ -1048,6 +1049,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_JSON_OK_ARTIFACTS" in suite_artifact_contract_text
         and '"evidence_extractor_contracts": "1"' in suite_artifact_contract_text
+        and "EVIDENCE_EXTRACTOR_CONTRACT_SELF_TEST ok" in suite_artifact_contract_text
         and "EVIDENCE_EXTRACTOR_CONTRACT_CHECK findings=0" in suite_artifact_contract_text
         and '"runner_path_ref_contract": "1"' in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_OPTIONAL_ARTIFACTS_BY_FLAG" in suite_artifact_contract_text
@@ -1232,6 +1234,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             "agent_loop_static_contracts.txt" in readme_body
             and "no_agent_mode_payload.txt" in readme_body
             and "evidence_extractor_contracts.txt" in readme_body
+            and "check_evidence_extractor_contracts.py --self-test" in readme_body
             and "suite_artifact_contract.json" in readme_body
             and "suite_artifact_contract_self_test.txt" in readme_body
             and "chinese_model_catalog_self_test.txt" in readme_body
@@ -1253,6 +1256,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
     require(
         "evidence_extractor_contracts.txt" in nl_tests_readme_text
         and "evidence_extractor_contracts=1" in nl_tests_readme_text
+        and "EVIDENCE_EXTRACTOR_CONTRACT_SELF_TEST ok" in nl_tests_readme_text
         and "EVIDENCE_EXTRACTOR_CONTRACT_CHECK findings=0" in nl_tests_readme_text
         and "agent_parity_gate/evidence_extractor_contracts.txt" in nl_tests_readme_text,
         findings,
