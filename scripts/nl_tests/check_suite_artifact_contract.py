@@ -29,6 +29,7 @@ HOST_PATH_MARKERS = ("/home/", "/tmp/", "/root/", "/Users/")
 AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
     "agent_parity_gate/gate_summary.env",
     "agent_parity_gate/runtime_hard_reply_baseline.txt",
+    "agent_parity_gate/policy_boundary_hard_reply.txt",
     "agent_parity_gate/no_agent_mode_payload.txt",
     "agent_parity_gate/agent_loop_static_contracts.txt",
     "agent_parity_gate/evidence_extractor_contracts.txt",
@@ -42,6 +43,7 @@ AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
 
 AGENT_PARITY_GATE_REQUIRED_FLAGS = {
     "runtime_hard_reply_baseline": "1",
+    "policy_boundary_hard_reply": "1",
     "no_agent_mode_payload": "1",
     "agent_loop_static_contracts": "1",
     "evidence_extractor_contracts": "1",
@@ -71,6 +73,10 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
         "SELF_TEST_OK",
         "RUNTIME_HARD_REPLY_ALL_SCAN",
         "new=0",
+    },
+    "agent_parity_gate/policy_boundary_hard_reply.txt": {
+        "POLICY_BOUNDARY_HARD_REPLY_SELF_TEST ok",
+        "POLICY_BOUNDARY_HARD_REPLY_CHECK ok",
     },
     "agent_parity_gate/no_agent_mode_payload.txt": {
         "SELF_TEST_OK",

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -46,7 +47,26 @@ def rust_files() -> list[Path]:
     return sorted(SRC_ROOT.rglob("*.rs"))
 
 
-def main() -> int:
+def run_self_test() -> int:
+    forbidden = 'let reply_rule = "Tell the user to retry after checking status.";'
+    machine_only = 'let status = "reason_code=provider_gap";'
+    if not HARD_REPLY_RE.search(forbidden):
+        print("SELF_TEST_FAIL missing_forbidden_rule_match", file=sys.stderr)
+        return 1
+    if HARD_REPLY_RE.search(machine_only):
+        print("SELF_TEST_FAIL machine_field_false_positive", file=sys.stderr)
+        return 1
+    print("POLICY_BOUNDARY_HARD_REPLY_SELF_TEST ok")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args(argv)
+    if args.self_test:
+        return run_self_test()
+
     findings: list[str] = []
     scanned = 0
     for path in rust_files():
@@ -70,4 +90,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

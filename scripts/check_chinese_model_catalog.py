@@ -909,6 +909,23 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate summary must record the runtime hard-reply baseline guard state",
     )
     require(
+        "AGENT_PARITY_GATE_STEP policy_boundary_hard_reply" in parity_text,
+        findings,
+        "agent parity gate must run the policy-boundary hard-reply guard step",
+    )
+    require(
+        "check_no_policy_boundary_hard_reply.py" in parity_text
+        and 'check_no_policy_boundary_hard_reply.py" --self-test' in parity_text
+        and "policy_boundary_hard_reply.txt" in parity_text,
+        findings,
+        "agent parity gate must self-test and write the policy-boundary hard-reply artifact",
+    )
+    require(
+        "policy_boundary_hard_reply=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the policy-boundary hard-reply guard state",
+    )
+    require(
         "AGENT_PARITY_GATE_STEP no_agent_mode_payload" in parity_text,
         findings,
         "agent parity gate must run the no-agent-mode payload guard step",
@@ -1061,6 +1078,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
     require(
         "AGENT_PARITY_GATE_REQUIRED_ARTIFACTS" in suite_artifact_contract_text
         and "agent_parity_gate/runtime_hard_reply_baseline.txt" in suite_artifact_contract_text
+        and "agent_parity_gate/policy_boundary_hard_reply.txt" in suite_artifact_contract_text
         and "agent_parity_gate/agent_loop_static_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/evidence_extractor_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/suite_wrapper_contract.json" in suite_artifact_contract_text
@@ -1072,8 +1090,11 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_JSON_OK_ARTIFACTS" in suite_artifact_contract_text
         and '"runtime_hard_reply_baseline": "1"' in suite_artifact_contract_text
+        and '"policy_boundary_hard_reply": "1"' in suite_artifact_contract_text
         and "RUNTIME_HARD_REPLY_ALL_SCAN" in suite_artifact_contract_text
         and "new=0" in suite_artifact_contract_text
+        and "POLICY_BOUNDARY_HARD_REPLY_SELF_TEST ok" in suite_artifact_contract_text
+        and "POLICY_BOUNDARY_HARD_REPLY_CHECK ok" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_route_authority_legacy_keys.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_legacy_route_boundary.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_pre_planner_exit_inventory.py" in suite_artifact_contract_text
@@ -1264,6 +1285,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         require(
             "agent_loop_static_contracts.txt" in readme_body
             and "runtime_hard_reply_baseline.txt" in readme_body
+            and "policy_boundary_hard_reply.txt" in readme_body
             and "no_agent_mode_payload.txt" in readme_body
             and "evidence_extractor_contracts.txt" in readme_body
             and "self-test" in readme_body
@@ -1293,6 +1315,14 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "new=0" in nl_tests_readme_text,
         findings,
         "NL tests README must document runtime hard-reply baseline artifact content",
+    )
+    require(
+        "policy_boundary_hard_reply.txt" in nl_tests_readme_text
+        and "policy_boundary_hard_reply=1" in nl_tests_readme_text
+        and "POLICY_BOUNDARY_HARD_REPLY_SELF_TEST ok" in nl_tests_readme_text
+        and "POLICY_BOUNDARY_HARD_REPLY_CHECK ok" in nl_tests_readme_text,
+        findings,
+        "NL tests README must document policy-boundary hard-reply artifact content",
     )
     require(
         "evidence_extractor_contracts.txt" in nl_tests_readme_text
