@@ -308,6 +308,27 @@ export function ModelConfigPage({
           <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{modelCatalogError}</p>
         ) : null}
 
+        {modelCatalogData?.last_guard_status ? (
+          <div className="mb-3 flex flex-wrap gap-1.5 text-[11px]">
+            <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/65">
+              guard_available={modelCatalogData.last_guard_status.available ? "1" : "0"}
+            </span>
+            <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/65">
+              guard_status={modelCatalogData.last_guard_status.status}
+            </span>
+            {typeof modelCatalogData.last_guard_status.finding_count === "number" ? (
+              <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/65">
+                finding_count={modelCatalogData.last_guard_status.finding_count}
+              </span>
+            ) : null}
+            {modelCatalogData.last_guard_status.path ? (
+              <span className="break-all rounded-md border border-white/10 bg-white/5 px-2 py-1 text-white/65">
+                guard_path={modelCatalogData.last_guard_status.path}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="grid gap-3 lg:grid-cols-2">
           {modelCatalogEntryViews.map((entry) => (
             <div key={entry.key} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
