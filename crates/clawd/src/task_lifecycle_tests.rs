@@ -799,6 +799,13 @@ fn task_query_lifecycle_projects_checkpoint_product_contract_fields() {
     assert_eq!(lifecycle["next_poll_after"], 1781800400);
     assert_eq!(lifecycle["resume_owner"], "worker_recovery_resume_executor");
     assert_eq!(lifecycle["resume_entrypoint"], "poll_async_job");
+    assert_eq!(lifecycle["completed_side_effect_count"], 1);
+    assert_eq!(lifecycle["requires_idempotency_guard"], true);
+    assert_eq!(
+        lifecycle["completed_side_effect_refs"],
+        json!(["write_file:tmp/a.txt"])
+    );
+    assert_eq!(lifecycle["completed_side_effect_refs_truncated"], false);
     assert_eq!(lifecycle["last_safe_step_id"], "step_2");
     assert_eq!(lifecycle["evidence_ref_count"], 1);
     assert_eq!(

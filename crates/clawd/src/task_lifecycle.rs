@@ -783,6 +783,27 @@ fn append_lifecycle_product_contract_fields(
     };
     obj.entry("resume_entrypoint".to_string())
         .or_insert(json!(checkpoint.resume_entrypoint));
+    let completed_side_effect_count = checkpoint.completed_side_effect_refs.len();
+    let visible_completed_side_effect_refs = checkpoint
+        .completed_side_effect_refs
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .take(8)
+        .collect::<Vec<_>>();
+    let visible_completed_side_effect_count = visible_completed_side_effect_refs.len();
+    let completed_side_effect_refs_truncated =
+        completed_side_effect_count > visible_completed_side_effect_count;
+    obj.entry("completed_side_effect_count".to_string())
+        .or_insert(json!(completed_side_effect_count));
+    obj.entry("requires_idempotency_guard".to_string())
+        .or_insert(json!(completed_side_effect_count > 0));
+    if !visible_completed_side_effect_refs.is_empty() {
+        obj.entry("completed_side_effect_refs".to_string())
+            .or_insert(json!(visible_completed_side_effect_refs));
+        obj.entry("completed_side_effect_refs_truncated".to_string())
+            .or_insert(json!(completed_side_effect_refs_truncated));
+    }
     if let Some(last_safe_step_id) = checkpoint
         .last_successful_step
         .as_deref()
