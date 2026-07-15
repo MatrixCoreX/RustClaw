@@ -984,6 +984,35 @@ def run_self_test() -> int:
             )
             return 1
 
+        provider_summary_jsonl_run = root / "provider-summary-jsonl-row-errors"
+        write_minimal_self_test_run(provider_summary_jsonl_run, content_checked=True)
+        provider_summary_jsonl_path = (
+            provider_summary_jsonl_run
+            / "agent_parity_gate/chinese_provider_smoke/provider_summary.jsonl"
+        )
+        provider_summary_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+        provider_summary_jsonl_path.write_text(
+            "{not-json\n[]\n{\"provider\":\"minimax\"}\n",
+            encoding="utf-8",
+        )
+        provider_summary_rows, provider_summary_findings = parse_provider_summary_jsonl(
+            provider_summary_jsonl_run
+        )
+        provider_summary_finding_set = set(provider_summary_findings)
+        if (
+            "agent_parity_gate_provider_summary_bad_json_line:1"
+            not in provider_summary_finding_set
+            or "agent_parity_gate_provider_summary_bad_row:2"
+            not in provider_summary_finding_set
+            or [row.get("provider") for row in provider_summary_rows] != ["minimax"]
+        ):
+            print(
+                "SELF_TEST_FAIL provider_summary_jsonl_row_errors:"
+                f"rows={provider_summary_rows} findings={provider_summary_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
         agent_contract_run = root / "agent-contract-mismatch"
         write_minimal_self_test_run(
             agent_contract_run,
