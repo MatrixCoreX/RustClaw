@@ -49,6 +49,14 @@ RUN_SUITE_REQUIRED_SNIPPETS = {
     "artifact_index_ref_printed": 'echo "  - artifact_index_ref=$(path_ref "$run_dir" "$artifact_index")"',
     "suite_summary_ref_printed": 'echo "  - suite_summary_ref=$(path_ref "$run_dir" "${run_dir}/suite_summary.env")"',
     "contract_report_ref_printed": 'echo "  - suite_artifact_contract_ref=$(path_ref "$run_dir" "$contract_report")"',
+    "clarify_context_prompt_block": "run_mode_clarify_context_prompt()",
+    "clarify_context_prompt_codex_header": "==== Paste this to Codex ====",
+    "clarify_context_clarify_run_dir_ref": 'printf "clarify_run_dir_ref: %s\\n" "$(path_ref "$SCRIPT_DIR" "$latest_clarify")"',
+    "clarify_context_clarify_run_log_ref": 'printf "clarify_run_log_ref: %s\\n" "$(path_ref "$SCRIPT_DIR" "${latest_clarify}/run.log")"',
+    "clarify_context_clarify_summary_ref": 'printf "clarify_summary_jsonl_ref: %s\\n" "$(path_ref "$SCRIPT_DIR" "${latest_clarify}/summary.jsonl")"',
+    "clarify_context_context_run_dir_ref": 'printf "context_run_dir_ref: %s\\n" "$(path_ref "$SCRIPT_DIR" "$latest_context")"',
+    "clarify_context_context_run_log_ref": 'printf "context_run_log_ref: %s\\n" "$(path_ref "$SCRIPT_DIR" "${latest_context}/run.log")"',
+    "clarify_context_context_summary_ref": 'printf "context_summary_jsonl_ref: %s\\n" "$(path_ref "$SCRIPT_DIR" "${latest_context}/summary.jsonl")"',
     "trap_captures_exit_code": "trap 'exit_code=$?",
     "trap_preserves_exit_code": 'exit "$exit_code"',
     "finalizer_does_not_replace_exit": 'finalize_wrapped_suite "$name" "$run_dir" "$run_log" "$suite_status" "$exit_code" || true',
@@ -62,6 +70,12 @@ RUN_SUITE_FORBIDDEN_SNIPPETS = {
     "artifact_index_absolute_print": 'echo "  - ${artifact_index}"',
     "suite_summary_absolute_print": 'echo "  - ${run_dir}/suite_summary.env"',
     "contract_report_absolute_print": 'echo "  - ${contract_report}"',
+    "clarify_run_dir_absolute_printf": 'printf "clarify_run_dir: %s\\n" "$latest_clarify"',
+    "clarify_run_log_absolute_printf": 'printf "clarify_run_log: %s/run.log\\n" "$latest_clarify"',
+    "clarify_summary_absolute_printf": 'printf "clarify_summary_jsonl: %s/summary.jsonl\\n" "$latest_clarify"',
+    "context_run_dir_absolute_printf": 'printf "context_run_dir: %s\\n" "$latest_context"',
+    "context_run_log_absolute_printf": 'printf "context_run_log: %s/run.log\\n" "$latest_context"',
+    "context_summary_absolute_printf": 'printf "context_summary_jsonl: %s/summary.jsonl\\n" "$latest_context"',
 }
 
 SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {

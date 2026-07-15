@@ -121,6 +121,9 @@ later task can resume from the run root without parsing prose logs. `status` and
 `exit_code` reflect the wrapped command; `artifact_finalize_status` reflects the
 summary/index write step. Wrapped console output and `run.log` print
 `run_dir_ref`, `run_log_ref`, and artifact refs instead of host absolute paths.
+The `clarify_context_prompt` helper also prints `clarify_*_ref` and
+`context_*_ref` fields for Codex-style review prompts, so copied test context
+does not depend on the local workspace path.
 Validate a wrapped run root with
 `python3 scripts/nl_tests/check_suite_artifact_contract.py <run_dir> --json`.
 Wrapped runs also write this validation result to

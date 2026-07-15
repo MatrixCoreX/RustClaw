@@ -971,6 +971,12 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "run_dir_ref" in suite_wrapper_text
         and "run_log_ref" in suite_wrapper_text
         and "suite_artifact_contract_ref" in suite_wrapper_text
+        and "clarify_run_dir_ref" in suite_wrapper_text
+        and "clarify_run_log_ref" in suite_wrapper_text
+        and "clarify_summary_jsonl_ref" in suite_wrapper_text
+        and "context_run_dir_ref" in suite_wrapper_text
+        and "context_run_log_ref" in suite_wrapper_text
+        and "context_summary_jsonl_ref" in suite_wrapper_text
         and "agent-parity-run-log-host-path" in suite_wrapper_text
         and "validate_provider_smoke_path_refs" in suite_wrapper_text
         and "agent_parity_gate_provider_smoke_bad_path_ref" in suite_wrapper_text
