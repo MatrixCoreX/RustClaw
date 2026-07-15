@@ -258,6 +258,12 @@ echo "AGENT_PARITY_GATE_STEP runtime_hard_reply_baseline"
     --fail-on-new
 } > "${OUT_DIR}/runtime_hard_reply_baseline.txt"
 
+echo "AGENT_PARITY_GATE_STEP policy_boundary_hard_reply"
+{
+  python3 "${ROOT_DIR}/scripts/check_no_policy_boundary_hard_reply.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_no_policy_boundary_hard_reply.py"
+} > "${OUT_DIR}/policy_boundary_hard_reply.txt"
+
 echo "AGENT_PARITY_GATE_STEP no_agent_mode_payload"
 {
   python3 "${ROOT_DIR}/scripts/check_no_agent_mode_payload.py" --self-test
@@ -374,6 +380,7 @@ fi
 {
   echo "out_dir_ref=$(path_ref "$OUT_DIR")"
   echo "runtime_hard_reply_baseline=1"
+  echo "policy_boundary_hard_reply=1"
   echo "no_agent_mode_payload=1"
   echo "agent_loop_static_contracts=1"
   echo "evidence_extractor_contracts=1"
