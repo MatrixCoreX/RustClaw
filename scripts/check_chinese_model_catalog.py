@@ -962,6 +962,12 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             and "no_agent_mode_payload.txt" in readme_body
             and "suite_artifact_contract.json" in readme_body
             and "agent_parity_gate_contract.checked=true" in readme_body
+            and "--validate-contract-report-content" in readme_body
+            and "--require-contract-report-content-checked" in readme_body
+            and "contract_report_content_checked=true" in readme_body
+            and "live_metrics=0|1" in readme_body
+            and "metrics=1" in readme_body
+            and "live_metrics=1" in readme_body
             and "llm_raw_trace_runner_contract.txt" in readme_body,
             findings,
             f"{label} must document agent parity nested/static/raw-trace gate artifacts",
