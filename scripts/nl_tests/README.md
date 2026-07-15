@@ -96,6 +96,11 @@ legacy-key guard, legacy route boundary guard, pre-planner removal guard, NL
 hard-match scanner, and historical hardcoded-language scanner. `gate_summary.env`
 records `agent_loop_static_contracts=1`, so artifact readers can tell the
 Codex/Claude-style agent-loop boundary checks were part of the run.
+It also writes `evidence_extractor_contracts.txt` from
+`scripts/check_evidence_extractor_contracts.py`. `gate_summary.env` records
+`evidence_extractor_contracts=1`, and the artifact must contain
+`EVIDENCE_EXTRACTOR_CONTRACT_CHECK findings=0`, so structured tool observation
+metadata cannot quietly drift back to strict language-text evidence paths.
 The gate also writes `secret_scan_contract.json` from
 `scripts/nl_tests/check_secret_scan_contract.py`, locking the shared scanner's
 forbidden-field and secret-like-value finding shapes. `gate_summary.env`
@@ -118,7 +123,8 @@ provided. `gate_summary.env` records the artifact location as the portable
 suite runs also write `artifact_index.txt` at the suite run
 root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/gate_summary.env`,
-`agent_parity_gate/agent_loop_static_contracts.txt`, and
+`agent_parity_gate/agent_loop_static_contracts.txt`,
+`agent_parity_gate/evidence_extractor_contracts.txt`, and
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
 They also write `suite_summary.env` with machine fields `suite`, `status`,
 `exit_code`, `artifact_finalize_status`, `run_log`, and `artifact_index` so a
@@ -147,14 +153,16 @@ contract counts. The final confirmation uses
 carry `contract_report_content_checked=true`. For wrapped `agent_parity_gate`
 runs, the artifact contract also validates nested gate artifacts such as
 `agent_parity_gate/agent_loop_static_contracts.txt` and
+`agent_parity_gate/evidence_extractor_contracts.txt`,
 `agent_parity_gate/runner_path_ref_contract.json`,
 `agent_parity_gate/suite_artifact_contract_self_test.txt`,
 `agent_parity_gate/rollout_metrics_contract.txt`, statically guards
 the artifact checker's dynamic machine fields such as the Chinese provider live
 scope, then checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
-the static agent-loop, secret-scan, wrapper, no-agent-mode, suite-artifact
-self-test, and raw LLM trace contracts participated in the run. It also checks
+the static agent-loop, evidence-extractor, secret-scan, wrapper, no-agent-mode,
+suite-artifact self-test, and raw LLM trace contracts participated in the run.
+It also checks
 that gate summary path fields use portable refs such as `out_dir_ref=out_dir`
 and never host absolute paths. It also checks artifact content: text reports
 must contain their success tokens, and JSON reports such as

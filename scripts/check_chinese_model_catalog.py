@@ -39,6 +39,7 @@ VIDEO_CONFIG = ROOT / "configs/video.toml"
 MUSIC_CONFIG = ROOT / "configs/music.toml"
 README = ROOT / "README.md"
 README_ZH_CN = ROOT / "README.zh-CN.md"
+NL_TESTS_README = ROOT / "scripts/nl_tests/README.md"
 CHINESE_CASE_FILE = ROOT / "scripts/nl_tests/cases/nl_cases_chinese_model_adapter_20260715.txt"
 CHINESE_PROVIDER_SMOKE_RUNNER = ROOT / "scripts/nl_tests/run_chinese_provider_smoke_matrix.sh"
 CHINESE_PROVIDER_SMOKE_MATRIX_CHECKER = ROOT / "scripts/nl_tests/check_chinese_provider_smoke_matrix.py"
@@ -744,6 +745,11 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         findings,
         f"missing {README_ZH_CN.relative_to(ROOT)}",
     )
+    require(
+        NL_TESTS_README.exists(),
+        findings,
+        f"missing {NL_TESTS_README.relative_to(ROOT)}",
+    )
     if not CHINESE_PROVIDER_SMOKE_RUNNER.exists() or not AGENT_PARITY_GATE_RUNNER.exists():
         return
 
@@ -756,6 +762,9 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
     parity_text = AGENT_PARITY_GATE_RUNNER.read_text(encoding="utf-8")
     readme_text = README.read_text(encoding="utf-8") if README.exists() else ""
     readme_zh_text = README_ZH_CN.read_text(encoding="utf-8") if README_ZH_CN.exists() else ""
+    nl_tests_readme_text = (
+        NL_TESTS_README.read_text(encoding="utf-8") if NL_TESTS_README.exists() else ""
+    )
     suite_wrapper_text = (
         SUITE_WRAPPER_CONTRACT_CHECKER.read_text(encoding="utf-8")
         if SUITE_WRAPPER_CONTRACT_CHECKER.exists()
@@ -1241,6 +1250,14 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             findings,
             f"{label} must document agent parity nested/static/raw-trace gate artifacts",
         )
+    require(
+        "evidence_extractor_contracts.txt" in nl_tests_readme_text
+        and "evidence_extractor_contracts=1" in nl_tests_readme_text
+        and "EVIDENCE_EXTRACTOR_CONTRACT_CHECK findings=0" in nl_tests_readme_text
+        and "agent_parity_gate/evidence_extractor_contracts.txt" in nl_tests_readme_text,
+        findings,
+        "scripts/nl_tests/README.md must document the evidence extractor gate artifact",
+    )
 
 
 def check_no_stale_minimax_endpoints(findings: list[str]) -> None:
