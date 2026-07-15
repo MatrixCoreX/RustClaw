@@ -248,6 +248,7 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
     },
     "agent_parity_gate/llm_raw_trace_runner_contract.txt": {
         "SELF_TEST_OK",
+        "LLM_RAW_TRACE_RUNNER_CONTRACT_SELF_TEST ok",
         "LLM_RAW_TRACE_RUNNER_CONTRACT ok",
     },
     "agent_parity_gate/suite_artifact_contract_self_test.txt": {

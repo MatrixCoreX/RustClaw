@@ -349,6 +349,7 @@ runs, the artifact contract also validates nested gate artifacts such as
 `agent_parity_gate/evidence_extractor_contracts.txt`,
 `agent_parity_gate/runner_path_ref_contract.json`,
 `agent_parity_gate/nl_suite_checker_self_tests.txt`,
+`agent_parity_gate/llm_raw_trace_runner_contract.txt`,
 `agent_parity_gate/suite_artifact_contract_self_test.txt`,
 `agent_parity_gate/rollout_metrics_contract.txt`, statically guards
 the artifact checker's dynamic machine fields such as the Chinese provider live
@@ -468,6 +469,10 @@ For `nl_suite_checker_self_tests.txt`, the required content includes
 `SUITE_WRAPPER_CONTRACT_SELF_TEST ok`,
 `RUNNER_PATH_REF_CONTRACT_SELF_TEST ok`, and
 `COMPACT_COVERAGE_SELF_TEST ok`.
+For `llm_raw_trace_runner_contract.txt`, the required content includes
+`LLM_RAW_TRACE_RUNNER_CONTRACT_SELF_TEST ok` and
+`LLM_RAW_TRACE_RUNNER_CONTRACT ok`, proving both the raw trace helper and the
+runner wiring checker before NL/live NL `LLM#1..N` output is trusted.
 It also checks
 that gate summary path fields use portable refs such as `out_dir_ref=out_dir`
 and never host absolute paths. It also checks artifact content: text reports

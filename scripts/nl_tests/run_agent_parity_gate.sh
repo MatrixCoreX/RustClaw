@@ -467,6 +467,7 @@ python3 "${SCRIPT_DIR}/check_suite_artifact_contract.py" --self-test \
 echo "AGENT_PARITY_GATE_STEP llm_raw_trace_runner_contract"
 {
   python3 "${SCRIPT_DIR}/print_llm_raw_trace.py" --self-test
+  python3 "${SCRIPT_DIR}/check_llm_raw_trace_runner_contract.py" --self-test
   python3 "${SCRIPT_DIR}/check_llm_raw_trace_runner_contract.py"
 } > "${OUT_DIR}/llm_raw_trace_runner_contract.txt"
 
