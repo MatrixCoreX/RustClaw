@@ -805,6 +805,23 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate summary must record the wrapped suite contract state",
     )
     require(
+        "AGENT_PARITY_GATE_STEP llm_raw_trace_runner_contract" in parity_text,
+        findings,
+        "agent parity gate must run the NL raw LLM trace runner contract step",
+    )
+    require(
+        "print_llm_raw_trace.py\" --self-test" in parity_text
+        and "check_llm_raw_trace_runner_contract.py" in parity_text
+        and "llm_raw_trace_runner_contract.txt" in parity_text,
+        findings,
+        "agent parity gate must write the NL raw LLM trace runner contract artifact",
+    )
+    require(
+        "llm_raw_trace_runner_contract=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the NL raw LLM trace runner contract state",
+    )
+    require(
         'if [[ -n "${NL_SUITE_RUN_DIR:-}" ]]' in parity_text
         and 'OUT_DIR="${NL_SUITE_RUN_DIR}/agent_parity_gate"' in parity_text,
         findings,
