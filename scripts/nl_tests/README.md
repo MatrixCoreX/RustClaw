@@ -74,11 +74,12 @@ Agent parity gate:
 
 This is the default lightweight gate after a Codex/Claude-style agent-loop
 implementation batch. It runs the static compact coverage check, the
-Chinese-provider model catalog guard, a dry-run Chinese-provider smoke matrix
-with MiniMax as the default live scope, the offline coding-loop repair fixture
-expectations, and bounded rollout metrics for that fixture. MiMo, Qwen, and
-DeepSeek remain in the metadata matrix but are recorded as out of live scope
-unless `--chinese-live-providers all` or a provider CSV is passed. When you pass
+shared secret scan contract, Chinese-provider model catalog guard, a dry-run
+Chinese-provider smoke matrix with MiniMax as the default live scope, the
+offline coding-loop repair fixture expectations, and bounded rollout metrics
+for that fixture. MiMo, Qwen, and DeepSeek remain in the metadata matrix but
+are recorded as out of live scope unless `--chinese-live-providers all` or a
+provider CSV is passed. When you pass
 one or more finished client-like run directories, it also applies the same
 metrics gates to the real NL run. The defaults require
 `pass_rate=1.0`, `avg_llm_calls_per_turn<=4`, no prompt truncation, and no final
@@ -90,6 +91,9 @@ guard and smoke preflight use `CHINESE_PROVIDER_ENV_FILE` or
 env-file source tokens plus secret-free credential metadata; artifacts do not
 write the env-file path or secret values. Use `--chinese-env-file <path>` to
 override it, or `--no-chinese-env-file` for a pure missing-credential preflight.
+The gate also writes `secret_scan_contract.json` from
+`scripts/nl_tests/check_secret_scan_contract.py`, locking the shared scanner's
+forbidden-field and secret-like-value finding shapes.
 
 For rerun shards, use:
 
@@ -217,10 +221,12 @@ safe aggregate.
   `matrix_summary.json` with
   `python3 scripts/nl_tests/check_chinese_provider_smoke_summary.py <matrix_summary.json>`;
   this checks provider rows, readiness counters, live-scope counters, and
-  secret-free credential metadata. The default live scope is MiniMax because it
-  is the current purchased provider; use `--live-providers all` only when all
-  provider accounts are intentionally in scope. For parity-gate runs, the
-  parent `run_agent_parity_gate.sh` passes `CHINESE_PROVIDER_ENV_FILE` or
+  secret-free credential metadata. The shared `check_secret_scan_contract.py`
+  guard locks forbidden secret fields and secret-like values so catalog and
+  smoke artifacts cannot silently drift. The default live scope is MiniMax
+  because it is the current purchased provider; use `--live-providers all` only
+  when all provider accounts are intentionally in scope. For parity-gate runs,
+  the parent `run_agent_parity_gate.sh` passes `CHINESE_PROVIDER_ENV_FILE` or
   `../runtime_env_filled.sh` to both catalog validation and smoke preflight when
   present.
 - Task execution async lifecycle: `scripts/nl_tests/cases/nl_cases_task_execution_async_lifecycle_20260626.txt`
