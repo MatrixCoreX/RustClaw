@@ -108,7 +108,9 @@ contract checker.
 When launched through `run_suite.sh agent_parity_gate`, the gate stores its JSON
 artifacts under the same suite run directory at `agent_parity_gate/`; direct
 runs still default to `logs/agent_parity_gate/<timestamp>` unless `--out-dir` is
-provided. Wrapped suite runs also write `artifact_index.txt` at the suite run
+provided. `gate_summary.env` records the artifact location as the portable
+`out_dir_ref` machine field instead of a host absolute `out_dir` path. Wrapped
+suite runs also write `artifact_index.txt` at the suite run
 root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/gate_summary.env`,
 `agent_parity_gate/agent_loop_static_contracts.txt`, and
@@ -117,7 +119,9 @@ They also write `suite_summary.env` with machine fields `suite`, `status`,
 `exit_code`, `artifact_finalize_status`, `run_log`, and `artifact_index` so a
 later task can resume from the run root without parsing prose logs. `status` and
 `exit_code` reflect the wrapped command; `artifact_finalize_status` reflects the
-summary/index write step. Validate a wrapped run root with
+summary/index write step. Wrapped console output and `run.log` print
+`run_dir_ref`, `run_log_ref`, and artifact refs instead of host absolute paths.
+Validate a wrapped run root with
 `python3 scripts/nl_tests/check_suite_artifact_contract.py <run_dir> --json`.
 Wrapped runs also write this validation result to
 `suite_artifact_contract.json` and list it in `artifact_index.txt`. The
@@ -139,7 +143,9 @@ scope, then checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
 the static agent-loop, secret-scan, wrapper, no-agent-mode, suite-artifact
 self-test, and raw LLM trace contracts participated in the run. It also checks
-artifact content: text reports must contain their success tokens, and JSON reports such as
+that gate summary path fields use portable refs such as `out_dir_ref=out_dir`
+and never host absolute paths. It also checks artifact content: text reports
+must contain their success tokens, and JSON reports such as
 `secret_scan_contract.json` and `suite_wrapper_contract.json` must expose
 `ok=true` from a top-level object. The suite-artifact self-test covers missing,
 unreadable, malformed, and non-object contract reports; invalid Chinese live-provider scope; invalid env-file state/source; unsafe Chinese-provider smoke path refs; unsafe rollout metrics source/output refs; bad UTF-8 artifact

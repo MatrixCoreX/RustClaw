@@ -394,6 +394,19 @@ def provider_smoke_path_ref_is_safe(value: Any, *, allow_empty: bool = False) ->
     return all(part not in {"", ".", ".."} for part in path.parts)
 
 
+def validate_gate_summary_no_host_paths(gate_summary: dict[str, str]) -> tuple[list[str], int]:
+    findings: list[str] = []
+    for key, value in sorted(gate_summary.items()):
+        if any(marker in value for marker in HOST_PATH_MARKERS):
+            findings.append(f"agent_parity_gate_summary_host_path:{key}")
+    if "out_dir" in gate_summary:
+        findings.append("agent_parity_gate_summary_legacy_out_dir")
+    out_dir_ref = gate_summary.get("out_dir_ref")
+    if not provider_smoke_path_ref_is_safe(out_dir_ref):
+        findings.append(f"agent_parity_gate_summary_bad_out_dir_ref:{out_dir_ref}")
+    return findings, 1
+
+
 def validate_provider_smoke_path_refs(
     rows: list[dict[str, Any]],
     source: str,
@@ -746,6 +759,14 @@ def validate_agent_parity_gate_artifacts(run_dir: Path, entries: set[str]) -> tu
 
     gate_summary, parse_findings = parse_env_file(summary_path)
     findings.extend(f"agent_parity_gate_{finding}" for finding in parse_findings)
+    summary_path_findings, summary_path_checks = validate_gate_summary_no_host_paths(
+        gate_summary
+    )
+    findings.extend(summary_path_findings)
+    content_checks += summary_path_checks
+    run_log_path_findings = validate_text_artifact_no_host_paths(run_dir, "run.log")
+    findings.extend(run_log_path_findings)
+    content_checks += 0 if run_log_path_findings else 1
     for key, expected in sorted(AGENT_PARITY_GATE_REQUIRED_FLAGS.items()):
         content_checks += 1
         actual = gate_summary.get(key)
@@ -1104,6 +1125,57 @@ def run_self_test() -> int:
                     file=sys.stderr,
                 )
                 return 1
+
+        gate_summary_path_cases = (
+            (
+                {"out_dir_ref": "out_dir"},
+                set(),
+            ),
+            (
+                {"out_dir": "/home/user/rustclaw/logs/agent_parity_gate/run"},
+                {
+                    "agent_parity_gate_summary_host_path:out_dir",
+                    "agent_parity_gate_summary_legacy_out_dir",
+                    "agent_parity_gate_summary_bad_out_dir_ref:None",
+                },
+            ),
+            (
+                {"out_dir_ref": "/tmp/run"},
+                {
+                    "agent_parity_gate_summary_host_path:out_dir_ref",
+                    "agent_parity_gate_summary_bad_out_dir_ref:/tmp/run",
+                },
+            ),
+        )
+        for gate_summary, expected_findings in gate_summary_path_cases:
+            path_findings, path_checks = validate_gate_summary_no_host_paths(gate_summary)
+            if set(path_findings) != expected_findings or path_checks != 1:
+                print(
+                    "SELF_TEST_FAIL gate-summary-host-path:"
+                    f"summary={gate_summary} findings={path_findings}",
+                    file=sys.stderr,
+                )
+                return 1
+
+        run_log_host_path_run = root / "agent-parity-run-log-host-path"
+        write_minimal_self_test_run(run_log_host_path_run, content_checked=True)
+        (run_log_host_path_run / "run.log").write_text(
+            "run_dir: /home/user/rustclaw/scripts/nl_suite_logs/agent_parity_gate/run\n",
+            encoding="utf-8",
+        )
+        run_log_host_path_findings = validate_text_artifact_no_host_paths(
+            run_log_host_path_run,
+            "run.log",
+        )
+        if "agent_parity_gate_artifact_host_path:run.log" not in set(
+            run_log_host_path_findings
+        ):
+            print(
+                "SELF_TEST_FAIL agent_parity_run_log_host_path:"
+                f"{run_log_host_path_findings}",
+                file=sys.stderr,
+            )
+            return 1
 
         agent_summary_missing_run = root / "agent-parity-missing-gate-summary"
         write_minimal_self_test_run(agent_summary_missing_run, content_checked=True)
