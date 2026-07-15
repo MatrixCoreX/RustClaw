@@ -9,6 +9,7 @@ OUT_DIR="${ROOT_DIR}/logs/agent_parity_gate/${RUN_STAMP}"
 RUN_DIRS=()
 SKIP_COVERAGE=0
 SKIP_MODEL_CATALOG=0
+SKIP_PROVIDER_SMOKE=0
 SKIP_CODING_FIXTURE=0
 SKIP_METRICS=0
 DEDUPE_LATEST_CASE=0
@@ -37,6 +38,7 @@ Options:
   --out-dir PATH                  Gate artifact directory. Default: logs/agent_parity_gate/<timestamp>
   --skip-coverage                 Skip compact metadata coverage.
   --skip-model-catalog            Skip Chinese-provider model catalog guard.
+  --skip-provider-smoke           Skip Chinese-provider dry-run smoke matrix.
   --skip-coding-fixture           Skip offline coding-loop repair fixture.
   --skip-metrics                  Skip metrics gates for provided run dirs.
   --dedupe-latest-case            For rerun shards, keep latest valid turn per numeric case id.
@@ -72,6 +74,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-model-catalog)
       SKIP_MODEL_CATALOG=1
+      shift
+      ;;
+    --skip-provider-smoke)
+      SKIP_PROVIDER_SMOKE=1
       shift
       ;;
     --skip-coding-fixture)
@@ -187,6 +193,14 @@ if [[ "$SKIP_MODEL_CATALOG" -eq 0 ]]; then
     > "${OUT_DIR}/chinese_model_catalog.json"
 fi
 
+if [[ "$SKIP_PROVIDER_SMOKE" -eq 0 ]]; then
+  echo "AGENT_PARITY_GATE_STEP chinese_provider_smoke_dry_run"
+  bash "${SCRIPT_DIR}/run_chinese_provider_smoke_matrix.sh" \
+    --dry-run \
+    --out-dir "${OUT_DIR}/chinese_provider_smoke" \
+    > "${OUT_DIR}/chinese_provider_smoke.txt"
+fi
+
 if [[ "$SKIP_CODING_FIXTURE" -eq 0 ]]; then
   echo "AGENT_PARITY_GATE_STEP coding_loop_repair_fixture"
   python3 "${SCRIPT_DIR}/evaluate_client_like_run.py" \
@@ -212,6 +226,7 @@ fi
   echo "out_dir=${OUT_DIR}"
   echo "coverage=$((1 - SKIP_COVERAGE))"
   echo "model_catalog=$((1 - SKIP_MODEL_CATALOG))"
+  echo "provider_smoke=$((1 - SKIP_PROVIDER_SMOKE))"
   echo "coding_fixture=$((1 - SKIP_CODING_FIXTURE))"
   echo "run_dir_count=${#RUN_DIRS[@]}"
   echo "metrics=$((1 - SKIP_METRICS))"
