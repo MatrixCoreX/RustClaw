@@ -157,6 +157,14 @@ done
 
 mkdir -p "$OUT_DIR"
 
+chinese_provider_env_file_args=()
+if [[ -n "$CHINESE_PROVIDER_ENV_FILE" && -f "$CHINESE_PROVIDER_ENV_FILE" ]]; then
+  chinese_provider_env_file_args+=(--env-file "$CHINESE_PROVIDER_ENV_FILE")
+  CHINESE_PROVIDER_ENV_FILE_STATE="present"
+elif [[ "$CHINESE_PROVIDER_ENV_FILE_STATE" != "disabled" ]]; then
+  CHINESE_PROVIDER_ENV_FILE_STATE="missing"
+fi
+
 metrics_args() {
   local out_path="$1"
   shift
@@ -209,7 +217,9 @@ fi
 
 if [[ "$SKIP_MODEL_CATALOG" -eq 0 ]]; then
   echo "AGENT_PARITY_GATE_STEP chinese_model_catalog"
-  python3 "${ROOT_DIR}/scripts/check_chinese_model_catalog.py" --json \
+  python3 "${ROOT_DIR}/scripts/check_chinese_model_catalog.py" \
+    --json \
+    "${chinese_provider_env_file_args[@]}" \
     > "${OUT_DIR}/chinese_model_catalog.json"
 fi
 
@@ -220,12 +230,7 @@ if [[ "$SKIP_PROVIDER_SMOKE" -eq 0 ]]; then
     --live-providers "$CHINESE_PROVIDER_LIVE_PROVIDERS" \
     --out-dir "${OUT_DIR}/chinese_provider_smoke"
   )
-  if [[ -n "$CHINESE_PROVIDER_ENV_FILE" && -f "$CHINESE_PROVIDER_ENV_FILE" ]]; then
-    chinese_provider_smoke_args+=(--env-file "$CHINESE_PROVIDER_ENV_FILE")
-    CHINESE_PROVIDER_ENV_FILE_STATE="present"
-  elif [[ "$CHINESE_PROVIDER_ENV_FILE_STATE" != "disabled" ]]; then
-    CHINESE_PROVIDER_ENV_FILE_STATE="missing"
-  fi
+  chinese_provider_smoke_args+=("${chinese_provider_env_file_args[@]}")
   bash "${SCRIPT_DIR}/run_chinese_provider_smoke_matrix.sh" \
     "${chinese_provider_smoke_args[@]}" \
     > "${OUT_DIR}/chinese_provider_smoke.txt"
