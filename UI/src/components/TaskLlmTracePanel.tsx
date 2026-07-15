@@ -11,6 +11,8 @@ import {
   agentFlowTimelineRows,
   flowStageMachineTokens,
   flowSummaryMachineTokens,
+  modelCatalogTraceMachineTokens,
+  resumeTraceMachineTokens,
   type AgentFlowTimelineRow,
 } from "../lib/task-llm-trace";
 import type { TaskLlmDebugCall, TaskLlmDebugResponse, TaskQueryResponse } from "../types/api";
@@ -338,6 +340,42 @@ export function TaskLlmTracePanel({
               </div>
               <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-black/40 p-3 text-[11px] leading-relaxed text-white/70">
                 {formatJsonish(taskLlmDebug.memory_trace)}
+              </pre>
+            </details>
+          ) : null}
+
+          {taskLlmDebug.model_catalog_trace ? (
+            <details className="mb-3 rounded-lg border border-cyan-300/15 bg-cyan-400/5 p-3" open>
+              <summary className="cursor-pointer text-xs font-medium text-cyan-100">
+                {t("模型能力目录决策", "Model catalog decision")}
+              </summary>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {modelCatalogTraceMachineTokens(taskLlmDebug.model_catalog_trace).map((item) => (
+                  <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-[11px] text-cyan-50/75">
+                    {item}
+                  </span>
+                ))}
+              </div>
+              <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-black/40 p-3 text-[11px] leading-relaxed text-white/70">
+                {formatJsonish(taskLlmDebug.model_catalog_trace)}
+              </pre>
+            </details>
+          ) : null}
+
+          {taskLlmDebug.resume_trace ? (
+            <details className="mb-3 rounded-lg border border-violet-300/15 bg-violet-400/5 p-3" open>
+              <summary className="cursor-pointer text-xs font-medium text-violet-100">
+                {t("后台续跑/Checkpoint 决策", "Background resume and checkpoint decision")}
+              </summary>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {resumeTraceMachineTokens(taskLlmDebug.resume_trace).map((item) => (
+                  <span key={item} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono text-[11px] text-violet-50/75">
+                    {item}
+                  </span>
+                ))}
+              </div>
+              <pre className="mt-2 max-h-72 overflow-auto rounded-md bg-black/40 p-3 text-[11px] leading-relaxed text-white/70">
+                {formatJsonish(taskLlmDebug.resume_trace)}
               </pre>
             </details>
           ) : null}

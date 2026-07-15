@@ -6,6 +6,8 @@ import {
   agentFlowTimelineRows,
   flowStageMachineTokens,
   flowSummaryMachineTokens,
+  modelCatalogTraceMachineTokens,
+  resumeTraceMachineTokens,
 } from "./task-llm-trace";
 
 test("builds task flow summary machine tokens", () => {
@@ -148,4 +150,46 @@ test("builds classroom timeline rows in agent-loop order", () => {
 test("classifies unknown flow stages as provider fallback phase", () => {
   assert.equal(agentFlowPhaseToken("provider.llm_call"), "provider");
   assert.equal(agentFlowPhaseToken("custom.future_stage"), "provider");
+});
+
+test("builds model catalog trace machine tokens", () => {
+  const tokens = modelCatalogTraceMachineTokens({
+    trace_kind: "model_catalog_decision",
+    status: "ok",
+    selected_provider: "minimax",
+    selected_model: "MiniMax-M3",
+    observed_provider_count: 1,
+    entry_count: 1,
+    catalog_guard_status: {
+      status: "ok",
+      finding_count: 0,
+    },
+  });
+
+  assert.ok(tokens.includes("trace_kind=model_catalog_decision"));
+  assert.ok(tokens.includes("selected_provider=minimax"));
+  assert.ok(tokens.includes("selected_model=MiniMax-M3"));
+  assert.ok(tokens.includes("catalog_guard_status.status=ok"));
+});
+
+test("builds resume trace machine tokens", () => {
+  const tokens = resumeTraceMachineTokens({
+    trace_kind: "task_resume_decision",
+    state: "waiting",
+    execution_state: "waiting",
+    checkpoint_id: "ckpt-1",
+    resume_entrypoint: "next_planner_round",
+    resume_due: false,
+    resume_wait_seconds: 30,
+    recommended_user_action_kind: "wait_until_next_check",
+    completed_side_effect_count: 1,
+    requires_idempotency_guard: true,
+    provider_blocker_status_code: "provider_rate_limited",
+  });
+
+  assert.ok(tokens.includes("trace_kind=task_resume_decision"));
+  assert.ok(tokens.includes("state=waiting"));
+  assert.ok(tokens.includes("checkpoint_id=ckpt-1"));
+  assert.ok(tokens.includes("requires_idempotency_guard=true"));
+  assert.ok(tokens.includes("provider_blocker_status_code=provider_rate_limited"));
 });

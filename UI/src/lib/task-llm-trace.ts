@@ -25,6 +25,24 @@ function compactValue(value: string | number | boolean | null | undefined): stri
   return text ? text : null;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function traceToken(record: Record<string, unknown>, key: string): string | null {
+  const value = compactValue(record[key] as string | number | boolean | null | undefined);
+  return value ? `${key}=${value}` : null;
+}
+
+function nestedTraceToken(record: Record<string, unknown>, parentKey: string, childKey: string): string | null {
+  const parent = asRecord(record[parentKey]);
+  if (!parent) return null;
+  const value = compactValue(parent[childKey] as string | number | boolean | null | undefined);
+  return value ? `${parentKey}.${childKey}=${value}` : null;
+}
+
 function sortedCounterEntries(counts: Record<string, number> | null | undefined, limit: number): string[] {
   if (!counts) return [];
   return Object.entries(counts)
@@ -67,6 +85,42 @@ export function flowStageMachineTokens(stage: TaskLlmDebugFlowStageSummary): str
     ...sortedCounterEntries(stage.status_counts, 3).map((item) => `status=${item}`),
     ...sortedCounterEntries(stage.trigger_counts, 3).map((item) => `trigger=${item}`),
   ];
+}
+
+export function modelCatalogTraceMachineTokens(trace: unknown): string[] {
+  const record = asRecord(trace);
+  if (!record) return [];
+  return [
+    traceToken(record, "trace_kind"),
+    traceToken(record, "status"),
+    traceToken(record, "selected_provider"),
+    traceToken(record, "selected_model"),
+    traceToken(record, "observed_provider_count"),
+    traceToken(record, "entry_count"),
+    nestedTraceToken(record, "catalog_guard_status", "status"),
+    nestedTraceToken(record, "catalog_guard_status", "finding_count"),
+  ].filter((item): item is string => Boolean(item));
+}
+
+export function resumeTraceMachineTokens(trace: unknown): string[] {
+  const record = asRecord(trace);
+  if (!record) return [];
+  return [
+    traceToken(record, "trace_kind"),
+    traceToken(record, "state"),
+    traceToken(record, "execution_state"),
+    traceToken(record, "reason_code"),
+    traceToken(record, "checkpoint_id"),
+    traceToken(record, "resume_entrypoint"),
+    traceToken(record, "resume_due"),
+    traceToken(record, "resume_wait_seconds"),
+    traceToken(record, "recommended_user_action_kind"),
+    traceToken(record, "completed_side_effect_count"),
+    traceToken(record, "requires_idempotency_guard"),
+    traceToken(record, "provider_blocker_status_code"),
+    traceToken(record, "provider_blocker_retry_after_seconds"),
+    traceToken(record, "open_issue_count"),
+  ].filter((item): item is string => Boolean(item));
 }
 
 export function agentFlowPhaseToken(flowStage: string | null | undefined): string {
