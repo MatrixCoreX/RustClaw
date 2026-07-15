@@ -123,7 +123,14 @@ Wrapped runs also write this validation result to
 auto-generated report uses `run_dir="."` so the artifact can be moved or shared
 without embedding the local workspace path. Auto-generated reports are strict:
 they are created with `--require-contract-report`, so the report must also be
-present in `artifact_index.txt`.
+present in `artifact_index.txt`. For wrapped `agent_parity_gate` runs, the
+artifact contract also validates nested gate artifacts such as
+`agent_parity_gate/agent_loop_static_contracts.txt` and checks
+`agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
+the static agent-loop, secret-scan, wrapper, no-agent-mode, and raw LLM trace
+contracts participated in the run.
+The JSON report includes `agent_parity_gate_contract.checked=true` plus the
+required artifact and flag counts when this suite-specific validation runs.
 
 For rerun shards, use:
 

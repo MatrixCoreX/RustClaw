@@ -24,6 +24,24 @@ ALLOWED_STATUSES = {"ok", "error"}
 ALLOWED_ARTIFACT_FINALIZE_STATUSES = {"ok", "error"}
 MACHINE_TOKEN_RE = re.compile(r"^[a-z0-9_.-]+$")
 
+AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
+    "agent_parity_gate/gate_summary.env",
+    "agent_parity_gate/runtime_hard_reply_baseline.txt",
+    "agent_parity_gate/no_agent_mode_payload.txt",
+    "agent_parity_gate/agent_loop_static_contracts.txt",
+    "agent_parity_gate/secret_scan_contract.json",
+    "agent_parity_gate/suite_wrapper_contract.json",
+    "agent_parity_gate/llm_raw_trace_runner_contract.txt",
+}
+
+AGENT_PARITY_GATE_REQUIRED_FLAGS = {
+    "no_agent_mode_payload": "1",
+    "agent_loop_static_contracts": "1",
+    "secret_scan_contract": "1",
+    "suite_wrapper_contract": "1",
+    "llm_raw_trace_runner_contract": "1",
+}
+
 
 def parse_env_file(path: Path) -> tuple[dict[str, str], list[str]]:
     values: dict[str, str] = {}
@@ -102,19 +120,15 @@ def validate_summary(run_dir: Path, summary: dict[str, str]) -> list[str]:
     return findings
 
 
-def validate_artifact_index(
-    run_dir: Path,
-    artifact_index_rel: str,
-    require_contract_report: bool,
-) -> list[str]:
+def read_artifact_index(run_dir: Path, artifact_index_rel: str) -> tuple[set[str], list[str]]:
     findings: list[str] = []
     if not is_safe_relative_path(artifact_index_rel):
-        return [f"path_not_run_root_relative:artifact_index"]
+        return set(), [f"path_not_run_root_relative:artifact_index"]
     artifact_index = run_dir / artifact_index_rel
     try:
         entries = artifact_index.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
-        return [f"artifact_index_read_failed:{exc.__class__.__name__}"]
+        return set(), [f"artifact_index_read_failed:{exc.__class__.__name__}"]
 
     seen: set[str] = set()
     for lineno, raw in enumerate(entries, 1):
@@ -128,13 +142,41 @@ def validate_artifact_index(
         seen.add(entry)
         if not (run_dir / entry).is_file():
             findings.append(f"artifact_index_entry_missing:{entry}")
+    return seen, findings
+
+
+def validate_artifact_index_entries(
+    entries: set[str],
+    require_contract_report: bool,
+) -> list[str]:
+    findings: list[str] = []
 
     required_entries = ["run.log", "suite_summary.env"]
     if require_contract_report:
         required_entries.append("suite_artifact_contract.json")
     for required in required_entries:
-        if required not in seen:
+        if required not in entries:
             findings.append(f"artifact_index_missing_required:{required}")
+    return findings
+
+
+def validate_agent_parity_gate_artifacts(run_dir: Path, entries: set[str]) -> list[str]:
+    findings: list[str] = []
+    for required in sorted(AGENT_PARITY_GATE_REQUIRED_ARTIFACTS):
+        if required not in entries:
+            findings.append(f"agent_parity_gate_artifact_missing:{required}")
+
+    summary_path = run_dir / "agent_parity_gate/gate_summary.env"
+    if not summary_path.is_file():
+        findings.append("agent_parity_gate_summary_missing")
+        return findings
+
+    gate_summary, parse_findings = parse_env_file(summary_path)
+    findings.extend(f"agent_parity_gate_{finding}" for finding in parse_findings)
+    for key, expected in sorted(AGENT_PARITY_GATE_REQUIRED_FLAGS.items()):
+        actual = gate_summary.get(key)
+        if actual != expected:
+            findings.append(f"agent_parity_gate_summary_bad_flag:{key}:{actual}")
     return findings
 
 
@@ -156,16 +198,31 @@ def validate_run_dir(run_dir: Path, require_contract_report: bool = False) -> di
     findings.extend(parse_findings)
     findings.extend(validate_summary(run_dir, summary))
     artifact_index_rel = summary.get("artifact_index")
+    artifact_entries: set[str] = set()
+    agent_parity_gate_contract: dict[str, Any] | None = None
     if artifact_index_rel:
-        findings.extend(validate_artifact_index(run_dir, artifact_index_rel, require_contract_report))
+        artifact_entries, index_findings = read_artifact_index(run_dir, artifact_index_rel)
+        findings.extend(index_findings)
+        findings.extend(validate_artifact_index_entries(artifact_entries, require_contract_report))
 
-    return {
+    if summary.get("suite") == "agent_parity_gate":
+        findings.extend(validate_agent_parity_gate_artifacts(run_dir, artifact_entries))
+        agent_parity_gate_contract = {
+            "checked": True,
+            "required_artifact_count": len(AGENT_PARITY_GATE_REQUIRED_ARTIFACTS),
+            "required_flag_count": len(AGENT_PARITY_GATE_REQUIRED_FLAGS),
+        }
+
+    report = {
         "ok": not findings,
         "run_dir": str(run_dir),
         "require_contract_report": require_contract_report,
         "summary": summary,
         "findings": findings,
     }
+    if agent_parity_gate_contract is not None:
+        report["agent_parity_gate_contract"] = agent_parity_gate_contract
+    return report
 
 
 def main() -> int:
