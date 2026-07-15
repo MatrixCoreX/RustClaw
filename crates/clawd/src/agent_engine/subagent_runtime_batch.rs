@@ -431,6 +431,7 @@ fn record_subagent_batch_action_with_config(
         },
         "aggregation": {
             "schema_version": 1,
+            "execution_mode": "bounded_parallel_readonly_child_runs",
             "status": aggregate_status,
             "strategy": "merge_child_machine_findings",
             "child_count": requested_child_count,
