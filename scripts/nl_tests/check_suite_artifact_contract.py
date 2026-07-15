@@ -51,7 +51,12 @@ AGENT_PARITY_GATE_REQUIRED_MACHINE_FIELDS = {
 
 AGENT_PARITY_GATE_DYNAMIC_MACHINE_FIELDS = {
     "chinese_provider_live_providers",
+    "chinese_provider_env_file_state",
+    "chinese_provider_env_file_source",
 }
+
+AGENT_PARITY_GATE_ENV_FILE_STATE_VALUES = {"present", "missing", "disabled"}
+AGENT_PARITY_GATE_ENV_FILE_SOURCE_VALUES = {"default", "explicit", "disabled"}
 
 AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
     "agent_parity_gate/no_agent_mode_payload.txt": {
@@ -386,6 +391,19 @@ def validate_live_provider_scope(gate_summary: dict[str, str]) -> tuple[list[str
     return findings, 1
 
 
+def validate_chinese_provider_env_file_summary(
+    gate_summary: dict[str, str],
+) -> tuple[list[str], int]:
+    findings: list[str] = []
+    state = gate_summary.get("chinese_provider_env_file_state")
+    source = gate_summary.get("chinese_provider_env_file_source")
+    if state not in AGENT_PARITY_GATE_ENV_FILE_STATE_VALUES:
+        findings.append(f"agent_parity_gate_summary_bad_env_file_state:{state}")
+    if source not in AGENT_PARITY_GATE_ENV_FILE_SOURCE_VALUES:
+        findings.append(f"agent_parity_gate_summary_bad_env_file_source:{source}")
+    return findings, 2
+
+
 def expected_live_scope_providers(gate_summary: dict[str, str]) -> set[str]:
     providers, findings = parse_live_provider_scope(gate_summary.get("chinese_provider_live_providers"))
     if findings:
@@ -678,6 +696,9 @@ def validate_agent_parity_gate_artifacts(run_dir: Path, entries: set[str]) -> tu
     scope_findings, scope_checks = validate_live_provider_scope(gate_summary)
     findings.extend(scope_findings)
     content_checks += scope_checks
+    env_file_findings, env_file_checks = validate_chinese_provider_env_file_summary(gate_summary)
+    findings.extend(env_file_findings)
+    content_checks += env_file_checks
     for rel_path, tokens in sorted(AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS.items()):
         token_findings = validate_text_artifact_tokens(run_dir, rel_path, tokens)
         findings.extend(token_findings)
@@ -961,6 +982,62 @@ def run_self_test() -> int:
                 print(
                     "SELF_TEST_FAIL live_provider_scope:"
                     f"summary={gate_summary} findings={scope_findings} providers={scope_provider_set}",
+                    file=sys.stderr,
+                )
+                return 1
+
+        env_file_summary_cases = (
+            (
+                {
+                    "chinese_provider_env_file_state": "present",
+                    "chinese_provider_env_file_source": "default",
+                },
+                set(),
+            ),
+            (
+                {
+                    "chinese_provider_env_file_state": "missing",
+                    "chinese_provider_env_file_source": "explicit",
+                },
+                set(),
+            ),
+            (
+                {
+                    "chinese_provider_env_file_state": "disabled",
+                    "chinese_provider_env_file_source": "disabled",
+                },
+                set(),
+            ),
+            (
+                {
+                    "chinese_provider_env_file_state": "",
+                    "chinese_provider_env_file_source": "default",
+                },
+                {"agent_parity_gate_summary_bad_env_file_state:"},
+            ),
+            (
+                {
+                    "chinese_provider_env_file_state": "present",
+                    "chinese_provider_env_file_source": "local-path",
+                },
+                {"agent_parity_gate_summary_bad_env_file_source:local-path"},
+            ),
+            (
+                {},
+                {
+                    "agent_parity_gate_summary_bad_env_file_state:None",
+                    "agent_parity_gate_summary_bad_env_file_source:None",
+                },
+            ),
+        )
+        for gate_summary, expected_findings in env_file_summary_cases:
+            env_file_findings, env_file_checks = validate_chinese_provider_env_file_summary(
+                gate_summary
+            )
+            if set(env_file_findings) != expected_findings or env_file_checks != 2:
+                print(
+                    "SELF_TEST_FAIL env_file_summary:"
+                    f"summary={gate_summary} findings={env_file_findings}",
                     file=sys.stderr,
                 )
                 return 1
