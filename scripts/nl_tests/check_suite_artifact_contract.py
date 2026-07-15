@@ -49,6 +49,10 @@ AGENT_PARITY_GATE_REQUIRED_MACHINE_FIELDS = {
     "live_metrics": {"0", "1"},
 }
 
+AGENT_PARITY_GATE_DYNAMIC_MACHINE_FIELDS = {
+    "chinese_provider_live_providers",
+}
+
 AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
     "agent_parity_gate/no_agent_mode_payload.txt": {
         "SELF_TEST_OK",
@@ -731,7 +735,8 @@ def validate_run_dir(
             "checked": True,
             "required_artifact_count": len(AGENT_PARITY_GATE_REQUIRED_ARTIFACTS),
             "required_flag_count": len(AGENT_PARITY_GATE_REQUIRED_FLAGS),
-            "required_machine_field_count": len(AGENT_PARITY_GATE_REQUIRED_MACHINE_FIELDS),
+            "required_machine_field_count": len(AGENT_PARITY_GATE_REQUIRED_MACHINE_FIELDS)
+            + len(AGENT_PARITY_GATE_DYNAMIC_MACHINE_FIELDS),
             "content_check_count": content_check_count,
         }
 
