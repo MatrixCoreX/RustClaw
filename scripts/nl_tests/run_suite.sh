@@ -179,12 +179,17 @@ write_suite_summary() {
 
 write_suite_artifact_contract_report() {
   local run_dir="$1"
+  local validate_content="${2:-0}"
   local contract_report="${run_dir}/suite_artifact_contract.json"
   local contract_tmp
+  local checker_args=(. --json --require-contract-report)
+  if [[ "$validate_content" == "1" ]]; then
+    checker_args+=(--validate-contract-report-content)
+  fi
   contract_tmp="$(mktemp)"
   if (
     cd "$run_dir"
-    python3 "${SCRIPT_DIR}/check_suite_artifact_contract.py" . --json --require-contract-report
+    python3 "${SCRIPT_DIR}/check_suite_artifact_contract.py" "${checker_args[@]}"
   ) > "$contract_tmp"; then
     mv "$contract_tmp" "$contract_report"
   else
@@ -209,13 +214,13 @@ finalize_wrapped_suite() {
   printf '{"ok":false,"run_dir":".","findings":["contract_report_pending"]}\n' > "$contract_report" \
     || artifact_finalize_status="error"
   write_artifact_index "$run_dir" || artifact_finalize_status="error"
-  write_suite_artifact_contract_report "$run_dir" || artifact_finalize_status="error"
+  write_suite_artifact_contract_report "$run_dir" 0 || artifact_finalize_status="error"
   write_artifact_index "$run_dir" || artifact_finalize_status="error"
-  write_suite_artifact_contract_report "$run_dir" || artifact_finalize_status="error"
+  write_suite_artifact_contract_report "$run_dir" 1 || artifact_finalize_status="error"
   if [[ "$artifact_finalize_status" != "ok" ]]; then
     write_suite_summary "$suite_name" "$run_dir" "$status" "$exit_code" "$artifact_finalize_status" || true
     write_artifact_index "$run_dir" || true
-    write_suite_artifact_contract_report "$run_dir" || true
+    write_suite_artifact_contract_report "$run_dir" 1 || true
   fi
 
   echo
