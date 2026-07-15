@@ -761,6 +761,10 @@ fn task_query_lifecycle_preserves_checkpoint_waiting_fields() {
     assert_eq!(lifecycle["pending_job_ref"], "job-1");
     assert_eq!(lifecycle["next_action_kind"], "resume_checkpoint");
     assert_eq!(lifecycle["next_action_ref"], "ckpt-1");
+    assert_eq!(
+        lifecycle["recommended_user_action_kind"],
+        "wait_for_worker_resume"
+    );
     assert_eq!(lifecycle["can_cancel"], true);
     assert_eq!(lifecycle["last_heartbeat_ts"], 1234);
 }
@@ -816,6 +820,10 @@ fn task_query_lifecycle_projects_checkpoint_product_contract_fields() {
     assert_eq!(lifecycle["cancel_ref"], "cancel:job-product");
     assert_eq!(lifecycle["next_action_kind"], "poll_async_job");
     assert_eq!(lifecycle["next_action_ref"], "job-product");
+    assert_eq!(
+        lifecycle["recommended_user_action_kind"],
+        "wait_for_async_poll"
+    );
     assert_eq!(lifecycle["poll_after_seconds"], 9);
     assert_eq!(lifecycle["async_job_expires_at"], 1781800800);
     assert_eq!(lifecycle["async_job_message_key"], "tool.job.running");
@@ -891,6 +899,10 @@ fn task_query_lifecycle_projects_provider_blocker_machine_fields() {
     );
     assert_eq!(lifecycle["next_action_kind"], "resume_checkpoint");
     assert_eq!(lifecycle["next_action_ref"], "ckpt-provider");
+    assert_eq!(
+        lifecycle["recommended_user_action_kind"],
+        "wait_for_worker_resume"
+    );
 }
 
 #[test]
@@ -932,6 +944,7 @@ fn task_query_lifecycle_maps_timeout_to_failed_machine_state() {
     assert_eq!(lifecycle["reason_code"], "worker_task_timeout");
     assert_eq!(lifecycle["next_action_kind"], "inspect_result");
     assert_eq!(lifecycle["next_action_ref"], "timeout");
+    assert_eq!(lifecycle["recommended_user_action_kind"], "inspect_result");
     assert_eq!(lifecycle["can_cancel"], false);
 }
 
@@ -944,6 +957,7 @@ fn task_query_lifecycle_exposes_poll_and_cancel_machine_flags_by_state() {
     assert_eq!(queued["can_cancel"], true);
     assert_eq!(queued["next_action_kind"], "poll_task");
     assert_eq!(queued["next_action_ref"], "queued");
+    assert_eq!(queued["recommended_user_action_kind"], "poll_task_status");
 
     let needs_user = task_query_lifecycle_projection(
         "running",
@@ -964,6 +978,10 @@ fn task_query_lifecycle_exposes_poll_and_cancel_machine_flags_by_state() {
     assert_eq!(needs_user["can_cancel"], true);
     assert_eq!(needs_user["next_action_kind"], "await_user_input");
     assert_eq!(needs_user["next_action_ref"], "ckpt-user");
+    assert_eq!(
+        needs_user["recommended_user_action_kind"],
+        "provide_required_input"
+    );
     assert_eq!(needs_user["last_heartbeat_ts"], 321);
 
     let succeeded = task_query_lifecycle_projection("succeeded", None, None);
@@ -971,10 +989,12 @@ fn task_query_lifecycle_exposes_poll_and_cancel_machine_flags_by_state() {
     assert_eq!(succeeded["execution_state"], "completed");
     assert_eq!(succeeded["can_poll"], true);
     assert_eq!(succeeded["can_cancel"], false);
+    assert_eq!(succeeded["recommended_user_action_kind"], "inspect_result");
 
     let cancelled = task_query_lifecycle_projection("canceled", None, None);
     assert_eq!(cancelled["state"], "cancelled");
     assert_eq!(cancelled["execution_state"], "cancelled");
     assert_eq!(cancelled["can_poll"], true);
     assert_eq!(cancelled["can_cancel"], false);
+    assert_eq!(cancelled["recommended_user_action_kind"], "inspect_result");
 }

@@ -129,6 +129,7 @@ pub(crate) fn task_query_lifecycle_projection(
         }
         append_lifecycle_reason_code_field(obj, &state);
         append_lifecycle_next_action_fields(obj, &state);
+        append_lifecycle_recommended_user_action_fields(obj, &state);
         if active_state {
             if let Some(updated_at_ts) = updated_at_ts.filter(|ts| *ts > 0) {
                 obj.entry("last_heartbeat_ts".to_string())
@@ -1044,6 +1045,38 @@ fn append_lifecycle_next_action_fields(obj: &mut serde_json::Map<String, Value>,
     if let Some(next_action_ref) = next_action_ref {
         obj.entry("next_action_ref".to_string())
             .or_insert(next_action_ref);
+    }
+}
+
+fn append_lifecycle_recommended_user_action_fields(
+    obj: &mut serde_json::Map<String, Value>,
+    state: &str,
+) {
+    let state = state.trim();
+    let recommended_user_action_kind = if state == "needs_user" {
+        Some("provide_required_input")
+    } else if matches!(state, "waiting" | "background") {
+        if obj.get("poll_ref").is_some() {
+            Some("wait_for_async_poll")
+        } else if obj
+            .get("resume_due")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            Some("wait_for_worker_resume")
+        } else {
+            Some("wait_until_next_check")
+        }
+    } else if matches!(state, "queued" | "running") {
+        Some("poll_task_status")
+    } else if matches!(state, "succeeded" | "failed" | "cancelled") {
+        Some("inspect_result")
+    } else {
+        None
+    };
+    if let Some(kind) = recommended_user_action_kind {
+        obj.entry("recommended_user_action_kind".to_string())
+            .or_insert(json!(kind));
     }
 }
 
