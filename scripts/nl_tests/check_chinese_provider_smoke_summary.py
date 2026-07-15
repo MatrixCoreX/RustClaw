@@ -8,7 +8,7 @@ import json
 import re
 import sys
 from collections import Counter
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 if __package__:
@@ -56,6 +56,7 @@ ALLOWED_LIVE_SCOPES = {
 
 MACHINE_TOKEN_RE = re.compile(r"^[a-z0-9_.-]+$")
 ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+PATH_REF_FIELDS = {"case_file", "output_file", "run_dir"}
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -67,6 +68,17 @@ def load_json(path: Path) -> dict[str, Any]:
 
 def string_counter(rows: list[dict[str, Any]], field: str) -> dict[str, int]:
     return dict(sorted(Counter(str(row.get(field) or "unknown") for row in rows).items()))
+
+
+def is_safe_path_ref(value: Any, *, allow_empty: bool = False) -> bool:
+    if not isinstance(value, str):
+        return False
+    if value == "":
+        return allow_empty
+    if value.startswith("/") or "\\" in value or any(ch.isspace() for ch in value):
+        return False
+    path = PurePosixPath(value)
+    return all(part not in {"", ".", ".."} for part in path.parts)
 
 
 def validate_summary(summary: dict[str, Any]) -> list[str]:
@@ -108,6 +120,9 @@ def validate_summary(summary: dict[str, Any]) -> list[str]:
             findings.append(f"provider_row_bad_credential_state:{index}:{credential_state}")
         if live_scope not in ALLOWED_LIVE_SCOPES:
             findings.append(f"provider_row_bad_live_scope:{index}:{live_scope}")
+        for field in sorted(PATH_REF_FIELDS):
+            if not is_safe_path_ref(row.get(field), allow_empty=(field == "run_dir")):
+                findings.append(f"provider_row_bad_path_ref:{index}:{field}")
         required_env = row.get("credential_required_env")
         if not isinstance(required_env, list):
             findings.append(f"provider_row_credential_required_env_not_array:{index}")
@@ -141,11 +156,65 @@ def validate_summary(summary: dict[str, Any]) -> list[str]:
     return findings
 
 
+def self_test_summary(row_override: dict[str, Any] | None = None) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "case_file": "scripts/nl_tests/cases/nl_cases_chinese_model_adapter_20260715.txt",
+        "credential_required_env": ["MINIMAX_API_KEY"],
+        "credential_state": "configured_env",
+        "exit_code": 0,
+        "live_scope": "included",
+        "live_scope_providers": ["minimax"],
+        "output_file": "out_dir/minimax/run.output.txt",
+        "provider": "minimax",
+        "reason_code": "dry_run",
+        "run_dir": "",
+        "status": "planned",
+    }
+    if row_override:
+        row.update(row_override)
+    return {
+        "credential_state_counts": string_counter([row], "credential_state"),
+        "live_scope_counts": string_counter([row], "live_scope"),
+        "provider_count": 1,
+        "providers": [row],
+        "reason_code_counts": string_counter([row], "reason_code"),
+        "status_counts": string_counter([row], "status"),
+    }
+
+
+def run_self_test() -> int:
+    positive_findings = validate_summary(self_test_summary())
+    if positive_findings:
+        print(f"SELF_TEST_FAIL positive:{positive_findings}", file=sys.stderr)
+        return 1
+
+    cases = (
+        ("absolute-output", {"output_file": "/tmp/run.output.txt"}, "provider_row_bad_path_ref:0:output_file"),
+        ("parent-case", {"case_file": "../cases.txt"}, "provider_row_bad_path_ref:0:case_file"),
+        ("backslash-run-dir", {"run_dir": r"out_dir\minimax"}, "provider_row_bad_path_ref:0:run_dir"),
+        ("space-output", {"output_file": "out dir/run.output.txt"}, "provider_row_bad_path_ref:0:output_file"),
+    )
+    for label, row_override, expected in cases:
+        findings = validate_summary(self_test_summary(row_override))
+        if expected not in set(findings):
+            print(f"SELF_TEST_FAIL {label}:{findings}", file=sys.stderr)
+            return 1
+
+    print("CHINESE_PROVIDER_SMOKE_SUMMARY_SELF_TEST ok")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("summary_json", type=Path)
+    parser.add_argument("summary_json", type=Path, nargs="?")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
+
+    if args.self_test:
+        return run_self_test()
+    if args.summary_json is None:
+        parser.error("summary_json is required unless --self-test is used")
 
     try:
         summary = load_json(args.summary_json)
