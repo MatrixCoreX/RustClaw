@@ -275,41 +275,6 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
         }
     }
 
-    if matches!(core_action, Some(CoreCommandAction::AgentMode)) {
-        let mode = slash_command
-            .as_ref()
-            .map(|command| command.tail.as_str())
-            .unwrap_or_default();
-        let reply = {
-            let mut set = state
-                .agent_off_chats
-                .lock()
-                .map_err(|_| anyhow!("agent mode lock poisoned"))?;
-            match mode {
-                "on" => {
-                    set.remove(&msg.chat.id.0);
-                    state.i18n.t("telegram.msg.agent_on")
-                }
-                "off" => {
-                    set.insert(msg.chat.id.0);
-                    state.i18n.t("telegram.msg.agent_off")
-                }
-                _ => {
-                    let enabled = !set.contains(&msg.chat.id.0);
-                    state.i18n.t_with(
-                        "telegram.msg.agent_usage_status",
-                        &[("status", if enabled { "on" } else { "off" })],
-                    )
-                }
-            }
-        };
-
-        bot.send_message(msg.chat.id, reply)
-            .await
-            .context("send /agent reply failed")?;
-        return Ok(());
-    }
-
     if matches!(core_action, Some(CoreCommandAction::Status)) {
         match fetch_status_text(&state, msg.chat.id.0).await {
             Ok(status_text) => {
@@ -755,25 +720,19 @@ pub(super) async fn handle_message(bot: Bot, msg: Message, state: BotState) -> a
         .context("send queue full ask message failed")?;
         return Ok(());
     }
-    let agent_enabled = state
-        .agent_off_chats
-        .lock()
-        .map(|set| !set.contains(&msg.chat.id.0))
-        .unwrap_or(true);
-
     match submit_task_only(
         &state,
         user_id,
         msg.chat.id.0,
         TaskKind::Ask,
-        json!({ "text": prompt, "agent_mode": agent_enabled }),
+        json!({ "text": prompt }),
     )
     .await
     {
         Ok(task_id) => {
             info!(
-                "telegramd: submitted ask task_id={} user_id={} chat_id={} agent_mode={}",
-                task_id, user_id, msg.chat.id.0, agent_enabled
+                "telegramd: submitted ask task_id={} user_id={} chat_id={}",
+                task_id, user_id, msg.chat.id.0
             );
             spawn_task_result_delivery(
                 bot.clone(),

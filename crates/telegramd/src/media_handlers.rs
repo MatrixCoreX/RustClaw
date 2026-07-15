@@ -204,11 +204,6 @@ pub(super) async fn handle_audio_message(
         return Ok(());
     }
 
-    let agent_enabled = state
-        .agent_off_chats
-        .lock()
-        .map(|set| !set.contains(&msg.chat.id.0))
-        .unwrap_or(true);
     info!(
         "{} transport_prompt_use flow=voice_chat prompt_name=voice_chat_prompt chat_id={} user_id={} prompt_source={}",
         transport_highlight_tag("transport_prompt"),
@@ -223,7 +218,6 @@ pub(super) async fn handle_audio_message(
         TaskKind::Ask,
         json!({
             "text": render_voice_chat_prompt(&state.voice_chat_prompt_template, transcript),
-            "agent_mode": agent_enabled,
             "source": "voice"
         }),
     )

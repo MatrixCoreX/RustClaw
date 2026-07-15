@@ -397,14 +397,8 @@ pub(super) async fn maybe_handle_resume_continuation(
         }
         return Ok(false);
     }
-    let agent_enabled = state
-        .agent_off_chats
-        .lock()
-        .map(|set| !set.contains(&chat_id))
-        .unwrap_or(true);
     let payload = json!({
         "text": prompt,
-        "agent_mode": agent_enabled,
         "source": "resume_continue_execute",
         "resume_user_text": prompt,
         "resume_context": pending.resume_context,

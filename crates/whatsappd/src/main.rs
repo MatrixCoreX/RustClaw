@@ -539,7 +539,7 @@ async fn handle_inbound_message(state: &AppState, msg: WaMessage) -> anyhow::Res
                     .unwrap_or_default();
                 handle_run_command(state, &msg.from, user_id, chat_id, command_tail).await?;
             } else {
-                let payload = json!({ "text": text.trim(), "agent_mode": true });
+                let payload = json!({ "text": text.trim() });
                 let task_id =
                     submit_task_only(state, user_id, chat_id, &msg.from, TaskKind::Ask, payload)
                         .await?;

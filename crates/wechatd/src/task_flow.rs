@@ -584,7 +584,6 @@ pub(super) async fn submit_wechat_task_and_reply(
 ) {
     let payload = json!({
         "text": text,
-        "agent_mode": true,
         "channel": "wechat",
         "context_token": context_token.clone(),
     });

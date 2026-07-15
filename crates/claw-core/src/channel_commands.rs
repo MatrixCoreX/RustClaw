@@ -17,7 +17,6 @@ pub enum CoreCommandAction {
     Start,
     Ask,
     BindKey,
-    AgentMode,
     Status,
     Cancel,
     Skills,
