@@ -917,6 +917,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "stored_agent_contract" in suite_artifact_contract_text
         and "stored_report_override" in suite_artifact_contract_text
         and "contract_report_missing" in suite_artifact_contract_text
+        and "contract_report_read_failed" in suite_artifact_contract_text
         and "contract_report_bad_json" in suite_artifact_contract_text
         and "contract_report_bad_shape" in suite_artifact_contract_text
         and "contract_report_not_ok" in suite_artifact_contract_text
@@ -929,6 +930,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "contract_report_unexpected_agent_parity_contract" in suite_artifact_contract_text
         and "unexpected_agent_contract" in suite_artifact_contract_text
         and "missing-contract-report" in suite_artifact_contract_text
+        and "read-failed" in suite_artifact_contract_text
         and "bad-json" in suite_artifact_contract_text
         and "bad-shape" in suite_artifact_contract_text
         and '"agent_loop_static_contracts": "1"' in suite_artifact_contract_text

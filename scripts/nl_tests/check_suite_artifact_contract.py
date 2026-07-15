@@ -931,6 +931,35 @@ def run_self_test() -> int:
                 )
                 return 1
 
+        read_failed_run = root / "read-failed"
+        write_minimal_self_test_run(read_failed_run, content_checked=True)
+        read_failed_report_path = read_failed_run / "suite_artifact_contract.json"
+        read_failed_report_path.unlink()
+        read_failed_report_path.mkdir()
+        read_failed_findings = validate_existing_contract_report(
+            read_failed_run,
+            {
+                "summary": {
+                    "suite": "manual",
+                    "status": "ok",
+                    "exit_code": "0",
+                    "artifact_finalize_status": "ok",
+                    "run_log": "run.log",
+                    "artifact_index": "artifact_index.txt",
+                },
+            },
+            require_content_checked=True,
+        )
+        if not any(
+            finding.startswith("contract_report_read_failed:")
+            for finding in read_failed_findings
+        ):
+            print(
+                f"SELF_TEST_FAIL read_failed:{read_failed_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
         base_field_cases = (
             (
                 "not-ok",
