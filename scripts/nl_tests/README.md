@@ -138,9 +138,10 @@ the static agent-loop, secret-scan, wrapper, no-agent-mode, suite-artifact
 self-test, and raw LLM trace contracts participated in the run. It also checks
 artifact content: text reports must contain their success tokens, and JSON reports such as
 `secret_scan_contract.json` and `suite_wrapper_contract.json` must expose
-`ok=true`. The suite-artifact self-test covers unchecked final reports, summary
-mismatch, nested `agent_parity_gate_contract` mismatch, and unexpected nested
-agent parity contracts in non-agent-parity reports. Enabled optional steps are also content-checked from
+`ok=true`. The suite-artifact self-test covers base report fields (`ok`,
+`run_dir`, `require_contract_report`, `findings`), unchecked final reports,
+summary mismatch, nested `agent_parity_gate_contract` mismatch, and unexpected
+nested agent parity contracts in non-agent-parity reports. Enabled optional steps are also content-checked from
 `gate_summary.env`: compact coverage must have no missing/forbidden rows,
 Chinese model catalog must report `status=ok` with all Chinese providers, and
 the coding repair fixture metrics must satisfy the configured pass-rate,

@@ -717,6 +717,7 @@ def write_minimal_self_test_run(
     content_checked: bool,
     stored_summary_override: dict[str, str] | None = None,
     stored_agent_contract: dict[str, Any] | None = None,
+    stored_report_override: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     summary = {
         "suite": "manual",
@@ -749,6 +750,8 @@ def write_minimal_self_test_run(
     }
     if stored_agent_contract is not None:
         stored_report["agent_parity_gate_contract"] = stored_agent_contract
+    if stored_report_override:
+        stored_report.update(stored_report_override)
     (run_dir / "suite_artifact_contract.json").write_text(
         json.dumps(
             stored_report,
@@ -881,6 +884,56 @@ def run_self_test() -> int:
                 file=sys.stderr,
             )
             return 1
+
+        base_field_cases = (
+            (
+                "not-ok",
+                {"ok": False},
+                "contract_report_not_ok:False",
+            ),
+            (
+                "bad-run-dir",
+                {"run_dir": "absolute-or-host-path"},
+                "contract_report_bad_run_dir:absolute-or-host-path",
+            ),
+            (
+                "bad-require-contract-report",
+                {"require_contract_report": False},
+                "contract_report_bad_require_contract_report:False",
+            ),
+            (
+                "findings-not-empty",
+                {"findings": ["contract_report_pending"]},
+                "contract_report_findings_not_empty",
+            ),
+        )
+        for label, stored_report_override, expected_finding in base_field_cases:
+            case_run = root / label
+            write_minimal_self_test_run(
+                case_run,
+                content_checked=True,
+                stored_report_override=stored_report_override,
+            )
+            case_findings = validate_existing_contract_report(
+                case_run,
+                {
+                    "summary": {
+                        "suite": "manual",
+                        "status": "ok",
+                        "exit_code": "0",
+                        "artifact_finalize_status": "ok",
+                        "run_log": "run.log",
+                        "artifact_index": "artifact_index.txt",
+                    },
+                },
+                require_content_checked=True,
+            )
+            if expected_finding not in set(case_findings):
+                print(
+                    f"SELF_TEST_FAIL {label}:{case_findings}",
+                    file=sys.stderr,
+                )
+                return 1
 
     print("SUITE_ARTIFACT_CONTRACT_SELF_TEST ok")
     return 0
