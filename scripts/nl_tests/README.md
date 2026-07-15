@@ -97,8 +97,9 @@ hard-match scanner, and historical hardcoded-language scanner. `gate_summary.env
 records `agent_loop_static_contracts=1`, so artifact readers can tell the
 Codex/Claude-style agent-loop boundary checks were part of the run.
 It also writes `evidence_extractor_contracts.txt` from
-`scripts/check_evidence_extractor_contracts.py`. `gate_summary.env` records
-`evidence_extractor_contracts=1`, and the artifact must contain
+`scripts/check_evidence_extractor_contracts.py --self-test` plus the main check.
+`gate_summary.env` records `evidence_extractor_contracts=1`, and the artifact
+must contain both `EVIDENCE_EXTRACTOR_CONTRACT_SELF_TEST ok` and
 `EVIDENCE_EXTRACTOR_CONTRACT_CHECK findings=0`, so structured tool observation
 metadata cannot quietly drift back to strict language-text evidence paths.
 The gate also writes `secret_scan_contract.json` from
