@@ -21,7 +21,7 @@ fn ask_runtime_failure_payload_is_machine_readable() {
 #[test]
 fn ask_runtime_failure_observed_facts_use_machine_payload_fields() {
     let facts = machine_payload_observed_facts(&ask_runtime_failure_machine_payload(
-        r#"provider=vendor-minimax failed: http 429: {"error":{"type":"rate_limit_error"}}"#,
+        r#"provider=vendor-minimax error_kind=rate_limited failed: http 429: {"error":{"type":"rate_limit_error"}}"#,
     ));
 
     assert!(facts.contains(&"message_key: clawd.msg.ask_runtime_failure".to_string()));
@@ -31,13 +31,14 @@ fn ask_runtime_failure_observed_facts_use_machine_payload_fields() {
     assert!(facts.contains(&"raw_error_present: true".to_string()));
     assert!(facts.contains(&"provider_error_class: rate_limited".to_string()));
     assert!(facts.contains(&"external_provider_blocked: true".to_string()));
+    assert!(facts.contains(&"provider_error_kind: rate_limited".to_string()));
     assert!(!facts.iter().any(|fact| fact.starts_with("error_summary:")));
 }
 
 #[test]
 fn ask_runtime_failure_default_text_preserves_provider_blocker_payload() {
     let text = ask_runtime_failure_default_text(
-        r#"provider=vendor-qwen failed: http 404: {"error":{"code":"model_not_found","type":"invalid_request_error"}}"#,
+        r#"provider=vendor-qwen error_kind=provider_non_retryable_business failed: http 404: {"error":{"code":"model_not_found","type":"invalid_request_error"}}"#,
     );
     let payload: serde_json::Value = serde_json::from_str(&text).unwrap();
 
@@ -46,6 +47,10 @@ fn ask_runtime_failure_default_text_preserves_provider_blocker_payload() {
     assert_eq!(payload["status_code"], "provider_model_unavailable");
     assert_eq!(payload["provider_error_class"], "model_unavailable");
     assert_eq!(payload["external_provider_blocked"], true);
+    assert_eq!(
+        payload["provider_error_kind"],
+        "provider_non_retryable_business"
+    );
 }
 
 #[test]
@@ -90,4 +95,18 @@ fn ask_runtime_failure_payload_classifies_provider_model_unavailable() {
     assert_eq!(payload["provider_error_class"], "model_unavailable");
     assert_eq!(payload["external_provider_blocked"], true);
     assert_eq!(payload["provider_http_status"], 404);
+}
+
+#[test]
+fn ask_runtime_failure_payload_classifies_gateway_timeout_error_kind() {
+    let payload: serde_json::Value = serde_json::from_str(&ask_runtime_failure_machine_payload(
+        "provider=vendor-qwen error_kind=timeout failed: request failed",
+    ))
+    .unwrap();
+
+    assert_eq!(payload["reason_code"], "provider_timeout");
+    assert_eq!(payload["status_code"], "provider_timeout");
+    assert_eq!(payload["provider_error_class"], "timeout");
+    assert_eq!(payload["provider_error_kind"], "timeout");
+    assert_eq!(payload["external_provider_blocked"], true);
 }

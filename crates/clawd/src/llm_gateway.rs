@@ -768,7 +768,8 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
                     // 上游链路已恢复，不应继续维持 Open/HalfOpen。
                     provider.breaker.note_success();
                 }
-                last_error = format!("provider={provider_name} failed: {err}");
+                last_error =
+                    format!("provider={provider_name} error_kind={error_kind} failed: {err}");
                 warn!(
                     "{} [LLM_CALL] stage=error task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_source={} error_kind={} error={}",
                     crate::highlight_tag("llm"),
