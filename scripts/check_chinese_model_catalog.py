@@ -931,6 +931,12 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate summary must record the NL raw LLM trace runner contract state",
     )
     require(
+        "LIVE_METRICS_RAN=1" in parity_text
+        and "live_metrics=${LIVE_METRICS_RAN}" in parity_text,
+        findings,
+        "agent parity gate summary must record whether live run metrics actually executed",
+    )
+    require(
         'if [[ -n "${NL_SUITE_RUN_DIR:-}" ]]' in parity_text
         and 'OUT_DIR="${NL_SUITE_RUN_DIR}/agent_parity_gate"' in parity_text,
         findings,

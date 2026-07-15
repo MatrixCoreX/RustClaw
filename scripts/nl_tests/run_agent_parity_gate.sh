@@ -18,6 +18,7 @@ SKIP_CODING_FIXTURE=0
 SKIP_METRICS=0
 DEDUPE_LATEST_CASE=0
 EXPECT_CASE_COUNT=0
+LIVE_METRICS_RAN=0
 
 MIN_PASS_RATE="${MIN_PASS_RATE:-1.0}"
 MAX_AVG_LLM_CALLS="${MAX_AVG_LLM_CALLS:-4}"
@@ -291,6 +292,7 @@ if [[ "${#RUN_DIRS[@]}" -gt 0 && "$SKIP_METRICS" -eq 0 ]]; then
   echo "AGENT_PARITY_GATE_STEP live_run_metrics count=${#RUN_DIRS[@]}"
   run_metrics_gate "${OUT_DIR}/run_metrics.json" "${RUN_DIRS[@]}" \
     > "${OUT_DIR}/run_metrics.txt"
+  LIVE_METRICS_RAN=1
 elif [[ "${#RUN_DIRS[@]}" -eq 0 ]]; then
   echo "AGENT_PARITY_GATE_NO_RUN_DIR live metrics skipped"
 fi
@@ -308,6 +310,7 @@ fi
   echo "coding_fixture=$((1 - SKIP_CODING_FIXTURE))"
   echo "run_dir_count=${#RUN_DIRS[@]}"
   echo "metrics=$((1 - SKIP_METRICS))"
+  echo "live_metrics=${LIVE_METRICS_RAN}"
   echo "min_pass_rate=${MIN_PASS_RATE}"
   echo "max_avg_llm_calls=${MAX_AVG_LLM_CALLS}"
   echo "max_prompt_truncations=${MAX_PROMPT_TRUNCATIONS}"

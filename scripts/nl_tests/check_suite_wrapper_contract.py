@@ -58,6 +58,7 @@ SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_provider_live_scope_helper": "expected_live_scope_providers",
     "agent_parity_provider_scope_skip_reason": "provider_not_in_live_scope",
     "agent_parity_rollout_metrics_validator": "validate_rollout_metrics_artifact",
+    "agent_parity_live_metrics_summary_flag": '"live_metrics"',
     "agent_parity_optional_validator": "validate_enabled_agent_parity_optional_artifacts",
     "agent_parity_nested_validator": "validate_agent_parity_gate_artifacts",
     "agent_parity_suite_branch": 'summary.get("suite") == "agent_parity_gate"',
