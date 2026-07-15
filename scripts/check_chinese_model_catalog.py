@@ -914,6 +914,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "expected_live_scope_providers" in suite_artifact_contract_text
         and "provider_not_in_live_scope" in suite_artifact_contract_text
         and "validate_rollout_metrics_artifact" in suite_artifact_contract_text
+        and "load_json_artifact" in suite_artifact_contract_text
+        and "load-json-artifact-bad-shape" in suite_artifact_contract_text
         and "validate_enabled_agent_parity_optional_artifacts" in suite_artifact_contract_text
         and "agent_parity_gate_summary_missing" in suite_artifact_contract_text
         and "agent-parity-missing-gate-summary" in suite_artifact_contract_text
