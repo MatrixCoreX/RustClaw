@@ -21,6 +21,10 @@ USER_ID=""
 CHAT_ID=""
 SKILL_NAME=""
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" "$1"
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -302,5 +306,5 @@ final_raw="$(submit_run_skill_and_wait "$SKILL_NAME" '{"action":"ping"}')"
 echo "$final_raw" | jq -e '.data.result_json.text == "TODO: implement ping"' >/dev/null
 
 echo "PASS: self-extension runtime enable regression finished"
-echo "workspace_root=${TEMP_WORKSPACE}"
+echo "workspace_root_ref=$(path_ref "${TEMP_WORKSPACE}")"
 echo "skill_name=${SKILL_NAME}"

@@ -19,6 +19,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 TASK_ID=""
 VERBOSE=0
 
@@ -134,6 +137,10 @@ print(json.dumps({
 PY
 }
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" "$1"
+}
+
 DB_PATH="${DB_PATH:-$(resolve_db_path)}"
 TASK_ROW_JSON=""
 if [[ -f "$DB_PATH" ]]; then
@@ -151,14 +158,14 @@ if [[ -f "$MODEL_IO_LOG" ]]; then
 fi
 
 echo "===== inspect_task: ${TASK_ID} ====="
-echo "db_path     : ${DB_PATH}"
-echo "model_io_log: ${MODEL_IO_LOG}"
-echo "tracing_log : ${TRACING_LOG}"
+echo "db_path_ref     : $(path_ref "${DB_PATH}")"
+echo "model_io_log_ref: $(path_ref "${MODEL_IO_LOG}")"
+echo "tracing_log_ref : $(path_ref "${TRACING_LOG}")"
 echo "calls_total : ${COUNT}"
 
 echo
 if [[ ! -f "$DB_PATH" ]]; then
-  echo "[inspect_task] sqlite db missing: ${DB_PATH}"
+  echo "[inspect_task] sqlite db missing: $(path_ref "${DB_PATH}")"
 elif [[ -z "$TASK_ROW_JSON" ]]; then
   echo "[inspect_task] no task row found for task_id=${TASK_ID}"
 else
@@ -179,7 +186,7 @@ else
 fi
 
 if [[ ! -f "$MODEL_IO_LOG" ]]; then
-  echo "[inspect_task] model_io log missing: $MODEL_IO_LOG"
+  echo "[inspect_task] model_io log missing: $(path_ref "${MODEL_IO_LOG}")"
   echo "[inspect_task] continuing with task_journal + tracing only"
 elif [[ "$COUNT" -eq 0 ]]; then
   echo "[inspect_task] no model_io entries found for task_id=${TASK_ID}"

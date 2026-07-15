@@ -33,6 +33,10 @@ HTTP_DIR_REL="document/nl_ops_http_demo"
 HTTP_INDEX_REL="${HTTP_DIR_REL}/index.html"
 REPAIR_HTTP_MARKER="ops-repair-ok"
 REPAIR_HTTP_BAD_MARKER="ops-repair-bad"
+
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" "$1"
+}
 REPAIR_HTTP_DIR_REL="document/nl_ops_http_repair_demo"
 REPAIR_HTTP_INDEX_REL="${REPAIR_HTTP_DIR_REL}/index.html"
 PASS=0
@@ -1047,9 +1051,9 @@ cleanup() {
   if [[ "$KEEP_WORKSPACE" != "1" && -n "$TEMP_WORKSPACE" && -d "$TEMP_WORKSPACE" ]]; then
     rm -rf "$TEMP_WORKSPACE"
   fi
-  echo "log_dir=${LOG_DIR}"
+  echo "log_dir_ref=$(path_ref "${LOG_DIR}")"
   if [[ "$KEEP_WORKSPACE" == "1" && -n "$TEMP_WORKSPACE" ]]; then
-    echo "workspace_root=${TEMP_WORKSPACE}"
+    echo "workspace_root_ref=$(path_ref "${TEMP_WORKSPACE}")"
   fi
   exit "$exit_code"
 }

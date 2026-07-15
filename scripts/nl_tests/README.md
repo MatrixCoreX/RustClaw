@@ -107,8 +107,9 @@ summary/index/report finalizer wiring and the agent parity nested artifact
 contract checker.
 It also writes `runner_path_ref_contract.json` from
 `scripts/nl_tests/check_runner_path_ref_contract.py`, locking the full/manual,
-multi-turn, ops, and circuit-breaker runner console outputs to portable path
-refs rather than host absolute paths.
+multi-turn, client-like, provider A/B, dynamic-guard, ops, task-termination,
+and circuit-breaker runner console outputs to portable path refs rather than
+host absolute paths.
 When launched through `run_suite.sh agent_parity_gate`, the gate stores its JSON
 artifacts under the same suite run directory at `agent_parity_gate/`; direct
 runs still default to `logs/agent_parity_gate/<timestamp>` unless `--out-dir` is

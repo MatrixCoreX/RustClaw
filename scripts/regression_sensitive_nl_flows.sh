@@ -31,6 +31,10 @@ PASS=0
 FAIL=0
 SKIP=0
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" "$1"
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -553,9 +557,9 @@ cleanup() {
   if [[ "$KEEP_WORKSPACE" != "1" && -n "$TEMP_WORKSPACE" && -d "$TEMP_WORKSPACE" ]]; then
     rm -rf "$TEMP_WORKSPACE"
   fi
-  echo "log_dir=${LOG_DIR}"
+  echo "log_dir_ref=$(path_ref "${LOG_DIR}")"
   if [[ "$KEEP_WORKSPACE" == "1" && -n "$TEMP_WORKSPACE" ]]; then
-    echo "workspace_root=${TEMP_WORKSPACE}"
+    echo "workspace_root_ref=$(path_ref "${TEMP_WORKSPACE}")"
   fi
   exit "$exit_code"
 }

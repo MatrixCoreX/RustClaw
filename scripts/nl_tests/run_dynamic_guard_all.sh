@@ -38,6 +38,10 @@ latest_run_dir() {
   ls -1dt "${log_root}"/* 2>/dev/null | head -n 1 || true
 }
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" "$1"
+}
+
 run_step \
   "dynamic_guard manual" \
   bash "${SCRIPT_DIR}/run_manual_test.sh" \
@@ -105,26 +109,26 @@ echo "All dynamic-guard suites completed."
 echo
 echo "Artifacts summary:"
 if [[ -n "${manual_latest}" ]]; then
-  echo "  manual_run_dir: ${manual_latest}"
-  echo "  manual_run_log: ${manual_latest}/run.log"
-  echo "  manual_summary_jsonl: ${manual_latest}/summary.jsonl"
-  echo "  manual_semantic_report: ${manual_latest}/semantic_report.jsonl"
+  echo "  manual_run_dir_ref: $(path_ref "${manual_latest}")"
+  echo "  manual_run_log_ref: $(path_ref "${manual_latest}/run.log")"
+  echo "  manual_summary_jsonl_ref: $(path_ref "${manual_latest}/summary.jsonl")"
+  echo "  manual_semantic_report_ref: $(path_ref "${manual_latest}/semantic_report.jsonl")"
 else
-  echo "  manual_run_dir: <not found>"
+  echo "  manual_run_dir_ref: not_found"
 fi
 if [[ -n "${clarify_latest}" ]]; then
-  echo "  clarify_run_dir: ${clarify_latest}"
-  echo "  clarify_run_log: ${clarify_latest}/run.log"
-  echo "  clarify_summary_jsonl: ${clarify_latest}/summary.jsonl"
-  echo "  clarify_semantic_report: ${clarify_latest}/semantic_report.jsonl"
+  echo "  clarify_run_dir_ref: $(path_ref "${clarify_latest}")"
+  echo "  clarify_run_log_ref: $(path_ref "${clarify_latest}/run.log")"
+  echo "  clarify_summary_jsonl_ref: $(path_ref "${clarify_latest}/summary.jsonl")"
+  echo "  clarify_semantic_report_ref: $(path_ref "${clarify_latest}/semantic_report.jsonl")"
 else
-  echo "  clarify_run_dir: <not found>"
+  echo "  clarify_run_dir_ref: not_found"
 fi
 if [[ -n "${context_latest}" ]]; then
-  echo "  context_run_dir: ${context_latest}"
-  echo "  context_run_log: ${context_latest}/run.log"
-  echo "  context_summary_jsonl: ${context_latest}/summary.jsonl"
-  echo "  context_semantic_report: ${context_latest}/semantic_report.jsonl"
+  echo "  context_run_dir_ref: $(path_ref "${context_latest}")"
+  echo "  context_run_log_ref: $(path_ref "${context_latest}/run.log")"
+  echo "  context_summary_jsonl_ref: $(path_ref "${context_latest}/summary.jsonl")"
+  echo "  context_semantic_report_ref: $(path_ref "${context_latest}/semantic_report.jsonl")"
 else
-  echo "  context_run_dir: <not found>"
+  echo "  context_run_dir_ref: not_found"
 fi

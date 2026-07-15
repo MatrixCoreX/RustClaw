@@ -70,6 +70,10 @@ Important:
 EOF
 }
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" --anchor "$OUT_DIR" --anchor-name out_dir "$1"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prepare)
@@ -192,9 +196,11 @@ prepare_cases() {
   cat > "${OUT_DIR}/manifest.env" <<EOF
 CASE_JSONL=${CASE_JSONL}
 EXPECTATIONS_JSONL=${EXPECTATIONS_JSONL}
+CASE_JSONL_REF=$(path_ref "${CASE_JSONL}")
+EXPECTATIONS_JSONL_REF=$(path_ref "${EXPECTATIONS_JSONL}")
 COUNT=${COUNT}
 EOF
-  echo "PROVIDER_AB_PREPARE_OK out_dir=${OUT_DIR} case_jsonl=${CASE_JSONL} expectations=${EXPECTATIONS_JSONL}"
+  echo "PROVIDER_AB_PREPARE_OK out_dir_ref=$(path_ref "${OUT_DIR}") case_jsonl_ref=$(path_ref "${CASE_JSONL}") expectations_ref=$(path_ref "${EXPECTATIONS_JSONL}")"
 }
 
 extract_run_dir() {
@@ -266,7 +272,7 @@ run_side() {
     printf 'PROVIDER_AB_RUN_SIDE_INCONCLUSIVE side=%s provider=%s reason=%s\n' \
       "${SIDE}" "${PROVIDER}" "${reason}" > "${output_file}"
     cat > "${OUT_DIR}/${SIDE}/metadata.json" <<EOF
-{"side":"${SIDE}","provider":"${PROVIDER}","status":"inconclusive","attempts":0,"run_dir":"","case_jsonl":"${CASE_JSONL}","expectations":"${EXPECTATIONS_JSONL}","output_file":"${output_file}","reason":"${reason}"}
+{"side":"${SIDE}","provider":"${PROVIDER}","status":"inconclusive","attempts":0,"run_dir":"","run_dir_ref":"","case_jsonl":"${CASE_JSONL}","case_jsonl_ref":"$(path_ref "${CASE_JSONL}")","expectations":"${EXPECTATIONS_JSONL}","expectations_ref":"$(path_ref "${EXPECTATIONS_JSONL}")","output_file":"${output_file}","output_file_ref":"$(path_ref "${output_file}")","reason":"${reason}"}
 EOF
     cat "${output_file}"
     return 0
@@ -303,9 +309,9 @@ EOF
     RUN_DIR="$(extract_run_dir "${output_file}" 2>/dev/null || true)"
     if output_looks_provider_inconclusive "${output_file}"; then
       cat > "${OUT_DIR}/${SIDE}/metadata.json" <<EOF
-{"side":"${SIDE}","provider":"${PROVIDER}","status":"inconclusive","attempts":${attempts_run},"run_dir":"${RUN_DIR}","case_jsonl":"${CASE_JSONL}","expectations":"${EXPECTATIONS_JSONL}","output_file":"${output_file}"}
+{"side":"${SIDE}","provider":"${PROVIDER}","status":"inconclusive","attempts":${attempts_run},"run_dir":"${RUN_DIR}","run_dir_ref":"$(path_ref "${RUN_DIR}")","case_jsonl":"${CASE_JSONL}","case_jsonl_ref":"$(path_ref "${CASE_JSONL}")","expectations":"${EXPECTATIONS_JSONL}","expectations_ref":"$(path_ref "${EXPECTATIONS_JSONL}")","output_file":"${output_file}","output_file_ref":"$(path_ref "${output_file}")"}
 EOF
-      echo "PROVIDER_AB_RUN_SIDE_INCONCLUSIVE side=${SIDE} provider=${PROVIDER} attempts=${attempts_run} run_dir=${RUN_DIR}"
+      echo "PROVIDER_AB_RUN_SIDE_INCONCLUSIVE side=${SIDE} provider=${PROVIDER} attempts=${attempts_run} run_dir_ref=$(path_ref "${RUN_DIR}")"
       return 0
     fi
     echo "PROVIDER_AB_RUN_SIDE_FAIL side=${SIDE} provider=${PROVIDER} attempts=${attempts_run} status=${suite_status}" >&2
@@ -316,9 +322,9 @@ EOF
     "${RUN_DIR}" \
     --expectations "${EXPECTATIONS_JSONL}"
   cat > "${OUT_DIR}/${SIDE}/metadata.json" <<EOF
-{"side":"${SIDE}","provider":"${PROVIDER}","status":"passed","attempts":${attempts_run},"run_dir":"${RUN_DIR}","case_jsonl":"${CASE_JSONL}","expectations":"${EXPECTATIONS_JSONL}"}
+{"side":"${SIDE}","provider":"${PROVIDER}","status":"passed","attempts":${attempts_run},"run_dir":"${RUN_DIR}","run_dir_ref":"$(path_ref "${RUN_DIR}")","case_jsonl":"${CASE_JSONL}","case_jsonl_ref":"$(path_ref "${CASE_JSONL}")","expectations":"${EXPECTATIONS_JSONL}","expectations_ref":"$(path_ref "${EXPECTATIONS_JSONL}")"}
 EOF
-  echo "PROVIDER_AB_RUN_SIDE_OK side=${SIDE} provider=${PROVIDER} attempts=${attempts_run} run_dir=${RUN_DIR}"
+  echo "PROVIDER_AB_RUN_SIDE_OK side=${SIDE} provider=${PROVIDER} attempts=${attempts_run} run_dir_ref=$(path_ref "${RUN_DIR}")"
 }
 
 compare_runs() {
