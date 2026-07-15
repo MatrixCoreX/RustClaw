@@ -235,9 +235,11 @@ For `registry_policy_contracts.txt`, `skill_registry_aliases.txt`, and
 `long_tail_skill_contracts.txt`, the required content includes their self-test
 tokens plus `REGISTRY_POLICY_CONTRACT_CHECK ok`, `SKILL_REGISTRY_ALIAS_CHECK ok`,
 and `LONG_TAIL_SKILL_CONTRACT_CHECK ok`.
-For `agent_loop_static_contracts.txt`, the required content includes the five
-`AGENT_LOOP_STATIC_SELF_TEST ...` labels as well as the main guard success
-tokens.
+For `agent_loop_static_contracts.txt`, the required content includes the six
+route/frontdoor/static `AGENT_LOOP_STATIC_SELF_TEST ...` labels as well as the
+main guard success tokens, including
+`AGENT_LOOP_STATIC_SELF_TEST check_frontdoor_boundary_dispatch.py` and
+`FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0`.
 It also checks
 that gate summary path fields use portable refs such as `out_dir_ref=out_dir`
 and never host absolute paths. It also checks artifact content: text reports
