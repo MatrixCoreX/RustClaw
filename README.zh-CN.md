@@ -664,7 +664,7 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
 
 ## 模型能力目录与中文 Provider 验证
 
-模型能力目录是配置派生的机器事实，不是运行时临时猜测。它从 `configs/config.toml` 的 LLM provider 表，以及 `configs/image.toml`、`configs/audio.toml`、`configs/video.toml`、`configs/music.toml` 的多模态模型配置生成，输出不含密钥的能力字段：文本、图片/视频/音频输入、图片/语音/视频/音乐生成、是否需要 async、是否支持 dry-run、timeout、context window、当前激活文本 provider 和配置来源。
+模型能力目录是配置派生的机器事实，不是运行时临时猜测。它从 `configs/config.toml` 的 LLM provider 表，以及 `configs/image.toml`、`configs/audio.toml`、`configs/video.toml`、`configs/music.toml` 的多模态模型配置生成，输出不含密钥的能力字段：文本、图片/视频/音频输入、图片/语音/视频/音乐生成、是否需要 async、是否支持 dry-run、timeout、context window、`credential_state`、当前激活文本 provider 和配置来源。`credential_state` 是机器 token（`configured_inline`、`configured_env` 或 `missing`），不会包含密钥值。
 
 ```mermaid
 flowchart TD

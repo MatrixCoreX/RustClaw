@@ -105,6 +105,7 @@ RUNTIME_CATALOG_ENTRY_FIELDS = {
     "base_url_kind",
     "config_source",
     "context_window_tokens",
+    "credential_state",
     "dry_run_supported",
     "model",
     "models",
@@ -182,6 +183,7 @@ def catalog_entry(
     music_gen = music.get("music_generation", {}) if isinstance(music.get("music_generation"), dict) else {}
 
     model = str(llm_table.get("model") or "")
+    credential_state = "configured_inline" if str(llm_table.get("api_key") or "").strip() else "missing"
     image_understanding_models = provider_models(image_vision, provider)
     audio_transcription_models = provider_models(stt, provider)
     supports_image_input = model in image_understanding_models
@@ -213,6 +215,7 @@ def catalog_entry(
         "base_url_kind": base_url_kind(str(llm_table.get("base_url") or "")),
         "context_window_tokens": llm_table.get("context_window_tokens"),
         "timeout_seconds": llm_table.get("timeout_seconds"),
+        "credential_state": credential_state,
         "supports_text": True,
         "supports_image_input": supports_image_input,
         "supports_video_input": supports_video_input,

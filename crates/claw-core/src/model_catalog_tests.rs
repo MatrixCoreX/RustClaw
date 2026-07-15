@@ -1,6 +1,34 @@
 use super::*;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+struct EnvRestore {
+    name: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvRestore {
+    fn capture(name: &'static str) -> Self {
+        Self {
+            name,
+            previous: std::env::var(name).ok(),
+        }
+    }
+}
+
+impl Drop for EnvRestore {
+    fn drop(&mut self) {
+        unsafe {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.name, value),
+                None => std::env::remove_var(self.name),
+            }
+        }
+    }
+}
 
 fn temp_workspace_root() -> PathBuf {
     let unique = SystemTime::now()
@@ -34,6 +62,20 @@ api_key = "secret-qwen"
 model = "qwen-max-latest"
 models = ["qwen-max-latest"]
 timeout_seconds = 60
+
+[llm.fixture_missing]
+base_url = "https://fixture.invalid/v1"
+api_key = ""
+model = "fixture-model"
+models = ["fixture-model"]
+timeout_seconds = 30
+
+[llm.mimo]
+base_url = "https://api.xiaomimimo.com/v1"
+api_key = ""
+model = "mimo-v2.5-pro"
+models = ["mimo-v2.5-pro"]
+timeout_seconds = 180
 "#,
     )
     .expect("write config");
@@ -108,11 +150,52 @@ fn catalog_separates_selected_model_inputs_from_media_skill_support() {
     assert!(minimax.supports_video_generation);
     assert!(minimax.supports_music_generation);
     assert!(minimax.async_required);
+    assert_eq!(minimax.credential_state, "configured_inline");
     assert_eq!(minimax.context_window_tokens, Some(1_000_000));
     assert_eq!(
         minimax.base_url_kind,
         "minimax_official_openai_compat".to_string()
     );
+}
+
+#[test]
+fn catalog_reports_missing_credential_state_without_secret_values() {
+    let root = temp_workspace_root();
+    write_fixture(&root);
+
+    let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
+    let missing = catalog
+        .entries
+        .iter()
+        .find(|entry| entry.provider == "fixture_missing")
+        .expect("fixture missing entry");
+
+    assert_eq!(missing.credential_state, "missing");
+    assert!(missing.supports_text);
+}
+
+#[test]
+fn catalog_reports_env_credential_state_without_secret_values() {
+    let _guard = ENV_LOCK.lock().expect("env lock");
+    let _restore_mimo = EnvRestore::capture("MIMO_API_KEY");
+    let _restore_xiaomi = EnvRestore::capture("XIAOMI_API_KEY");
+    unsafe {
+        std::env::set_var("MIMO_API_KEY", "secret-env-mimo");
+        std::env::remove_var("XIAOMI_API_KEY");
+    }
+
+    let root = temp_workspace_root();
+    write_fixture(&root);
+    let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
+    let mimo = catalog
+        .entries
+        .iter()
+        .find(|entry| entry.provider == "mimo")
+        .expect("mimo entry");
+    let serialized = serde_json::to_string(&catalog).expect("json");
+
+    assert_eq!(mimo.credential_state, "configured_env");
+    assert!(!serialized.contains("secret-env-mimo"));
 }
 
 #[test]
@@ -125,5 +208,6 @@ fn catalog_output_does_not_serialize_secret_values() {
 
     assert!(!serialized.contains("secret-minimax"));
     assert!(!serialized.contains("secret-qwen"));
+    assert!(serialized.contains("configured_inline"));
     assert!(serialized.contains("qwen_dashscope_openai_compat"));
 }

@@ -35,6 +35,7 @@ pub struct ModelCatalogEntry {
     pub base_url_kind: String,
     pub context_window_tokens: Option<usize>,
     pub timeout_seconds: Option<u64>,
+    pub credential_state: String,
     pub supports_text: bool,
     pub supports_image_input: bool,
     pub supports_video_input: bool,
@@ -168,6 +169,7 @@ fn catalog_entry(
         base_url_kind: base_url_kind(&string_field(llm_table, "base_url")),
         context_window_tokens: usize_field(llm_table, "context_window_tokens"),
         timeout_seconds: u64_field(llm_table, "timeout_seconds"),
+        credential_state: credential_state(llm_table, provider),
         supports_text: true,
         supports_image_input,
         supports_video_input,
@@ -280,6 +282,34 @@ fn u64_field(table: &toml::map::Map<String, toml::Value>, key: &str) -> Option<u
         .and_then(toml::Value::as_integer)
         .and_then(|value| u64::try_from(value).ok())
         .filter(|value| *value > 0)
+}
+
+fn credential_state(table: &toml::map::Map<String, toml::Value>, provider: &str) -> String {
+    if !string_field(table, "api_key").is_empty() {
+        return "configured_inline".to_string();
+    }
+    if provider_credential_env_vars(provider)
+        .iter()
+        .any(|name| std::env::var(name).is_ok_and(|value| !value.trim().is_empty()))
+    {
+        return "configured_env".to_string();
+    }
+    "missing".to_string()
+}
+
+fn provider_credential_env_vars(provider: &str) -> &'static [&'static str] {
+    match provider {
+        "anthropic" => &["ANTHROPIC_API_KEY"],
+        "custom" => &["CUSTOM_API_KEY"],
+        "deepseek" => &["DEEPSEEK_API_KEY"],
+        "google" => &["GOOGLE_API_KEY"],
+        "grok" => &["GROK_API_KEY"],
+        "minimax" => &["MINIMAX_API_KEY"],
+        "mimo" => &["MIMO_API_KEY", "XIAOMI_API_KEY"],
+        "openai" => &["OPENAI_API_KEY"],
+        "qwen" => &["QWEN_API_KEY", "DASHSCOPE_API_KEY"],
+        _ => &[],
+    }
 }
 
 fn api_style_token(raw: Option<&str>) -> String {

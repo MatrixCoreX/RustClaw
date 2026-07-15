@@ -59,6 +59,7 @@ pub(super) fn model_catalog_text_lines(body: &serde_json::Value) -> Vec<String> 
             let context = token(entry, "context_window_tokens");
             let api_style = token(entry, "api_style");
             let base_url_kind = token(entry, "base_url_kind");
+            let credential_state = token(entry, "credential_state");
             let capabilities = [
                 ("text", bool_token(entry, "supports_text")),
                 ("image_input", bool_token(entry, "supports_image_input")),
@@ -96,7 +97,7 @@ pub(super) fn model_catalog_text_lines(body: &serde_json::Value) -> Vec<String> 
             .collect::<Vec<_>>()
             .join(" ");
             format!(
-            "model_catalog_entry provider={provider} model={model} active={active} api_style={api_style} base_url_kind={base_url_kind} context_window_tokens={context} {capabilities}"
+            "model_catalog_entry provider={provider} model={model} active={active} api_style={api_style} base_url_kind={base_url_kind} credential_state={credential_state} context_window_tokens={context} {capabilities}"
             )
         })
         .collect()
