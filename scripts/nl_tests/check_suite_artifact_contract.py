@@ -402,9 +402,13 @@ def validate_chinese_model_catalog_artifact(run_dir: Path) -> tuple[list[str], i
         findings.append("agent_parity_gate_chinese_model_catalog_findings_nonzero")
     if payload.get("findings") != []:
         findings.append("agent_parity_gate_chinese_model_catalog_findings_not_empty")
+    catalog_rows = payload.get("catalog", [])
+    if not isinstance(catalog_rows, list):
+        findings.append("agent_parity_gate_chinese_model_catalog_bad_catalog_shape")
+        catalog_rows = []
     providers = {
         entry.get("provider")
-        for entry in payload.get("catalog", [])
+        for entry in catalog_rows
         if isinstance(entry, dict)
     }
     missing = sorted(AGENT_PARITY_CHINESE_MODEL_PROVIDERS - providers)
@@ -453,11 +457,11 @@ def validate_provider_smoke_artifacts(
         checks += 8
         if safe_int(payload.get("provider_count")) < len(AGENT_PARITY_CHINESE_MODEL_PROVIDERS):
             findings.append("agent_parity_gate_provider_smoke_bad_provider_count")
-        provider_rows = [
-            entry
-            for entry in payload.get("providers", [])
-            if isinstance(entry, dict)
-        ]
+        provider_rows_raw = payload.get("providers", [])
+        if not isinstance(provider_rows_raw, list):
+            findings.append("agent_parity_gate_provider_smoke_bad_providers_shape")
+            provider_rows_raw = []
+        provider_rows = [entry for entry in provider_rows_raw if isinstance(entry, dict)]
         providers = {entry.get("provider") for entry in provider_rows}
         missing = sorted(AGENT_PARITY_CHINESE_MODEL_PROVIDERS - providers)
         if missing:
@@ -1048,6 +1052,75 @@ def run_self_test() -> int:
             print(
                 "SELF_TEST_FAIL provider_case_coverage_bad_provider_tags:"
                 f"{provider_case_coverage_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        model_catalog_shape_run = root / "chinese-model-catalog-bad-catalog-shape"
+        write_minimal_self_test_run(model_catalog_shape_run, content_checked=True)
+        model_catalog_shape_path = (
+            model_catalog_shape_run / "agent_parity_gate/chinese_model_catalog.json"
+        )
+        model_catalog_shape_path.parent.mkdir(parents=True, exist_ok=True)
+        model_catalog_shape_path.write_text(
+            json.dumps(
+                {
+                    "status": "ok",
+                    "finding_count": 0,
+                    "findings": [],
+                    "catalog": 1,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        model_catalog_shape_findings, _ = validate_chinese_model_catalog_artifact(
+            model_catalog_shape_run
+        )
+        if (
+            "agent_parity_gate_chinese_model_catalog_bad_catalog_shape"
+            not in set(model_catalog_shape_findings)
+        ):
+            print(
+                "SELF_TEST_FAIL chinese_model_catalog_bad_catalog_shape:"
+                f"{model_catalog_shape_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        provider_matrix_shape_run = root / "provider-smoke-bad-providers-shape"
+        write_minimal_self_test_run(provider_matrix_shape_run, content_checked=True)
+        provider_matrix_summary_path = (
+            provider_matrix_shape_run
+            / "agent_parity_gate/chinese_provider_smoke/matrix_summary.json"
+        )
+        provider_matrix_summary_path.parent.mkdir(parents=True, exist_ok=True)
+        provider_matrix_summary_path.write_text(
+            json.dumps(
+                {
+                    "provider_count": len(AGENT_PARITY_CHINESE_MODEL_PROVIDERS),
+                    "providers": 1,
+                    "status_counts": {},
+                    "reason_code_counts": {},
+                    "credential_state_counts": {},
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        provider_matrix_shape_findings, _ = validate_provider_smoke_artifacts(
+            provider_matrix_shape_run,
+            {"chinese_provider_live_providers": "minimax"},
+        )
+        if (
+            "agent_parity_gate_provider_smoke_bad_providers_shape"
+            not in set(provider_matrix_shape_findings)
+        ):
+            print(
+                "SELF_TEST_FAIL provider_smoke_bad_providers_shape:"
+                f"{provider_matrix_shape_findings}",
                 file=sys.stderr,
             )
             return 1
