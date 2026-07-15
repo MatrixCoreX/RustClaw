@@ -216,6 +216,17 @@ def base_url_kind(base_url: str) -> str:
     return "custom_or_unknown"
 
 
+def api_style_token(raw: Any) -> str:
+    value = str(raw or "").strip()
+    if value in {"", "openai_compat", "openai_compatible"}:
+        return "openai_compatible"
+    if value in {"anthropic_claude", "anthropic_messages"}:
+        return "anthropic_messages"
+    if value in {"google_gemini", "gemini"}:
+        return "google_gemini"
+    return "custom_or_unknown"
+
+
 def provider_models(section: dict[str, Any], provider: str) -> set[str]:
     return set(as_list(section.get(f"{provider}_models")))
 
@@ -302,7 +313,7 @@ def catalog_entry(
         "provider": provider,
         "model": model,
         "models": as_list(llm_table.get("models")),
-        "api_style": "openai_compatible",
+        "api_style": api_style_token(llm_table.get("api_format")),
         "base_url_kind": base_url_kind(str(llm_table.get("base_url") or "")),
         "context_window_tokens": llm_table.get("context_window_tokens"),
         "timeout_seconds": llm_table.get("timeout_seconds"),
