@@ -1,0 +1,129 @@
+use super::*;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn temp_workspace_root() -> PathBuf {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("rustclaw-model-catalog-{unique}"));
+    std::fs::create_dir_all(root.join("configs")).expect("create configs");
+    root
+}
+
+fn write_fixture(root: &Path) {
+    std::fs::write(
+        root.join("configs/config.toml"),
+        r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M3"
+
+[llm.minimax]
+base_url = "https://api.minimaxi.com/v1"
+api_key = "secret-minimax"
+model = "MiniMax-M3"
+models = ["MiniMax-M3", "MiniMax-M2.7"]
+context_window_tokens = 1000000
+timeout_seconds = 180
+
+[llm.qwen]
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+api_key = "secret-qwen"
+model = "qwen-max-latest"
+models = ["qwen-max-latest"]
+timeout_seconds = 60
+"#,
+    )
+    .expect("write config");
+    std::fs::write(
+        root.join("configs/image.toml"),
+        r#"
+[image_vision]
+minimax_models = ["MiniMax-M3"]
+qwen_models = ["qwen-vl-max"]
+
+[image_generation]
+minimax_models = ["image-01"]
+qwen_models = ["wanx2.1-t2i-turbo"]
+
+[image_edit]
+minimax_models = ["image-01"]
+"#,
+    )
+    .expect("write image");
+    std::fs::write(
+        root.join("configs/audio.toml"),
+        r#"
+[audio_transcribe]
+qwen_models = ["qwen3-asr-flash"]
+minimax_models = ["speech-01"]
+
+[audio_synthesize]
+minimax_models = ["speech-2.8-turbo"]
+qwen_models = ["qwen3-tts-flash"]
+"#,
+    )
+    .expect("write audio");
+    std::fs::write(
+        root.join("configs/video.toml"),
+        r#"
+[video_generation]
+minimax_models = ["MiniMax-Hailuo-2.3"]
+"#,
+    )
+    .expect("write video");
+    std::fs::write(
+        root.join("configs/music.toml"),
+        r#"
+[music_generation]
+minimax_models = ["music-2.6"]
+"#,
+    )
+    .expect("write music");
+}
+
+#[test]
+fn catalog_separates_selected_model_inputs_from_media_skill_support() {
+    let root = temp_workspace_root();
+    write_fixture(&root);
+
+    let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
+    let minimax = catalog
+        .entries
+        .iter()
+        .find(|entry| entry.provider == "minimax")
+        .expect("minimax entry");
+
+    assert_eq!(catalog.selected_provider, "minimax");
+    assert_eq!(catalog.selected_model, "MiniMax-M3");
+    assert!(minimax.active_text_provider);
+    assert!(minimax.supports_image_input);
+    assert!(minimax.supports_video_input);
+    assert!(!minimax.supports_audio_input);
+    assert!(minimax.supports_audio_transcription);
+    assert!(minimax.supports_image_generation);
+    assert!(minimax.supports_audio_generation);
+    assert!(minimax.supports_video_generation);
+    assert!(minimax.supports_music_generation);
+    assert!(minimax.async_required);
+    assert_eq!(minimax.context_window_tokens, Some(1_000_000));
+    assert_eq!(
+        minimax.base_url_kind,
+        "minimax_official_openai_compat".to_string()
+    );
+}
+
+#[test]
+fn catalog_output_does_not_serialize_secret_values() {
+    let root = temp_workspace_root();
+    write_fixture(&root);
+
+    let catalog = build_model_catalog_from_workspace(&root).expect("catalog");
+    let serialized = serde_json::to_string(&catalog).expect("json");
+
+    assert!(!serialized.contains("secret-minimax"));
+    assert!(!serialized.contains("secret-qwen"));
+    assert!(serialized.contains("qwen_dashscope_openai_compat"));
+}

@@ -5,6 +5,7 @@ mod exec;
 mod goal;
 mod health;
 mod llm_trace;
+mod models;
 mod permission;
 mod report;
 mod report_budget_health;
@@ -23,6 +24,7 @@ pub(crate) use goal::{
 };
 pub(crate) use health::run_health;
 pub(crate) use llm_trace::run_llm_trace;
+pub(crate) use models::run_models_catalog;
 pub(crate) use permission::{
     run_permission_capability, run_permission_explain, run_permission_inspect,
 };
@@ -56,6 +58,8 @@ use goal::{
 #[cfg(test)]
 use llm_trace::llm_trace_text_lines;
 #[cfg(test)]
+use models::{filter_catalog_response, model_catalog_text_lines};
+#[cfg(test)]
 use permission::permission_report_json;
 #[cfg(test)]
 use report::{coding_review_json, subagent_report_json, task_report_json, task_report_text_lines};
@@ -86,3 +90,7 @@ mod session_tests;
 #[cfg(test)]
 #[path = "commands_llm_trace_tests.rs"]
 mod llm_trace_tests;
+
+#[cfg(test)]
+#[path = "commands_models_tests.rs"]
+mod models_tests;
