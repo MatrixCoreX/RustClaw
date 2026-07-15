@@ -418,6 +418,13 @@ echo "AGENT_PARITY_GATE_STEP deterministic_boundary_inventory_contracts"
   python3 "${ROOT_DIR}/scripts/check_repair_boundary_inventory_coverage.py"
 } > "${OUT_DIR}/deterministic_boundary_inventory_contracts.txt"
 
+echo "AGENT_PARITY_GATE_STEP maintainability_skill_contracts"
+{
+  python3 "${ROOT_DIR}/scripts/check_long_files.py"
+  python3 "${ROOT_DIR}/scripts/check_skill_prompts.py"
+  python3 "${ROOT_DIR}/scripts/check_skill_registry_parity.py" --mode all --strict
+} > "${OUT_DIR}/maintainability_skill_contracts.txt"
+
 echo "AGENT_PARITY_GATE_STEP evidence_extractor_contracts"
 {
   python3 "${ROOT_DIR}/scripts/check_evidence_extractor_contracts.py" --self-test
@@ -527,6 +534,7 @@ fi
   echo "semantic_boundary_contracts=1"
   echo "agent_architecture_boundary_contracts=1"
   echo "deterministic_boundary_inventory_contracts=1"
+  echo "maintainability_skill_contracts=1"
   echo "evidence_extractor_contracts=1"
   echo "secret_scan_contract=1"
   echo "suite_wrapper_contract=1"

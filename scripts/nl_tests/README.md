@@ -242,6 +242,13 @@ the artifact must contain `ANSWER_VERIFIER_BOUNDARY_CHECK ok`,
 `DETERMINISTIC_DECISION_INVENTORY_CHECK ok`,
 `REPAIR_BOUNDARY_INVENTORY_CHECK ok`, and
 `REPAIR_BOUNDARY_INVENTORY_COVERAGE_CHECK required=... missing=0`.
+It also writes `maintainability_skill_contracts.txt` from
+`scripts/check_long_files.py`, `scripts/check_skill_prompts.py`, and
+`scripts/check_skill_registry_parity.py --mode all --strict`.
+`gate_summary.env` records `maintainability_skill_contracts=1`, and the
+artifact must contain `LONG_FILE_CHECK ok`, layered prompt success text, and
+`REGISTRY_PARITY mode=all ... differences=0`, so file-size maintainability,
+generated skill prompts, and main/docker registry parity are release artifacts.
 It also writes `evidence_extractor_contracts.txt` from
 `scripts/check_evidence_extractor_contracts.py --self-test` plus the main check.
 `gate_summary.env` records `evidence_extractor_contracts=1`, and the artifact
@@ -289,6 +296,7 @@ root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/agent_loop_static_contracts.txt`,
 `agent_parity_gate/agent_architecture_boundary_contracts.txt`,
 `agent_parity_gate/deterministic_boundary_inventory_contracts.txt`,
+`agent_parity_gate/maintainability_skill_contracts.txt`,
 `agent_parity_gate/evidence_extractor_contracts.txt`, and
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
 They also write `suite_summary.env` with machine fields `suite`, `status`,
@@ -327,8 +335,8 @@ scope, then checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
 the runtime hard-reply, policy-boundary hard-reply, repair no-user-text,
 policy-decision-token, registry-policy, registry-alias, long-tail-skill,
-task-lifecycle, task-event/context/team, clawcli model-readiness, static
-agent-loop, evidence-extractor, secret-scan, wrapper, no-agent-mode,
+maintainability-skill, task-lifecycle, task-event/context/team, clawcli
+model-readiness, static agent-loop, evidence-extractor, secret-scan, wrapper, no-agent-mode,
 suite-artifact self-test, and raw LLM trace contracts participated in the run.
 For `runtime_hard_reply_baseline.txt`, the required content includes
 `SELF_TEST_OK`, `RUNTIME_HARD_REPLY_ALL_SCAN`, and `new=0`.
@@ -423,6 +431,10 @@ includes `ANSWER_VERIFIER_BOUNDARY_CHECK ok`,
 `DETERMINISTIC_DECISION_INVENTORY_CHECK ok`,
 `REPAIR_BOUNDARY_INVENTORY_CHECK ok`, and
 `REPAIR_BOUNDARY_INVENTORY_COVERAGE_CHECK required=... missing=0`.
+For `maintainability_skill_contracts.txt`, the required content includes
+`LONG_FILE_CHECK ok`, `OK: all`,
+`registry skills have a generated layered prompt body`,
+`REGISTRY_PARITY mode=all`, and `differences=0`.
 It also checks
 that gate summary path fields use portable refs such as `out_dir_ref=out_dir`
 and never host absolute paths. It also checks artifact content: text reports
