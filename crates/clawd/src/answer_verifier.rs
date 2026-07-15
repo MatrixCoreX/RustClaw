@@ -1,9 +1,7 @@
 use std::collections::BTreeSet;
 
-use serde::Deserialize;
-use serde_json::json;
-
 use crate::{AppState, ClaimedTask, RouteResult};
+use serde::Deserialize;
 
 const ANSWER_VERIFIER_PROMPT_LOGICAL_PATH: &str = "prompts/answer_verifier_prompt.md";
 const MAX_VERIFIER_STEPS: usize = 8;
