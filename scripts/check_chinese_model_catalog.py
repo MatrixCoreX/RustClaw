@@ -39,6 +39,8 @@ MUSIC_CONFIG = ROOT / "configs/music.toml"
 CHINESE_CASE_FILE = ROOT / "scripts/nl_tests/cases/nl_cases_chinese_model_adapter_20260715.txt"
 CHINESE_PROVIDER_SMOKE_RUNNER = ROOT / "scripts/nl_tests/run_chinese_provider_smoke_matrix.sh"
 AGENT_PARITY_GATE_RUNNER = ROOT / "scripts/nl_tests/run_agent_parity_gate.sh"
+SUITE_WRAPPER_CONTRACT_CHECKER = ROOT / "scripts/nl_tests/check_suite_wrapper_contract.py"
+SUITE_ARTIFACT_CONTRACT_CHECKER = ROOT / "scripts/nl_tests/check_suite_artifact_contract.py"
 VENDOR_PATCH_ROOT = ROOT / "prompts/layers/vendor_patches"
 TASK_DEBUG_TRACE_SOURCE = ROOT / "crates/clawd/src/http/ui_routes/task_debug_trace.rs"
 UI_TASK_LLM_TRACE_SOURCE = ROOT / "UI/src/lib/task-llm-trace.ts"
@@ -687,11 +689,31 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         findings,
         f"missing {AGENT_PARITY_GATE_RUNNER.relative_to(ROOT)}",
     )
+    require(
+        SUITE_WRAPPER_CONTRACT_CHECKER.exists(),
+        findings,
+        f"missing {SUITE_WRAPPER_CONTRACT_CHECKER.relative_to(ROOT)}",
+    )
+    require(
+        SUITE_ARTIFACT_CONTRACT_CHECKER.exists(),
+        findings,
+        f"missing {SUITE_ARTIFACT_CONTRACT_CHECKER.relative_to(ROOT)}",
+    )
     if not CHINESE_PROVIDER_SMOKE_RUNNER.exists() or not AGENT_PARITY_GATE_RUNNER.exists():
         return
 
     smoke_text = CHINESE_PROVIDER_SMOKE_RUNNER.read_text(encoding="utf-8")
     parity_text = AGENT_PARITY_GATE_RUNNER.read_text(encoding="utf-8")
+    suite_wrapper_text = (
+        SUITE_WRAPPER_CONTRACT_CHECKER.read_text(encoding="utf-8")
+        if SUITE_WRAPPER_CONTRACT_CHECKER.exists()
+        else ""
+    )
+    suite_artifact_contract_text = (
+        SUITE_ARTIFACT_CONTRACT_CHECKER.read_text(encoding="utf-8")
+        if SUITE_ARTIFACT_CONTRACT_CHECKER.exists()
+        else ""
+    )
     require(
         'DEFAULT_LIVE_PROVIDERS="${CHINESE_PROVIDER_LIVE_PROVIDERS:-minimax}"'
         in smoke_text,
@@ -839,6 +861,26 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "suite_wrapper_contract=1" in parity_text,
         findings,
         "agent parity gate summary must record the wrapped suite contract state",
+    )
+    require(
+        "SUITE_ARTIFACT_CONTRACT" in suite_wrapper_text
+        and "AGENT_PARITY_GATE_REQUIRED_ARTIFACTS" in suite_wrapper_text
+        and "AGENT_PARITY_GATE_REQUIRED_FLAGS" in suite_wrapper_text
+        and "agent_parity_gate_contract" in suite_wrapper_text,
+        findings,
+        "wrapped suite contract guard must statically protect agent parity nested artifact checks",
+    )
+    require(
+        "AGENT_PARITY_GATE_REQUIRED_ARTIFACTS" in suite_artifact_contract_text
+        and "agent_parity_gate/agent_loop_static_contracts.txt" in suite_artifact_contract_text
+        and "agent_parity_gate/suite_wrapper_contract.json" in suite_artifact_contract_text
+        and "AGENT_PARITY_GATE_REQUIRED_FLAGS" in suite_artifact_contract_text
+        and '"agent_loop_static_contracts": "1"' in suite_artifact_contract_text
+        and '"suite_wrapper_contract": "1"' in suite_artifact_contract_text
+        and 'summary.get("suite") == "agent_parity_gate"' in suite_artifact_contract_text
+        and '"agent_parity_gate_contract"' in suite_artifact_contract_text,
+        findings,
+        "suite artifact contract checker must verify wrapped agent parity nested artifacts and flags",
     )
     require(
         "AGENT_PARITY_GATE_STEP llm_raw_trace_runner_contract" in parity_text,
