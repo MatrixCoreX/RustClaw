@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import {
+  nniDeviceMessage,
   nniJoinErrorMessage,
   parseNniRemoteNodeUrls,
   shortenHex,
@@ -150,10 +151,8 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
                   ...prev,
                   signature_chip_present: false,
                   status: "signature_chip_missing",
-                  message: t(
-                    "未检测到设备签名芯片。此设备仍可使用 RustClaw，NNI 的设备签名能力暂不可用。",
-                    "No device signature chip was detected. RustClaw can still run, but NNI device signing is unavailable.",
-                  ),
+                  message_key: "nni.device_status.signature_chip_missing",
+                  next_step_key: "nni.device_status.signature_chip_missing.next_step",
                 }
               : prev,
           );
@@ -161,7 +160,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
         throw new Error(body.error || `NNI 操作失败 (${res.status})`);
       }
       setNniActionResult(body.data);
-      setNniActionMessage(body.data.message || t("NNI 操作已完成。", "NNI action completed."));
+      setNniActionMessage(nniDeviceMessage(body.data, lang, t("NNI 操作已完成。", "NNI action completed.")));
       if (body.data.payload?.pubkey) {
         setNniStatus((prev) =>
           prev
@@ -447,7 +446,7 @@ export function useNniRuntime({ apiFetch, t, lang }: UseNniRuntimeParams) {
     const status = nniStatus ?? (await fetchNniDeviceStatus(false));
     if (!status?.signature_chip_present) {
       setNniActionError(
-        status?.message ||
+        nniDeviceMessage(status, lang) ||
           t(
             "未检测到设备签名芯片，暂时不能加入需要设备签名的 NNI。",
             "No device signature chip was detected, so this device cannot join signed NNI yet.",

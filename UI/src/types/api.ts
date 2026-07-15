@@ -445,8 +445,10 @@ export interface NniDeviceStatusResponse {
   helper_available: boolean;
   signature_chip_present: boolean;
   status: string;
-  message: string;
+  message?: string | null;
+  message_key?: string | null;
   next_step?: string | null;
+  next_step_key?: string | null;
   helper_path?: string | null;
   supported_actions?: string[];
   pubkey?: string | null;
@@ -479,7 +481,8 @@ export interface NniDevicePayload {
 export interface NniDeviceActionResponse {
   action: string;
   signature_chip_present: boolean;
-  message: string;
+  message?: string | null;
+  message_key?: string | null;
   payload?: NniDevicePayload;
   meta?: NniDeviceMeta | null;
 }

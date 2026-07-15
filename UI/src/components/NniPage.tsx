@@ -18,6 +18,8 @@ import { writeTextToClipboard } from "../lib/auth-keys";
 import {
   NNI_RUNTIME_TILES,
   nniActionLabel,
+  nniDeviceMessage,
+  nniDeviceNextStep,
   nniPayloadHexField,
   nniTimestampSignatureReady,
   shortenHex,
@@ -167,6 +169,15 @@ export function NniPage({
   const actionLabel = (action: string) => nniActionLabel(action, lang);
   const nniRuntimeActivity =
     nniJoined || nniTestJoinPulse || ["join_nni", "sign_challenge", "sign_timestamp"].includes(nniActionLoading || "");
+  const nniStatusMessage =
+    nniDeviceMessage(
+      nniStatus,
+      lang,
+      nniStatusLoading
+        ? t("正在读取签名芯片状态。", "Reading signature chip status.")
+        : t("还没有读取状态。点击刷新状态开始检测。", "Status has not been loaded yet. Click Refresh status to check."),
+    ) ?? "";
+  const nniStatusNextStep = nniDeviceNextStep(nniStatus, lang);
 
   useEffect(() => {
     return () => {
@@ -335,13 +346,8 @@ export function NniPage({
                 : "mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100"
             }
           >
-            <p className="font-medium">
-              {nniStatus?.message ||
-                (nniStatusLoading
-                  ? t("正在读取签名芯片状态。", "Reading signature chip status.")
-                  : t("还没有读取状态。点击刷新状态开始检测。", "Status has not been loaded yet. Click Refresh status to check."))}
-            </p>
-            {nniStatus?.next_step ? <p className="mt-1 text-sm opacity-80">{nniStatus.next_step}</p> : null}
+            <p className="font-medium">{nniStatusMessage}</p>
+            {nniStatusNextStep ? <p className="mt-1 text-sm opacity-80">{nniStatusNextStep}</p> : null}
             {nniStatus?.error ? <p className="mt-2 break-words font-mono text-xs opacity-75">{nniStatus.error}</p> : null}
           </div>
 

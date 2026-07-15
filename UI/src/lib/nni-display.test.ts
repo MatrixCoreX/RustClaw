@@ -5,6 +5,8 @@ import {
   NNI_RUNTIME_TILES,
   findNniJoinErrorCode,
   nniActionLabel,
+  nniDeviceMessage,
+  nniDeviceNextStep,
   nniJoinErrorMessage,
   nniPayloadHexField,
   nniTimestampSignatureReady,
@@ -101,6 +103,77 @@ test("formats NNI action labels", () => {
   assert.equal(nniActionLabel("pubkey", "en"), "Read Slot 0 public key");
   assert.equal(nniActionLabel("sign_timestamp", "zh"), "生成时间戳签名");
   assert.equal(nniActionLabel("custom_action", "en"), "custom_action");
+});
+
+test("renders NNI device messages from machine keys", () => {
+  assert.equal(
+    nniDeviceMessage(
+      {
+        nni_available: true,
+        helper_available: true,
+        signature_chip_present: true,
+        status: "ready",
+        message_key: "nni.device_status.ready",
+      },
+      "en",
+    ),
+    "A device signature chip was detected, and NNI device signing is available.",
+  );
+  assert.equal(
+    nniDeviceNextStep(
+      {
+        nni_available: true,
+        helper_available: true,
+        signature_chip_present: false,
+        status: "signature_chip_missing",
+        next_step_key: "nni.device_status.signature_chip_missing.next_step",
+      },
+      "zh",
+    ),
+    "如果这是无签名芯片设备，可以忽略本页签名操作；如果应当有芯片，请检查 I2C 接线、地址和 cryptoauthlib 环境。",
+  );
+  assert.equal(
+    nniDeviceMessage(
+      {
+        action: "sign_timestamp",
+        signature_chip_present: true,
+        message_key: "nni.device_action.completed",
+      },
+      "zh",
+    ),
+    "NNI 设备签名操作完成。",
+  );
+});
+
+test("keeps legacy NNI message fields as display fallback", () => {
+  assert.equal(
+    nniDeviceMessage(
+      {
+        nni_available: true,
+        helper_available: false,
+        signature_chip_present: false,
+        status: "helper_missing",
+        message: "legacy status message",
+      },
+      "en",
+      "fallback status",
+    ),
+    "legacy status message",
+  );
+  assert.equal(
+    nniDeviceNextStep(
+      {
+        nni_available: true,
+        helper_available: false,
+        signature_chip_present: false,
+        status: "helper_missing",
+        next_step: "legacy next step",
+      },
+      "en",
+    ),
+    "legacy next step",
+  );
+  assert.equal(nniDeviceMessage(null, "en", "fallback message"), "fallback message");
 });
 
 test("builds deterministic runtime tiles", () => {

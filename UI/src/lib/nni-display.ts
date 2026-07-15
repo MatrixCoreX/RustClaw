@@ -1,4 +1,4 @@
-import type { NniDeviceActionResponse, NniDevicePayload } from "../types/api";
+import type { NniDeviceActionResponse, NniDevicePayload, NniDeviceStatusResponse } from "../types/api";
 
 export type UiLanguage = "zh" | "en";
 
@@ -57,6 +57,56 @@ export function nniTimestampSignatureReady(value?: NniDeviceActionResponse | nul
     typeof payload.signature === "string" &&
     payload.signature.trim().length > 0
   );
+}
+
+export function nniDeviceMessage(
+  value: NniDeviceStatusResponse | NniDeviceActionResponse | null | undefined,
+  lang: UiLanguage,
+  fallback?: string,
+): string | null {
+  const message = messageForNniKey(value?.message_key, lang);
+  return message ?? value?.message ?? fallback ?? null;
+}
+
+export function nniDeviceNextStep(
+  value: NniDeviceStatusResponse | null | undefined,
+  lang: UiLanguage,
+): string | null {
+  const message = messageForNniKey(value?.next_step_key, lang);
+  return message ?? value?.next_step ?? null;
+}
+
+function messageForNniKey(key: string | null | undefined, lang: UiLanguage): string | null {
+  switch (key) {
+    case "nni.device_status.helper_missing":
+      return copy(lang, "设备签名 helper 未安装，无法检测签名芯片。", "The device-signing helper is not installed, so the signature chip cannot be checked.");
+    case "nni.device_status.helper_missing.next_step":
+      return copy(
+        lang,
+        "如果本设备需要 NNI 设备签名，请确认 pi_app/signature.py 已随 RustClaw 一起部署。",
+        "If this device needs NNI device signing, confirm pi_app/signature.py was deployed with RustClaw.",
+      );
+    case "nni.device_status.ready":
+      return copy(lang, "已检测到设备签名芯片，NNI 设备签名可用。", "A device signature chip was detected, and NNI device signing is available.");
+    case "nni.device_status.signature_chip_missing":
+      return copy(
+        lang,
+        "未检测到设备签名芯片。此设备仍可使用 RustClaw，NNI 的设备签名能力暂不可用。",
+        "No device signature chip was detected. RustClaw can still run, but NNI device signing is unavailable.",
+      );
+    case "nni.device_status.signature_chip_missing.next_step":
+      return copy(
+        lang,
+        "如果这是无签名芯片设备，可以忽略本页签名操作；如果应当有芯片，请检查 I2C 接线、地址和 cryptoauthlib 环境。",
+        "If this device has no signature chip, ignore signing actions here; if it should have one, check I2C wiring, address, and cryptoauthlib.",
+      );
+    case "nni.device_action.completed":
+      return copy(lang, "NNI 设备签名操作完成。", "NNI device signing action completed.");
+    case "nni.device_action.signature_chip_missing":
+      return copy(lang, "未检测到设备签名芯片，无法完成本次 NNI 签名操作。", "No device signature chip was detected, so this NNI signing action cannot be completed.");
+    default:
+      return null;
+  }
 }
 
 export function findNniJoinErrorCode(data?: unknown): string | null {
