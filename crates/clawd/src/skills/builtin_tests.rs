@@ -522,7 +522,11 @@ async fn run_safe_command_idle_timeout_kills_silent_command() {
         .await
         .expect_err("silent command should hit idle timeout");
 
-    assert!(err.contains("idle timed out"), "unexpected error: {err}");
+    assert!(
+        err.contains("run_cmd.idle_timeout"),
+        "unexpected error: {err}"
+    );
+    assert!(err.contains("seconds=1"), "unexpected error: {err}");
 }
 
 #[tokio::test]
@@ -546,7 +550,8 @@ async fn run_cmd_nonzero_exit_returns_structured_error() {
         crate::skills::parse_structured_skill_error(&err).expect("structured run_cmd error");
     assert_eq!(structured.skill, "run_cmd");
     assert_eq!(structured.error_kind, "nonzero_exit");
-    assert!(structured.error_text.contains("exit code 7"));
+    assert!(structured.error_text.contains("run_cmd.nonzero_exit"));
+    assert!(structured.error_text.contains("exit_code=7"));
     assert_eq!(
         structured
             .extra
