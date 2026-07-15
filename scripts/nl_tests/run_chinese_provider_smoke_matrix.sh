@@ -14,6 +14,7 @@ POLL_SECONDS_VALUE="${POLL_INTERVAL_SECONDS:-1}"
 QUALITY_GUARD=1
 DRY_RUN=0
 PROVIDERS=()
+LIVE_PROVIDERS=()
 
 usage() {
   cat <<'EOF'
@@ -23,6 +24,8 @@ Usage:
 Options:
   --provider NAME         Add one provider to run. May be repeated.
   --providers CSV        Provider list. Default: minimax,mimo,qwen,deepseek.
+  --live-provider NAME    Mark one provider as in current live scope. May be repeated.
+  --live-providers CSV    Current live-scope providers. Empty means all requested providers.
   --case-file PATH       NL case file. Default: chinese model adapter compact set.
   --case-limit N         Limit appended cases passed to the client-like runner.
   --out-dir PATH         Output directory for matrix metadata and run logs.
@@ -59,6 +62,45 @@ add_csv_providers() {
       PROVIDERS+=("$item")
     fi
   done
+}
+
+add_csv_live_providers() {
+  local raw="$1"
+  local item
+  IFS=',' read -r -a items <<< "$raw"
+  for item in "${items[@]}"; do
+    item="$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]' | xargs)"
+    if [[ -n "$item" ]]; then
+      LIVE_PROVIDERS+=("$item")
+    fi
+  done
+}
+
+provider_in_live_scope() {
+  local provider="$1"
+  local item
+  if [[ "${#LIVE_PROVIDERS[@]}" -eq 0 ]]; then
+    return 0
+  fi
+  for item in "${LIVE_PROVIDERS[@]}"; do
+    if [[ "$item" == "$provider" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+live_scope_csv() {
+  local item
+  local out=""
+  for item in "${LIVE_PROVIDERS[@]}"; do
+    if [[ -z "$out" ]]; then
+      out="$item"
+    else
+      out="${out},${item}"
+    fi
+  done
+  printf '%s' "$out"
 }
 
 provider_required_env_vars() {
@@ -114,7 +156,15 @@ write_metadata() {
   local run_dir="$5"
   local output_file="$6"
   local exit_code="$7"
-  python3 - "$path" "$provider" "$status" "$reason" "$run_dir" "$output_file" "$exit_code" "$CASE_FILE" <<'PY'
+  local live_scope="all"
+  if [[ "${#LIVE_PROVIDERS[@]}" -gt 0 ]]; then
+    if provider_in_live_scope "$provider"; then
+      live_scope="included"
+    else
+      live_scope="excluded"
+    fi
+  fi
+  python3 - "$path" "$provider" "$status" "$reason" "$run_dir" "$output_file" "$exit_code" "$CASE_FILE" "$live_scope" "$(live_scope_csv)" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -127,10 +177,14 @@ run_dir = sys.argv[5]
 output_file = sys.argv[6]
 exit_code = int(sys.argv[7])
 case_file = sys.argv[8]
+live_scope = sys.argv[9]
+live_scope_providers = [item for item in sys.argv[10].split(",") if item]
 payload = {
     "provider": provider,
     "status": status,
     "reason_code": reason,
+    "live_scope": live_scope,
+    "live_scope_providers": live_scope_providers,
     "run_dir": run_dir,
     "output_file": output_file,
     "exit_code": exit_code,
@@ -164,6 +218,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --providers)
       add_csv_providers "${2:-}"
+      shift 2
+      ;;
+    --live-provider)
+      add_csv_live_providers "${2:-}"
+      shift 2
+      ;;
+    --live-providers)
+      add_csv_live_providers "${2:-}"
       shift 2
       ;;
     --case-file)
@@ -240,6 +302,7 @@ python3 "${ROOT_DIR}/scripts/nl_tests/check_chinese_provider_smoke_matrix.py" \
 echo "CHINESE_PROVIDER_SMOKE_MATRIX out_dir=${OUT_DIR}"
 echo "case_file=${CASE_FILE}"
 echo "providers=${PROVIDERS[*]}"
+echo "live_scope_providers=${LIVE_PROVIDERS[*]:-all}"
 echo "dry_run=${DRY_RUN}"
 
 matrix_status=0
@@ -249,6 +312,12 @@ for provider in "${PROVIDERS[@]}"; do
   metadata_file="${provider_dir}/metadata.json"
   output_file="${provider_dir}/run.output.txt"
   required_env="$(required_env_csv "$provider")"
+  if ! provider_in_live_scope "$provider"; then
+    write_metadata "$metadata_file" "$provider" "skipped" "provider_not_in_live_scope" "" "$output_file" 0
+    append_summary "$metadata_file"
+    echo "CHINESE_PROVIDER_SMOKE_SKIP provider=${provider} reason_code=provider_not_in_live_scope"
+    continue
+  fi
   if [[ -z "$required_env" ]]; then
     write_metadata "$metadata_file" "$provider" "skipped" "provider_unknown" "" "$output_file" 0
     append_summary "$metadata_file"
