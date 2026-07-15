@@ -687,7 +687,7 @@ curl -X POST http://127.0.0.1:8787/v1/tasks \
 
 ## 模型能力目录与中文 Provider 验证
 
-模型能力目录是配置派生的机器事实，不是运行时临时猜测。它从 `configs/config.toml` 的 LLM provider 表，以及 `configs/image.toml`、`configs/audio.toml`、`configs/video.toml`、`configs/music.toml` 的多模态模型配置生成，输出不含密钥的能力字段：文本、图片/视频/音频输入、图片/语音/视频/音乐生成、是否需要 async、是否支持 dry-run、timeout、context window、`credential_state`、当前激活文本 provider 和配置来源。`credential_state` 是机器 token（`configured_inline`、`configured_env` 或 `missing`），不会包含密钥值。`clawcli models catalog` 会渲染 `model_catalog_summary` 和 `model_catalog_entry` 机器行，让脚本不用解析 prose 就能读取 selected provider/model、entry count、modalities 和 capability flags。
+模型能力目录是配置派生的机器事实，不是运行时临时猜测。它从 `configs/config.toml` 的 LLM provider 表，以及 `configs/image.toml`、`configs/audio.toml`、`configs/video.toml`、`configs/music.toml` 的多模态模型配置生成，输出不含密钥的能力字段：文本、图片/视频/音频输入、图片/语音/视频/音乐生成、是否需要 async、是否支持 dry-run、timeout、context window、`credential_state`、当前激活文本 provider 和配置来源。`credential_state` 是机器 token（`configured_inline`、`configured_env` 或 `missing`），不会包含密钥值。`clawcli models catalog` 会渲染 `model_catalog_summary` 和 `model_catalog_entry` 机器行，让脚本不用解析 prose 就能读取 selected provider/model、entry count、modalities 和 capability flags。`clawcli models readiness` 会为当前选中的 provider/model 渲染 compact 的 `model_readiness_summary`，包含 `selected_entry_status`、`credential_state`、`ready`、文本/图片/语音/视频/音乐能力、`async_required` 和 `dry_run`，同样只从 catalog 派生，不探测密钥值、provider 日志或自然语言说明。
 
 ```mermaid
 flowchart TD
@@ -702,6 +702,9 @@ flowchart TD
     H --> J[clawcli models catalog]
     J --> JG[clawcli models catalog 合同<br/>check_clawcli_models_catalog_contracts.py]
     JG --> JGA[Agent parity gate artifact<br/>clawcli_models_catalog_contracts.txt]
+    H --> JR[clawcli models readiness]
+    JR --> JRG[clawcli models readiness 合同<br/>check_clawcli_models_readiness_contracts.py]
+    JRG --> JRGA[Agent parity gate artifact<br/>clawcli_models_readiness_contracts.txt]
     H --> K[UI Models 页面]
     H --> L[Task debug model_catalog_trace]
     L --> M[教学模式面板<br/>无密钥 selected provider/model + observed calls]
@@ -737,6 +740,8 @@ flowchart TD
     CLT --> CLTA[Agent parity gate artifact<br/>clawcli_llm_trace_contracts.txt]
     O --> CMC[clawcli models catalog 合同<br/>check_clawcli_models_catalog_contracts.py]
     CMC --> CMCA[Agent parity gate artifact<br/>clawcli_models_catalog_contracts.txt]
+    O --> CMR[clawcli models readiness 合同<br/>check_clawcli_models_readiness_contracts.py]
+    CMR --> CMRA[Agent parity gate artifact<br/>clawcli_models_readiness_contracts.txt]
     O --> AM[旧 agent-mode payload 守卫<br/>check_no_agent_mode_payload.py]
     AM --> AA[Agent parity gate artifact<br/>no_agent_mode_payload.txt]
     O --> ALS[Agent-loop 静态合同<br/>route authority + frontdoor boundary + legacy boundary + NL hardmatch guards]
@@ -790,6 +795,8 @@ Agent parity gate 还会运行 `scripts/check_agent_loop_guard_final_scope.py --
 同一 gate 也会写入 `clawcli_llm_trace_contracts.txt` 并记录 `clawcli_llm_trace_contracts=1`。该 artifact 来自 `scripts/check_clawcli_llm_trace_contracts.py --self-test` 和主检查，必须包含 `CLAWCLI_LLM_TRACE_CONTRACT_SELF_TEST ok` 与 `CLAWCLI_LLM_TRACE_CONTRACT_CHECK findings=0`。它把 `clawcli llm-trace`、`llm_call_ref=LLM#1..N`、flow/code attribution、provider/model/status/usage token、raw request/response 字段和 UI 教学 trace helper 都固定在机器字段合同上。
 
 同一 gate 也会写入 `clawcli_models_catalog_contracts.txt` 并记录 `clawcli_models_catalog_contracts=1`。该 artifact 来自 `scripts/check_clawcli_models_catalog_contracts.py --self-test` 和主检查，必须包含 `CLAWCLI_MODELS_CATALOG_CONTRACT_SELF_TEST ok` 与 `CLAWCLI_MODELS_CATALOG_CONTRACT_CHECK findings=0`。它把 `clawcli models catalog`、`model_catalog_summary`、`model_catalog_entry`、provider filter、`credential_state`、active text provider、modalities、capability flags、async/dry-run metadata 和 UI model catalog display 都固定在无密钥机器字段合同上。
+
+同一 gate 也会写入 `clawcli_models_readiness_contracts.txt` 并记录 `clawcli_models_readiness_contracts=1`。该 artifact 来自 `scripts/check_clawcli_models_readiness_contracts.py --self-test` 和主检查，必须包含 `CLAWCLI_MODELS_READINESS_CONTRACT_SELF_TEST ok` 与 `CLAWCLI_MODELS_READINESS_CONTRACT_CHECK findings=0`。它把 `clawcli models readiness`、`model_readiness_summary`、selected provider/model 匹配、`selected_entry_status`、`credential_state`、`ready`、capability flags、async/dry-run metadata 和缺失选中条目的行为都固定在无密钥机器字段合同上。
 
 Agent parity gate 还会运行 `scripts/nl_tests/check_secret_scan_contract.py` 并写入 `secret_scan_contract.json`，把禁用密钥字段、非 object JSON artifact 和疑似密钥值的检查固定成机器合同，而不是靠人工约定；同时运行 `scripts/nl_tests/check_suite_wrapper_contract.py` 并写入 `suite_wrapper_contract.json`，保证长任务回放和教学追踪依赖的 wrapped-suite 恢复产物保持稳定。它还会运行 `scripts/nl_tests/check_runner_path_ref_contract.py` 并写入 `runner_path_ref_contract.json`，保证 full/manual/multi-turn/client-like/provider A/B/dynamic/regression runner 的 console log 继续使用可搬移 path-ref，而不是本机绝对路径。它还会运行 `scripts/nl_tests/check_suite_artifact_contract.py --self-test`、`scripts/nl_tests/print_llm_raw_trace.py --self-test` 和 `scripts/nl_tests/summarize_rollout_metrics.py --self-test`，并写入 `suite_artifact_contract_self_test.txt`、`llm_raw_trace_runner_contract.txt`、`rollout_metrics_contract.txt`，证明 checker 会拒绝 report 缺失、不可读取、JSON 损坏、顶层不是 object、基础 report 字段错误、未完成自证、summary 不一致、嵌套 agent parity contract 不一致、中文 live provider scope 非法、env-file state/source 非法、gate summary path ref 不安全、中文 provider smoke path ref 不安全、rollout metrics source/output ref 不安全或意外带入嵌套 agent parity contract 的 report，之后才把它作为 release artifact 信任。当通过 `scripts/nl_tests/run_suite.sh agent_parity_gate` 启动时，`suite_artifact_contract.json` 还会验证嵌套的 `agent_parity_gate/` artifacts，并记录 `agent_parity_gate_contract.checked=true`，证明 runtime hard-reply、policy-boundary hard-reply、repair no-user-text、policy-decision-token、final-scope、registry-policy、registry-alias、long-tail-skill、clawcli exec/replay、clawcli session/TUI、clawcli goal、clawcli LLM trace、agent-loop static、no-agent-mode、evidence-extractor、secret、wrapper、runner path-ref、suite-artifact self-test、raw LLM trace 和 rollout metrics path 合同都参与了该 wrapped run；如果嵌套 gate summary 缺失，checker 会返回结构化 `agent_parity_gate_summary_missing` finding，而不是 traceback。最终 report 写入会使用 `--validate-contract-report-content` 和 `--require-contract-report-content-checked`，要求既有 report 为 `ok=true`、无 findings、与当前 summary 和嵌套合同计数一致，并且已经标记 `contract_report_content_checked=true`。`gate_summary.env` 必须包含 `live_metrics=0|1`，`chinese_provider_live_providers` 必须是 `all` 或已知中文 provider 机器 token 的 CSV，env-file state/source 也必须保持在允许的机器 token 集合内；`metrics=1` 只表示 metrics gate 没有被禁用，`live_metrics=1` 才表示提供了 run directory 且 `run_metrics.*` 已生成并以可搬移 source/output refs 通过内容校验，checker 不会从 `metrics` 推断 live metrics。NL/live NL runner 会保留 `logs/model_io.log` offset、`task_id`、`PRINT_LLM_TRACE` 和 `LLM#1..N` 原始字段回放合同。
 

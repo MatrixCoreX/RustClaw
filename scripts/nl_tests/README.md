@@ -194,6 +194,14 @@ artifact must contain `CLAWCLI_MODELS_CATALOG_CONTRACT_SELF_TEST ok` and
 `model_catalog_summary`, `model_catalog_entry`, `credential_state`, provider
 filtering, modalities, capability flags, async/dry-run metadata, and UI model
 catalog display remain secret-free machine-field contracts.
+It also writes `clawcli_models_readiness_contracts.txt` from
+`scripts/check_clawcli_models_readiness_contracts.py --self-test` plus the main
+check. `gate_summary.env` records `clawcli_models_readiness_contracts=1`, and
+the artifact must contain `CLAWCLI_MODELS_READINESS_CONTRACT_SELF_TEST ok` and
+`CLAWCLI_MODELS_READINESS_CONTRACT_CHECK findings=0`, so `clawcli models
+readiness`, `model_readiness_summary`, `selected_entry_status`,
+`credential_state`, `ready`, capability flags, async/dry-run metadata, and
+missing selected-entry behavior remain secret-free machine-field contracts.
 It also writes `semantic_boundary_contracts.txt` from
 `scripts/check_runtime_semantic_rewrite_boundary.py --self-test`,
 `scripts/check_contract_repair_loop_observation_boundary.py --self-test`,
@@ -249,6 +257,7 @@ root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/clawcli_goal_contracts.txt`,
 `agent_parity_gate/clawcli_llm_trace_contracts.txt`,
 `agent_parity_gate/clawcli_models_catalog_contracts.txt`,
+`agent_parity_gate/clawcli_models_readiness_contracts.txt`,
 `agent_parity_gate/agent_loop_static_contracts.txt`,
 `agent_parity_gate/evidence_extractor_contracts.txt`, and
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
@@ -288,7 +297,8 @@ scope, then checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
 the runtime hard-reply, policy-boundary hard-reply, repair no-user-text,
 policy-decision-token, registry-policy, registry-alias, long-tail-skill,
-task-lifecycle, task-event/context/team, static agent-loop, evidence-extractor, secret-scan, wrapper, no-agent-mode,
+task-lifecycle, task-event/context/team, clawcli model-readiness, static
+agent-loop, evidence-extractor, secret-scan, wrapper, no-agent-mode,
 suite-artifact self-test, and raw LLM trace contracts participated in the run.
 For `runtime_hard_reply_baseline.txt`, the required content includes
 `SELF_TEST_OK`, `RUNTIME_HARD_REPLY_ALL_SCAN`, and `new=0`.
@@ -350,6 +360,12 @@ catalog` keeps `model_catalog_summary`, `model_catalog_entry`,
 `credential_state`, provider filtering, modalities, capability flags,
 async/dry-run metadata, and UI model catalog display as secret-free machine
 fields.
+For `clawcli_models_readiness_contracts.txt`, the required content includes
+`CLAWCLI_MODELS_READINESS_CONTRACT_SELF_TEST ok` and
+`CLAWCLI_MODELS_READINESS_CONTRACT_CHECK findings=0`. This proves `clawcli
+models readiness` keeps `model_readiness_summary`, `selected_entry_status`,
+`credential_state`, `ready`, capability flags, async/dry-run metadata, and
+missing selected-entry behavior as secret-free machine fields.
 For `agent_loop_static_contracts.txt`, the required content includes the six
 route/frontdoor/static `AGENT_LOOP_STATIC_SELF_TEST ...` labels as well as the
 main guard success tokens, including

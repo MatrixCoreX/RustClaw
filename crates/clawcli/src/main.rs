@@ -407,6 +407,11 @@ enum ModelsCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Print selected provider/model readiness from /v1/models/catalog.
+    Readiness {
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1101,6 +1106,10 @@ fn main() -> Result<()> {
             ModelsCommand::Catalog { provider, json } => {
                 let k = key.as_deref().ok_or_else(auth::key_required_error)?;
                 commands::run_models_catalog(base_url, k, provider.as_deref(), *json)
+            }
+            ModelsCommand::Readiness { json } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_models_readiness(base_url, k, *json)
             }
         },
         Command::Active {

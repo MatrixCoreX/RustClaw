@@ -43,6 +43,7 @@ AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
     "agent_parity_gate/clawcli_goal_contracts.txt",
     "agent_parity_gate/clawcli_llm_trace_contracts.txt",
     "agent_parity_gate/clawcli_models_catalog_contracts.txt",
+    "agent_parity_gate/clawcli_models_readiness_contracts.txt",
     "agent_parity_gate/no_agent_mode_payload.txt",
     "agent_parity_gate/agent_loop_static_contracts.txt",
     "agent_parity_gate/semantic_boundary_contracts.txt",
@@ -71,6 +72,7 @@ AGENT_PARITY_GATE_REQUIRED_FLAGS = {
     "clawcli_goal_contracts": "1",
     "clawcli_llm_trace_contracts": "1",
     "clawcli_models_catalog_contracts": "1",
+    "clawcli_models_readiness_contracts": "1",
     "no_agent_mode_payload": "1",
     "agent_loop_static_contracts": "1",
     "semantic_boundary_contracts": "1",
@@ -157,6 +159,10 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
     "agent_parity_gate/clawcli_models_catalog_contracts.txt": {
         "CLAWCLI_MODELS_CATALOG_CONTRACT_SELF_TEST ok",
         "CLAWCLI_MODELS_CATALOG_CONTRACT_CHECK findings=0",
+    },
+    "agent_parity_gate/clawcli_models_readiness_contracts.txt": {
+        "CLAWCLI_MODELS_READINESS_CONTRACT_SELF_TEST ok",
+        "CLAWCLI_MODELS_READINESS_CONTRACT_CHECK findings=0",
     },
     "agent_parity_gate/no_agent_mode_payload.txt": {
         "SELF_TEST_OK",

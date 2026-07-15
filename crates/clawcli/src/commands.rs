@@ -24,7 +24,7 @@ pub(crate) use goal::{
 };
 pub(crate) use health::run_health;
 pub(crate) use llm_trace::run_llm_trace;
-pub(crate) use models::run_models_catalog;
+pub(crate) use models::{run_models_catalog, run_models_readiness};
 pub(crate) use permission::{
     run_permission_capability, run_permission_explain, run_permission_inspect,
 };
@@ -58,7 +58,10 @@ use goal::{
 #[cfg(test)]
 use llm_trace::llm_trace_text_lines;
 #[cfg(test)]
-use models::{filter_catalog_response, model_catalog_text_lines};
+use models::{
+    filter_catalog_response, model_catalog_text_lines, model_readiness_json,
+    model_readiness_text_lines,
+};
 #[cfg(test)]
 use permission::permission_report_json;
 #[cfg(test)]
