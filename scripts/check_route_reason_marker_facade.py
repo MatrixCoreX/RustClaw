@@ -9,6 +9,7 @@ classifies rendered route evidence rather than choosing route authority.
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -39,16 +40,53 @@ def is_test_file(path: Path) -> bool:
     )
 
 
-def main() -> int:
+def scan_text(path: Path, text: str) -> list[tuple[Path, int, str, str]]:
+    findings: list[tuple[Path, int, str, str]] = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        for kind, pattern in PATTERNS:
+            if pattern.search(line):
+                findings.append((path.relative_to(ROOT), lineno, kind, line.strip()))
+    return findings
+
+
+def scan_repo() -> list[tuple[Path, int, str, str]]:
     findings: list[tuple[Path, int, str, str]] = []
     for path in SRC.rglob("*.rs"):
         if is_test_file(path) or path in ALLOWED_DIRECT_PARSERS:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        for lineno, line in enumerate(text.splitlines(), 1):
-            for kind, pattern in PATTERNS:
-                if pattern.search(line):
-                    findings.append((path.relative_to(ROOT), lineno, kind, line.strip()))
+        findings.extend(scan_text(path, text))
+    return findings
+
+
+def run_self_test() -> int:
+    bad = """
+fn bad(route_reason: &str, route: &RouteResult) {
+    let _ = route_reason.contains("execution");
+    let _ = route.route_reason.split(';');
+}
+"""
+    bad_findings = scan_text(SRC / "worker/example.rs", bad)
+    assert any(kind == "route_reason_contains" for _, _, kind, _ in bad_findings)
+    assert any(kind == "field_route_reason_split" for _, _, kind, _ in bad_findings)
+    good = """
+fn good(marker: RouteReasonMarker) {
+    let _ = marker.is_execution();
+}
+"""
+    assert not scan_text(SRC / "worker/example.rs", good)
+    print("ROUTE_REASON_MARKER_FACADE_SELF_TEST ok")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args(argv)
+    if args.self_test:
+        return run_self_test()
+
+    findings = scan_repo()
 
     for rel, lineno, kind, line in findings:
         print(f"{rel}:{lineno}: {kind}: {line}")
@@ -57,4 +95,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
