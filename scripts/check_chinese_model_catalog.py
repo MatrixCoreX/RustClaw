@@ -649,6 +649,22 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate summary must record the shared secret scan contract state",
     )
     require(
+        "AGENT_PARITY_GATE_STEP suite_wrapper_contract" in parity_text,
+        findings,
+        "agent parity gate must run the wrapped suite contract step",
+    )
+    require(
+        "check_suite_wrapper_contract.py" in parity_text
+        and "suite_wrapper_contract.json" in parity_text,
+        findings,
+        "agent parity gate must write the wrapped suite contract artifact",
+    )
+    require(
+        "suite_wrapper_contract=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the wrapped suite contract state",
+    )
+    require(
         'if [[ -n "${NL_SUITE_RUN_DIR:-}" ]]' in parity_text
         and 'OUT_DIR="${NL_SUITE_RUN_DIR}/agent_parity_gate"' in parity_text,
         findings,

@@ -688,9 +688,11 @@ flowchart TD
     PS --> Q[Live 或 dry-run provider matrix<br/>scope skip + 凭据预检 + 结构化结果]
     Q --> SV[Smoke summary validator<br/>无密钥 counters + provider rows]
     SC --> AP[Agent parity gate artifact<br/>secret_scan_contract.json]
+    O --> SW[Suite wrapper contract<br/>check_suite_wrapper_contract.py]
+    SW --> AW[Agent parity gate artifact<br/>suite_wrapper_contract.json]
 ```
 
-MiniMax M3/M2.7、MiMo、Qwen 和 DeepSeek 的中文 provider 元数据由 `scripts/check_chinese_model_catalog.py` 守住；`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` 可只验证 case 与凭据状态，不调用 provider。需要 live 验证时，必须确保当前运行中的 `clawd` 已按对应 provider/config 启动，runner 的 `RUSTCLAW_PROVIDER_OVERRIDE` 只用于元数据和同环境启动 wrapper，不会重写已经运行的进程。如果当前账号只购买/启用了一部分 provider，用 `--live-providers minimax` 或其他机器 token CSV 明确当前验收范围，范围外 provider 会记录为 `provider_not_in_live_scope`，不再被当成代码未完成。Agent parity gate 还会运行 `scripts/nl_tests/check_secret_scan_contract.py` 并写入 `secret_scan_contract.json`，把禁用密钥字段和疑似密钥值的检查固定成机器合同，而不是靠人工约定。
+MiniMax M3/M2.7、MiMo、Qwen 和 DeepSeek 的中文 provider 元数据由 `scripts/check_chinese_model_catalog.py` 守住；`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` 可只验证 case 与凭据状态，不调用 provider。需要 live 验证时，必须确保当前运行中的 `clawd` 已按对应 provider/config 启动，runner 的 `RUSTCLAW_PROVIDER_OVERRIDE` 只用于元数据和同环境启动 wrapper，不会重写已经运行的进程。如果当前账号只购买/启用了一部分 provider，用 `--live-providers minimax` 或其他机器 token CSV 明确当前验收范围，范围外 provider 会记录为 `provider_not_in_live_scope`，不再被当成代码未完成。Agent parity gate 还会运行 `scripts/nl_tests/check_secret_scan_contract.py` 并写入 `secret_scan_contract.json`，把禁用密钥字段和疑似密钥值的检查固定成机器合同，而不是靠人工约定；同时运行 `scripts/nl_tests/check_suite_wrapper_contract.py` 并写入 `suite_wrapper_contract.json`，保证长任务回放和教学追踪依赖的 wrapped-suite 恢复产物保持稳定。
 
 ## NL 回归快捷入口
 
