@@ -1130,6 +1130,23 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate summary must record the clawcli LLM trace contract state",
     )
     require(
+        "AGENT_PARITY_GATE_STEP clawcli_models_catalog_contracts" in parity_text,
+        findings,
+        "agent parity gate must run the clawcli models catalog contract guard step",
+    )
+    require(
+        "check_clawcli_models_catalog_contracts.py" in parity_text
+        and 'check_clawcli_models_catalog_contracts.py" --self-test' in parity_text
+        and "clawcli_models_catalog_contracts.txt" in parity_text,
+        findings,
+        "agent parity gate must self-test and write the clawcli models catalog artifact",
+    )
+    require(
+        "clawcli_models_catalog_contracts=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the clawcli models catalog contract state",
+    )
+    require(
         "AGENT_PARITY_GATE_STEP no_agent_mode_payload" in parity_text,
         findings,
         "agent parity gate must run the no-agent-mode payload guard step",
@@ -1316,6 +1333,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "agent_parity_gate/clawcli_session_tui_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/clawcli_goal_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/clawcli_llm_trace_contracts.txt" in suite_artifact_contract_text
+        and "agent_parity_gate/clawcli_models_catalog_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/agent_loop_static_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/evidence_extractor_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/suite_wrapper_contract.json" in suite_artifact_contract_text
@@ -1340,6 +1358,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and '"clawcli_session_tui_contracts": "1"' in suite_artifact_contract_text
         and '"clawcli_goal_contracts": "1"' in suite_artifact_contract_text
         and '"clawcli_llm_trace_contracts": "1"' in suite_artifact_contract_text
+        and '"clawcli_models_catalog_contracts": "1"' in suite_artifact_contract_text
         and "RUNTIME_HARD_REPLY_ALL_SCAN" in suite_artifact_contract_text
         and "new=0" in suite_artifact_contract_text
         and "POLICY_BOUNDARY_HARD_REPLY_SELF_TEST ok" in suite_artifact_contract_text
@@ -1367,6 +1386,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "CLAWCLI_GOAL_CONTRACT_CHECK findings=0" in suite_artifact_contract_text
         and "CLAWCLI_LLM_TRACE_CONTRACT_SELF_TEST ok" in suite_artifact_contract_text
         and "CLAWCLI_LLM_TRACE_CONTRACT_CHECK findings=0" in suite_artifact_contract_text
+        and "CLAWCLI_MODELS_CATALOG_CONTRACT_SELF_TEST ok" in suite_artifact_contract_text
+        and "CLAWCLI_MODELS_CATALOG_CONTRACT_CHECK findings=0" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_route_authority_legacy_keys.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_legacy_route_boundary.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_pre_planner_exit_inventory.py" in suite_artifact_contract_text
@@ -1498,6 +1519,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and '"clawcli_session_tui_contracts": "1"' in suite_artifact_contract_text
         and '"clawcli_goal_contracts": "1"' in suite_artifact_contract_text
         and '"clawcli_llm_trace_contracts": "1"' in suite_artifact_contract_text
+        and '"clawcli_models_catalog_contracts": "1"' in suite_artifact_contract_text
         and '"evidence_extractor_contracts": "1"' in suite_artifact_contract_text
         and '"suite_wrapper_contract": "1"' in suite_artifact_contract_text
         and '"suite_artifact_contract_self_test": "1"' in suite_artifact_contract_text
@@ -1591,6 +1613,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             and "clawcli_session_tui_contracts.txt" in readme_body
             and "clawcli_goal_contracts.txt" in readme_body
             and "clawcli_llm_trace_contracts.txt" in readme_body
+            and "clawcli_models_catalog_contracts.txt" in readme_body
             and "no_agent_mode_payload.txt" in readme_body
             and "semantic_boundary_contracts.txt" in readme_body
             and "evidence_extractor_contracts.txt" in readme_body
@@ -1739,6 +1762,14 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "CLAWCLI_LLM_TRACE_CONTRACT_CHECK findings=0" in nl_tests_readme_text,
         findings,
         "NL tests README must document clawcli LLM trace artifact content",
+    )
+    require(
+        "clawcli_models_catalog_contracts.txt" in nl_tests_readme_text
+        and "clawcli_models_catalog_contracts=1" in nl_tests_readme_text
+        and "CLAWCLI_MODELS_CATALOG_CONTRACT_SELF_TEST ok" in nl_tests_readme_text
+        and "CLAWCLI_MODELS_CATALOG_CONTRACT_CHECK findings=0" in nl_tests_readme_text,
+        findings,
+        "NL tests README must document clawcli models catalog artifact content",
     )
     require(
         "evidence_extractor_contracts.txt" in nl_tests_readme_text

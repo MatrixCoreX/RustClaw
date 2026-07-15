@@ -67,13 +67,22 @@ fn models_catalog_filter_and_text_lines_use_machine_tokens() {
     assert_eq!(entries.len(), 1);
 
     let lines = model_catalog_text_lines(&filtered);
-    assert_eq!(lines.len(), 1);
-    assert!(lines[0].contains("model_catalog_entry provider=minimax model=MiniMax-M3"));
-    assert!(lines[0].contains("active=1"));
-    assert!(lines[0].contains("credential_state=configured_inline"));
-    assert!(lines[0].contains("input_modalities=text,image,video"));
-    assert!(lines[0].contains("output_modalities=text"));
-    assert!(lines[0].contains("image_input=1"));
-    assert!(lines[0].contains("audio_input=0"));
-    assert!(lines[0].contains("music_generation=1"));
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].contains("model_catalog_summary"));
+    assert!(lines[0].contains("schema_version=1"));
+    assert!(lines[0].contains("selected_provider=minimax"));
+    assert!(lines[0].contains("selected_model=MiniMax-M3"));
+    assert!(lines[0].contains("entry_count=1"));
+    assert!(lines[1].contains("model_catalog_entry provider=minimax model=MiniMax-M3"));
+    assert!(lines[1].contains("active=1"));
+    assert!(lines[1].contains("credential_state=configured_inline"));
+    assert!(lines[1].contains("context_window_tokens=1000000"));
+    assert!(lines[1].contains("input_modalities=text,image,video"));
+    assert!(lines[1].contains("output_modalities=text"));
+    assert!(lines[1].contains("image_input=1"));
+    assert!(lines[1].contains("audio_input=0"));
+    assert!(lines[1].contains("video_generation=1"));
+    assert!(lines[1].contains("music_generation=1"));
+    assert!(lines[1].contains("async_required=1"));
+    assert!(lines[1].contains("dry_run=1"));
 }
