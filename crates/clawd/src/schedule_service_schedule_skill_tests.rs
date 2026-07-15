@@ -110,22 +110,27 @@ fn schedule_payload_keeps_existing_context_token() {
 }
 
 #[test]
-fn schedule_needs_more_info_fallback_uses_current_request_language() {
+fn schedule_needs_more_info_fallback_returns_machine_message_key() {
     let state = AppState::test_default_with_fixture_provider();
     let task = claimed_task_with_payload("api", json!({"text": "placeholder"}));
 
-    assert_eq!(
-        schedule_needs_more_info_fallback_text(
-            &state,
-            &task,
-            "Remind me tomorrow to check deployment"
-        ),
-        "Please provide the necessary details first, then I can create this scheduled job for you."
-    );
-    assert_eq!(
-        schedule_needs_more_info_fallback_text(&state, &task, "明天提醒我检查部署"),
-        "请补充必要信息后，我再帮你创建这个定时任务。"
-    );
+    for prompt in [
+        "Remind me tomorrow to check deployment",
+        "明天提醒我检查部署",
+    ] {
+        let value = serde_json::from_str::<serde_json::Value>(
+            &schedule_needs_more_info_fallback_text(&state, &task, prompt),
+        )
+        .expect("machine fallback payload");
+        assert_eq!(
+            value.get("message_key").and_then(serde_json::Value::as_str),
+            Some("schedule.msg.create_needs_more_info")
+        );
+        assert_eq!(
+            value.get("reason_code").and_then(serde_json::Value::as_str),
+            Some("schedule_needs_more_info")
+        );
+    }
 }
 
 #[test]
