@@ -1,6 +1,9 @@
 use super::*;
+use axum::http::HeaderValue;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const UI_ROUTE_TEST_USER_KEY: &str = "ui-route-test-key";
 
 fn temp_workspace_root() -> PathBuf {
     let unique = SystemTime::now()
@@ -10,6 +13,27 @@ fn temp_workspace_root() -> PathBuf {
     let path = std::env::temp_dir().join(format!("rustclaw-ui-routes-{unique}"));
     std::fs::create_dir_all(&path).expect("create temp dir");
     path
+}
+
+fn insert_ui_route_auth_key(state: &AppState) {
+    let db = state.core.db.get().expect("db pool");
+    db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
+        .expect("create auth schema");
+    db.execute(
+        "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, 'admin', 1, '123', NULL)",
+        rusqlite::params![UI_ROUTE_TEST_USER_KEY],
+    )
+    .expect("insert auth key");
+}
+
+fn ui_route_auth_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-rustclaw-key",
+        HeaderValue::from_static(UI_ROUTE_TEST_USER_KEY),
+    );
+    headers
 }
 
 #[test]
@@ -451,6 +475,95 @@ fn model_catalog_guard_status_reads_latest_gate_artifact() {
     assert_eq!(
         status["path"],
         "logs/agent_parity_gate/newer/chinese_model_catalog.json"
+    );
+}
+
+#[tokio::test]
+async fn model_catalog_api_handler_returns_secret_free_catalog() {
+    let root = temp_workspace_root();
+    std::fs::create_dir_all(root.join("configs")).expect("configs dir");
+    std::fs::write(
+        root.join("configs/config.toml"),
+        r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M3"
+
+[llm.minimax]
+api_format = "openai_compat"
+base_url = "https://api.minimaxi.com/v1"
+api_key = "catalog-secret"
+model = "MiniMax-M3"
+models = ["MiniMax-M3", "MiniMax-M2.7"]
+context_window_tokens = 1000000
+timeout_seconds = 60
+"#,
+    )
+    .expect("write config");
+    std::fs::write(
+        root.join("configs/image.toml"),
+        r#"
+[image_vision]
+minimax_models = ["MiniMax-M3"]
+"#,
+    )
+    .expect("write image config");
+    std::fs::write(
+        root.join("configs/video.toml"),
+        r#"
+[video_generation]
+minimax_models = ["MiniMax-Hailuo-2.3"]
+"#,
+    )
+    .expect("write video config");
+    std::fs::write(
+        root.join("configs/music.toml"),
+        r#"
+[music_generation]
+minimax_models = ["music-2.6"]
+"#,
+    )
+    .expect("write music config");
+    let gate = root.join("logs/agent_parity_gate/catalog");
+    std::fs::create_dir_all(&gate).expect("guard dir");
+    std::fs::write(
+        gate.join("chinese_model_catalog.json"),
+        r#"{"status":"ok","finding_count":0}"#,
+    )
+    .expect("guard status");
+
+    let mut state = AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root;
+    insert_ui_route_auth_key(&state);
+
+    let (status, Json(body)) = get_model_catalog(State(state), ui_route_auth_headers()).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.ok);
+    assert_eq!(body.error, None);
+    let data = body.data.expect("catalog data");
+    assert_eq!(data["schema_version"], 1);
+    assert_eq!(data["selected_provider"], "minimax");
+    assert_eq!(data["selected_model"], "MiniMax-M3");
+    assert_eq!(data["last_guard_status"]["available"], true);
+    assert_eq!(data["last_guard_status"]["status"], "ok");
+    let entries = data["entries"].as_array().expect("catalog entries");
+    let minimax = entries
+        .iter()
+        .find(|entry| entry["provider"] == "minimax")
+        .expect("minimax entry");
+    assert_eq!(minimax["model"], "MiniMax-M3");
+    assert_eq!(minimax["supports_text"], true);
+    assert_eq!(minimax["supports_image_input"], true);
+    assert_eq!(minimax["supports_video_input"], true);
+    assert_eq!(minimax["supports_image_understanding"], true);
+    assert_eq!(minimax["supports_video_generation"], true);
+    assert_eq!(minimax["supports_music_generation"], true);
+    assert_eq!(minimax["dry_run_supported"], true);
+    assert_eq!(minimax["active_text_provider"], true);
+    assert!(
+        !data.to_string().contains("catalog-secret"),
+        "catalog response must not expose provider secrets"
     );
 }
 
