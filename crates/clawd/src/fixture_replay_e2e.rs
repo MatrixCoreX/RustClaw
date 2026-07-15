@@ -395,7 +395,6 @@ pub(crate) struct ReplayOutcome {
 fn build_fixture_ask_payload_json(text: &str, call_id: &str) -> String {
     serde_json::json!({
         "text": text,
-        "agent_mode": true,
         "channel": "ui",
         "agent_id": crate::DEFAULT_AGENT_ID,
         "call_id": call_id,

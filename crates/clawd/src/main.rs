@@ -1471,8 +1471,7 @@ async fn classify_direct(
         kind: "ask".to_string(),
         payload_json: json!({
             "text": text,
-            "source": source,
-            "agent_mode": false
+            "source": source
         })
         .to_string(),
     };

@@ -26,14 +26,6 @@ description_key = "telegram.menu.ask_desc"
 order = 40
 
 [[commands]]
-name = "agent"
-kind = "core"
-core_action = "agent_mode"
-channels = ["telegram"]
-description_key = "telegram.menu.agent_desc"
-order = 50
-
-[[commands]]
 name = "status"
 kind = "core"
 core_action = "status"

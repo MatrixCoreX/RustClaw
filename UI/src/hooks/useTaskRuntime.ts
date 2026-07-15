@@ -397,7 +397,6 @@ export function useTaskRuntime({
       if (interactionKind === "ask") {
         payload = {
           text: interactionAskText.trim(),
-          agent_mode: true,
         };
       } else {
         let parsedArgs: unknown = interactionSkillArgs;

@@ -721,10 +721,7 @@ fn handle_text_message_to_clawd(
         external_user_id: Some(open_id.clone()),
         external_chat_id: Some(chat_id.clone()),
         kind: TaskKind::Ask,
-        payload: json!({
-            "text": text,
-            "agent_mode": true
-        }),
+        payload: json!({ "text": text }),
     };
 
     let submit_url = format!("{}/v1/tasks", state.config.feishu.clawd_base_url);

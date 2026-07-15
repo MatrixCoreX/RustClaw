@@ -621,7 +621,6 @@ export function useChatRuntime({
         ...(effectiveExternalChatId ? { external_chat_id: effectiveExternalChatId } : {}),
         payload: {
           text: requestText,
-          agent_mode: true,
           ...(audioOnly ? { source: "voice" } : {}),
           ...(adapterName ? { adapter: adapterName } : {}),
           ...(attached.length > 0
