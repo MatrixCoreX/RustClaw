@@ -29,7 +29,6 @@ export interface ChatThreadSummary {
   preview: string;
   updatedAt: number;
   messageCount: number;
-  agentMode: boolean;
   teachingMode: boolean;
   taskId: string | null;
   taskStatus: TaskQueryResponse["status"] | "running" | null;
@@ -75,7 +74,6 @@ interface ChatThreadRecord {
   input: string;
   createdAt: number;
   updatedAt: number;
-  agentMode: boolean;
   teachingMode: boolean;
   externalChatId: string;
   lastTaskId?: string | null;
@@ -905,7 +903,6 @@ function normalizeStoredChatThread(raw: unknown, t: Translate): ChatThreadRecord
     input: typeof record.input === "string" ? record.input : "",
     createdAt: typeof record.createdAt === "number" ? record.createdAt : now,
     updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : now,
-    agentMode: typeof record.agentMode === "boolean" ? record.agentMode : true,
     teachingMode: typeof record.teachingMode === "boolean" ? record.teachingMode : false,
     externalChatId:
       typeof record.externalChatId === "string" && record.externalChatId.trim()
@@ -1039,7 +1036,6 @@ function createChatThread(t: Translate): ChatThreadRecord {
     input: "",
     createdAt: now,
     updatedAt: now,
-    agentMode: true,
     teachingMode: false,
     externalChatId: createThreadExternalChatId(),
     lastTaskId: null,
@@ -1091,7 +1087,6 @@ function buildChatThreadSummaries(
         preview: threadPreview(thread, t),
         updatedAt: thread.updatedAt,
         messageCount: thread.messages.filter((message) => message.role !== "system").length,
-        agentMode: thread.agentMode,
         teachingMode: thread.teachingMode,
         taskId: latestRun?.taskId ?? taskResult?.task_id ?? thread.lastTaskId ?? null,
         taskStatus: latestRun?.status ?? taskResult?.status ?? null,

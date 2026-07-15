@@ -35,7 +35,6 @@ interface ChatThreadSummary {
   preview: string;
   updatedAt: number;
   messageCount: number;
-  agentMode: boolean;
   teachingMode: boolean;
   taskId: string | null;
   taskStatus: TaskQueryResponse["status"] | "running" | null;
