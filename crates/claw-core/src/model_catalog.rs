@@ -36,6 +36,8 @@ pub struct ModelCatalogEntry {
     pub context_window_tokens: Option<usize>,
     pub timeout_seconds: Option<u64>,
     pub credential_state: String,
+    pub input_modalities: Vec<String>,
+    pub output_modalities: Vec<String>,
     pub supports_text: bool,
     pub supports_image_input: bool,
     pub supports_video_input: bool,
@@ -147,9 +149,15 @@ fn catalog_entry(
     let music_generation_models =
         provider_models(section(&inputs.music, "music_generation"), provider);
 
-    let supports_image_input = contains_model(&image_vision_models, &model);
-    let supports_video_input = provider == "minimax" && model == "MiniMax-M3";
-    let supports_audio_input = contains_model(&audio_transcribe_models, &model);
+    let input_modalities =
+        configured_modalities(llm_table, "input_modalities").unwrap_or_else(|| {
+            fallback_input_modalities(&model, &image_vision_models, &audio_transcribe_models)
+        });
+    let output_modalities = configured_modalities(llm_table, "output_modalities")
+        .unwrap_or_else(|| vec!["text".to_string()]);
+    let supports_image_input = has_modality(&input_modalities, "image");
+    let supports_video_input = has_modality(&input_modalities, "video");
+    let supports_audio_input = has_modality(&input_modalities, "audio");
     let supports_image_understanding = !image_vision_models.is_empty();
     let supports_audio_transcription = !audio_transcribe_models.is_empty();
     let supports_image_generation =
@@ -172,6 +180,8 @@ fn catalog_entry(
         context_window_tokens: usize_field(llm_table, "context_window_tokens"),
         timeout_seconds: u64_field(llm_table, "timeout_seconds"),
         credential_state: credential_state(llm_table, provider, &inputs.env_values),
+        input_modalities,
+        output_modalities,
         supports_text: true,
         supports_image_input,
         supports_video_input,
@@ -246,6 +256,42 @@ fn provider_models(
 
 fn contains_model(models: &[String], model: &str) -> bool {
     !model.trim().is_empty() && models.iter().any(|candidate| candidate == model)
+}
+
+fn configured_modalities(
+    table: &toml::map::Map<String, toml::Value>,
+    key: &str,
+) -> Option<Vec<String>> {
+    let values = string_list_field(table, key)
+        .into_iter()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .fold(Vec::new(), |mut acc, value| {
+            if !acc.iter().any(|existing| existing == &value) {
+                acc.push(value);
+            }
+            acc
+        });
+    (!values.is_empty()).then_some(values)
+}
+
+fn fallback_input_modalities(
+    model: &str,
+    image_vision_models: &[String],
+    audio_transcribe_models: &[String],
+) -> Vec<String> {
+    let mut modalities = vec!["text".to_string()];
+    if contains_model(image_vision_models, model) {
+        modalities.push("image".to_string());
+    }
+    if contains_model(audio_transcribe_models, model) {
+        modalities.push("audio".to_string());
+    }
+    modalities
+}
+
+fn has_modality(modalities: &[String], target: &str) -> bool {
+    modalities.iter().any(|value| value == target)
 }
 
 fn string_field(table: &toml::map::Map<String, toml::Value>, key: &str) -> String {

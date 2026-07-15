@@ -53,6 +53,8 @@ base_url = "https://api.minimaxi.com/v1"
 api_key = "secret-minimax"
 model = "MiniMax-M3"
 models = ["MiniMax-M3", "MiniMax-M2.7"]
+input_modalities = ["text", "image", "video"]
+output_modalities = ["text"]
 context_window_tokens = 1000000
 timeout_seconds = 180
 
@@ -61,6 +63,8 @@ base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 api_key = "secret-qwen"
 model = "qwen-max-latest"
 models = ["qwen-max-latest"]
+input_modalities = ["text"]
+output_modalities = ["text"]
 timeout_seconds = 60
 
 [llm.fixture_missing]
@@ -68,6 +72,8 @@ base_url = "https://fixture.invalid/v1"
 api_key = ""
 model = "fixture-model"
 models = ["fixture-model"]
+input_modalities = ["text"]
+output_modalities = ["text"]
 timeout_seconds = 30
 
 [llm.mimo]
@@ -75,6 +81,8 @@ base_url = "https://api.xiaomimimo.com/v1"
 api_key = ""
 model = "mimo-v2.5-pro"
 models = ["mimo-v2.5-pro"]
+input_modalities = ["text"]
+output_modalities = ["text"]
 timeout_seconds = 180
 "#,
     )
@@ -141,6 +149,11 @@ fn catalog_separates_selected_model_inputs_from_media_skill_support() {
     assert_eq!(catalog.selected_provider, "minimax");
     assert_eq!(catalog.selected_model, "MiniMax-M3");
     assert!(minimax.active_text_provider);
+    assert_eq!(
+        minimax.input_modalities,
+        vec!["text".to_string(), "image".to_string(), "video".to_string()]
+    );
+    assert_eq!(minimax.output_modalities, vec!["text".to_string()]);
     assert!(minimax.supports_image_input);
     assert!(minimax.supports_video_input);
     assert!(!minimax.supports_audio_input);

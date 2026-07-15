@@ -127,6 +127,8 @@ models = [
     "deepseek-chat",
     "deepseek-reasoner",
 ]
+input_modalities = ["text"]
+output_modalities = ["text"]
 timeout_seconds = 60
 
 # 用途/Purpose: Qwen 提供商连接与模型池.
@@ -142,6 +144,8 @@ models = [
     "qwen-plus-latest",
     "qwen-turbo-latest",
 ]
+input_modalities = ["text"]
+output_modalities = ["text"]
 timeout_seconds = 60
 
 # 用途/Purpose: MiniMax 提供商连接与模型池（OpenAI-compatible）.
@@ -168,6 +172,8 @@ models = [
     "MiniMax-M2.1-highspeed",
     "MiniMax-M2",
 ]
+input_modalities = ["text", "image", "video"]
+output_modalities = ["text"]
 # MiniMax text routing/model calls can be slow under load; keep the per-request
 # window aligned with worker.llm_total_timeout_seconds instead of cutting off
 # normal responses at 60s.
@@ -187,6 +193,8 @@ models = [
     "mimo-v2.5-pro",
     "mimo-v2.5",
 ]
+input_modalities = ["text"]
+output_modalities = ["text"]
 timeout_seconds = 180
 
 # 用途/Purpose: 自定义 OpenAI-compatible 提供商.

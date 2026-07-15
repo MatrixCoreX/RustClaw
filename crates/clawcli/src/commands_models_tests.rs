@@ -17,6 +17,8 @@ fn models_catalog_filter_and_text_lines_use_machine_tokens() {
                     "base_url_kind": "minimax_official_openai_compat",
                     "credential_state": "configured_inline",
                     "context_window_tokens": 1000000,
+                    "input_modalities": ["text", "image", "video"],
+                    "output_modalities": ["text"],
                     "supports_text": true,
                     "supports_image_input": true,
                     "supports_video_input": true,
@@ -38,6 +40,8 @@ fn models_catalog_filter_and_text_lines_use_machine_tokens() {
                     "base_url_kind": "qwen_dashscope_openai_compat",
                     "credential_state": "missing",
                     "context_window_tokens": null,
+                    "input_modalities": ["text"],
+                    "output_modalities": ["text"],
                     "supports_text": true,
                     "supports_image_input": false,
                     "supports_video_input": false,
@@ -67,6 +71,8 @@ fn models_catalog_filter_and_text_lines_use_machine_tokens() {
     assert!(lines[0].contains("model_catalog_entry provider=minimax model=MiniMax-M3"));
     assert!(lines[0].contains("active=1"));
     assert!(lines[0].contains("credential_state=configured_inline"));
+    assert!(lines[0].contains("input_modalities=text,image,video"));
+    assert!(lines[0].contains("output_modalities=text"));
     assert!(lines[0].contains("image_input=1"));
     assert!(lines[0].contains("audio_input=0"));
     assert!(lines[0].contains("music_generation=1"));

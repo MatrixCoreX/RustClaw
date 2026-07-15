@@ -665,6 +665,8 @@ export interface ModelCatalogEntry {
   context_window_tokens?: number | null;
   timeout_seconds?: number | null;
   credential_state?: string | null;
+  input_modalities: string[];
+  output_modalities: string[];
   supports_text: boolean;
   supports_image_input: boolean;
   supports_video_input: boolean;

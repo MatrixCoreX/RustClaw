@@ -60,6 +60,8 @@ pub(super) fn model_catalog_text_lines(body: &serde_json::Value) -> Vec<String> 
             let api_style = token(entry, "api_style");
             let base_url_kind = token(entry, "base_url_kind");
             let credential_state = token(entry, "credential_state");
+            let input_modalities = array_token(entry, "input_modalities");
+            let output_modalities = array_token(entry, "output_modalities");
             let capabilities = [
                 ("text", bool_token(entry, "supports_text")),
                 ("image_input", bool_token(entry, "supports_image_input")),
@@ -97,7 +99,7 @@ pub(super) fn model_catalog_text_lines(body: &serde_json::Value) -> Vec<String> 
             .collect::<Vec<_>>()
             .join(" ");
             format!(
-            "model_catalog_entry provider={provider} model={model} active={active} api_style={api_style} base_url_kind={base_url_kind} credential_state={credential_state} context_window_tokens={context} {capabilities}"
+            "model_catalog_entry provider={provider} model={model} active={active} api_style={api_style} base_url_kind={base_url_kind} credential_state={credential_state} context_window_tokens={context} input_modalities={input_modalities} output_modalities={output_modalities} {capabilities}"
             )
         })
         .collect()
@@ -113,6 +115,23 @@ fn token(entry: &serde_json::Value, key: &str) -> String {
             _ => "null".to_string(),
         })
         .unwrap_or_else(|| "null".to_string())
+}
+
+fn array_token(entry: &serde_json::Value, key: &str) -> String {
+    entry
+        .get(key)
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "missing".to_string())
 }
 
 fn bool_token(entry: &serde_json::Value, key: &str) -> &'static str {
