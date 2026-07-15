@@ -643,6 +643,11 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         findings,
         "agent parity gate must write the shared secret scan contract artifact",
     )
+    require(
+        "secret_scan_contract=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the shared secret scan contract state",
+    )
 
 
 def build_report(env_file: Path | None = None) -> dict[str, Any]:
