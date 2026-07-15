@@ -914,6 +914,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "--validate-contract-report-content" in suite_artifact_contract_text
         and "--require-contract-report-content-checked" in suite_artifact_contract_text
         and '"contract_report_content_checked"' in suite_artifact_contract_text
+        and "stored_agent_contract" in suite_artifact_contract_text
         and "contract_report_content_checked_not_true" in suite_artifact_contract_text
         and "contract_report_summary_mismatch" in suite_artifact_contract_text
         and "contract_report_agent_parity_contract_mismatch" in suite_artifact_contract_text

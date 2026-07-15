@@ -716,6 +716,7 @@ def write_minimal_self_test_run(
     *,
     content_checked: bool,
     stored_summary_override: dict[str, str] | None = None,
+    stored_agent_contract: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     summary = {
         "suite": "manual",
@@ -738,16 +739,19 @@ def write_minimal_self_test_run(
     report_summary = dict(summary)
     if stored_summary_override:
         report_summary.update(stored_summary_override)
+    stored_report = {
+        "ok": True,
+        "run_dir": ".",
+        "require_contract_report": True,
+        "contract_report_content_checked": content_checked,
+        "summary": report_summary,
+        "findings": [],
+    }
+    if stored_agent_contract is not None:
+        stored_report["agent_parity_gate_contract"] = stored_agent_contract
     (run_dir / "suite_artifact_contract.json").write_text(
         json.dumps(
-            {
-                "ok": True,
-                "run_dir": ".",
-                "require_contract_report": True,
-                "contract_report_content_checked": content_checked,
-                "summary": report_summary,
-                "findings": [],
-            },
+            stored_report,
             ensure_ascii=False,
             sort_keys=True,
         )
@@ -811,6 +815,39 @@ def run_self_test() -> int:
         if mismatch_report.get("ok") or "contract_report_summary_mismatch" not in mismatch_findings:
             print(
                 f"SELF_TEST_FAIL summary_mismatch:{mismatch_report.get('findings')}",
+                file=sys.stderr,
+            )
+            return 1
+
+        agent_contract_run = root / "agent-contract-mismatch"
+        write_minimal_self_test_run(
+            agent_contract_run,
+            content_checked=True,
+            stored_agent_contract={"checked": False, "content_check_count": 0},
+        )
+        agent_contract_findings = validate_existing_contract_report(
+            agent_contract_run,
+            {
+                "summary": {
+                    "suite": "manual",
+                    "status": "ok",
+                    "exit_code": "0",
+                    "artifact_finalize_status": "ok",
+                    "run_log": "run.log",
+                    "artifact_index": "artifact_index.txt",
+                },
+                "agent_parity_gate_contract": {
+                    "checked": True,
+                    "content_check_count": 1,
+                },
+            },
+            require_content_checked=True,
+        )
+        if "contract_report_agent_parity_contract_mismatch" not in set(
+            agent_contract_findings
+        ):
+            print(
+                f"SELF_TEST_FAIL agent_contract_mismatch:{agent_contract_findings}",
                 file=sys.stderr,
             )
             return 1
