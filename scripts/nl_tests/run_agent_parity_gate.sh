@@ -266,6 +266,7 @@ fi
 
 {
   echo "out_dir=${OUT_DIR}"
+  echo "secret_scan_contract=1"
   echo "coverage=$((1 - SKIP_COVERAGE))"
   echo "model_catalog=$((1 - SKIP_MODEL_CATALOG))"
   echo "provider_smoke=$((1 - SKIP_PROVIDER_SMOKE))"

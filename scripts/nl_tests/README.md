@@ -93,7 +93,9 @@ write the env-file path or secret values. Use `--chinese-env-file <path>` to
 override it, or `--no-chinese-env-file` for a pure missing-credential preflight.
 The gate also writes `secret_scan_contract.json` from
 `scripts/nl_tests/check_secret_scan_contract.py`, locking the shared scanner's
-forbidden-field and secret-like-value finding shapes.
+forbidden-field and secret-like-value finding shapes. `gate_summary.env`
+records `secret_scan_contract=1` as a non-secret machine token so gate artifact
+readers can tell the contract was part of the run.
 
 For rerun shards, use:
 
