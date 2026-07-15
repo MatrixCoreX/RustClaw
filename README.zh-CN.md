@@ -659,7 +659,7 @@ curl http://127.0.0.1:8787/v1/health \
 curl -X POST http://127.0.0.1:8787/v1/tasks \
   -H "Content-Type: application/json" \
   -H "X-RustClaw-Key: rk-xxxx" \
-  -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello","agent_mode":true}}'
+  -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello"}}'
 ```
 
 ## 模型能力目录与中文 Provider 验证
@@ -682,17 +682,31 @@ flowchart TD
     L --> M[教学模式面板<br/>无密钥 selected provider/model + observed calls]
     H --> N[python3 scripts/check_chinese_model_catalog.py]
     N --> O[静态门禁<br/>MiniMax/MiMo/Qwen/DeepSeek metadata + vendor patches + case tags]
+    O --> AM[旧 agent-mode payload 守卫<br/>check_no_agent_mode_payload.py]
+    AM --> AA[Agent parity gate artifact<br/>no_agent_mode_payload.txt]
+    O --> ALS[Agent-loop 静态合同<br/>route authority + legacy boundary + NL hardmatch guards]
+    ALS --> ALA[Agent parity gate artifact<br/>agent_loop_static_contracts.txt]
     O --> SC[密钥扫描合同<br/>check_secret_scan_contract.py]
     O --> P[scripts/nl_tests/run_chinese_provider_smoke_matrix.sh]
-    P --> PS[当前 live scope<br/>--live-providers minimax]
+    P --> PS[默认 live scope<br/>minimax]
     PS --> Q[Live 或 dry-run provider matrix<br/>scope skip + 凭据预检 + 结构化结果]
+    P --> R[显式全 provider gate<br/>--live-providers all]
+    R --> Q
     Q --> SV[Smoke summary validator<br/>无密钥 counters + provider rows]
     SC --> AP[Agent parity gate artifact<br/>secret_scan_contract.json]
     O --> SW[Suite wrapper contract<br/>check_suite_wrapper_contract.py]
-    SW --> AW[Agent parity gate artifact<br/>suite_wrapper_contract.json]
+    SW --> SAC[Wrapped suite artifact contract<br/>check_suite_artifact_contract.py]
+    SAC --> AW[Agent parity gate artifact<br/>suite_wrapper_contract.json]
+    SAC --> SAR[Wrapped suite report<br/>suite_artifact_contract.json]
+    O --> LT[NL raw LLM trace runner contract<br/>print_llm_raw_trace self-test + runner guard]
+    LT --> AT[Agent parity gate artifact<br/>llm_raw_trace_runner_contract.txt]
 ```
 
-MiniMax M3/M2.7、MiMo、Qwen 和 DeepSeek 的中文 provider 元数据由 `scripts/check_chinese_model_catalog.py` 守住；`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` 可只验证 case 与凭据状态，不调用 provider。需要 live 验证时，必须确保当前运行中的 `clawd` 已按对应 provider/config 启动，runner 的 `RUSTCLAW_PROVIDER_OVERRIDE` 只用于元数据和同环境启动 wrapper，不会重写已经运行的进程。如果当前账号只购买/启用了一部分 provider，用 `--live-providers minimax` 或其他机器 token CSV 明确当前验收范围，范围外 provider 会记录为 `provider_not_in_live_scope`，不再被当成代码未完成。Agent parity gate 还会运行 `scripts/nl_tests/check_secret_scan_contract.py` 并写入 `secret_scan_contract.json`，把禁用密钥字段和疑似密钥值的检查固定成机器合同，而不是靠人工约定；同时运行 `scripts/nl_tests/check_suite_wrapper_contract.py` 并写入 `suite_wrapper_contract.json`，保证长任务回放和教学追踪依赖的 wrapped-suite 恢复产物保持稳定。
+MiniMax M3/M2.7、MiMo、Qwen 和 DeepSeek 的中文 provider 元数据由 `scripts/check_chinese_model_catalog.py` 守住；`scripts/nl_tests/run_chinese_provider_smoke_matrix.sh --dry-run` 可只验证 case 与凭据状态，不调用 provider。需要 live 验证时，必须确保当前运行中的 `clawd` 已按对应 provider/config 启动，runner 的 `RUSTCLAW_PROVIDER_OVERRIDE` 只用于元数据和同环境启动 wrapper，不会重写已经运行的进程。如果当前账号只购买/启用了一部分 provider，用 `--live-providers minimax` 或其他机器 token CSV 明确当前验收范围，范围外 provider 会记录为 `provider_not_in_live_scope`，不再被当成代码未完成；默认 live scope 是 MiniMax，只有明确需要完整账号验收时才使用 `--live-providers all`。
+
+Agent parity gate 会传递 `CHINESE_PROVIDER_ENV_FILE` 或默认的 `../runtime_env_filled.sh` 给中文 provider catalog 与 smoke preflight，并且只记录 env-file 状态/来源和无密钥凭据元数据，不记录 env-file 路径或密钥值。它会运行 `scripts/check_no_agent_mode_payload.py` 并写入 `no_agent_mode_payload.txt`，防止旧 channel/UI agent-mode 布尔开关重新成为关闭默认 agent loop 的隐形入口。它还会运行 route-authority legacy-key guard、legacy route boundary guard、pre-planner removal guard、NL hard-match scanner 和 historical hardcoded-language scanner，并写入 `agent_loop_static_contracts.txt`，确保旧 pre-route 语义路由和固定自然语言捷径不会回到生产路径。
+
+Agent parity gate 还会运行 `scripts/nl_tests/check_secret_scan_contract.py` 并写入 `secret_scan_contract.json`，把禁用密钥字段和疑似密钥值的检查固定成机器合同，而不是靠人工约定；同时运行 `scripts/nl_tests/check_suite_wrapper_contract.py` 并写入 `suite_wrapper_contract.json`，保证长任务回放和教学追踪依赖的 wrapped-suite 恢复产物保持稳定。当通过 `scripts/nl_tests/run_suite.sh agent_parity_gate` 启动时，`suite_artifact_contract.json` 还会验证嵌套的 `agent_parity_gate/` artifacts，并记录 `agent_parity_gate_contract.checked=true`，证明 agent-loop static、no-agent-mode、secret、wrapper 和 raw LLM trace 合同都参与了该 wrapped run。它也会运行 `scripts/nl_tests/print_llm_raw_trace.py --self-test` 与 `scripts/nl_tests/check_llm_raw_trace_runner_contract.py`，写入 `llm_raw_trace_runner_contract.txt`，确保 NL/live NL runner 保留 `logs/model_io.log` offset、`task_id`、`PRINT_LLM_TRACE` 和 `LLM#1..N` 原始字段回放合同。
 
 ## NL 回归快捷入口
 
