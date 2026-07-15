@@ -524,7 +524,12 @@ def validate_enabled_agent_parity_optional_artifacts(
         coding_findings, coding_checks = validate_coding_fixture_artifacts(run_dir, gate_summary)
         findings.extend(coding_findings)
         checks += coding_checks
-    if gate_summary.get("metrics") == "1" and safe_int(gate_summary.get("run_dir_count")) > 0:
+    live_metrics_enabled = gate_summary.get("live_metrics") == "1" or (
+        "live_metrics" not in gate_summary
+        and gate_summary.get("metrics") == "1"
+        and safe_int(gate_summary.get("run_dir_count")) > 0
+    )
+    if live_metrics_enabled:
         for rel_path, token in (
             ("agent_parity_gate/run_metrics.txt", "ROLLOUT_METRICS_OK"),
         ):
