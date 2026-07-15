@@ -1564,6 +1564,19 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate must run the NL raw LLM trace runner contract step",
     )
     require(
+        "agent_parity_gate/secret_scan_contract_self_test.txt" in suite_artifact_contract_text
+        and '"secret_scan_contract_self_test": "1"' in suite_artifact_contract_text
+        and "SECRET_SCAN_CONTRACT_SELF_TEST ok" in suite_artifact_contract_text
+        and "agent_parity_gate/nl_suite_checker_self_tests.txt" in suite_artifact_contract_text
+        and '"nl_suite_checker_self_tests": "1"' in suite_artifact_contract_text
+        and "SUITE_WRAPPER_CONTRACT_SELF_TEST ok" in suite_artifact_contract_text
+        and "RUNNER_PATH_REF_CONTRACT_SELF_TEST ok" in suite_artifact_contract_text
+        and "COMPACT_COVERAGE_SELF_TEST ok" in suite_artifact_contract_text
+        and "LLM_RAW_TRACE_RUNNER_CONTRACT_SELF_TEST ok" in suite_artifact_contract_text,
+        findings,
+        "suite artifact contract checker must include recent checker self-test gate tokens",
+    )
+    require(
         "AGENT_PARITY_GATE_STEP suite_artifact_contract_self_test" in parity_text
         and "check_suite_artifact_contract.py\" --self-test" in parity_text
         and "suite_artifact_contract_self_test.txt" in parity_text,
@@ -1577,10 +1590,20 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
     )
     require(
         "print_llm_raw_trace.py\" --self-test" in parity_text
+        and "check_llm_raw_trace_runner_contract.py\" --self-test" in parity_text
         and "check_llm_raw_trace_runner_contract.py" in parity_text
         and "llm_raw_trace_runner_contract.txt" in parity_text,
         findings,
         "agent parity gate must write the NL raw LLM trace runner contract artifact",
+    )
+    require(
+        "check_secret_scan_contract.py\" --self-test" in parity_text
+        and "secret_scan_contract_self_test.txt" in parity_text
+        and "secret_scan_contract_self_test=1" in parity_text
+        and "nl_suite_checker_self_tests.txt" in parity_text
+        and "nl_suite_checker_self_tests=1" in parity_text,
+        findings,
+        "agent parity gate must write recent checker self-test artifacts and flags",
     )
     require(
         "llm_raw_trace_runner_contract=1" in parity_text,
