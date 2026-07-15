@@ -15,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "crates" / "clawd" / "src" / "task_journal_evidence_registry.rs"
+AGENTS = ROOT / "AGENTS.md"
 
 STEP_JSON_RE = re.compile(
     r"step_json_extractor\(\s*"
@@ -103,11 +104,31 @@ def check_explicit_text_legacy_strict_shape(text: str) -> list[str]:
     return findings
 
 
+def check_agents_rule() -> list[str]:
+    findings: list[str] = []
+    try:
+        text = AGENTS.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"agents_rule_read_failed:{exc.__class__.__name__}"]
+    required_tokens = {
+        "script": "python3 scripts/check_evidence_extractor_contracts.py",
+        "stable_machine_fields": "stable machine evidence fields",
+        "text_legacy_limit": "text_legacy",
+        "text_error_text_boundary": "text/error_text",
+        "machine_protocol_boundary": "machine-readable evidence protocol",
+    }
+    for label, token in required_tokens.items():
+        if token not in text:
+            findings.append(f"agents_rule_missing:{label}")
+    return findings
+
+
 def main() -> int:
     text = REGISTRY.read_text(encoding="utf-8")
     findings = check_step_json_extractors(text)
     findings.extend(check_step_text_extractors(text))
     findings.extend(check_explicit_text_legacy_strict_shape(text))
+    findings.extend(check_agents_rule())
     print(f"EVIDENCE_EXTRACTOR_CONTRACT_CHECK findings={len(findings)}")
     for finding in findings:
         print(f"  - {finding}")
