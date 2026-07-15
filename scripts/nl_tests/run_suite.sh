@@ -184,7 +184,7 @@ write_suite_artifact_contract_report() {
   contract_tmp="$(mktemp)"
   if (
     cd "$run_dir"
-    python3 "${SCRIPT_DIR}/check_suite_artifact_contract.py" . --json
+    python3 "${SCRIPT_DIR}/check_suite_artifact_contract.py" . --json --require-contract-report
   ) > "$contract_tmp"; then
     mv "$contract_tmp" "$contract_report"
   else
@@ -205,6 +205,8 @@ finalize_wrapped_suite() {
   local artifact_finalize_status="ok"
 
   write_suite_summary "$suite_name" "$run_dir" "$status" "$exit_code" "$artifact_finalize_status" \
+    || artifact_finalize_status="error"
+  printf '{"ok":false,"run_dir":".","findings":["contract_report_pending"]}\n' > "$contract_report" \
     || artifact_finalize_status="error"
   write_artifact_index "$run_dir" || artifact_finalize_status="error"
   write_suite_artifact_contract_report "$run_dir" || artifact_finalize_status="error"

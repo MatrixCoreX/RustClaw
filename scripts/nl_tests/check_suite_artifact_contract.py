@@ -102,7 +102,11 @@ def validate_summary(run_dir: Path, summary: dict[str, str]) -> list[str]:
     return findings
 
 
-def validate_artifact_index(run_dir: Path, artifact_index_rel: str) -> list[str]:
+def validate_artifact_index(
+    run_dir: Path,
+    artifact_index_rel: str,
+    require_contract_report: bool,
+) -> list[str]:
     findings: list[str] = []
     if not is_safe_relative_path(artifact_index_rel):
         return [f"path_not_run_root_relative:artifact_index"]
@@ -125,13 +129,16 @@ def validate_artifact_index(run_dir: Path, artifact_index_rel: str) -> list[str]
         if not (run_dir / entry).is_file():
             findings.append(f"artifact_index_entry_missing:{entry}")
 
-    for required in ["run.log", "suite_summary.env"]:
+    required_entries = ["run.log", "suite_summary.env"]
+    if require_contract_report:
+        required_entries.append("suite_artifact_contract.json")
+    for required in required_entries:
         if required not in seen:
             findings.append(f"artifact_index_missing_required:{required}")
     return findings
 
 
-def validate_run_dir(run_dir: Path) -> dict[str, Any]:
+def validate_run_dir(run_dir: Path, require_contract_report: bool = False) -> dict[str, Any]:
     findings: list[str] = []
     if not run_dir.exists():
         findings.append("run_dir_missing")
@@ -150,11 +157,12 @@ def validate_run_dir(run_dir: Path) -> dict[str, Any]:
     findings.extend(validate_summary(run_dir, summary))
     artifact_index_rel = summary.get("artifact_index")
     if artifact_index_rel:
-        findings.extend(validate_artifact_index(run_dir, artifact_index_rel))
+        findings.extend(validate_artifact_index(run_dir, artifact_index_rel, require_contract_report))
 
     return {
         "ok": not findings,
         "run_dir": str(run_dir),
+        "require_contract_report": require_contract_report,
         "summary": summary,
         "findings": findings,
     }
@@ -164,9 +172,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("run_dir", type=Path)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--require-contract-report", action="store_true")
     args = parser.parse_args()
 
-    report = validate_run_dir(args.run_dir)
+    report = validate_run_dir(args.run_dir, require_contract_report=args.require_contract_report)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     elif report["ok"]:
