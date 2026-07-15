@@ -36,6 +36,7 @@ AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
     "agent_parity_gate/registry_policy_contracts.txt",
     "agent_parity_gate/skill_registry_aliases.txt",
     "agent_parity_gate/long_tail_skill_contracts.txt",
+    "agent_parity_gate/task_lifecycle_contracts.txt",
     "agent_parity_gate/no_agent_mode_payload.txt",
     "agent_parity_gate/agent_loop_static_contracts.txt",
     "agent_parity_gate/semantic_boundary_contracts.txt",
@@ -57,6 +58,7 @@ AGENT_PARITY_GATE_REQUIRED_FLAGS = {
     "registry_policy_contracts": "1",
     "skill_registry_aliases": "1",
     "long_tail_skill_contracts": "1",
+    "task_lifecycle_contracts": "1",
     "no_agent_mode_payload": "1",
     "agent_loop_static_contracts": "1",
     "semantic_boundary_contracts": "1",
@@ -115,6 +117,10 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
     "agent_parity_gate/long_tail_skill_contracts.txt": {
         "LONG_TAIL_SKILL_CONTRACT_SELF_TEST ok",
         "LONG_TAIL_SKILL_CONTRACT_CHECK ok",
+    },
+    "agent_parity_gate/task_lifecycle_contracts.txt": {
+        "TASK_LIFECYCLE_CONTRACT_SELF_TEST ok",
+        "TASK_LIFECYCLE_CONTRACT_CHECK findings=0",
     },
     "agent_parity_gate/no_agent_mode_payload.txt": {
         "SELF_TEST_OK",

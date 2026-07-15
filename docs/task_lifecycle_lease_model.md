@@ -91,6 +91,7 @@ An active resume-executor lease blocks duplicate resume work until it expires. E
 - `resume-by-task-id` only applies to an existing checkpointed `waiting` or `background` task. It sets `next_check_after` to now, `resume_due=true`, and keeps the original `task_checkpoint`.
 - `pause-by-task-id` only applies to an existing checkpointed `waiting` or `background` task. It pushes `next_check_after` into the future and keeps the original `task_checkpoint`.
 - Manual pause/resume does not stop arbitrary code already executing inside a tool call. Long-tail tools must expose checkpoint or async-job fields before they can be safely paused or resumed by API/CLI/UI.
+- Operator entrypoints such as `clawcli resume-task <task_id>`, `clawcli pause-task <task_id> --pause-seconds N`, and `clawcli cancel-task <task_id>` are thin wrappers over these structured task-control paths. They must use task ids and lifecycle/checkpoint machine fields, not localized result text.
 
 ## Decision
 
