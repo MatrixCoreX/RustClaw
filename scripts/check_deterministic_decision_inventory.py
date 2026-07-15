@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "crates/clawd/src"
 PLANNING_ROOT = SRC_ROOT / "agent_engine"
 PLANNING_FILE = PLANNING_ROOT / "planning.rs"
+PLANNING_TESTS_FILE = PLANNING_ROOT / "planning_tests.rs"
 
 OWNER_CATEGORIES = {
     "contract_boundary",
@@ -246,10 +247,10 @@ def target_files() -> list[Path]:
     return sorted(files)
 
 
-def cfg_test_module_paths() -> set[str]:
-    if not PLANNING_FILE.is_file():
+def parse_path_modules(source: Path, *, require_cfg_test: bool) -> set[str]:
+    if not source.is_file():
         return set()
-    lines = PLANNING_FILE.read_text(encoding="utf-8").splitlines()
+    lines = source.read_text(encoding="utf-8").splitlines()
     paths: set[str] = set()
     cfg_test_pending = False
     path_pending: str | None = None
@@ -261,15 +262,23 @@ def cfg_test_module_paths() -> set[str]:
             cfg_test_pending = True
             path_pending = None
             continue
-        if cfg_test_pending and line.startswith("#[path = "):
+        path_allowed = cfg_test_pending or not require_cfg_test
+        if path_allowed and line.startswith("#[path = "):
             marker = line.split('"', 2)
             if len(marker) >= 3:
                 path_pending = marker[1]
             continue
-        if cfg_test_pending and path_pending and line.startswith("mod "):
-            paths.add(rel(PLANNING_ROOT / path_pending))
-        cfg_test_pending = False
+        if path_allowed and path_pending and line.startswith("mod "):
+            paths.add(rel(source.parent / path_pending))
+        if require_cfg_test:
+            cfg_test_pending = False
         path_pending = None
+    return paths
+
+
+def cfg_test_module_paths() -> set[str]:
+    paths = parse_path_modules(PLANNING_FILE, require_cfg_test=True)
+    paths.update(parse_path_modules(PLANNING_TESTS_FILE, require_cfg_test=False))
     return paths
 
 
@@ -441,7 +450,7 @@ def run_self_test() -> int:
     )
     assert not any("semantic_rewrite" in entry.categories for entry in observed_entries)
     assert (
-        "crates/clawd/src/agent_engine/runtime_surface_plan.rs"
+        "crates/clawd/src/agent_engine/planning_tests/runtime_surface_plans.rs"
         in cfg_test_module_paths()
     )
     assert not validate_deterministic_plan_results_are_test_only()
