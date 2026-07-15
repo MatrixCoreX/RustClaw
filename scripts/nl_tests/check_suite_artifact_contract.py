@@ -270,6 +270,35 @@ def load_json_artifact(run_dir: Path, rel_path: str) -> tuple[Any, list[str]]:
         return None, [f"agent_parity_gate_artifact_bad_json:{rel_path}"]
 
 
+def parse_provider_summary_jsonl(run_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    rel_path = "agent_parity_gate/chinese_provider_smoke/provider_summary.jsonl"
+    text, findings = read_text_artifact(run_dir / rel_path, rel_path)
+    if findings:
+        return [], findings
+    rows: list[dict[str, Any]] = []
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            findings.append(f"agent_parity_gate_provider_summary_bad_json_line:{lineno}")
+            continue
+        if not isinstance(payload, dict):
+            findings.append(f"agent_parity_gate_provider_summary_bad_row:{lineno}")
+            continue
+        rows.append(payload)
+    return rows, findings
+
+
+def expected_live_scope_providers(gate_summary: dict[str, str]) -> set[str]:
+    raw = (gate_summary.get("chinese_provider_live_providers") or "").strip().lower()
+    if raw in {"", "all"}:
+        return set(AGENT_PARITY_CHINESE_MODEL_PROVIDERS)
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
 def validate_compact_coverage_artifact(run_dir: Path) -> tuple[list[str], int]:
     rel_path = "agent_parity_gate/compact_coverage.json"
     payload, findings = load_json_artifact(run_dir, rel_path)
@@ -318,7 +347,32 @@ def validate_chinese_model_catalog_artifact(run_dir: Path) -> tuple[list[str], i
     return findings, checks
 
 
-def validate_provider_smoke_artifacts(run_dir: Path) -> tuple[list[str], int]:
+def validate_provider_smoke_case_coverage(run_dir: Path) -> tuple[list[str], int]:
+    rel_path = "agent_parity_gate/chinese_provider_smoke/case_coverage.json"
+    payload, findings = load_json_artifact(run_dir, rel_path)
+    checks = 0
+    if findings:
+        return findings, checks
+    checks += 5
+    if payload.get("ok") is not True:
+        findings.append("agent_parity_gate_provider_smoke_case_coverage_not_ok")
+    if payload.get("missing_coverage_tags") != []:
+        findings.append("agent_parity_gate_provider_smoke_case_coverage_missing_tags")
+    if payload.get("missing_provider_tags") != []:
+        findings.append("agent_parity_gate_provider_smoke_case_coverage_missing_provider_tags")
+    if payload.get("forbidden_live_tag_hits") != []:
+        findings.append("agent_parity_gate_provider_smoke_case_coverage_forbidden_live_tags")
+    provider_tags = set(payload.get("provider_tags") or [])
+    missing = sorted(AGENT_PARITY_CHINESE_MODEL_PROVIDERS - provider_tags)
+    if missing:
+        findings.append(f"agent_parity_gate_provider_smoke_case_coverage_missing_providers:{','.join(missing)}")
+    return findings, checks
+
+
+def validate_provider_smoke_artifacts(
+    run_dir: Path,
+    gate_summary: dict[str, str],
+) -> tuple[list[str], int]:
     findings: list[str] = []
     checks = 0
     payload, json_findings = load_json_artifact(
@@ -326,19 +380,54 @@ def validate_provider_smoke_artifacts(run_dir: Path) -> tuple[list[str], int]:
     )
     findings.extend(json_findings)
     if not json_findings:
-        checks += 3
+        checks += 8
         if safe_int(payload.get("provider_count")) < len(AGENT_PARITY_CHINESE_MODEL_PROVIDERS):
             findings.append("agent_parity_gate_provider_smoke_bad_provider_count")
-        providers = {
-            entry.get("provider")
+        provider_rows = [
+            entry
             for entry in payload.get("providers", [])
             if isinstance(entry, dict)
-        }
+        ]
+        providers = {entry.get("provider") for entry in provider_rows}
         missing = sorted(AGENT_PARITY_CHINESE_MODEL_PROVIDERS - providers)
         if missing:
             findings.append(f"agent_parity_gate_provider_smoke_missing_providers:{','.join(missing)}")
         if not isinstance(payload.get("status_counts"), dict):
             findings.append("agent_parity_gate_provider_smoke_missing_status_counts")
+        if not isinstance(payload.get("reason_code_counts"), dict):
+            findings.append("agent_parity_gate_provider_smoke_missing_reason_code_counts")
+        if not isinstance(payload.get("credential_state_counts"), dict):
+            findings.append("agent_parity_gate_provider_smoke_missing_credential_state_counts")
+        live_scope = expected_live_scope_providers(gate_summary)
+        for provider in sorted(AGENT_PARITY_CHINESE_MODEL_PROVIDERS):
+            row = next((item for item in provider_rows if item.get("provider") == provider), None)
+            if row is None:
+                continue
+            if safe_int(row.get("exit_code"), -1) != 0:
+                findings.append(f"agent_parity_gate_provider_smoke_bad_exit_code:{provider}")
+            if provider in live_scope:
+                if row.get("live_scope") not in {"included", "all"}:
+                    findings.append(f"agent_parity_gate_provider_smoke_bad_in_scope_marker:{provider}:{row.get('live_scope')}")
+                if row.get("status") != "planned" or row.get("reason_code") != "dry_run":
+                    findings.append(f"agent_parity_gate_provider_smoke_bad_in_scope_status:{provider}:{row.get('status')}:{row.get('reason_code')}")
+            else:
+                if row.get("live_scope") != "excluded":
+                    findings.append(f"agent_parity_gate_provider_smoke_bad_out_scope_marker:{provider}:{row.get('live_scope')}")
+                if row.get("status") != "skipped" or row.get("reason_code") != "provider_not_in_live_scope":
+                    findings.append(f"agent_parity_gate_provider_smoke_bad_out_scope_status:{provider}:{row.get('status')}:{row.get('reason_code')}")
+        reason_counts = payload.get("reason_code_counts")
+        if isinstance(reason_counts, dict) and "dry_run" not in reason_counts:
+            findings.append("agent_parity_gate_provider_smoke_missing_dry_run_reason")
+        rows, row_findings = parse_provider_summary_jsonl(run_dir)
+        findings.extend(row_findings)
+        row_providers = {row.get("provider") for row in rows}
+        row_missing = sorted(AGENT_PARITY_CHINESE_MODEL_PROVIDERS - row_providers)
+        if row_missing:
+            findings.append(f"agent_parity_gate_provider_summary_missing_providers:{','.join(row_missing)}")
+        checks += 1
+    coverage_findings, coverage_checks = validate_provider_smoke_case_coverage(run_dir)
+    findings.extend(coverage_findings)
+    checks += coverage_checks
     text, text_findings = read_text_artifact(
         run_dir / "agent_parity_gate/chinese_provider_smoke.txt",
         "agent_parity_gate/chinese_provider_smoke.txt",
@@ -428,7 +517,7 @@ def validate_enabled_agent_parity_optional_artifacts(
         findings.extend(catalog_findings)
         checks += catalog_checks
     if gate_summary.get("provider_smoke") == "1":
-        smoke_findings, smoke_checks = validate_provider_smoke_artifacts(run_dir)
+        smoke_findings, smoke_checks = validate_provider_smoke_artifacts(run_dir, gate_summary)
         findings.extend(smoke_findings)
         checks += smoke_checks
     if gate_summary.get("coding_fixture") == "1":

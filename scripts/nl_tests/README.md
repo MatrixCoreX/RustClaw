@@ -136,7 +136,11 @@ must contain their success tokens, and JSON reports such as
 `gate_summary.env`: compact coverage must have no missing/forbidden rows,
 Chinese model catalog must report `status=ok` with all Chinese providers, and
 the coding repair fixture metrics must satisfy the configured pass-rate,
-prompt-truncation, provider-error, and average-LLM-call thresholds.
+prompt-truncation, provider-error, and average-LLM-call thresholds. When
+provider smoke is enabled, the contract also checks the case coverage artifact,
+provider summary JSONL, and each MiniMax/MiMo/Qwen/DeepSeek matrix row for the
+expected dry-run or `provider_not_in_live_scope` reason based on
+`chinese_provider_live_providers`.
 The JSON report includes `agent_parity_gate_contract.checked=true` plus the
 required artifact, flag, and content-check counts when this suite-specific
 validation runs.
