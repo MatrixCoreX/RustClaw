@@ -166,7 +166,7 @@ PROVIDER_CREDENTIAL_ENV_VARS = {
     "qwen": ["QWEN_API_KEY", "DASHSCOPE_API_KEY"],
 }
 
-STALE_MINIMAX_ENDPOINT_TOKENS = ("api.minimax.io", "api.minimax.cn")
+STALE_MINIMAX_ENDPOINT_TOKENS = ("api.minimax.io", "api.minimax.cn", "api.minimax.ocom")
 STALE_MINIMAX_ENDPOINT_SCAN_ROOTS = (
     ROOT / "configs",
     ROOT / "docker/config",
