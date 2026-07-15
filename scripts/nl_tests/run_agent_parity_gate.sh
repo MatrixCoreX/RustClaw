@@ -25,6 +25,7 @@ MAX_PROMPT_BYTES_BEFORE="${MAX_PROMPT_BYTES_BEFORE:-}"
 CHINESE_PROVIDER_LIVE_PROVIDERS="${CHINESE_PROVIDER_LIVE_PROVIDERS:-minimax}"
 CHINESE_PROVIDER_ENV_FILE="${CHINESE_PROVIDER_ENV_FILE:-${ROOT_DIR}/../runtime_env_filled.sh}"
 CHINESE_PROVIDER_ENV_FILE_STATE="auto"
+CHINESE_PROVIDER_ENV_FILE_SOURCE="default"
 
 usage() {
   cat <<'EOF'
@@ -137,11 +138,13 @@ while [[ $# -gt 0 ]]; do
     --chinese-env-file)
       CHINESE_PROVIDER_ENV_FILE="${2:-}"
       CHINESE_PROVIDER_ENV_FILE_STATE="explicit"
+      CHINESE_PROVIDER_ENV_FILE_SOURCE="explicit"
       shift 2
       ;;
     --no-chinese-env-file)
       CHINESE_PROVIDER_ENV_FILE=""
       CHINESE_PROVIDER_ENV_FILE_STATE="disabled"
+      CHINESE_PROVIDER_ENV_FILE_SOURCE="disabled"
       shift
       ;;
     -*)
@@ -271,7 +274,7 @@ fi
   echo "max_provider_final_errors=${MAX_PROVIDER_FINAL_ERRORS}"
   echo "chinese_provider_live_providers=${CHINESE_PROVIDER_LIVE_PROVIDERS}"
   echo "chinese_provider_env_file_state=${CHINESE_PROVIDER_ENV_FILE_STATE}"
-  echo "chinese_provider_env_file=${CHINESE_PROVIDER_ENV_FILE}"
+  echo "chinese_provider_env_file_source=${CHINESE_PROVIDER_ENV_FILE_SOURCE}"
 } > "${OUT_DIR}/gate_summary.env"
 
 echo "AGENT_PARITY_GATE_OK out_dir=${OUT_DIR}"

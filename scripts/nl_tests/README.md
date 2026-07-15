@@ -87,8 +87,9 @@ provider errors. Override with `--min-pass-rate`, `--max-avg-llm-calls`,
 variables with the same uppercase names. The Chinese-provider model catalog
 guard and smoke preflight use `CHINESE_PROVIDER_ENV_FILE` or
 `../runtime_env_filled.sh` when present, and record only env-file state plus
-secret-free credential metadata. Use `--chinese-env-file <path>` to override it,
-or `--no-chinese-env-file` for a pure missing-credential preflight.
+env-file source tokens plus secret-free credential metadata; artifacts do not
+write the env-file path or secret values. Use `--chinese-env-file <path>` to
+override it, or `--no-chinese-env-file` for a pure missing-credential preflight.
 
 For rerun shards, use:
 
