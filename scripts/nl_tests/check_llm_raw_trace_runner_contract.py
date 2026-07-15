@@ -192,6 +192,7 @@ init_llm_trace_offset "$llm_offset_file"
     assert "--task-id" in extract_function(good, "print_new_llm_trace")
     assert "--task-id" not in extract_function(bad, "print_new_llm_trace")
     print("SELF_TEST_OK")
+    print("LLM_RAW_TRACE_RUNNER_CONTRACT_SELF_TEST ok")
     return 0
 
 

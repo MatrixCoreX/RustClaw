@@ -116,6 +116,7 @@ SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_suite_artifact_self_test_token": "SUITE_ARTIFACT_CONTRACT_SELF_TEST ok",
     "agent_parity_rollout_metrics_contract": "rollout_metrics_contract",
     "agent_parity_rollout_metrics_contract_token": "ROLLOUT_METRICS_SELF_TEST ok",
+    "agent_parity_llm_raw_trace_runner_self_test_token": "LLM_RAW_TRACE_RUNNER_CONTRACT_SELF_TEST ok",
     "agent_parity_self_test_stored_contract": "stored_agent_contract",
     "agent_parity_self_test_report_override": "stored_report_override",
     "agent_parity_text_token_validator": "validate_text_artifact_tokens",
