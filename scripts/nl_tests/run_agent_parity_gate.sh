@@ -270,6 +270,12 @@ echo "AGENT_PARITY_GATE_STEP repair_no_user_text_fields"
   python3 "${ROOT_DIR}/scripts/check_repair_no_user_text_fields.py"
 } > "${OUT_DIR}/repair_no_user_text_fields.txt"
 
+echo "AGENT_PARITY_GATE_STEP policy_decision_tokens"
+{
+  python3 "${ROOT_DIR}/scripts/check_policy_decision_tokens.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_policy_decision_tokens.py"
+} > "${OUT_DIR}/policy_decision_tokens.txt"
+
 echo "AGENT_PARITY_GATE_STEP no_agent_mode_payload"
 {
   python3 "${ROOT_DIR}/scripts/check_no_agent_mode_payload.py" --self-test
@@ -388,6 +394,7 @@ fi
   echo "runtime_hard_reply_baseline=1"
   echo "policy_boundary_hard_reply=1"
   echo "repair_no_user_text_fields=1"
+  echo "policy_decision_tokens=1"
   echo "no_agent_mode_payload=1"
   echo "agent_loop_static_contracts=1"
   echo "evidence_extractor_contracts=1"

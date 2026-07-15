@@ -117,6 +117,12 @@ It also writes `repair_no_user_text_fields.txt` from
 must contain `SELF_TEST_OK` and `REPAIR_USER_TEXT_FIELD_CHECK ok`, so repair and
 loop recovery boundaries do not treat user-visible `text/error_text` as machine
 protocol.
+It also writes `policy_decision_tokens.txt` from
+`scripts/check_policy_decision_tokens.py --self-test` plus the main check.
+`gate_summary.env` records `policy_decision_tokens=1`, and the artifact must
+contain `POLICY_DECISION_TOKEN_SELF_TEST ok` and
+`POLICY_DECISION_TOKEN_CHECK ok`, so permission, confirmation, and background
+wait decisions keep flowing through the `PolicyDecision` machine-token enum.
 It also writes `evidence_extractor_contracts.txt` from
 `scripts/check_evidence_extractor_contracts.py --self-test` plus the main check.
 `gate_summary.env` records `evidence_extractor_contracts=1`, and the artifact
@@ -148,6 +154,7 @@ root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/runtime_hard_reply_baseline.txt`,
 `agent_parity_gate/policy_boundary_hard_reply.txt`,
 `agent_parity_gate/repair_no_user_text_fields.txt`,
+`agent_parity_gate/policy_decision_tokens.txt`,
 `agent_parity_gate/agent_loop_static_contracts.txt`,
 `agent_parity_gate/evidence_extractor_contracts.txt`, and
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
@@ -185,8 +192,9 @@ runs, the artifact contract also validates nested gate artifacts such as
 the artifact checker's dynamic machine fields such as the Chinese provider live
 scope, then checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
-the runtime hard-reply, policy-boundary hard-reply, repair no-user-text, static
-agent-loop, evidence-extractor, secret-scan, wrapper, no-agent-mode,
+the runtime hard-reply, policy-boundary hard-reply, repair no-user-text,
+policy-decision-token, static agent-loop, evidence-extractor, secret-scan,
+wrapper, no-agent-mode,
 suite-artifact self-test, and raw LLM trace contracts participated in the run.
 For `runtime_hard_reply_baseline.txt`, the required content includes
 `SELF_TEST_OK`, `RUNTIME_HARD_REPLY_ALL_SCAN`, and `new=0`.
@@ -195,6 +203,8 @@ For `policy_boundary_hard_reply.txt`, the required content includes
 `POLICY_BOUNDARY_HARD_REPLY_CHECK ok`.
 For `repair_no_user_text_fields.txt`, the required content includes
 `SELF_TEST_OK` and `REPAIR_USER_TEXT_FIELD_CHECK ok`.
+For `policy_decision_tokens.txt`, the required content includes
+`POLICY_DECISION_TOKEN_SELF_TEST ok` and `POLICY_DECISION_TOKEN_CHECK ok`.
 For `agent_loop_static_contracts.txt`, the required content includes the five
 `AGENT_LOOP_STATIC_SELF_TEST ...` labels as well as the main guard success
 tokens.

@@ -943,6 +943,23 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate summary must record the repair no-user-text guard state",
     )
     require(
+        "AGENT_PARITY_GATE_STEP policy_decision_tokens" in parity_text,
+        findings,
+        "agent parity gate must run the policy decision token guard step",
+    )
+    require(
+        "check_policy_decision_tokens.py" in parity_text
+        and 'check_policy_decision_tokens.py" --self-test' in parity_text
+        and "policy_decision_tokens.txt" in parity_text,
+        findings,
+        "agent parity gate must self-test and write the policy decision token artifact",
+    )
+    require(
+        "policy_decision_tokens=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the policy decision token guard state",
+    )
+    require(
         "AGENT_PARITY_GATE_STEP no_agent_mode_payload" in parity_text,
         findings,
         "agent parity gate must run the no-agent-mode payload guard step",
@@ -1097,6 +1114,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "agent_parity_gate/runtime_hard_reply_baseline.txt" in suite_artifact_contract_text
         and "agent_parity_gate/policy_boundary_hard_reply.txt" in suite_artifact_contract_text
         and "agent_parity_gate/repair_no_user_text_fields.txt" in suite_artifact_contract_text
+        and "agent_parity_gate/policy_decision_tokens.txt" in suite_artifact_contract_text
         and "agent_parity_gate/agent_loop_static_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/evidence_extractor_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/suite_wrapper_contract.json" in suite_artifact_contract_text
@@ -1110,11 +1128,14 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and '"runtime_hard_reply_baseline": "1"' in suite_artifact_contract_text
         and '"policy_boundary_hard_reply": "1"' in suite_artifact_contract_text
         and '"repair_no_user_text_fields": "1"' in suite_artifact_contract_text
+        and '"policy_decision_tokens": "1"' in suite_artifact_contract_text
         and "RUNTIME_HARD_REPLY_ALL_SCAN" in suite_artifact_contract_text
         and "new=0" in suite_artifact_contract_text
         and "POLICY_BOUNDARY_HARD_REPLY_SELF_TEST ok" in suite_artifact_contract_text
         and "POLICY_BOUNDARY_HARD_REPLY_CHECK ok" in suite_artifact_contract_text
         and "REPAIR_USER_TEXT_FIELD_CHECK ok" in suite_artifact_contract_text
+        and "POLICY_DECISION_TOKEN_SELF_TEST ok" in suite_artifact_contract_text
+        and "POLICY_DECISION_TOKEN_CHECK ok" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_route_authority_legacy_keys.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_legacy_route_boundary.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_pre_planner_exit_inventory.py" in suite_artifact_contract_text
@@ -1307,6 +1328,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             and "runtime_hard_reply_baseline.txt" in readme_body
             and "policy_boundary_hard_reply.txt" in readme_body
             and "repair_no_user_text_fields.txt" in readme_body
+            and "policy_decision_tokens.txt" in readme_body
             and "no_agent_mode_payload.txt" in readme_body
             and "evidence_extractor_contracts.txt" in readme_body
             and "self-test" in readme_body
@@ -1351,6 +1373,14 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "REPAIR_USER_TEXT_FIELD_CHECK ok" in nl_tests_readme_text,
         findings,
         "NL tests README must document repair no-user-text artifact content",
+    )
+    require(
+        "policy_decision_tokens.txt" in nl_tests_readme_text
+        and "policy_decision_tokens=1" in nl_tests_readme_text
+        and "POLICY_DECISION_TOKEN_SELF_TEST ok" in nl_tests_readme_text
+        and "POLICY_DECISION_TOKEN_CHECK ok" in nl_tests_readme_text,
+        findings,
+        "NL tests README must document policy decision token artifact content",
     )
     require(
         "evidence_extractor_contracts.txt" in nl_tests_readme_text
