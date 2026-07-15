@@ -918,6 +918,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "contract_report_content_checked_not_true" in suite_artifact_contract_text
         and "contract_report_summary_mismatch" in suite_artifact_contract_text
         and "contract_report_agent_parity_contract_mismatch" in suite_artifact_contract_text
+        and "contract_report_unexpected_agent_parity_contract" in suite_artifact_contract_text
+        and "unexpected_agent_contract" in suite_artifact_contract_text
         and '"agent_loop_static_contracts": "1"' in suite_artifact_contract_text
         and '"suite_wrapper_contract": "1"' in suite_artifact_contract_text
         and '"suite_artifact_contract_self_test": "1"' in suite_artifact_contract_text

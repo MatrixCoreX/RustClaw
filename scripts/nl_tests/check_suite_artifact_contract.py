@@ -852,6 +852,36 @@ def run_self_test() -> int:
             )
             return 1
 
+        unexpected_agent_contract_run = root / "unexpected-agent-contract"
+        write_minimal_self_test_run(
+            unexpected_agent_contract_run,
+            content_checked=True,
+            stored_agent_contract={"checked": True, "content_check_count": 1},
+        )
+        unexpected_agent_contract_findings = validate_existing_contract_report(
+            unexpected_agent_contract_run,
+            {
+                "summary": {
+                    "suite": "manual",
+                    "status": "ok",
+                    "exit_code": "0",
+                    "artifact_finalize_status": "ok",
+                    "run_log": "run.log",
+                    "artifact_index": "artifact_index.txt",
+                },
+            },
+            require_content_checked=True,
+        )
+        if "contract_report_unexpected_agent_parity_contract" not in set(
+            unexpected_agent_contract_findings
+        ):
+            print(
+                "SELF_TEST_FAIL unexpected_agent_contract:"
+                f"{unexpected_agent_contract_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
     print("SUITE_ARTIFACT_CONTRACT_SELF_TEST ok")
     return 0
 
