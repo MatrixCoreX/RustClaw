@@ -65,12 +65,15 @@ fn build_model_catalog_trace_for_debug(state: &AppState, entries: &[TaskDebugEnt
         })
         .map(|entry| {
             json!({
+                "schema_version": entry.schema_version,
                 "provider": entry.provider,
                 "model": entry.model,
+                "models": entry.models,
                 "api_style": entry.api_style,
                 "base_url_kind": entry.base_url_kind,
                 "credential_state": entry.credential_state,
                 "context_window_tokens": entry.context_window_tokens,
+                "timeout_seconds": entry.timeout_seconds,
                 "input_modalities": entry.input_modalities,
                 "output_modalities": entry.output_modalities,
                 "supports_text": entry.supports_text,
@@ -366,6 +369,12 @@ minimax_models = ["MiniMax-M3"]
         assert_eq!(trace["selected_provider"], "minimax");
         assert_eq!(trace["selected_model"], "MiniMax-M3");
         assert_eq!(trace["observed_providers"][0], "minimax");
+        assert_eq!(trace["entries"][0]["schema_version"], 1);
+        assert_eq!(trace["entries"][0]["models"], json!(["MiniMax-M3"]));
+        assert!(trace["entries"][0]
+            .as_object()
+            .is_some_and(|entry| entry.contains_key("timeout_seconds")));
+        assert_eq!(trace["entries"][0]["timeout_seconds"], json!(null));
         assert_eq!(
             trace["entries"][0]["input_modalities"],
             json!(["text", "image", "video"])

@@ -166,8 +166,14 @@ test("builds model catalog trace machine tokens", () => {
     },
     entries: [
       {
+        schema_version: 1,
         provider: "minimax",
         model: "MiniMax-M3",
+        models: ["MiniMax-M3", "MiniMax-M2.7"],
+        api_style: "openai_compatible",
+        base_url_kind: "minimax_official_openai_compat",
+        context_window_tokens: 1000000,
+        timeout_seconds: 180,
         credential_state: "configured_env",
         active_text_provider: true,
         input_modalities: ["text", "image", "video"],
@@ -189,7 +195,13 @@ test("builds model catalog trace machine tokens", () => {
   assert.ok(tokens.includes("selected_provider=minimax"));
   assert.ok(tokens.includes("selected_model=MiniMax-M3"));
   assert.ok(tokens.includes("catalog_guard_status.status=ok"));
+  assert.ok(tokens.includes("entries.1.schema_version=1"));
   assert.ok(tokens.includes("entries.1.provider=minimax"));
+  assert.ok(tokens.includes("entries.1.api_style=openai_compatible"));
+  assert.ok(tokens.includes("entries.1.base_url_kind=minimax_official_openai_compat"));
+  assert.ok(tokens.includes("entries.1.context_window_tokens=1000000"));
+  assert.ok(tokens.includes("entries.1.timeout_seconds=180"));
+  assert.ok(tokens.includes("entries.1.models=MiniMax-M3,MiniMax-M2.7"));
   assert.ok(tokens.includes("entries.1.active_text_provider=true"));
   assert.ok(tokens.includes("entries.1.input_modalities=text,image,video"));
   assert.ok(tokens.includes("entries.1.output_modalities=text"));

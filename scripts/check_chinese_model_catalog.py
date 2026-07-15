@@ -40,6 +40,8 @@ CHINESE_CASE_FILE = ROOT / "scripts/nl_tests/cases/nl_cases_chinese_model_adapte
 CHINESE_PROVIDER_SMOKE_RUNNER = ROOT / "scripts/nl_tests/run_chinese_provider_smoke_matrix.sh"
 AGENT_PARITY_GATE_RUNNER = ROOT / "scripts/nl_tests/run_agent_parity_gate.sh"
 VENDOR_PATCH_ROOT = ROOT / "prompts/layers/vendor_patches"
+TASK_DEBUG_TRACE_SOURCE = ROOT / "crates/clawd/src/http/ui_routes/task_debug_trace.rs"
+UI_TASK_LLM_TRACE_SOURCE = ROOT / "UI/src/lib/task-llm-trace.ts"
 
 TEXT_PROVIDER_FIELDS = [
     "base_url",
@@ -140,6 +142,14 @@ RUNTIME_CATALOG_ENTRY_FIELDS = {
     "supports_video_generation",
     "supports_video_input",
     "timeout_seconds",
+}
+
+TASK_DEBUG_TRACE_CATALOG_FIELD_EXCLUSIONS = {
+    "config_source",
+}
+
+UI_TEACHING_CATALOG_FIELD_EXCLUSIONS = {
+    "config_source",
 }
 
 PROVIDER_CREDENTIAL_ENV_VARS = {
@@ -615,6 +625,47 @@ def check_runtime_catalog_shape(findings: list[str], catalog: list[dict[str, Any
         require(not missing, findings, f"catalog entry {provider}: missing runtime fields {missing}")
 
 
+def check_model_catalog_teaching_projection(findings: list[str]) -> None:
+    require(
+        TASK_DEBUG_TRACE_SOURCE.exists(),
+        findings,
+        f"missing {TASK_DEBUG_TRACE_SOURCE.relative_to(ROOT)}",
+    )
+    require(
+        UI_TASK_LLM_TRACE_SOURCE.exists(),
+        findings,
+        f"missing {UI_TASK_LLM_TRACE_SOURCE.relative_to(ROOT)}",
+    )
+    if not TASK_DEBUG_TRACE_SOURCE.exists() or not UI_TASK_LLM_TRACE_SOURCE.exists():
+        return
+
+    task_debug_source = TASK_DEBUG_TRACE_SOURCE.read_text(encoding="utf-8")
+    ui_trace_source = UI_TASK_LLM_TRACE_SOURCE.read_text(encoding="utf-8")
+    task_debug_required = sorted(RUNTIME_CATALOG_ENTRY_FIELDS - TASK_DEBUG_TRACE_CATALOG_FIELD_EXCLUSIONS)
+    missing_task_debug_projection = [
+        field
+        for field in task_debug_required
+        if f'"{field}": entry.{field}' not in task_debug_source
+    ]
+    require(
+        not missing_task_debug_projection,
+        findings,
+        f"task debug model_catalog_trace missing projected fields {missing_task_debug_projection}",
+    )
+
+    ui_required = sorted(RUNTIME_CATALOG_ENTRY_FIELDS - UI_TEACHING_CATALOG_FIELD_EXCLUSIONS)
+    missing_ui_projection = [
+        field
+        for field in ui_required
+        if f'"{field}"' not in ui_trace_source
+    ]
+    require(
+        not missing_ui_projection,
+        findings,
+        f"UI model catalog teaching tokens missing fields {missing_ui_projection}",
+    )
+
+
 def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
     require(
         CHINESE_PROVIDER_SMOKE_RUNNER.exists(),
@@ -764,6 +815,7 @@ def build_report(env_file: Path | None = None) -> dict[str, Any]:
     check_chinese_case_gate(findings)
     catalog = build_catalog(main, env_values)
     check_runtime_catalog_shape(findings, catalog)
+    check_model_catalog_teaching_projection(findings)
     check_chinese_provider_smoke_live_scope(findings)
     findings.extend(secret_scan_findings(catalog, "$.catalog"))
     return {
