@@ -111,7 +111,7 @@ submit_ask() {
       user_id: $user_id,
       chat_id: $chat_id,
       kind: "ask",
-      payload: { text: $text, agent_mode: true }
+      payload: { text: $text }
     } + (if ($user_key | length) > 0 then { user_key: $user_key } else {} end)' \
   | curl -sS -X POST "${BASE_URL}/v1/tasks" \
       -H "Content-Type: application/json" \

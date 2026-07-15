@@ -386,7 +386,7 @@ async function handleInboundMessage(msg) {
   }
 
   if (text) {
-    await runTaskFlow(jid, "ask", { text, agent_mode: true });
+    await runTaskFlow(jid, "ask", { text });
   }
 }
 

@@ -19,6 +19,9 @@ SCAN_ROOTS = (
     "README.zh-CN.md",
     "configs",
     "crates",
+    "scripts",
+    "services",
+    "simulate-telegramd.sh",
     "UI/src",
 )
 SKIP_PATH_PARTS = {
@@ -26,12 +29,16 @@ SKIP_PATH_PARTS = {
     "node_modules",
     "dist",
     "__pycache__",
+    "nl_suite_logs",
 }
 SKIP_FILES = {
     Path("scripts/check_no_agent_mode_payload.py"),
 }
 SCAN_SUFFIXES = {
     ".rs",
+    ".js",
+    ".py",
+    ".sh",
     ".ts",
     ".tsx",
     ".toml",
@@ -77,6 +84,13 @@ def scan_file(path: Path) -> list[str]:
 def run_self_test() -> int:
     assert FORBIDDEN_PATTERN.search('"agent_mode": true')
     assert not FORBIDDEN_PATTERN.search('"subagent_model_child"')
+    assert "scripts" in SCAN_ROOTS
+    assert "services" in SCAN_ROOTS
+    assert "simulate-telegramd.sh" in SCAN_ROOTS
+    assert ".sh" in SCAN_SUFFIXES
+    assert ".js" in SCAN_SUFFIXES
+    assert ".py" in SCAN_SUFFIXES
+    assert "nl_suite_logs" in SKIP_PATH_PARTS
     assert Path("scripts/check_no_agent_mode_payload.py") in SKIP_FILES
     print("SELF_TEST_OK")
     return 0

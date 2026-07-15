@@ -10,7 +10,6 @@ USER_ID="${USER_ID:-}"
 CHAT_ID="${CHAT_ID:-}"
 WAIT_SECONDS="${WAIT_SECONDS:-120}"
 POLL_INTERVAL="${POLL_INTERVAL:-1}"
-AGENT_MODE="${AGENT_MODE:-true}"
 TRIGGER_ERROR_REGEX="${TRIGGER_ERROR_REGEX:-技能执行错误|agent tool call limit exceeded|agent repeated same action}"
 STRICT_MODE="${STRICT_MODE:-false}"
 RETRY_ON_TRANSIENT="${RETRY_ON_TRANSIENT:-true}"
@@ -34,7 +33,7 @@ Options:
   --help, -h          show this help
 
 Env:
-  BASE_URL, USER_ID, CHAT_ID, WAIT_SECONDS, POLL_INTERVAL, AGENT_MODE, STRICT_MODE, RETRY_ON_TRANSIENT
+  BASE_URL, USER_ID, CHAT_ID, WAIT_SECONDS, POLL_INTERVAL, STRICT_MODE, RETRY_ON_TRANSIENT
 
 Notes:
   - This script uses ask-mode natural language prompts to verify LLM can trigger crypto skill.
@@ -160,14 +159,12 @@ submit_ask_task() {
     --argjson user_id "$USER_ID" \
     --argjson chat_id "$CHAT_ID" \
     --arg text "$prompt" \
-    --argjson agent_mode "$AGENT_MODE" \
     '{
       user_id: $user_id,
       chat_id: $chat_id,
       kind: "ask",
       payload: {
-        text: $text,
-        agent_mode: $agent_mode
+        text: $text
       }
     }')"
   curl -sS -X POST "${BASE_URL}/v1/tasks" -H "Content-Type: application/json" -d "$body"

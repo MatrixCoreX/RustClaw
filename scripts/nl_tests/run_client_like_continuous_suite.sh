@@ -47,7 +47,7 @@ Usage:
 
 What it tests:
   Directly POSTs /v1/tasks to clawd, but uses the same request shape as telegramd:
-  channel=telegram, stable user_id/chat_id, external ids, user_key, and payload.agent_mode=true.
+  channel=telegram, stable user_id/chat_id, external ids, user_key, and text payload.
   Multiple turns reuse one client identity so clawd accumulates tasks, conversation state, and memory.
 
 Options:
@@ -1236,7 +1236,7 @@ submit_turn() {
   fi
 
   for ((submit_attempt = 1; submit_attempt <= max_submit_attempts; submit_attempt++)); do
-    submit_raw="$(submit_client_like_telegram_task "$prompt" "true" "" "$EXTERNAL_USER_ID_VALUE" "$turn_external_chat_id")"
+    submit_raw="$(submit_client_like_telegram_task "$prompt" "" "" "$EXTERNAL_USER_ID_VALUE" "$turn_external_chat_id")"
     submit_status=0
     submit_extract="$(extract_submit_task_id "$submit_raw" 2>&1)" || submit_status=$?
     if [[ "$submit_status" -eq 0 ]]; then
