@@ -104,7 +104,7 @@ fn summary_json_includes_coding_workflow_repair_contract() {
         "run_cmd",
         crate::executor::StepExecutionStatus::Error,
         None,
-        Some("exit=101 command=cargo test -p clawd".to_string()),
+        Some("exit=101 command=cargo test -p clawd\nstderr_ref=artifact:stderr:step_1".to_string()),
     ));
 
     let summary = journal.to_summary_json();
@@ -113,6 +113,15 @@ fn summary_json_includes_coding_workflow_repair_contract() {
     assert_eq!(workflow["verification_status"], "failed");
     assert_eq!(workflow["next_step"], "repair_failed_verification");
     assert_eq!(workflow["failure_kinds"][0], "test");
+    assert_eq!(workflow["failed_command_count"], 1);
+    assert_eq!(workflow["failed_commands"][0], "cargo test -p clawd");
+    assert_eq!(workflow["failed_command_ref_count"], 1);
+    assert_eq!(workflow["failed_command_refs"][0], "step:step_1");
+    assert_eq!(workflow["failed_command_stderr_ref_count"], 1);
+    assert_eq!(
+        workflow["failed_command_stderr_refs"][0],
+        "artifact:stderr:step_1"
+    );
     assert_eq!(workflow["repair_attempt_count"], 1);
     assert_eq!(workflow["repair_attempt_refs"][0], "step:step_1");
     assert!(workflow
@@ -138,6 +147,18 @@ fn summary_json_includes_coding_workflow_repair_contract() {
             .pointer("/validation_gate/repair_signal/signal_kind")
             .and_then(Value::as_str),
         Some("verification_failed")
+    );
+    assert_eq!(
+        workflow
+            .pointer("/validation_gate/repair_signal/failed_command_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        workflow
+            .pointer("/validation_gate/repair_signal/failed_command_stderr_ref_count")
+            .and_then(Value::as_u64),
+        Some(1)
     );
 }
 

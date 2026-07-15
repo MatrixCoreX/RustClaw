@@ -14,6 +14,9 @@ struct CodingWorkflowSignals {
     verification_commands: BTreeSet<String>,
     checkpoint_refs: BTreeSet<String>,
     completed_side_effect_refs: BTreeSet<String>,
+    failed_commands: BTreeSet<String>,
+    failed_command_refs: BTreeSet<String>,
+    failed_command_stderr_refs: BTreeSet<String>,
     failure_kinds: BTreeSet<String>,
     repair_step_refs: BTreeSet<String>,
     verified_observed: bool,
@@ -46,6 +49,12 @@ pub(super) fn coding_workflow_summary_json(journal: &TaskJournal) -> Value {
         "checkpoint_refs": bounded_set_values(&signals.checkpoint_refs),
         "completed_side_effect_count": signals.completed_side_effect_refs.len(),
         "completed_side_effect_refs": bounded_set_values(&signals.completed_side_effect_refs),
+        "failed_command_count": signals.failed_commands.len(),
+        "failed_commands": bounded_set_values(&signals.failed_commands),
+        "failed_command_ref_count": signals.failed_command_refs.len(),
+        "failed_command_refs": bounded_set_values(&signals.failed_command_refs),
+        "failed_command_stderr_ref_count": signals.failed_command_stderr_refs.len(),
+        "failed_command_stderr_refs": bounded_set_values(&signals.failed_command_stderr_refs),
         "remaining_risks": remaining_risks(&signals, verification_status),
         "done_condition_coverage": done_condition_coverage(&signals, verification_status),
         "validation_gate": validation_gate_json(&signals, verification_status),
@@ -79,6 +88,15 @@ fn collect_transition(map: &Map<String, Value>, signals: &mut CodingWorkflowSign
         map.get("completed_side_effect_refs"),
         &mut signals.completed_side_effect_refs,
     );
+    collect_string_array(map.get("failed_commands"), &mut signals.failed_commands);
+    collect_string_array(
+        map.get("failed_command_refs"),
+        &mut signals.failed_command_refs,
+    );
+    collect_string_array(
+        map.get("failed_command_stderr_refs"),
+        &mut signals.failed_command_stderr_refs,
+    );
     if map.get("phase").and_then(Value::as_str) == Some("repair") {
         collect_step_ref(map, &mut signals.repair_step_refs);
     }
@@ -101,6 +119,15 @@ fn collect_checkpoint(map: &Map<String, Value>, signals: &mut CodingWorkflowSign
     collect_string_array(
         map.get("completed_side_effect_refs"),
         &mut signals.completed_side_effect_refs,
+    );
+    collect_string_array(map.get("failed_commands"), &mut signals.failed_commands);
+    collect_string_array(
+        map.get("failed_command_refs"),
+        &mut signals.failed_command_refs,
+    );
+    collect_string_array(
+        map.get("failed_command_stderr_refs"),
+        &mut signals.failed_command_stderr_refs,
     );
     match map.get("verification_status").and_then(Value::as_str) {
         Some("verified") => signals.verified_observed = true,
@@ -194,6 +221,9 @@ fn validation_gate_json(signals: &CodingWorkflowSignals, verification_status: &s
             "next_step": "repair_failed_verification",
             "failure_kind_count": signals.failure_kinds.len(),
             "failure_kinds": bounded_set_values(&signals.failure_kinds),
+            "failed_command_count": signals.failed_commands.len(),
+            "failed_command_ref_count": signals.failed_command_refs.len(),
+            "failed_command_stderr_ref_count": signals.failed_command_stderr_refs.len(),
         })
     } else {
         Value::Null
