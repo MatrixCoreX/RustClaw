@@ -107,6 +107,7 @@ fn build_model_catalog_trace_for_debug(state: &AppState, entries: &[TaskDebugEnt
         "status": "ok",
         "selected_provider": catalog.selected_provider,
         "selected_model": catalog.selected_model,
+        "readiness": build_model_readiness_trace_for_debug(&catalog),
         "observed_provider_count": observed_providers.len(),
         "observed_providers": observed_providers.into_iter().collect::<Vec<_>>(),
         "observed_models": observed_models.into_iter().collect::<Vec<_>>(),
@@ -114,6 +115,57 @@ fn build_model_catalog_trace_for_debug(state: &AppState, entries: &[TaskDebugEnt
         "entries": catalog_entries,
         "vendor_patch_names": vendor_patch_names.into_iter().collect::<Vec<_>>(),
         "catalog_guard_status": read_model_catalog_guard_status(&state.skill_rt.workspace_root),
+    })
+}
+
+fn build_model_readiness_trace_for_debug(
+    catalog: &claw_core::model_catalog::ModelCatalog,
+) -> Value {
+    let matched_entry_count = catalog
+        .entries
+        .iter()
+        .filter(|entry| {
+            entry.provider == catalog.selected_provider && entry.model == catalog.selected_model
+        })
+        .count();
+    let selected_entry = catalog.entries.iter().find(|entry| {
+        entry.provider == catalog.selected_provider && entry.model == catalog.selected_model
+    });
+    let selected_entry_status = if selected_entry.is_some() {
+        "found"
+    } else {
+        "missing"
+    };
+    let credential_state = selected_entry
+        .map(|entry| entry.credential_state.as_str())
+        .unwrap_or("null");
+    let text_generation = selected_entry
+        .map(|entry| entry.supports_text)
+        .unwrap_or(false);
+    let ready = selected_entry.is_some()
+        && text_generation
+        && !matches!(credential_state, "missing" | "null" | "");
+    json!({
+        "schema_version": catalog.schema_version,
+        "selected_provider": catalog.selected_provider,
+        "selected_model": catalog.selected_model,
+        "selected_entry_status": selected_entry_status,
+        "entry_count": catalog.entries.len(),
+        "matched_entry_count": matched_entry_count,
+        "credential_state": credential_state,
+        "ready": ready,
+        "text_generation": text_generation,
+        "image_input": selected_entry.map(|entry| entry.supports_image_input).unwrap_or(false),
+        "image_understanding": selected_entry.map(|entry| entry.supports_image_understanding).unwrap_or(false),
+        "image_generation": selected_entry.map(|entry| entry.supports_image_generation).unwrap_or(false),
+        "audio_input": selected_entry.map(|entry| entry.supports_audio_input).unwrap_or(false),
+        "audio_transcription": selected_entry.map(|entry| entry.supports_audio_transcription).unwrap_or(false),
+        "audio_generation": selected_entry.map(|entry| entry.supports_audio_generation).unwrap_or(false),
+        "video_input": selected_entry.map(|entry| entry.supports_video_input).unwrap_or(false),
+        "video_generation": selected_entry.map(|entry| entry.supports_video_generation).unwrap_or(false),
+        "music_generation": selected_entry.map(|entry| entry.supports_music_generation).unwrap_or(false),
+        "async_required": selected_entry.map(|entry| entry.async_required).unwrap_or(false),
+        "dry_run": selected_entry.map(|entry| entry.dry_run_supported).unwrap_or(false),
     })
 }
 
@@ -305,16 +357,15 @@ mod task_debug_trace_tests {
         path
     }
 
-    #[test]
-    fn task_debug_model_catalog_trace_projects_secret_free_capabilities() {
-        let root = temp_debug_workspace_root();
+    fn write_minimax_debug_catalog(root: &PathBuf, selected_model: &str) {
         std::fs::create_dir_all(root.join("configs")).expect("configs dir");
         std::fs::write(
             root.join("configs/config.toml"),
-            r#"
+            format!(
+                r#"
 [llm]
 selected_vendor = "minimax"
-selected_model = "MiniMax-M3"
+selected_model = "{selected_model}"
 
 [llm.minimax]
 api_format = "openai_compat"
@@ -325,7 +376,8 @@ models = ["MiniMax-M3"]
 input_modalities = ["text", "image", "video"]
 output_modalities = ["text"]
 context_window_tokens = 1000000
-"#,
+"#
+            ),
         )
         .expect("write config");
         std::fs::write(
@@ -336,6 +388,12 @@ minimax_models = ["MiniMax-M3"]
 "#,
         )
         .expect("write image config");
+    }
+
+    #[test]
+    fn task_debug_model_catalog_trace_projects_secret_free_capabilities() {
+        let root = temp_debug_workspace_root();
+        write_minimax_debug_catalog(&root, "MiniMax-M3");
         let mut state = crate::AppState::test_default_with_fixture_provider();
         state.skill_rt.workspace_root = root;
         let entries = vec![TaskDebugEntry {
@@ -385,7 +443,64 @@ minimax_models = ["MiniMax-M3"]
         assert_eq!(trace["entries"][0]["supports_audio_transcription"], false);
         assert_eq!(trace["entries"][0]["active_text_provider"], true);
         assert_eq!(trace["entries"][0]["credential_state"], "configured_inline");
+        assert_eq!(trace["readiness"]["schema_version"], 1);
+        assert_eq!(trace["readiness"]["selected_provider"], "minimax");
+        assert_eq!(trace["readiness"]["selected_model"], "MiniMax-M3");
+        assert_eq!(trace["readiness"]["selected_entry_status"], "found");
+        assert_eq!(trace["readiness"]["entry_count"], 1);
+        assert_eq!(trace["readiness"]["matched_entry_count"], 1);
+        assert_eq!(trace["readiness"]["credential_state"], "configured_inline");
+        assert_eq!(trace["readiness"]["ready"], true);
+        assert_eq!(trace["readiness"]["text_generation"], true);
+        assert_eq!(trace["readiness"]["image_input"], true);
+        assert_eq!(trace["readiness"]["image_understanding"], true);
+        assert_eq!(trace["readiness"]["video_input"], true);
+        assert_eq!(trace["readiness"]["async_required"], false);
+        assert_eq!(trace["readiness"]["dry_run"], false);
         assert_eq!(trace["vendor_patch_names"][0], "minimax");
+        assert!(!trace.to_string().contains("catalog-secret"));
+    }
+
+    #[test]
+    fn task_debug_model_catalog_trace_marks_missing_selected_model_not_ready() {
+        let root = temp_debug_workspace_root();
+        write_minimax_debug_catalog(&root, "missing-model");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = root;
+        let entries = vec![TaskDebugEntry {
+            ts: Some(10),
+            task_id: Some("task-1".to_string()),
+            call_id: Some("task-1:planner".to_string()),
+            vendor: Some("minimax".to_string()),
+            provider: Some("vendor-minimax".to_string()),
+            provider_type: Some("openai_compat".to_string()),
+            model: Some("MiniMax-M3".to_string()),
+            model_kind: None,
+            status: Some("ok".to_string()),
+            mode: None,
+            prompt_source: Some("layered:prompts/lightweight_execution_prompt.md".to_string()),
+            prompt_hash: None,
+            prompt_file: None,
+            prompt: None,
+            request_payload: Some(json!({"messages": []})),
+            response: None,
+            raw_response: Some("{}".to_string()),
+            clean_response: None,
+            sanitized: None,
+            error: None,
+            usage: None,
+        }];
+
+        let trace = build_model_catalog_trace_for_debug(&state, &entries);
+
+        assert_eq!(trace["selected_model"], "missing-model");
+        assert_eq!(trace["readiness"]["selected_model"], "missing-model");
+        assert_eq!(trace["readiness"]["selected_entry_status"], "missing");
+        assert_eq!(trace["readiness"]["matched_entry_count"], 0);
+        assert_eq!(trace["readiness"]["credential_state"], "null");
+        assert_eq!(trace["readiness"]["ready"], false);
+        assert_eq!(trace["readiness"]["text_generation"], false);
+        assert_eq!(trace["entries"][0]["model"], "MiniMax-M3");
         assert!(!trace.to_string().contains("catalog-secret"));
     }
 

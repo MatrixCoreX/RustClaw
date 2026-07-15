@@ -87,9 +87,60 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "music_generation=1",
         "dry_run=1",
     ),
+    "crates/clawd/src/http/ui_routes/task_debug_trace.rs": (
+        "build_model_catalog_trace_for_debug",
+        "build_model_readiness_trace_for_debug",
+        '"readiness": build_model_readiness_trace_for_debug(&catalog)',
+        "task_debug_model_catalog_trace_projects_secret_free_capabilities",
+        "task_debug_model_catalog_trace_marks_missing_selected_model_not_ready",
+        "selected_entry_status",
+        "matched_entry_count",
+        "credential_state",
+        "ready",
+        "text_generation",
+        "image_input",
+        "image_understanding",
+        "image_generation",
+        "audio_input",
+        "audio_transcription",
+        "audio_generation",
+        "video_input",
+        "video_generation",
+        "music_generation",
+        "async_required",
+        "dry_run",
+    ),
+    "UI/src/lib/task-llm-trace.ts": (
+        "modelCatalogTraceMachineTokens",
+        "MODEL_CATALOG_READINESS_SCALAR_FIELDS",
+        "MODEL_CATALOG_READINESS_BOOL_FIELDS",
+        "modelCatalogReadinessTokens",
+        "readiness.${field}",
+        "selected_entry_status",
+        "matched_entry_count",
+        "credential_state",
+        "ready",
+        "text_generation",
+        "image_understanding",
+        "music_generation",
+        "dry_run",
+    ),
+    "UI/src/lib/task-llm-trace.test.ts": (
+        "builds model catalog trace machine tokens",
+        "readiness",
+        "readiness.selected_entry_status=found",
+        "readiness.matched_entry_count=1",
+        "readiness.credential_state=configured_env",
+        "readiness.ready=true",
+        "readiness.image_understanding=true",
+        "readiness.video_generation=true",
+        "readiness.music_generation=true",
+        "readiness.dry_run=true",
+    ),
     "README.md": (
         "clawcli models readiness",
         "model_readiness_summary",
+        "model_catalog_trace.readiness",
         "clawcli_models_readiness_contracts.txt",
         "clawcli_models_readiness_contracts=1",
         "CLAWCLI_MODELS_READINESS_CONTRACT_SELF_TEST ok",
@@ -98,6 +149,7 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     "README.zh-CN.md": (
         "clawcli models readiness",
         "model_readiness_summary",
+        "model_catalog_trace.readiness",
         "clawcli_models_readiness_contracts.txt",
         "clawcli_models_readiness_contracts=1",
         "CLAWCLI_MODELS_READINESS_CONTRACT_SELF_TEST ok",
@@ -109,6 +161,7 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "CLAWCLI_MODELS_READINESS_CONTRACT_SELF_TEST ok",
         "CLAWCLI_MODELS_READINESS_CONTRACT_CHECK findings=0",
         "model_readiness_summary",
+        "model_catalog_trace.readiness",
         "selected_entry_status",
     ),
     "AGENTS.md": (
@@ -118,6 +171,7 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "CLAWCLI_MODELS_READINESS_CONTRACT_SELF_TEST ok",
         "CLAWCLI_MODELS_READINESS_CONTRACT_CHECK findings=0",
         "model_readiness_summary",
+        "model_catalog_trace.readiness",
     ),
     "scripts/nl_tests/run_agent_parity_gate.sh": (
         "AGENT_PARITY_GATE_STEP clawcli_models_readiness_contracts",
@@ -183,6 +237,29 @@ def scan_texts(texts: dict[str, str | None]) -> list[str]:
     ):
         if token not in tests:
             findings.append(f"missing_models_readiness_test_token:{token}")
+
+    task_debug = texts.get("crates/clawd/src/http/ui_routes/task_debug_trace.rs") or ""
+    for token in (
+        '"readiness": build_model_readiness_trace_for_debug(&catalog)',
+        "task_debug_model_catalog_trace_marks_missing_selected_model_not_ready",
+        "selected_entry_status",
+        "matched_entry_count",
+        "credential_state",
+        "ready",
+        "music_generation",
+    ):
+        if token not in task_debug:
+            findings.append(f"missing_task_debug_model_readiness_token:{token}")
+
+    ui_trace = texts.get("UI/src/lib/task-llm-trace.ts") or ""
+    for token in (
+        "modelCatalogReadinessTokens",
+        "MODEL_CATALOG_READINESS_SCALAR_FIELDS",
+        "MODEL_CATALOG_READINESS_BOOL_FIELDS",
+        "readiness.${field}",
+    ):
+        if token not in ui_trace:
+            findings.append(f"missing_ui_model_readiness_token:{token}")
 
     return findings
 

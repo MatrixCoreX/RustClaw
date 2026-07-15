@@ -164,6 +164,28 @@ test("builds model catalog trace machine tokens", () => {
       status: "ok",
       finding_count: 0,
     },
+    readiness: {
+      schema_version: 1,
+      selected_provider: "minimax",
+      selected_model: "MiniMax-M3",
+      selected_entry_status: "found",
+      entry_count: 1,
+      matched_entry_count: 1,
+      credential_state: "configured_env",
+      ready: true,
+      text_generation: true,
+      image_input: true,
+      image_understanding: true,
+      image_generation: true,
+      audio_input: false,
+      audio_transcription: false,
+      audio_generation: true,
+      video_input: true,
+      video_generation: true,
+      music_generation: true,
+      async_required: true,
+      dry_run: true,
+    },
     entries: [
       {
         schema_version: 1,
@@ -195,6 +217,15 @@ test("builds model catalog trace machine tokens", () => {
   assert.ok(tokens.includes("selected_provider=minimax"));
   assert.ok(tokens.includes("selected_model=MiniMax-M3"));
   assert.ok(tokens.includes("catalog_guard_status.status=ok"));
+  assert.ok(tokens.includes("readiness.selected_entry_status=found"));
+  assert.ok(tokens.includes("readiness.matched_entry_count=1"));
+  assert.ok(tokens.includes("readiness.credential_state=configured_env"));
+  assert.ok(tokens.includes("readiness.ready=true"));
+  assert.ok(tokens.includes("readiness.image_understanding=true"));
+  assert.ok(tokens.includes("readiness.audio_input=false"));
+  assert.ok(tokens.includes("readiness.video_generation=true"));
+  assert.ok(tokens.includes("readiness.music_generation=true"));
+  assert.ok(tokens.includes("readiness.dry_run=true"));
   assert.ok(tokens.includes("entries.1.schema_version=1"));
   assert.ok(tokens.includes("entries.1.provider=minimax"));
   assert.ok(tokens.includes("entries.1.api_style=openai_compatible"));
