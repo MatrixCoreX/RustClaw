@@ -20,6 +20,8 @@ mod task_machine_kv_summary;
 mod task_payload_helpers;
 #[path = "task_resume.rs"]
 mod task_resume;
+#[path = "task_runtime_failure_payload.rs"]
+mod task_runtime_failure_payload;
 #[path = "task_structured_evidence_table.rs"]
 mod task_structured_evidence_table;
 #[path = "task_terminal_clarify.rs"]
@@ -66,6 +68,7 @@ use task_resume::{
     resume_failure_is_unbound_path_lookup_clarify_result, retry_answer_after_verifier,
     text_looks_like_missing_file_target,
 };
+use task_runtime_failure_payload::ask_runtime_failure_machine_payload;
 use task_structured_evidence_table::deterministic_structured_evidence_table_recovery;
 use task_structured_evidence_table::verified_terminal_answer_after_verifier_pass;
 use task_tree_summary_recovery::deterministic_tree_summary_rows_failure_recovery;
@@ -886,36 +889,6 @@ async fn compose_ask_failure_user_message(
         &default_text,
     )
     .await
-}
-
-fn ask_runtime_failure_machine_payload(err: &str) -> String {
-    let err = err.trim();
-    let mut payload = serde_json::json!({
-        "schema_version": 1,
-        "message_key": "clawd.msg.ask_runtime_failure",
-        "reason_code": "ask_runtime_failure",
-        "status_code": "ask_runtime_failure",
-        "failure_attribution": "provider_gap",
-        "retryable": false,
-    });
-    if !err.is_empty() {
-        payload["raw_error_present"] = serde_json::json!(true);
-        payload["provider_error_class"] = serde_json::json!(ask_runtime_failure_error_class(err));
-    }
-    payload.to_string()
-}
-
-fn ask_runtime_failure_error_class(err: &str) -> &'static str {
-    let lower = err.to_ascii_lowercase();
-    if lower.contains("429") || lower.contains("rate_limit") {
-        "rate_limited"
-    } else if lower.contains("401") || lower.contains("403") || lower.contains("unauthorized") {
-        "auth_or_permission_failed"
-    } else if lower.contains("timeout") || lower.contains("timed out") {
-        "timeout"
-    } else {
-        "provider_error"
-    }
 }
 
 fn ask_runtime_failure_default_text(state: &AppState, language_hint: &str) -> String {
