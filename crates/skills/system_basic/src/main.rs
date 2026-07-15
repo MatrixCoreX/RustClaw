@@ -9,10 +9,12 @@ use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+mod model_catalog_field_alias;
 mod path_helpers;
 mod platform_helpers;
 mod structured_helpers;
 
+use model_catalog_field_alias::*;
 use path_helpers::*;
 use platform_helpers::*;
 use structured_helpers::*;
@@ -934,14 +936,39 @@ fn extract_field(
         parse_structured_root(&real, obj.get("format").and_then(Value::as_str))?;
 
     let found = lookup_field_value_with_resolution(&root_value, field_path);
-    let (exists, value, value_type, value_text) = match found.value {
-        Some(v) => (
+    let alias = found
+        .value
+        .is_none()
+        .then(|| lookup_model_catalog_field_alias(workspace_root, &real, &root_value, field_path))
+        .flatten();
+    let resolved_field_path = alias
+        .as_ref()
+        .map(|found| found.resolved_field_path.clone())
+        .or(found.resolved_field_path)
+        .unwrap_or_default();
+    let match_strategy = alias
+        .as_ref()
+        .map(|found| found.match_strategy)
+        .unwrap_or(found.match_strategy);
+    let match_count = if alias.is_some() {
+        1
+    } else {
+        found.match_count
+    };
+    let (exists, value, value_type, value_text) = match (found.value, alias) {
+        (Some(v), _) => (
             true,
             v.clone(),
             json_value_type(v).to_string(),
             json_value_to_text(v),
         ),
-        None => (false, Value::Null, "null".to_string(), String::new()),
+        (None, Some(found)) => (
+            true,
+            found.value.clone(),
+            json_value_type(&found.value).to_string(),
+            json_value_to_text(&found.value),
+        ),
+        (None, None) => (false, Value::Null, "null".to_string(), String::new()),
     };
 
     Ok(json!({
@@ -950,9 +977,9 @@ fn extract_field(
         "resolved_path": real.display().to_string(),
         "format": format,
         "field_path": field_path,
-        "resolved_field_path": found.resolved_field_path.unwrap_or_default(),
-        "match_strategy": found.match_strategy,
-        "match_count": found.match_count,
+        "resolved_field_path": resolved_field_path,
+        "match_strategy": match_strategy,
+        "match_count": match_count,
         "exists": exists,
         "value_type": value_type,
         "value_text": value_text,
@@ -978,20 +1005,47 @@ fn extract_fields(
     let mut results = Vec::new();
     for field_path in field_paths {
         let found = lookup_field_value_with_resolution(&root_value, &field_path);
-        let (exists, value, value_type, value_text) = match found.value {
-            Some(v) => (
+        let alias = found
+            .value
+            .is_none()
+            .then(|| {
+                lookup_model_catalog_field_alias(workspace_root, &real, &root_value, &field_path)
+            })
+            .flatten();
+        let resolved_field_path = alias
+            .as_ref()
+            .map(|found| found.resolved_field_path.clone())
+            .or(found.resolved_field_path)
+            .unwrap_or_default();
+        let match_strategy = alias
+            .as_ref()
+            .map(|found| found.match_strategy)
+            .unwrap_or(found.match_strategy);
+        let match_count = if alias.is_some() {
+            1
+        } else {
+            found.match_count
+        };
+        let (exists, value, value_type, value_text) = match (found.value, alias) {
+            (Some(v), _) => (
                 true,
                 v.clone(),
                 json_value_type(v).to_string(),
                 json_value_to_text(v),
             ),
-            None => (false, Value::Null, "null".to_string(), String::new()),
+            (None, Some(found)) => (
+                true,
+                found.value.clone(),
+                json_value_type(&found.value).to_string(),
+                json_value_to_text(&found.value),
+            ),
+            (None, None) => (false, Value::Null, "null".to_string(), String::new()),
         };
         results.push(json!({
             "field_path": field_path,
-            "resolved_field_path": found.resolved_field_path.unwrap_or_default(),
-            "match_strategy": found.match_strategy,
-            "match_count": found.match_count,
+            "resolved_field_path": resolved_field_path,
+            "match_strategy": match_strategy,
+            "match_count": match_count,
             "exists": exists,
             "value_type": value_type,
             "value_text": value_text,

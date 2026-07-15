@@ -262,7 +262,6 @@ for provider in "${PROVIDERS[@]}"; do
     --poll-seconds "$POLL_SECONDS_VALUE"
     --skip-smoke
     --case-file "$CASE_FILE"
-    --include-case-tag "chinese_provider"
     --log-root "$provider_dir"
     --llm-trace-max-chars "1600"
   )

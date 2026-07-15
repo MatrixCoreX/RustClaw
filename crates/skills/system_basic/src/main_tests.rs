@@ -817,6 +817,185 @@ deny = []
 }
 
 #[test]
+fn extract_fields_resolves_model_catalog_machine_aliases() {
+    let root = temp_root("model_catalog_aliases");
+    let config_dir = root.join("configs");
+    std::fs::create_dir_all(&config_dir).expect("create configs");
+    std::fs::write(
+        config_dir.join("config.toml"),
+        r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M3"
+
+[llm.minimax]
+model = "MiniMax-M3"
+base_url = "https://api.minimaxi.com/v1"
+context_window_tokens = 1000000
+timeout_seconds = 180
+models = ["MiniMax-M3", "MiniMax-M2.7"]
+"#,
+    )
+    .expect("write config");
+    std::fs::write(
+        config_dir.join("image.toml"),
+        r#"
+[image_vision]
+minimax_models = ["MiniMax-M3"]
+
+[image_generation]
+minimax_models = ["image-01"]
+"#,
+    )
+    .expect("write image config");
+    std::fs::write(
+        config_dir.join("audio.toml"),
+        r#"
+[audio_synthesize]
+minimax_models = ["speech-2.8-turbo"]
+"#,
+    )
+    .expect("write audio config");
+    std::fs::write(
+        config_dir.join("video.toml"),
+        r#"
+[video_generation]
+minimax_models = ["MiniMax-Hailuo-2.3"]
+"#,
+    )
+    .expect("write video config");
+    std::fs::write(
+        config_dir.join("music.toml"),
+        r#"
+[music_generation]
+minimax_models = ["music-2.6"]
+"#,
+    )
+    .expect("write music config");
+
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!("configs/config.toml"));
+    obj.insert(
+        "field_paths".to_string(),
+        json!([
+            "providers.MiniMax",
+            "providers.MiniMax.selected_model",
+            "providers.MiniMax.text_model",
+            "providers.MiniMax.text.context_window_tokens",
+            "providers.MiniMax.models.M3",
+            "providers.MiniMax.models",
+            "providers.MiniMax.base_url",
+            "providers.MiniMax.context_window_tokens",
+            "providers.MiniMax.models.M3.understanding_inputs",
+            "providers.MiniMax.models.M3.generation_boundary",
+            "models.MiniMax-M3.capabilities.generation",
+            "providers.minimax.m3.understanding_inputs",
+            "providers.minimax.m3.generation_boundary"
+        ]),
+    );
+
+    let out = extract_fields(&root, &obj, false).expect("extract aliases");
+    let value: Value = serde_json::from_str(&out).expect("json");
+    let results = value
+        .get("results")
+        .and_then(Value::as_array)
+        .expect("results");
+    assert_eq!(results.len(), 13);
+    assert!(results
+        .iter()
+        .all(|item| item.get("exists").and_then(Value::as_bool) == Some(true)));
+    let provider = results[0].get("value").expect("provider object");
+    assert_eq!(
+        provider.get("model").and_then(Value::as_str),
+        Some("MiniMax-M3")
+    );
+    assert!(provider
+        .get("understanding_inputs")
+        .and_then(Value::as_array)
+        .expect("provider understanding inputs")
+        .iter()
+        .any(|item| item.as_str() == Some("video")));
+    assert!(provider
+        .get("models")
+        .and_then(Value::as_array)
+        .expect("provider models")
+        .iter()
+        .any(|item| item.get("model").and_then(Value::as_str) == Some("MiniMax-M3")));
+    assert_eq!(
+        results[1].get("value_text").and_then(Value::as_str),
+        Some("MiniMax-M3")
+    );
+    assert_eq!(
+        results[2].get("value_text").and_then(Value::as_str),
+        Some("MiniMax-M3")
+    );
+    assert_eq!(
+        results[3].get("value").and_then(Value::as_i64),
+        Some(1_000_000)
+    );
+    assert_eq!(
+        results[4]
+            .get("value")
+            .and_then(|value| value.get("model"))
+            .and_then(Value::as_str),
+        Some("MiniMax-M3")
+    );
+    assert!(results[5]
+        .get("value")
+        .and_then(Value::as_array)
+        .expect("provider models object")
+        .iter()
+        .any(|item| {
+            item.get("understanding_inputs")
+                .and_then(Value::as_array)
+                .is_some_and(|inputs| inputs.iter().any(|input| input.as_str() == Some("image")))
+        }));
+    let understanding = results[8]
+        .get("value")
+        .and_then(Value::as_array)
+        .expect("understanding inputs");
+    assert!(understanding
+        .iter()
+        .any(|item| item.as_str() == Some("image")));
+    assert!(understanding
+        .iter()
+        .any(|item| item.as_str() == Some("video")));
+    let generation = results[9].get("value").expect("generation boundary");
+    assert_eq!(
+        generation.get("execution_contract").and_then(Value::as_str),
+        Some("async_start_poll_cancel")
+    );
+    let skills = generation
+        .get("media_skill_capabilities")
+        .and_then(Value::as_array)
+        .expect("media skills");
+    assert!(skills
+        .iter()
+        .any(|item| item.as_str() == Some("image.generate")));
+    assert!(skills
+        .iter()
+        .any(|item| item.as_str() == Some("music.generate")));
+    assert_eq!(
+        results[10].get("match_strategy").and_then(Value::as_str),
+        Some("model_catalog_model_alias")
+    );
+    assert!(results[11]
+        .get("value")
+        .and_then(Value::as_array)
+        .expect("direct provider model inputs")
+        .iter()
+        .any(|item| item.as_str() == Some("video")));
+    assert_eq!(
+        results[12]
+            .get("value")
+            .and_then(|value| value.get("execution_contract"))
+            .and_then(Value::as_str),
+        Some("async_start_poll_cancel")
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn extract_field_keeps_ambiguous_bare_key_missing() {
     let root = temp_root("extract_field_ambiguous_bare_key");
     let target = root.join("config.toml");
