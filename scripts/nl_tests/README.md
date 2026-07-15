@@ -76,8 +76,8 @@ This is the default lightweight gate after a Codex/Claude-style agent-loop
 implementation batch. It runs the static compact coverage check, the
 shared secret scan contract, Chinese-provider model catalog guard and self-test, a dry-run
 Chinese-provider smoke matrix with MiniMax as the default live scope, the
-offline coding-loop repair fixture expectations, and bounded rollout metrics
-for that fixture. MiMo, Qwen, and DeepSeek remain in the metadata matrix but
+offline coding-loop repair fixture expectations, bounded rollout metrics
+for that fixture, and the rollout metrics portable path contract. MiMo, Qwen, and DeepSeek remain in the metadata matrix but
 are recorded as out of live scope unless `--chinese-live-providers all` or a
 provider CSV is passed. When you pass
 one or more finished client-like run directories, it also applies the same
@@ -132,7 +132,8 @@ contract counts. The final confirmation uses
 carry `contract_report_content_checked=true`. For wrapped `agent_parity_gate`
 runs, the artifact contract also validates nested gate artifacts such as
 `agent_parity_gate/agent_loop_static_contracts.txt` and
-`agent_parity_gate/suite_artifact_contract_self_test.txt`, statically guards
+`agent_parity_gate/suite_artifact_contract_self_test.txt`,
+`agent_parity_gate/rollout_metrics_contract.txt`, statically guards
 the artifact checker's dynamic machine fields such as the Chinese provider live
 scope, then checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
@@ -141,7 +142,7 @@ self-test, and raw LLM trace contracts participated in the run. It also checks
 artifact content: text reports must contain their success tokens, and JSON reports such as
 `secret_scan_contract.json` and `suite_wrapper_contract.json` must expose
 `ok=true` from a top-level object. The suite-artifact self-test covers missing,
-unreadable, malformed, and non-object contract reports; invalid Chinese live-provider scope; invalid env-file state/source; unsafe Chinese-provider smoke path refs; bad UTF-8 artifact
+unreadable, malformed, and non-object contract reports; invalid Chinese live-provider scope; invalid env-file state/source; unsafe Chinese-provider smoke path refs; unsafe rollout metrics source/output refs; bad UTF-8 artifact
 payloads; non-object JSON ok
 artifacts; non-object loader-backed artifacts such as compact coverage; base report fields (`ok`, `run_dir`,
 `require_contract_report`, `findings`); bad UTF-8 suite metadata; unchecked final reports; summary
@@ -169,7 +170,8 @@ paths. `live_metrics` is a required
 `gate_summary.env` machine field. `metrics=1` only means "the metrics gate was
 not disabled"; it does not substitute for `live_metrics`. `live_metrics=1`
 means run directories were provided and `run_metrics.json` / `run_metrics.txt`
-were actually generated and content-checked. Runs without run directories keep
+were actually generated and content-checked with portable source/output refs.
+Runs without run directories keep
 `live_metrics=0` even when `metrics=1`.
 The JSON report includes `agent_parity_gate_contract.checked=true` plus the
 required artifact, flag, machine-field, and content-check counts when this

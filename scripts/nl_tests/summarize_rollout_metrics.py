@@ -5,11 +5,14 @@ import argparse
 import json
 import os
 import re
+import tempfile
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+
+ROOT = Path(__file__).resolve().parents[2]
 
 EXTERNAL_SKILL_HINTS = {
     "crypto",
@@ -56,6 +59,28 @@ COUNTER_FIELDS = (
 CLARIFICATION_FINAL_STATUS_KEYS = {"clarify", "clarification_requested"}
 VERIFIER_BLOCK_KEYS = {"False", "false"}
 CASE_FILE_RE = re.compile(r"^turn_(?P<turn>\d+)_case_(?P<case>\d+)\.json$")
+
+
+def portable_path_ref(value: Path | str) -> str:
+    text = str(value)
+    if text in {"", "multiple", "external_path"}:
+        return text
+    try:
+        resolved = Path(text).resolve()
+    except OSError:
+        return "external_path"
+    try:
+        return resolved.relative_to(ROOT).as_posix()
+    except ValueError:
+        return "external_path"
+
+
+def rollout_metrics_ok_line(output: Path, result: dict[str, Any]) -> str:
+    return (
+        "ROLLOUT_METRICS_OK "
+        f"output={portable_path_ref(output)} "
+        f"turns={result['turns_total']} pass_rate={result['pass_rate']}"
+    )
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -1106,7 +1131,7 @@ def summarize_run(
     return {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source_run_dir": source_run_dir or str(run_dir),
+        "source_run_dir": portable_path_ref(source_run_dir or run_dir),
         "turns_total": total_turns,
         "parse_errors": parse_errors,
         "pass_rate": ratio(succeeded, total_turns),
@@ -1206,7 +1231,7 @@ def summarize_run_dirs(
             attribution_run_dirs=unique_run_dirs,
             source_run_dir="multiple",
         )
-        result["source_run_dirs"] = [str(run_dir) for run_dir in run_dirs]
+        result["source_run_dirs"] = [portable_path_ref(run_dir) for run_dir in run_dirs]
         result["case_dedupe"] = case_dedupe
         return result
 
@@ -1333,7 +1358,7 @@ def summarize_run_dirs(
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source_run_dir": "multiple",
-        "source_run_dirs": [str(run_dir) for run_dir in run_dirs],
+        "source_run_dirs": [portable_path_ref(run_dir) for run_dir in run_dirs],
         "turns_total": turns_total,
         "parse_errors": parse_errors,
         "pass_rate": ratio(status_counts.get("succeeded", 0), turns_total),
@@ -1391,11 +1416,37 @@ def default_output_path(run_dirs: list[Path], dedupe_latest_case: bool = False) 
     return Path("logs/agent_rollout_metrics") / name
 
 
+def run_self_test() -> int:
+    fixture_ref = portable_path_ref(
+        ROOT / "scripts/nl_tests/fixtures/client_like_runs/coding_loop_repair"
+    )
+    if fixture_ref.startswith("/") or "rustclaw" in fixture_ref.split("/")[:1]:
+        print(f"SELF_TEST_FAIL fixture_ref:{fixture_ref}")
+        return 1
+    with tempfile.TemporaryDirectory(prefix="rollout-metrics-") as tmp:
+        external_ref = portable_path_ref(Path(tmp) / "run")
+        if external_ref != "external_path":
+            print(f"SELF_TEST_FAIL external_ref:{external_ref}")
+            return 1
+        line = rollout_metrics_ok_line(
+            Path(tmp) / "metrics.json",
+            {"turns_total": 1, "pass_rate": 1.0},
+        )
+        if tmp in line or "/tmp/" in line or "output=external_path" not in line:
+            print(f"SELF_TEST_FAIL ok_line:{line}")
+            return 1
+    if portable_path_ref("multiple") != "multiple":
+        print("SELF_TEST_FAIL multiple_ref")
+        return 1
+    print("ROLLOUT_METRICS_SELF_TEST ok")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Summarize client-like NL rollout metrics into stable JSON."
     )
-    parser.add_argument("run_dirs", nargs="+", help="Client-like NL run directories")
+    parser.add_argument("run_dirs", nargs="*", help="Client-like NL run directories")
     parser.add_argument(
         "--output",
         help="Output JSON path (default: logs/agent_rollout_metrics/<run>_rollout_metrics.json)",
@@ -1468,7 +1519,13 @@ def main() -> int:
         default=0,
         help="Fail when --dedupe-latest-case finds fewer unique cases than this count.",
     )
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
+
+    if args.self_test:
+        return run_self_test()
+    if not args.run_dirs:
+        parser.error("at least one run_dir is required unless --self-test is used")
 
     run_dirs = [Path(run_dir).resolve() for run_dir in args.run_dirs]
     for run_dir in run_dirs:
@@ -1520,7 +1577,7 @@ def main() -> int:
     if args.print_json:
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     else:
-        print(f"ROLLOUT_METRICS_OK output={output} turns={result['turns_total']} pass_rate={result['pass_rate']}")
+        print(rollout_metrics_ok_line(output, result))
     if result["metric_gate"]["configured"] and not result["metric_gate"]["passed"]:
         print(
             "ROLLOUT_METRICS_GATE_FAIL "
