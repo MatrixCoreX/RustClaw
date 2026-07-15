@@ -1454,9 +1454,25 @@ async fn missing_target_failure_without_fallback_publishes_failure_only() {
         .get("failed_step.error")
         .map(String::as_str)
         .unwrap_or_default();
-    assert!(
-        failed_error.contains("target path was not found"),
-        "failed_error={failed_error}"
+    let failed_error_json: serde_json::Value =
+        serde_json::from_str(failed_error).expect("structured failed error");
+    assert_eq!(
+        failed_error_json
+            .get("message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.skill.error_observation")
+    );
+    assert_eq!(
+        failed_error_json
+            .get("skill")
+            .and_then(serde_json::Value::as_str),
+        Some("system_basic")
+    );
+    assert_eq!(
+        failed_error_json
+            .get("error_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("not_found")
     );
     assert_eq!(loop_state.progress_messages.len(), 1);
     assert!(loop_state.progress_messages[0].contains("telegram.progress.step_failed"));
