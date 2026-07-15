@@ -403,6 +403,18 @@ flowchart TD
 - `clawcli submit --detach` 快速返回 `task_id`；`clawcli submit --wait` 轮询到终态；`--json` 保持 submit/watch 输出适合脚本消费。
 - `clawcli exec` 是面向 CI/脚本的执行入口：提交或恢复 ask 任务，默认等待，返回稳定 exit class/code，支持 `--profile quick|coding|release-gate|long-tail`，可在后台 checkpoint 停下，非 JSON 输出会用 `exec_compact_*` 机器行展示预算、代码变更、验证、resume 与残余风险；artifact 目录会写 `summary.json`、`task.json`、`events.jsonl`、`verification.json`、`diff_summary.json`、`llm_summary.json`、`resume.json` 和 `index.json`。`clawcli code` 是 `exec --profile coding` 的简写。
 - `clawcli active` 默认打印紧凑任务表，也支持 `--json`；`clawcli events <task_id>` 支持 `--jsonl` 和 `--event-type`、`--checkpoint-id`、`--policy-decision`、`--subagent-id`、`--async-job-id` 等机器过滤器。
+- `clawcli tui --user-id <id> --chat-id <id>` 是同一 task API 上的终端控制台；加 `--once` 可输出单次 snapshot，加 `--task-id <task_id>` 可展示 selected task 的 `selected_progress` 和 `selected_summary`。
+- `clawcli session list/show/resume/archive/delete/fork` 会维护本地 session navigation store，只保存 `session_id`、`task_ids`、`active_goal_id`、`workspace_root`、checkpoint、event sequence、archive status 和 fork source 等 operator metadata，不作为自然语言路由来源。
+
+```bash
+clawcli session list --user-id 1 --chat-id 1 --json
+clawcli session show task-123 --json
+clawcli session resume task-123 "continue from the checkpoint" --json
+clawcli session archive task-123 --json
+clawcli session fork task-123 task-123.fork --json
+clawcli session delete task-123 --json
+```
+
 - task event stream 包含状态迁移、checkpoint、工具生命周期、coding checkpoint/evidence、provider、hook、subagent 和 final 事件。`clawcli events/watch`、`clawcli report`、`clawcli review`、`clawcli subagents`、`clawcli permission inspect` 与浏览器任务详情会渲染 `evidence_ref`、`checkpoint_ref`、`checkpoint_kind`、`pending_async_job_id`、`step_ref`、`changed_file_count`、`test_count`、`verification_command_count`、`verification_command`、`verification_commands`、`verification_status`、`verification_failure_kinds`、`unverified_risk`、`llm_budget_status`、`child_run_id`、`tool_permission_profile`、`read_only_enforced`、`write_isolation_status`、`isolation_profile`、`sandbox_source`、`started_at`、`finished_at` 等机器字段；原始 event JSON 放在二级详情。
 - `clawcli run-skill <skill_name> --args-json '{...}'` 提交显式 `kind=run_skill` 任务，不走自然语言路由；加 `--wait` 可轮询同一个 `task_id`。
 - `clawcli skills` 读取 registry-backed 技能元数据；`clawcli capabilities` 读取扁平化 `/v1/capabilities` 机器端点。脚本消费时请加 `--json`。
@@ -704,6 +716,8 @@ flowchart TD
     TECT --> TECTA[Agent parity gate artifact<br/>task_event_context_team_contracts.txt]
     O --> CER[clawcli exec/replay 合同<br/>check_clawcli_exec_replay_contracts.py]
     CER --> CERA[Agent parity gate artifact<br/>clawcli_exec_replay_contracts.txt]
+    O --> CST[clawcli session/TUI 合同<br/>check_clawcli_session_tui_contracts.py]
+    CST --> CSTA[Agent parity gate artifact<br/>clawcli_session_tui_contracts.txt]
     O --> AM[旧 agent-mode payload 守卫<br/>check_no_agent_mode_payload.py]
     AM --> AA[Agent parity gate artifact<br/>no_agent_mode_payload.txt]
     O --> ALS[Agent-loop 静态合同<br/>route authority + frontdoor boundary + legacy boundary + NL hardmatch guards]
@@ -749,6 +763,8 @@ Agent parity gate 还会运行 `scripts/check_agent_loop_guard_final_scope.py --
 同一 gate 也会写入 `task_event_context_team_contracts.txt` 并记录 `task_event_context_team_contracts=1`。该 artifact 来自 `scripts/check_task_event_context_team_contracts.py --self-test` 和主检查，必须包含 `TASK_EVENT_CONTEXT_TEAM_CONTRACT_SELF_TEST ok` 与 `TASK_EVENT_CONTEXT_TEAM_CONTRACT_CHECK findings=0`。它保证 `task_goal`、`context_budget`、`context_compaction`、provider prompt-budget metrics、coding evidence，以及只读 subagent/team lifecycle events 继续作为结构化 event-stream 字段提供给 CLI、UI、教学模式和 replay 工具。
 
 同一 gate 也会写入 `clawcli_exec_replay_contracts.txt` 并记录 `clawcli_exec_replay_contracts=1`。该 artifact 来自 `scripts/check_clawcli_exec_replay_contracts.py --self-test` 和主检查，必须包含 `CLAWCLI_EXEC_REPLAY_CONTRACT_SELF_TEST ok` 与 `CLAWCLI_EXEC_REPLAY_CONTRACT_CHECK findings=0`。它把 `clawcli exec`/`clawcli code` 的 CI artifacts（`summary.json`、`task.json`、`events.jsonl`、`verification.json`、`diff_summary.json`、`llm_summary.json`、`resume.json`、`index.json`）、`exec_compact_*` 输出，以及 `clawcli replay export/run/diff` 的 recorded_only coverage/view/diff class 行为都固定在机器字段合同上。
+
+同一 gate 也会写入 `clawcli_session_tui_contracts.txt` 并记录 `clawcli_session_tui_contracts=1`。该 artifact 来自 `scripts/check_clawcli_session_tui_contracts.py --self-test` 和主检查，必须包含 `CLAWCLI_SESSION_TUI_CONTRACT_SELF_TEST ok` 与 `CLAWCLI_SESSION_TUI_CONTRACT_CHECK findings=0`。它把 `clawcli session list/show/resume/archive/delete/fork`、本地 session store metadata、`clawcli tui` selected task snapshot、`selected_progress`、`selected_summary`、operator key tokens，以及 TUI report/review/subagents/permission 投影都固定在机器字段合同上。
 
 Agent parity gate 还会运行 `scripts/nl_tests/check_secret_scan_contract.py` 并写入 `secret_scan_contract.json`，把禁用密钥字段、非 object JSON artifact 和疑似密钥值的检查固定成机器合同，而不是靠人工约定；同时运行 `scripts/nl_tests/check_suite_wrapper_contract.py` 并写入 `suite_wrapper_contract.json`，保证长任务回放和教学追踪依赖的 wrapped-suite 恢复产物保持稳定。它还会运行 `scripts/nl_tests/check_runner_path_ref_contract.py` 并写入 `runner_path_ref_contract.json`，保证 full/manual/multi-turn/client-like/provider A/B/dynamic/regression runner 的 console log 继续使用可搬移 path-ref，而不是本机绝对路径。它还会运行 `scripts/nl_tests/check_suite_artifact_contract.py --self-test`、`scripts/nl_tests/print_llm_raw_trace.py --self-test` 和 `scripts/nl_tests/summarize_rollout_metrics.py --self-test`，并写入 `suite_artifact_contract_self_test.txt`、`llm_raw_trace_runner_contract.txt`、`rollout_metrics_contract.txt`，证明 checker 会拒绝 report 缺失、不可读取、JSON 损坏、顶层不是 object、基础 report 字段错误、未完成自证、summary 不一致、嵌套 agent parity contract 不一致、中文 live provider scope 非法、env-file state/source 非法、gate summary path ref 不安全、中文 provider smoke path ref 不安全、rollout metrics source/output ref 不安全或意外带入嵌套 agent parity contract 的 report，之后才把它作为 release artifact 信任。当通过 `scripts/nl_tests/run_suite.sh agent_parity_gate` 启动时，`suite_artifact_contract.json` 还会验证嵌套的 `agent_parity_gate/` artifacts，并记录 `agent_parity_gate_contract.checked=true`，证明 runtime hard-reply、policy-boundary hard-reply、repair no-user-text、policy-decision-token、final-scope、registry-policy、registry-alias、long-tail-skill、agent-loop static、no-agent-mode、evidence-extractor、secret、wrapper、runner path-ref、suite-artifact self-test、raw LLM trace 和 rollout metrics path 合同都参与了该 wrapped run；如果嵌套 gate summary 缺失，checker 会返回结构化 `agent_parity_gate_summary_missing` finding，而不是 traceback。最终 report 写入会使用 `--validate-contract-report-content` 和 `--require-contract-report-content-checked`，要求既有 report 为 `ok=true`、无 findings、与当前 summary 和嵌套合同计数一致，并且已经标记 `contract_report_content_checked=true`。`gate_summary.env` 必须包含 `live_metrics=0|1`，`chinese_provider_live_providers` 必须是 `all` 或已知中文 provider 机器 token 的 CSV，env-file state/source 也必须保持在允许的机器 token 集合内；`metrics=1` 只表示 metrics gate 没有被禁用，`live_metrics=1` 才表示提供了 run directory 且 `run_metrics.*` 已生成并以可搬移 source/output refs 通过内容校验，checker 不会从 `metrics` 推断 live metrics。NL/live NL runner 会保留 `logs/model_io.log` offset、`task_id`、`PRINT_LLM_TRACE` 和 `LLM#1..N` 原始字段回放合同。
 
