@@ -892,8 +892,15 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "AGENT_PARITY_GATE_REQUIRED_FLAGS" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_JSON_OK_ARTIFACTS" in suite_artifact_contract_text
+        and "AGENT_PARITY_GATE_OPTIONAL_ARTIFACTS_BY_FLAG" in suite_artifact_contract_text
+        and "AGENT_PARITY_CHINESE_MODEL_PROVIDERS" in suite_artifact_contract_text
         and "validate_text_artifact_tokens" in suite_artifact_contract_text
         and "validate_json_artifact_ok" in suite_artifact_contract_text
+        and "validate_compact_coverage_artifact" in suite_artifact_contract_text
+        and "validate_chinese_model_catalog_artifact" in suite_artifact_contract_text
+        and "validate_provider_smoke_artifacts" in suite_artifact_contract_text
+        and "validate_rollout_metrics_artifact" in suite_artifact_contract_text
+        and "validate_enabled_agent_parity_optional_artifacts" in suite_artifact_contract_text
         and '"agent_loop_static_contracts": "1"' in suite_artifact_contract_text
         and '"suite_wrapper_contract": "1"' in suite_artifact_contract_text
         and '"content_check_count"' in suite_artifact_contract_text

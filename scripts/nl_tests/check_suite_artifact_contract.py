@@ -65,6 +65,28 @@ AGENT_PARITY_GATE_JSON_OK_ARTIFACTS = {
     "agent_parity_gate/suite_wrapper_contract.json",
 }
 
+AGENT_PARITY_GATE_OPTIONAL_ARTIFACTS_BY_FLAG = {
+    "coverage": {
+        "agent_parity_gate/compact_coverage.json",
+    },
+    "model_catalog": {
+        "agent_parity_gate/chinese_model_catalog.json",
+    },
+    "provider_smoke": {
+        "agent_parity_gate/chinese_provider_smoke.txt",
+        "agent_parity_gate/chinese_provider_smoke/case_coverage.json",
+        "agent_parity_gate/chinese_provider_smoke/matrix_summary.json",
+        "agent_parity_gate/chinese_provider_smoke/provider_summary.jsonl",
+    },
+    "coding_fixture": {
+        "agent_parity_gate/coding_loop_repair_eval.txt",
+        "agent_parity_gate/coding_loop_repair_metrics.json",
+        "agent_parity_gate/coding_loop_repair_metrics.txt",
+    },
+}
+
+AGENT_PARITY_CHINESE_MODEL_PROVIDERS = {"deepseek", "mimo", "minimax", "qwen"}
+
 
 def parse_env_file(path: Path) -> tuple[dict[str, str], list[str]]:
     values: dict[str, str] = {}
@@ -215,8 +237,224 @@ def validate_json_artifact_ok(run_dir: Path, rel_path: str) -> list[str]:
     return []
 
 
-def validate_agent_parity_gate_artifacts(run_dir: Path, entries: set[str]) -> list[str]:
+def safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def nested_get(obj: Any, *path: str) -> Any:
+    cur = obj
+    for key in path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+    return cur
+
+
+def load_json_artifact(run_dir: Path, rel_path: str) -> tuple[Any, list[str]]:
+    text, findings = read_text_artifact(run_dir / rel_path, rel_path)
+    if findings:
+        return None, findings
+    try:
+        return json.loads(text), []
+    except json.JSONDecodeError:
+        return None, [f"agent_parity_gate_artifact_bad_json:{rel_path}"]
+
+
+def validate_compact_coverage_artifact(run_dir: Path) -> tuple[list[str], int]:
+    rel_path = "agent_parity_gate/compact_coverage.json"
+    payload, findings = load_json_artifact(run_dir, rel_path)
+    checks = 0
+    if findings:
+        return findings, checks
+    checks += 5
+    if safe_int(payload.get("case_count")) <= 0:
+        findings.append("agent_parity_gate_compact_coverage_bad_case_count")
+    if payload.get("missing") != {}:
+        findings.append("agent_parity_gate_compact_coverage_missing_tags")
+    if payload.get("forbidden_live_publish_rows") != []:
+        findings.append("agent_parity_gate_compact_coverage_forbidden_live_publish")
+    if payload.get("media_rows_without_dry_run") != []:
+        findings.append("agent_parity_gate_compact_coverage_media_without_dry_run")
+    covered = payload.get("covered") if isinstance(payload, dict) else None
+    if not isinstance(covered, dict) or not {
+        "agent_parity",
+        "chinese_model_adapter",
+    }.issubset(covered):
+        findings.append("agent_parity_gate_compact_coverage_missing_core_groups")
+    return findings, checks
+
+
+def validate_chinese_model_catalog_artifact(run_dir: Path) -> tuple[list[str], int]:
+    rel_path = "agent_parity_gate/chinese_model_catalog.json"
+    payload, findings = load_json_artifact(run_dir, rel_path)
+    checks = 0
+    if findings:
+        return findings, checks
+    checks += 4
+    if payload.get("status") != "ok":
+        findings.append(f"agent_parity_gate_chinese_model_catalog_bad_status:{payload.get('status')}")
+    if safe_int(payload.get("finding_count")) != 0:
+        findings.append("agent_parity_gate_chinese_model_catalog_findings_nonzero")
+    if payload.get("findings") != []:
+        findings.append("agent_parity_gate_chinese_model_catalog_findings_not_empty")
+    providers = {
+        entry.get("provider")
+        for entry in payload.get("catalog", [])
+        if isinstance(entry, dict)
+    }
+    missing = sorted(AGENT_PARITY_CHINESE_MODEL_PROVIDERS - providers)
+    if missing:
+        findings.append(f"agent_parity_gate_chinese_model_catalog_missing_providers:{','.join(missing)}")
+    return findings, checks
+
+
+def validate_provider_smoke_artifacts(run_dir: Path) -> tuple[list[str], int]:
     findings: list[str] = []
+    checks = 0
+    payload, json_findings = load_json_artifact(
+        run_dir, "agent_parity_gate/chinese_provider_smoke/matrix_summary.json"
+    )
+    findings.extend(json_findings)
+    if not json_findings:
+        checks += 3
+        if safe_int(payload.get("provider_count")) < len(AGENT_PARITY_CHINESE_MODEL_PROVIDERS):
+            findings.append("agent_parity_gate_provider_smoke_bad_provider_count")
+        providers = {
+            entry.get("provider")
+            for entry in payload.get("providers", [])
+            if isinstance(entry, dict)
+        }
+        missing = sorted(AGENT_PARITY_CHINESE_MODEL_PROVIDERS - providers)
+        if missing:
+            findings.append(f"agent_parity_gate_provider_smoke_missing_providers:{','.join(missing)}")
+        if not isinstance(payload.get("status_counts"), dict):
+            findings.append("agent_parity_gate_provider_smoke_missing_status_counts")
+    text, text_findings = read_text_artifact(
+        run_dir / "agent_parity_gate/chinese_provider_smoke.txt",
+        "agent_parity_gate/chinese_provider_smoke.txt",
+    )
+    findings.extend(text_findings)
+    if not text_findings:
+        checks += 1
+        if "CHINESE_PROVIDER_SMOKE_MATRIX" not in text:
+            findings.append("agent_parity_gate_provider_smoke_missing_runner_token")
+    return findings, checks
+
+
+def validate_rollout_metrics_artifact(
+    run_dir: Path,
+    rel_path: str,
+    gate_summary: dict[str, str],
+) -> tuple[list[str], int]:
+    payload, findings = load_json_artifact(run_dir, rel_path)
+    checks = 0
+    if findings:
+        return findings, checks
+    min_pass_rate = safe_float(gate_summary.get("min_pass_rate"), 1.0)
+    max_avg_llm_calls = safe_float(gate_summary.get("max_avg_llm_calls"), 4.0)
+    max_prompt_truncations = safe_int(gate_summary.get("max_prompt_truncations"), 0)
+    max_provider_final_errors = safe_int(gate_summary.get("max_provider_final_errors"), 0)
+    checks += 7
+    if safe_int(payload.get("turns_total")) <= 0:
+        findings.append(f"agent_parity_gate_metrics_bad_turns:{rel_path}")
+    if safe_float(payload.get("pass_rate")) < min_pass_rate:
+        findings.append(f"agent_parity_gate_metrics_pass_rate_below_threshold:{rel_path}")
+    if nested_get(payload, "metric_gate", "passed") is not True:
+        findings.append(f"agent_parity_gate_metrics_gate_not_passed:{rel_path}")
+    if safe_int(payload.get("parse_errors")) != 0:
+        findings.append(f"agent_parity_gate_metrics_parse_errors:{rel_path}")
+    if safe_float(nested_get(payload, "llm", "avg_calls_per_turn")) > max_avg_llm_calls:
+        findings.append(f"agent_parity_gate_metrics_avg_llm_calls_above_threshold:{rel_path}")
+    if safe_int(nested_get(payload, "llm", "prompt_truncation_count")) > max_prompt_truncations:
+        findings.append(f"agent_parity_gate_metrics_prompt_truncations_above_threshold:{rel_path}")
+    if safe_int(nested_get(payload, "llm", "provider_final_error_count")) > max_provider_final_errors:
+        findings.append(f"agent_parity_gate_metrics_provider_final_errors_above_threshold:{rel_path}")
+    return findings, checks
+
+
+def validate_coding_fixture_artifacts(
+    run_dir: Path,
+    gate_summary: dict[str, str],
+) -> tuple[list[str], int]:
+    findings: list[str] = []
+    checks = 0
+    for rel_path, token in (
+        ("agent_parity_gate/coding_loop_repair_eval.txt", "CLIENT_LIKE_EVAL_OK"),
+        ("agent_parity_gate/coding_loop_repair_metrics.txt", "ROLLOUT_METRICS_OK"),
+    ):
+        artifact_findings = validate_text_artifact_tokens(run_dir, rel_path, {token})
+        findings.extend(artifact_findings)
+        checks += 0 if artifact_findings else 1
+    metrics_findings, metrics_checks = validate_rollout_metrics_artifact(
+        run_dir,
+        "agent_parity_gate/coding_loop_repair_metrics.json",
+        gate_summary,
+    )
+    findings.extend(metrics_findings)
+    checks += metrics_checks
+    return findings, checks
+
+
+def validate_enabled_agent_parity_optional_artifacts(
+    run_dir: Path,
+    entries: set[str],
+    gate_summary: dict[str, str],
+) -> tuple[list[str], int]:
+    findings: list[str] = []
+    checks = 0
+    for flag, required_paths in sorted(AGENT_PARITY_GATE_OPTIONAL_ARTIFACTS_BY_FLAG.items()):
+        if gate_summary.get(flag) != "1":
+            continue
+        for required in sorted(required_paths):
+            checks += 1
+            if required not in entries:
+                findings.append(f"agent_parity_gate_enabled_artifact_missing:{flag}:{required}")
+    if gate_summary.get("coverage") == "1":
+        coverage_findings, coverage_checks = validate_compact_coverage_artifact(run_dir)
+        findings.extend(coverage_findings)
+        checks += coverage_checks
+    if gate_summary.get("model_catalog") == "1":
+        catalog_findings, catalog_checks = validate_chinese_model_catalog_artifact(run_dir)
+        findings.extend(catalog_findings)
+        checks += catalog_checks
+    if gate_summary.get("provider_smoke") == "1":
+        smoke_findings, smoke_checks = validate_provider_smoke_artifacts(run_dir)
+        findings.extend(smoke_findings)
+        checks += smoke_checks
+    if gate_summary.get("coding_fixture") == "1":
+        coding_findings, coding_checks = validate_coding_fixture_artifacts(run_dir, gate_summary)
+        findings.extend(coding_findings)
+        checks += coding_checks
+    if gate_summary.get("metrics") == "1" and safe_int(gate_summary.get("run_dir_count")) > 0:
+        for rel_path, token in (
+            ("agent_parity_gate/run_metrics.txt", "ROLLOUT_METRICS_OK"),
+        ):
+            artifact_findings = validate_text_artifact_tokens(run_dir, rel_path, {token})
+            findings.extend(artifact_findings)
+            checks += 0 if artifact_findings else 1
+        metrics_findings, metrics_checks = validate_rollout_metrics_artifact(
+            run_dir,
+            "agent_parity_gate/run_metrics.json",
+            gate_summary,
+        )
+        findings.extend(metrics_findings)
+        checks += metrics_checks
+    return findings, checks
+
+
+def validate_agent_parity_gate_artifacts(run_dir: Path, entries: set[str]) -> tuple[list[str], int]:
+    findings: list[str] = []
+    content_checks = 0
     for required in sorted(AGENT_PARITY_GATE_REQUIRED_ARTIFACTS):
         if required not in entries:
             findings.append(f"agent_parity_gate_artifact_missing:{required}")
@@ -229,14 +467,26 @@ def validate_agent_parity_gate_artifacts(run_dir: Path, entries: set[str]) -> li
     gate_summary, parse_findings = parse_env_file(summary_path)
     findings.extend(f"agent_parity_gate_{finding}" for finding in parse_findings)
     for key, expected in sorted(AGENT_PARITY_GATE_REQUIRED_FLAGS.items()):
+        content_checks += 1
         actual = gate_summary.get(key)
         if actual != expected:
             findings.append(f"agent_parity_gate_summary_bad_flag:{key}:{actual}")
     for rel_path, tokens in sorted(AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS.items()):
-        findings.extend(validate_text_artifact_tokens(run_dir, rel_path, tokens))
+        token_findings = validate_text_artifact_tokens(run_dir, rel_path, tokens)
+        findings.extend(token_findings)
+        content_checks += 0 if token_findings else len(tokens)
     for rel_path in sorted(AGENT_PARITY_GATE_JSON_OK_ARTIFACTS):
-        findings.extend(validate_json_artifact_ok(run_dir, rel_path))
-    return findings
+        ok_findings = validate_json_artifact_ok(run_dir, rel_path)
+        findings.extend(ok_findings)
+        content_checks += 0 if ok_findings else 1
+    optional_findings, optional_checks = validate_enabled_agent_parity_optional_artifacts(
+        run_dir,
+        entries,
+        gate_summary,
+    )
+    findings.extend(optional_findings)
+    content_checks += optional_checks
+    return findings, content_checks
 
 
 def validate_run_dir(run_dir: Path, require_contract_report: bool = False) -> dict[str, Any]:
@@ -265,15 +515,15 @@ def validate_run_dir(run_dir: Path, require_contract_report: bool = False) -> di
         findings.extend(validate_artifact_index_entries(artifact_entries, require_contract_report))
 
     if summary.get("suite") == "agent_parity_gate":
-        findings.extend(validate_agent_parity_gate_artifacts(run_dir, artifact_entries))
+        agent_parity_findings, content_check_count = validate_agent_parity_gate_artifacts(
+            run_dir, artifact_entries
+        )
+        findings.extend(agent_parity_findings)
         agent_parity_gate_contract = {
             "checked": True,
             "required_artifact_count": len(AGENT_PARITY_GATE_REQUIRED_ARTIFACTS),
             "required_flag_count": len(AGENT_PARITY_GATE_REQUIRED_FLAGS),
-            "content_check_count": sum(
-                len(tokens) for tokens in AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS.values()
-            )
-            + len(AGENT_PARITY_GATE_JSON_OK_ARTIFACTS),
+            "content_check_count": content_check_count,
         }
 
     report = {
