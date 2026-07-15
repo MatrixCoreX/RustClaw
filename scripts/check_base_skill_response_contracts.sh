@@ -62,6 +62,16 @@ command -v jq >/dev/null 2>&1 || {
   exit 2
 }
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" "$1"
+}
+
+log_link() {
+  local label="$1"
+  local path="$2"
+  printf '[%s](%s)' "$label" "$(path_ref "$path")"
+}
+
 mkdir -p "$LOG_DIR"
 TMP_DIR="$(mktemp -d /tmp/base-skill-contracts-XXXXXX)"
 
@@ -92,7 +102,7 @@ check_ok_extra() {
   if [[ "$rc" -ne 0 ]]; then
     FAIL=$((FAIL + 1))
     echo "FAIL $skill exit=$rc"
-    RESULT_LINES+=("- FAIL: \`$skill\` exit=$rc ([stdout]($stdout_log), [stderr]($stderr_log))")
+    RESULT_LINES+=("- FAIL: \`$skill\` exit=$rc ($(log_link stdout "$stdout_log"), $(log_link stderr "$stderr_log"))")
     return
   fi
 
@@ -101,7 +111,7 @@ check_ok_extra() {
   if [[ -z "$resp" ]]; then
     FAIL=$((FAIL + 1))
     echo "FAIL $skill empty output"
-    RESULT_LINES+=("- FAIL: \`$skill\` empty output ([stdout]($stdout_log), [stderr]($stderr_log))")
+    RESULT_LINES+=("- FAIL: \`$skill\` empty output ($(log_link stdout "$stdout_log"), $(log_link stderr "$stderr_log"))")
     return
   fi
 
@@ -111,7 +121,7 @@ check_ok_extra() {
   " >/dev/null 2>&1; then
     FAIL=$((FAIL + 1))
     echo "FAIL $skill extra contract mismatch"
-    RESULT_LINES+=("- FAIL: \`$skill\` extra contract mismatch ([stdout]($stdout_log), [stderr]($stderr_log))")
+    RESULT_LINES+=("- FAIL: \`$skill\` extra contract mismatch ($(log_link stdout "$stdout_log"), $(log_link stderr "$stderr_log"))")
     return
   fi
 
@@ -137,7 +147,7 @@ check_error_contract() {
   if [[ "$rc" -ne 0 ]]; then
     FAIL=$((FAIL + 1))
     echo "FAIL $skill error contract exit=$rc"
-    RESULT_LINES+=("- FAIL: \`$skill\` error contract exit=$rc ([stdout]($stdout_log), [stderr]($stderr_log))")
+    RESULT_LINES+=("- FAIL: \`$skill\` error contract exit=$rc ($(log_link stdout "$stdout_log"), $(log_link stderr "$stderr_log"))")
     return
   fi
 
@@ -146,7 +156,7 @@ check_error_contract() {
   if [[ -z "$resp" ]]; then
     FAIL=$((FAIL + 1))
     echo "FAIL $skill error contract empty output"
-    RESULT_LINES+=("- FAIL: \`$skill\` error contract empty output ([stdout]($stdout_log), [stderr]($stderr_log))")
+    RESULT_LINES+=("- FAIL: \`$skill\` error contract empty output ($(log_link stdout "$stdout_log"), $(log_link stderr "$stderr_log"))")
     return
   fi
 
@@ -157,7 +167,7 @@ check_error_contract() {
   " >/dev/null 2>&1; then
     FAIL=$((FAIL + 1))
     echo "FAIL $skill error contract mismatch"
-    RESULT_LINES+=("- FAIL: \`$skill\` error contract mismatch ([stdout]($stdout_log), [stderr]($stderr_log))")
+    RESULT_LINES+=("- FAIL: \`$skill\` error contract mismatch ($(log_link stdout "$stdout_log"), $(log_link stderr "$stderr_log"))")
     return
   fi
 
@@ -217,7 +227,7 @@ echo "==== Base Skill Contract Summary ===="
 echo "PASS: $PASS"
 echo "FAIL: $FAIL"
 echo "SKIP: $SKIP"
-echo "Logs: $LOG_DIR"
+echo "Logs ref: $(path_ref "$LOG_DIR")"
 
 mkdir -p "$(dirname "$REPORT_PATH")"
 {
@@ -228,14 +238,14 @@ mkdir -p "$(dirname "$REPORT_PATH")"
   echo "- PASS: $PASS"
   echo "- FAIL: $FAIL"
   echo "- SKIP: $SKIP"
-  echo "- Logs: \`$LOG_DIR\`"
+  echo "- Logs ref: \`$(path_ref "$LOG_DIR")\`"
   echo
   for line in "${RESULT_LINES[@]}"; do
     echo "$line"
   done
 } >"$REPORT_PATH"
 
-echo "Report: $REPORT_PATH"
+echo "Report ref: $(path_ref "$REPORT_PATH")"
 
 if [[ "$FAIL" -ne 0 ]]; then
   exit 1

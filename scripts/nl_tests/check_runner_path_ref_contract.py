@@ -26,6 +26,8 @@ SELF_EXTENSION_NL_HANDOFF = ROOT / "scripts/regression_self_extension_nl_handoff
 CIRCUIT_BREAKER = ROOT / "scripts/nl_tests/test_circuit_breaker.sh"
 TASK_TERMINATION = ROOT / "scripts/verify_task_termination.sh"
 INSPECT_TASK = ROOT / "scripts/inspect_task.sh"
+BASE_SKILL_RESPONSE_CONTRACTS = ROOT / "scripts/check_base_skill_response_contracts.sh"
+SKILLS_UPGRADE_SUITE = ROOT / "scripts/regression_skills_upgrade_suite.sh"
 
 REQUIRED_SNIPPETS: dict[Path, dict[str, str]] = {
     PATH_REF_HELPER: {
@@ -125,6 +127,21 @@ REQUIRED_SNIPPETS: dict[Path, dict[str, str]] = {
         "model_io_log_ref": "model_io_log_ref",
         "tracing_log_ref": "tracing_log_ref",
     },
+    BASE_SKILL_RESPONSE_CONTRACTS: {
+        "path_ref_fn": "path_ref()",
+        "log_link_fn": "log_link()",
+        "logs_ref": "Logs ref:",
+        "report_ref": "Report ref:",
+        "stdout_log_link": "$(log_link stdout",
+        "stderr_log_link": "$(log_link stderr",
+    },
+    SKILLS_UPGRADE_SUITE: {
+        "path_ref_fn": "path_ref()",
+        "wrapper_smoke_stdout_tmp": 'WRAPPER_SMOKE_STDOUT="$TMP_DIR/wrapper_smoke.log"',
+        "wrapper_report_ref": "Wrapper smoke report ref:",
+        "base_contract_ref": "Base contract report ref:",
+        "report_saved_ref": "Report saved ref:",
+    },
 }
 
 FORBIDDEN_SNIPPETS: dict[Path, dict[str, str]] = {
@@ -207,6 +224,21 @@ FORBIDDEN_SNIPPETS: dict[Path, dict[str, str]] = {
         "tracing_absolute_print": 'echo "tracing_log : ${TRACING_LOG}"',
         "missing_db_absolute_print": 'echo "[inspect_task] sqlite db missing: ${DB_PATH}"',
         "missing_model_io_absolute_print": 'echo "[inspect_task] model_io log missing: $MODEL_IO_LOG"',
+    },
+    BASE_SKILL_RESPONSE_CONTRACTS: {
+        "logs_absolute_print": 'echo "Logs: $LOG_DIR"',
+        "report_absolute_print": 'echo "Report: $REPORT_PATH"',
+        "logs_absolute_report": 'echo "- Logs: \\`$LOG_DIR\\`"',
+        "stdout_absolute_link": "[stdout]($stdout_log)",
+        "stderr_absolute_link": "[stderr]($stderr_log)",
+    },
+    SKILLS_UPGRADE_SUITE: {
+        "wrapper_smoke_absolute_tmp": "/tmp/rustclaw_wrapper_smoke.log",
+        "wrapper_smoke_absolute_report_message": 'pass "wrapper smoke completed successfully (report: $WRAPPER_SMOKE_REPORT)"',
+        "wrapper_smoke_absolute_fail_message": 'fail "wrapper smoke reported failures (report: $WRAPPER_SMOKE_REPORT)"',
+        "wrapper_report_absolute": 'echo "- Wrapper smoke report: \\`$WRAPPER_SMOKE_REPORT\\`"',
+        "base_contract_absolute": 'echo "- Base contract report: \\`$BASE_CONTRACTS_REPORT\\`"',
+        "report_saved_absolute": 'echo "Report saved: $REPORT_PATH"',
     },
 }
 
