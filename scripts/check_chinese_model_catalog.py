@@ -910,7 +910,17 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "json-ok-artifact-bad-shape" in suite_artifact_contract_text
         and "validate_compact_coverage_artifact" in suite_artifact_contract_text
         and "validate_chinese_model_catalog_artifact" in suite_artifact_contract_text
+        and (
+            "agent_parity_gate_chinese_model_catalog_bad_catalog_shape"
+            in suite_artifact_contract_text
+        )
+        and "chinese-model-catalog-bad-catalog-shape" in suite_artifact_contract_text
         and "validate_provider_smoke_artifacts" in suite_artifact_contract_text
+        and (
+            "agent_parity_gate_provider_smoke_bad_providers_shape"
+            in suite_artifact_contract_text
+        )
+        and "provider-smoke-bad-providers-shape" in suite_artifact_contract_text
         and "validate_provider_smoke_case_coverage" in suite_artifact_contract_text
         and (
             "agent_parity_gate_provider_smoke_case_coverage_bad_provider_tags"
