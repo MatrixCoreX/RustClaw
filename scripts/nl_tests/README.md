@@ -107,7 +107,8 @@ They also write `suite_summary.env` with machine fields `suite`, `status`,
 `exit_code`, `artifact_finalize_status`, `run_log`, and `artifact_index` so a
 later task can resume from the run root without parsing prose logs. `status` and
 `exit_code` reflect the wrapped command; `artifact_finalize_status` reflects the
-summary/index write step.
+summary/index write step. Validate a wrapped run root with
+`python3 scripts/nl_tests/check_suite_artifact_contract.py <run_dir> --json`.
 
 For rerun shards, use:
 
