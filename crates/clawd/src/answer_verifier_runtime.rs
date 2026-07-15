@@ -704,6 +704,13 @@ pub(super) fn structured_machine_projection_can_skip_answer_verifier(
     ) {
         return true;
     }
+    if super::answer_verifier_machine_kv::requested_machine_kv_projection_can_skip_answer_verifier(
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
+        return true;
+    }
     finalizer_grounded_machine_payload_can_skip_verifier(journal)
         && is_structured_machine_projection(candidate_answer)
 }
