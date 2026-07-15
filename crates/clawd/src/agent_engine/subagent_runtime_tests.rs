@@ -629,6 +629,10 @@ fn subagent_batch_records_bounded_parallel_aggregation() {
         observation["execution_mode"],
         "bounded_parallel_readonly_child_runs"
     );
+    assert_eq!(
+        observation["aggregation"]["execution_mode"],
+        "bounded_parallel_readonly_child_runs"
+    );
     assert_eq!(observation["team_spec"]["spec_kind"], "agent_team_spec");
     assert_eq!(observation["team_spec"]["team_id"], "subagent-batch:5:2");
     assert_eq!(observation["team_spec"]["max_parallel"], 4);
