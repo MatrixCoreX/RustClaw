@@ -149,7 +149,8 @@ gate summary is missing, the checker returns the structured
 `agent_parity_gate_summary_missing` finding instead of crashing. Enabled optional steps are also content-checked from
 `gate_summary.env`: compact coverage must have no missing/forbidden rows,
 Chinese model catalog must report `status=ok` with all Chinese providers, its
-`chinese_model_catalog_self_test.txt` must include `CHINESE_MODEL_CATALOG_SELF_TEST ok`, and
+`chinese_model_catalog_self_test.txt` must include `CHINESE_MODEL_CATALOG_SELF_TEST ok`
+after covering TOML/env-file structured failure findings, and
 the coding repair fixture metrics must satisfy the configured pass-rate,
 prompt-truncation, provider-error, and average-LLM-call thresholds. When
 provider smoke is enabled, the contract also checks the case coverage artifact,
