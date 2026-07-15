@@ -410,10 +410,16 @@ rows = [
     for line in summary_path.read_text(encoding="utf-8").splitlines()
     if line.strip()
 ]
-counts = Counter(str(row.get("status") or "unknown") for row in rows)
+status_counts = Counter(str(row.get("status") or "unknown") for row in rows)
+reason_code_counts = Counter(str(row.get("reason_code") or "unknown") for row in rows)
+credential_state_counts = Counter(str(row.get("credential_state") or "unknown") for row in rows)
+live_scope_counts = Counter(str(row.get("live_scope") or "unknown") for row in rows)
 payload = {
     "provider_count": len(rows),
-    "status_counts": dict(sorted(counts.items())),
+    "status_counts": dict(sorted(status_counts.items())),
+    "reason_code_counts": dict(sorted(reason_code_counts.items())),
+    "credential_state_counts": dict(sorted(credential_state_counts.items())),
+    "live_scope_counts": dict(sorted(live_scope_counts.items())),
     "providers": rows,
 }
 out_path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
