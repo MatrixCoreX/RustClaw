@@ -1994,3 +1994,6 @@ mod local_status_evidence;
 
 #[path = "answer_verifier_tests/strict_json_projection_skip.rs"]
 mod strict_json_projection_skip;
+
+#[path = "answer_verifier_tests/control_envelope_projection_skip.rs"]
+mod control_envelope_projection_skip;
