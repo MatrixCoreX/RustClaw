@@ -920,6 +920,13 @@ pub(crate) fn is_missing_target_skill_error(skill_name: &str, err: &str) -> bool
     skill_name.eq_ignore_ascii_case("read_file") && err.starts_with(READ_FILE_NOT_FOUND_PREFIX)
 }
 
+pub(crate) fn read_file_not_found_path(err: &str) -> Option<&str> {
+    err.trim()
+        .strip_prefix(READ_FILE_NOT_FOUND_PREFIX)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+}
+
 pub(crate) fn is_observable_run_cmd_error(skill_name: &str, err: &str) -> bool {
     let Some(structured) = parse_structured_skill_error(err) else {
         return false;

@@ -13,9 +13,21 @@ fn resume_context_body(value: &Value) -> &Value {
 
 pub(super) fn text_looks_like_missing_file_target(text: &str) -> bool {
     let trimmed = text.trim();
-    trimmed.starts_with("__RC_READ_FILE_NOT_FOUND__:")
+    crate::skills::read_file_not_found_path(trimmed).is_some()
         || crate::skills::parse_structured_skill_error(trimmed)
             .is_some_and(|structured| structured.error_kind == "not_found")
+}
+
+fn machine_token(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || !trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+    {
+        return None;
+    }
+    Some(trimmed)
 }
 
 fn resume_context_has_remaining_actions(resume_ctx: &Value) -> bool {
@@ -23,33 +35,6 @@ fn resume_context_has_remaining_actions(resume_ctx: &Value) -> bool {
         .get("remaining_actions")
         .and_then(|value| value.as_array())
         .is_some_and(|actions| !actions.is_empty())
-}
-
-fn resume_context_failed_step_texts(resume_ctx: &Value) -> Vec<&str> {
-    let body = resume_context_body(resume_ctx);
-    let mut texts = Vec::new();
-    if let Some(error) = body
-        .get("failed_step")
-        .and_then(|step| step.get("error"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        texts.push(error);
-    }
-    if let Some(messages) = body
-        .get("completed_messages")
-        .and_then(|value| value.as_array())
-    {
-        texts.extend(
-            messages
-                .iter()
-                .filter_map(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty()),
-        );
-    }
-    texts
 }
 
 fn resume_context_failed_step_action(resume_ctx: &Value) -> Option<&str> {
@@ -121,28 +106,69 @@ pub(super) fn resume_context_path_batch_facts_are_missing_only(resume_ctx: &Valu
     saw_path_batch && saw_missing && !saw_existing
 }
 
-fn text_is_directory_lookup_failure(text: &str) -> bool {
-    let trimmed = text.trim();
-    trimmed.starts_with("read_dir failed")
-        || crate::skills::parse_structured_skill_error(trimmed)
-            .is_some_and(|structured| structured.error_text.trim().starts_with("read_dir failed"))
+fn structured_error_extra_string<'a>(
+    error: &'a crate::skills::StructuredSkillError,
+    key: &str,
+) -> Option<&'a str> {
+    error
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get(key))
+        .and_then(|value| value.as_str())
+        .and_then(machine_token)
+}
+
+fn structured_error_has_machine_token(
+    error: &crate::skills::StructuredSkillError,
+    key: &str,
+    allowed: &[&str],
+) -> bool {
+    structured_error_extra_string(error, key).is_some_and(|value| {
+        allowed
+            .iter()
+            .any(|allowed_value| value.eq_ignore_ascii_case(allowed_value))
+    })
+}
+
+fn structured_error_is_directory_lookup_failure(
+    error: &crate::skills::StructuredSkillError,
+) -> bool {
+    matches!(
+        error.error_kind.as_str(),
+        "read_dir_failed" | "directory_not_found" | "directory_lookup_failed"
+    ) || structured_error_has_machine_token(
+        error,
+        "operation",
+        &["read_dir", "list_dir", "directory_lookup"],
+    ) || structured_error_has_machine_token(
+        error,
+        "reason_code",
+        &[
+            "read_dir_failed",
+            "directory_not_found",
+            "directory_lookup_failed",
+        ],
+    ) || structured_error_has_machine_token(
+        error,
+        "error_code",
+        &[
+            "read_dir_failed",
+            "directory_not_found",
+            "directory_lookup_failed",
+        ],
+    )
+}
+
+fn structured_error_is_missing_target(error: &crate::skills::StructuredSkillError) -> bool {
+    error.error_kind == "not_found"
+        || structured_error_has_machine_token(error, "reason_code", &["not_found", "missing"])
+        || structured_error_has_machine_token(error, "error_code", &["not_found", "missing"])
 }
 
 pub(super) fn resume_context_has_directory_lookup_failure(resume_ctx: &Value) -> bool {
-    let body = resume_context_body(resume_ctx);
-    if body
-        .get("failed_step")
-        .and_then(|step| step.get("error"))
-        .and_then(|value| value.as_str())
-        .is_some_and(text_is_directory_lookup_failure)
-    {
-        return true;
-    }
-    body.get("failed_step")
-        .and_then(|step| step.get("structured_error"))
-        .and_then(|error| error.get("error_text"))
-        .and_then(|value| value.as_str())
-        .is_some_and(text_is_directory_lookup_failure)
+    resume_context_failed_structured_skill_error(resume_ctx)
+        .as_ref()
+        .is_some_and(structured_error_is_directory_lookup_failure)
 }
 
 pub(super) fn resume_failure_is_unbound_path_lookup_clarify_result(
@@ -171,15 +197,14 @@ pub(super) fn resume_failure_is_unbound_path_lookup_clarify_result(
 
 pub(super) fn resume_failure_is_missing_file_delivery_result(
     route_result: &crate::RouteResult,
-    user_error: &str,
     resume_ctx: &Value,
 ) -> bool {
     super::route_has_file_delivery_contract(route_result)
         && !resume_context_has_remaining_actions(resume_ctx)
-        && (text_looks_like_missing_file_target(user_error)
-            || resume_context_failed_step_texts(resume_ctx)
-                .iter()
-                .any(|text| text_looks_like_missing_file_target(text)))
+        && (resume_context_path_batch_facts_are_missing_only(resume_ctx)
+            || resume_context_failed_structured_skill_error(resume_ctx)
+                .as_ref()
+                .is_some_and(structured_error_is_missing_target))
 }
 
 fn resume_context_failed_structured_skill_error(
@@ -187,15 +212,8 @@ fn resume_context_failed_structured_skill_error(
 ) -> Option<crate::skills::StructuredSkillError> {
     resume_context_body(resume_ctx)
         .get("failed_step")
-        .and_then(|step| {
-            step.get("structured_error")
-                .and_then(resume_context_structured_skill_error_from_value)
-                .or_else(|| {
-                    step.get("error")
-                        .and_then(|value| value.as_str())
-                        .and_then(crate::skills::parse_structured_skill_error)
-                })
-        })
+        .and_then(|step| step.get("structured_error"))
+        .and_then(resume_context_structured_skill_error_from_value)
 }
 
 pub(super) fn answer_verifier_retry_applicable(
@@ -598,7 +616,7 @@ fn resume_context_structured_skill_error_from_value(
     Some(crate::skills::StructuredSkillError {
         skill: resume_context_string_field(value, "skill")?,
         error_kind: resume_context_string_field(value, "error_kind")?,
-        error_text: resume_context_string_field(value, "error_text")?,
+        error_text: String::new(),
         platform: resume_context_string_field(value, "platform"),
         manager_type: resume_context_string_field(value, "manager_type"),
         service_name: resume_context_string_field(value, "service_name"),
@@ -652,6 +670,20 @@ fn compact_resume_error_text(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+fn structured_error_detail(error: &crate::skills::StructuredSkillError) -> Option<String> {
+    resume_context_extra_string(error, "stderr")
+        .or_else(|| resume_context_extra_string(error, "stdout"))
+        .or_else(|| resume_context_extra_string(error, "message_key"))
+        .or_else(|| resume_context_extra_string(error, "error_code"))
+        .or_else(|| resume_context_extra_string(error, "status_code"))
+        .map(compact_resume_error_text)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            (!error.error_kind.trim().is_empty())
+                .then(|| format!("error_kind={}", error.error_kind))
+        })
+}
+
 pub(super) fn resume_failure_execution_failed_step_answer(
     route_result: &crate::RouteResult,
     resume_ctx: &Value,
@@ -668,11 +700,6 @@ pub(super) fn resume_failure_execution_failed_step_answer(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("step");
-    let raw_error = failed_step
-        .get("error")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
     let structured = resume_context_failed_structured_skill_error(resume_ctx);
     let command = structured
         .as_ref()
@@ -680,13 +707,7 @@ pub(super) fn resume_failure_execution_failed_step_answer(
     let exit_code = structured
         .as_ref()
         .and_then(|error| resume_context_extra_i64(error, "exit_code"));
-    let detail = structured
-        .as_ref()
-        .and_then(|error| resume_context_extra_string(error, "stderr"))
-        .or_else(|| structured.as_ref().map(|error| error.error_text.trim()))
-        .or(raw_error)
-        .map(compact_resume_error_text)
-        .filter(|value| !value.is_empty())?;
+    let detail = structured.as_ref().and_then(structured_error_detail)?;
 
     let mut payload = serde_json::json!({
         "message_key": "clawd.msg.execution.failed_step",
@@ -723,19 +744,38 @@ pub(super) fn resume_context_execution_summary_messages(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("step");
-    let error = failed_step
-        .get("error")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("Execution failed.");
-    let error = resume_context_user_visible_step_error(error);
-    vec![serde_json::json!({
+    let mut payload = serde_json::json!({
         "message_key": "clawd.msg.execution.summary",
         "reason_code": "resume_failed_step_summary",
         "step_index": 1,
         "action": action,
-        "error": crate::truncate_for_agent_trace(&error).replace("```", "'''"),
-    })
-    .to_string()]
+    });
+    if let Some(structured) = resume_context_failed_structured_skill_error(resume_ctx) {
+        payload["skill"] = serde_json::json!(structured.skill);
+        payload["error_kind"] = serde_json::json!(structured.error_kind);
+        if let Some(command) = resume_context_extra_string(&structured, "command") {
+            payload["command"] = serde_json::json!(command);
+        }
+        if let Some(exit_code) = resume_context_extra_i64(&structured, "exit_code") {
+            payload["exit_code"] = serde_json::json!(exit_code);
+        }
+        if let Some(error_code) = resume_context_extra_string(&structured, "error_code") {
+            payload["error_code"] = serde_json::json!(error_code);
+        }
+        if let Some(status_code) = resume_context_extra_string(&structured, "status_code") {
+            payload["status_code"] = serde_json::json!(status_code);
+        }
+    } else if let Some(error) = failed_step
+        .get("error")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let error = resume_context_user_visible_step_error(error);
+        payload["error"] =
+            serde_json::json!(crate::truncate_for_agent_trace(&error).replace("```", "'''"));
+    } else {
+        payload["error_kind"] = serde_json::json!("unstructured_failure");
+    }
+    vec![payload.to_string()]
 }

@@ -1663,14 +1663,56 @@ fn resume_failure_missing_file_delivery_is_success_result() {
     let resume_ctx = json!({
         "failed_step": {
             "action": "skill(run_cmd)",
-            "error": "__RC_READ_FILE_NOT_FOUND__:/tmp/missing.txt"
+            "error": "__RC_READ_FILE_NOT_FOUND__:/tmp/missing.txt",
+            "structured_error": {
+                "skill": "read_file",
+                "error_kind": "not_found",
+                "extra": {
+                    "path": "/tmp/missing.txt",
+                    "error_code": "not_found"
+                }
+            }
         },
         "remaining_actions": []
     });
 
     assert!(super::resume_failure_is_missing_file_delivery_result(
         &route,
-        "I couldn't send the requested file because it doesn't exist at the path `/tmp/missing.txt`.",
+        &resume_ctx
+    ));
+}
+
+#[test]
+fn resume_failure_missing_file_delivery_rejects_prose_only_error() {
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::act_plain(),
+        resolved_intent: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: String::new(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Unknown,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract::default(),
+    };
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.delivery_required = true;
+    let resume_ctx = json!({
+        "failed_step": {
+            "action": "skill(run_cmd)",
+            "error": "I couldn't send the requested file because it doesn't exist."
+        },
+        "remaining_actions": []
+    });
+
+    assert!(!super::resume_failure_is_missing_file_delivery_result(
+        &route,
         &resume_ctx
     ));
 }
@@ -1692,8 +1734,11 @@ fn resume_failure_unbound_path_lookup_is_clarify_result() {
             "error": "read_dir failed",
             "structured_error": {
                 "skill": "fs_search",
-                "error_kind": "unknown",
-                "error_text": "read_dir failed"
+                "error_kind": "read_dir_failed",
+                "extra": {
+                    "operation": "read_dir",
+                    "reason_code": "read_dir_failed"
+                }
             }
         },
         "remaining_actions": []
@@ -1723,8 +1768,11 @@ fn resume_failure_unbound_directory_lookup_is_clarify_result_without_path_batch(
             "error": "read_dir failed: No such file or directory (os error 2)",
             "structured_error": {
                 "skill": "fs_search",
-                "error_kind": "unknown",
-                "error_text": "read_dir failed: No such file or directory (os error 2)"
+                "error_kind": "directory_lookup_failed",
+                "extra": {
+                    "operation": "read_dir",
+                    "error_code": "directory_lookup_failed"
+                }
             }
         },
         "remaining_actions": []
@@ -1817,10 +1865,19 @@ fn resume_failure_structured_service_status_is_success_result() {
             .and_then(serde_json::Value::as_str),
         Some("resume_failed_step_summary")
     );
-    assert!(summary
-        .pointer("/error")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|error| error.contains("no matching service found")));
+    assert_eq!(
+        summary
+            .pointer("/skill")
+            .and_then(serde_json::Value::as_str),
+        Some("service_control")
+    );
+    assert_eq!(
+        summary
+            .pointer("/error_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("not_found")
+    );
+    assert!(summary.pointer("/error").is_none());
     assert!(!messages[0].contains("__RC_SKILL_ERROR__"));
 }
 

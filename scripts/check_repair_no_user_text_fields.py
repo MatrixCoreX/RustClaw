@@ -18,6 +18,7 @@ CORE_RECOVERY_FILES = [
     "crates/clawd/src/verifier.rs",
     "crates/clawd/src/repair_signal.rs",
     "crates/clawd/src/execution_adapters.rs",
+    "crates/clawd/src/finalize/task_resume.rs",
 ]
 
 # These files may check that lifecycle handoff payloads do not contain
@@ -30,6 +31,14 @@ PRESENCE_CHECK_ONLY_FILES = [
 ]
 
 MONITORED_FILES = CORE_RECOVERY_FILES + PRESENCE_CHECK_ONLY_FILES
+
+FINALIZER_RESUME_FILE = "crates/clawd/src/finalize/task_resume.rs"
+FINALIZER_RESUME_FORBIDDEN_SNIPPETS = [
+    "fn resume_context_failed_step_texts",
+    "fn text_is_directory_lookup_failure",
+    "structured.error_text",
+    "error.error_text",
+]
 
 STRING_READ_PATTERNS = [
     re.compile(r'\.get\("text"\)\.and_then\(\s*Value::as_str\s*\)'),
@@ -68,6 +77,13 @@ def is_allowed_presence_check(relative: str, line: str) -> bool:
 def scan_source(relative: str, text: str) -> list[str]:
     findings: list[str] = []
     for line_no, line in enumerate(text.splitlines(), start=1):
+        if relative == FINALIZER_RESUME_FILE:
+            for snippet in FINALIZER_RESUME_FORBIDDEN_SNIPPETS:
+                if snippet in line:
+                    findings.append(f"{relative}:{line_no}: finalizer_resume_text_control: {line.strip()}")
+                    break
+            else:
+                pass
         if any(pattern.search(line) for pattern in STRING_READ_PATTERNS):
             findings.append(f"{relative}:{line_no}: string_read: {line.strip()}")
             continue
@@ -91,12 +107,20 @@ def scan_repo() -> list[str]:
 def run_self_test() -> int:
     core_bad = 'fn bad(value: &Value) { let text = value.get("text").and_then(Value::as_str); }'
     core_presence_bad = 'fn bad(value: &Value) -> bool { value.get("text").is_some() }'
+    finalizer_error_text_bad = (
+        'fn bad(value: &Value) { let text = value.get("error_text").and_then(Value::as_str); }'
+    )
+    finalizer_text_classifier_bad = (
+        "fn resume_context_failed_step_texts(value: &Value) -> Vec<&str> { Vec::new() }"
+    )
     lifecycle_presence_ok = 'fn ok(value: &Value) -> bool { value.get("text").is_none() }'
     lifecycle_read_bad = (
         'fn bad(value: &Value) { let text = value.get("error_text").and_then(Value::as_str); }'
     )
     assert scan_source(CORE_RECOVERY_FILES[0], core_bad)
     assert scan_source(CORE_RECOVERY_FILES[0], core_presence_bad)
+    assert scan_source(FINALIZER_RESUME_FILE, finalizer_error_text_bad)
+    assert scan_source(FINALIZER_RESUME_FILE, finalizer_text_classifier_bad)
     assert not scan_source(PRESENCE_CHECK_ONLY_FILES[0], lifecycle_presence_ok)
     assert scan_source(PRESENCE_CHECK_ONLY_FILES[0], lifecycle_read_bad)
     print("SELF_TEST_OK")

@@ -1795,7 +1795,6 @@ pub(crate) async fn finalize_ask_result(
                 }
                 let qualified_resume_completion = if resume_failure_is_missing_file_delivery_result(
                     route_result,
-                    &user_error,
                     &resume_payload,
                 ) {
                     Some(("missing_file_delivery", user_error.clone()))

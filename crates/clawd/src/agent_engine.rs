@@ -1548,14 +1548,25 @@ fn resume_step_failed_machine_payload(
 }
 
 fn resume_context_structured_skill_error(raw_err: Option<&str>) -> Option<Value> {
-    let structured = raw_err
-        .map(str::trim)
-        .filter(|err| !err.is_empty())
-        .and_then(crate::skills::parse_structured_skill_error)?;
+    let raw = raw_err.map(str::trim).filter(|err| !err.is_empty())?;
+    if let Some(path) = crate::skills::read_file_not_found_path(raw) {
+        return Some(json!({
+            "skill": "read_file",
+            "error_kind": "not_found",
+            "platform": Value::Null,
+            "manager_type": Value::Null,
+            "service_name": Value::Null,
+            "extra": {
+                "path": path,
+                "error_code": "not_found",
+                "reason_code": "not_found"
+            }
+        }));
+    }
+    let structured = crate::skills::parse_structured_skill_error(raw)?;
     Some(json!({
         "skill": structured.skill,
         "error_kind": structured.error_kind,
-        "error_text": structured.error_text,
         "platform": structured.platform,
         "manager_type": structured.manager_type,
         "service_name": structured.service_name,
