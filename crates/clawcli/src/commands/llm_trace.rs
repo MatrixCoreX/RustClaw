@@ -142,7 +142,10 @@ fn debug_calls(debug: &Value) -> Vec<&Value> {
 
 fn llm_call_summary_line(call: &Value, call_index: usize) -> String {
     let flow = call.get("flow").unwrap_or(&Value::Null);
-    let mut tokens = vec![format!("index={call_index}")];
+    let mut tokens = vec![
+        format!("llm_call_ref=LLM#{call_index}"),
+        format!("index={call_index}"),
+    ];
     push_token(&mut tokens, "status", call.get("status"));
     push_token(&mut tokens, "vendor", call.get("vendor"));
     push_token(&mut tokens, "provider", call.get("provider"));

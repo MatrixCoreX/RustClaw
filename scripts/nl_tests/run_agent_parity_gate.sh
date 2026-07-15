@@ -330,6 +330,12 @@ echo "AGENT_PARITY_GATE_STEP clawcli_goal_contracts"
   python3 "${ROOT_DIR}/scripts/check_clawcli_goal_contracts.py"
 } > "${OUT_DIR}/clawcli_goal_contracts.txt"
 
+echo "AGENT_PARITY_GATE_STEP clawcli_llm_trace_contracts"
+{
+  python3 "${ROOT_DIR}/scripts/check_clawcli_llm_trace_contracts.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_clawcli_llm_trace_contracts.py"
+} > "${OUT_DIR}/clawcli_llm_trace_contracts.txt"
+
 echo "AGENT_PARITY_GATE_STEP no_agent_mode_payload"
 {
   python3 "${ROOT_DIR}/scripts/check_no_agent_mode_payload.py" --self-test
@@ -473,6 +479,7 @@ fi
   echo "clawcli_exec_replay_contracts=1"
   echo "clawcli_session_tui_contracts=1"
   echo "clawcli_goal_contracts=1"
+  echo "clawcli_llm_trace_contracts=1"
   echo "no_agent_mode_payload=1"
   echo "agent_loop_static_contracts=1"
   echo "semantic_boundary_contracts=1"
