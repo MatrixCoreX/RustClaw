@@ -396,6 +396,88 @@ fn upsert_skill_switches_line(raw: &str, rendered_line: &str) -> String {
     out
 }
 
+fn render_toml_string_array(key: &str, values: &[String]) -> Vec<String> {
+    if values.is_empty() {
+        return vec![format!("{key} = []")];
+    }
+    let mut lines = vec![format!("{key} = [")];
+    for value in values {
+        lines.push(format!("    {},", toml_string_literal(value)));
+    }
+    lines.push("]".to_string());
+    lines
+}
+
+fn array_block_end(lines: &[String], start: usize) -> usize {
+    let mut depth: isize = 0;
+    for (idx, line) in lines.iter().enumerate().skip(start) {
+        depth += line.matches('[').count() as isize;
+        depth -= line.matches(']').count() as isize;
+        if depth <= 0 && line.contains(']') {
+            return idx;
+        }
+    }
+    start
+}
+
+fn ensure_string_array_contains_in_section(
+    raw: &str,
+    section_name: &str,
+    key: &str,
+    current_values: &[String],
+    required_value: &str,
+) -> String {
+    let required = required_value.trim();
+    if required.is_empty() || current_values.iter().any(|value| value == required) {
+        return raw.to_string();
+    }
+
+    let mut values = current_values.to_vec();
+    values.push(required.to_string());
+    let rendered = render_toml_string_array(key, &values);
+    let section_header = format!("[{section_name}]");
+    let mut lines: Vec<String> = raw.lines().map(|line| line.to_string()).collect();
+    let Some(section_start) = lines.iter().position(|line| line.trim() == section_header) else {
+        return raw.to_string();
+    };
+    let section_end = lines
+        .iter()
+        .enumerate()
+        .skip(section_start + 1)
+        .find(|(_, line)| {
+            let trimmed = line.trim();
+            trimmed.starts_with('[') && trimmed.ends_with(']')
+        })
+        .map(|(idx, _)| idx)
+        .unwrap_or(lines.len());
+    let target_start = (section_start + 1..section_end).find(|idx| {
+        let trimmed = lines[*idx].trim_start();
+        if trimmed.starts_with('#') {
+            return false;
+        }
+        trimmed
+            .strip_prefix(key)
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+    });
+
+    if let Some(start) = target_start {
+        let end = array_block_end(&lines, start).min(section_end.saturating_sub(1));
+        lines.splice(start..=end, rendered);
+    } else {
+        let mut insert_at = section_end;
+        while insert_at > section_start + 1 && lines[insert_at - 1].trim().is_empty() {
+            insert_at -= 1;
+        }
+        lines.splice(insert_at..insert_at, rendered);
+    }
+
+    let mut out = lines.join("\n");
+    if raw.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
 async fn get_skills_config(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -637,22 +719,6 @@ async fn update_llm_config(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    if selected_vendor != "custom"
-        && !allowed_models.is_empty()
-        && !allowed_models.iter().any(|m| m == &selected_model)
-    {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!(
-                    "model is not in the configured pool for vendor {selected_vendor}: {selected_model}"
-                )),
-            }),
-        );
-    }
-
     let vendor_base_url = req.vendor_base_url.as_deref().map(str::trim).unwrap_or("");
     if vendor_base_url.is_empty() {
         return (
@@ -689,9 +755,16 @@ async fn update_llm_config(
         "model",
         &format!("model = {:?}", selected_model),
     );
+    let updated_vendor_models = ensure_string_array_contains_in_section(
+        &updated_vendor_model,
+        &format!("llm.{selected_vendor}"),
+        "models",
+        &allowed_models,
+        &selected_model,
+    );
     let vendor_api_key = req.vendor_api_key.as_deref().map(str::trim).unwrap_or("");
     let updated_api_key = upsert_string_key_in_section(
-        &updated_vendor_model,
+        &updated_vendor_models,
         &format!("llm.{selected_vendor}"),
         "api_key",
         &format!("api_key = {:?}", vendor_api_key),
@@ -782,7 +855,7 @@ async fn test_llm_config(
         }
     };
     let vendors = collect_llm_vendor_info(&parsed);
-    let Some(vendor_info) = vendors.iter().find(|item| {
+    let Some(_vendor_info) = vendors.iter().find(|item| {
         item.get("name")
             .and_then(|v| v.as_str())
             .map(|name| name.eq_ignore_ascii_case(&selected_vendor))
@@ -797,34 +870,6 @@ async fn test_llm_config(
             }),
         );
     };
-
-    let allowed_models = vendor_info
-        .get("models")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|item| item.as_str())
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    if selected_vendor != "custom"
-        && !allowed_models.is_empty()
-        && !allowed_models.iter().any(|m| m == &selected_model)
-    {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some(format!(
-                    "model is not in the configured pool for vendor {selected_vendor}: {selected_model}"
-                )),
-            }),
-        );
-    }
 
     let vendor_base_url = req.vendor_base_url.as_deref().map(str::trim).unwrap_or("");
     if vendor_base_url.is_empty() {
