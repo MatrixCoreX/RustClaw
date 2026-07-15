@@ -220,6 +220,17 @@ echo "AGENT_PARITY_GATE_STEP no_agent_mode_payload"
 python3 "${ROOT_DIR}/scripts/check_no_agent_mode_payload.py" \
   > "${OUT_DIR}/no_agent_mode_payload.txt"
 
+echo "AGENT_PARITY_GATE_STEP agent_loop_static_contracts"
+{
+  python3 "${ROOT_DIR}/scripts/check_route_authority_legacy_keys.py"
+  python3 "${ROOT_DIR}/scripts/check_legacy_route_boundary.py"
+  python3 "${ROOT_DIR}/scripts/check_pre_planner_exit_inventory.py"
+  python3 "${ROOT_DIR}/scripts/check_no_nl_hardmatch.py"
+  python3 "${ROOT_DIR}/scripts/check_historical_hardcoded_language.py" \
+    --fail-on-runtime \
+    --fail-on-ui-visible
+} > "${OUT_DIR}/agent_loop_static_contracts.txt"
+
 echo "AGENT_PARITY_GATE_STEP secret_scan_contract"
 python3 "${SCRIPT_DIR}/check_secret_scan_contract.py" --json \
   > "${OUT_DIR}/secret_scan_contract.json"
@@ -285,6 +296,7 @@ fi
 {
   echo "out_dir=${OUT_DIR}"
   echo "no_agent_mode_payload=1"
+  echo "agent_loop_static_contracts=1"
   echo "secret_scan_contract=1"
   echo "suite_wrapper_contract=1"
   echo "llm_raw_trace_runner_contract=1"
