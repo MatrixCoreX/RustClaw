@@ -38,6 +38,7 @@ AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
     "agent_parity_gate/long_tail_skill_contracts.txt",
     "agent_parity_gate/task_lifecycle_contracts.txt",
     "agent_parity_gate/task_event_context_team_contracts.txt",
+    "agent_parity_gate/clawcli_exec_replay_contracts.txt",
     "agent_parity_gate/no_agent_mode_payload.txt",
     "agent_parity_gate/agent_loop_static_contracts.txt",
     "agent_parity_gate/semantic_boundary_contracts.txt",
@@ -61,6 +62,7 @@ AGENT_PARITY_GATE_REQUIRED_FLAGS = {
     "long_tail_skill_contracts": "1",
     "task_lifecycle_contracts": "1",
     "task_event_context_team_contracts": "1",
+    "clawcli_exec_replay_contracts": "1",
     "no_agent_mode_payload": "1",
     "agent_loop_static_contracts": "1",
     "semantic_boundary_contracts": "1",
@@ -127,6 +129,10 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
     "agent_parity_gate/task_event_context_team_contracts.txt": {
         "TASK_EVENT_CONTEXT_TEAM_CONTRACT_SELF_TEST ok",
         "TASK_EVENT_CONTEXT_TEAM_CONTRACT_CHECK findings=0",
+    },
+    "agent_parity_gate/clawcli_exec_replay_contracts.txt": {
+        "CLAWCLI_EXEC_REPLAY_CONTRACT_SELF_TEST ok",
+        "CLAWCLI_EXEC_REPLAY_CONTRACT_CHECK findings=0",
     },
     "agent_parity_gate/no_agent_mode_payload.txt": {
         "SELF_TEST_OK",

@@ -157,6 +157,13 @@ the artifact must contain `TASK_EVENT_CONTEXT_TEAM_CONTRACT_SELF_TEST ok` and
 `context_budget`, `context_compaction`, provider prompt-budget metrics, coding
 evidence, and read-only subagent/team events remain structured event-stream
 fields.
+It also writes `clawcli_exec_replay_contracts.txt` from
+`scripts/check_clawcli_exec_replay_contracts.py --self-test` plus the main
+check. `gate_summary.env` records `clawcli_exec_replay_contracts=1`, and the
+artifact must contain `CLAWCLI_EXEC_REPLAY_CONTRACT_SELF_TEST ok` and
+`CLAWCLI_EXEC_REPLAY_CONTRACT_CHECK findings=0`, so the exec artifact set,
+compact `exec_compact_*` output, recorded-only replay views, coverage, and
+diff class contracts remain machine-field driven.
 It also writes `semantic_boundary_contracts.txt` from
 `scripts/check_runtime_semantic_rewrite_boundary.py --self-test`,
 `scripts/check_contract_repair_loop_observation_boundary.py --self-test`,
@@ -207,6 +214,7 @@ root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/long_tail_skill_contracts.txt`,
 `agent_parity_gate/task_lifecycle_contracts.txt`,
 `agent_parity_gate/task_event_context_team_contracts.txt`,
+`agent_parity_gate/clawcli_exec_replay_contracts.txt`,
 `agent_parity_gate/agent_loop_static_contracts.txt`,
 `agent_parity_gate/evidence_extractor_contracts.txt`, and
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
@@ -276,6 +284,12 @@ For `task_event_context_team_contracts.txt`, the required content includes
 context budget/compaction, provider prompt budget metrics, coding evidence, and
 subagent/team lifecycle events stay machine-readable for CLI, UI, teaching mode,
 and replay tooling.
+For `clawcli_exec_replay_contracts.txt`, the required content includes
+`CLAWCLI_EXEC_REPLAY_CONTRACT_SELF_TEST ok` and
+`CLAWCLI_EXEC_REPLAY_CONTRACT_CHECK findings=0`. This proves `clawcli exec` and
+`clawcli code` keep their exec artifact and compact output contracts, while
+`clawcli replay export/run/diff` stays recorded-only replay with coverage,
+view, and diff class machine fields.
 For `agent_loop_static_contracts.txt`, the required content includes the six
 route/frontdoor/static `AGENT_LOOP_STATIC_SELF_TEST ...` labels as well as the
 main guard success tokens, including
