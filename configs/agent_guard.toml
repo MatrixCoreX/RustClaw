@@ -96,16 +96,16 @@ multi_round_enabled = true
 # 风险/Risk: 过高会增加模型调用成本；仍受 max_rounds/no-progress/repeat guard 限制.
 answer_verifier_retry_limit = 2
 # 用途/Purpose: Answer Verifier required-evidence 强制阻断范围；替代全局 bool.
-# 可选值/Allowed tokens: off, selected_agent_loop, all.
-# 建议修改/Recommended change: 285 release-gate equivalent 与 route-delta clean 后默认 all；
-# 若发现 verifier 误判，可回滚到 selected_agent_loop 或 off。
-# 风险/Risk: all 会把 verifier 误判直接放大为用户可见失败；回滚时必须保留 route-delta 观察.
+# 终态值/Final token: all.
+# 建议修改/Recommended change: 保持 all；非 all 的历史值会被 runtime 归一化为 all。
+# 风险/Risk: verifier 误判应通过 evidence contract、extractor、registry metadata 或 planner prompt 修复，
+# 不再通过关闭守卫或回退 legacy route 选择解决。
 answer_verifier_enforce_required_scope = "all"
 # 用途/Purpose: registry 幂等/去重治理范围；替代全局 bool.
-# 可选值/Allowed tokens: off, selected_agent_loop, all.
-# 建议修改/Recommended change: 285 release-gate equivalent 与 route-delta clean 后默认 all；
-# 若发现重复动作或外部副作用误拦截，可回滚到 selected_agent_loop 或 off。
-# 风险/Risk: all 会改变重复动作、外部副作用和查询收敛行为；回滚时必须保留 route-delta 观察.
+# 终态值/Final token: all.
+# 建议修改/Recommended change: 保持 all；非 all 的历史值会被 runtime 归一化为 all。
+# 风险/Risk: 重复动作或外部副作用误拦截应通过 registry idempotency、dedup_scope、once_per_task
+# 或 verifier policy 修复，不再通过关闭守卫或回退 legacy route 选择解决。
 registry_idempotency_guard_scope = "all"
 # 用途/Purpose: selected agent-loop contracts 结构化证据强制门禁；只检查机器 evidence coverage.
 # 建议修改/Recommended change: 默认开启；若 canary 发现误判，可临时改回 false 回滚.

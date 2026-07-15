@@ -960,6 +960,23 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate summary must record the policy decision token guard state",
     )
     require(
+        "AGENT_PARITY_GATE_STEP agent_loop_guard_final_scope" in parity_text,
+        findings,
+        "agent parity gate must run the final agent-loop guard scope step",
+    )
+    require(
+        "check_agent_loop_guard_final_scope.py" in parity_text
+        and 'check_agent_loop_guard_final_scope.py" --self-test' in parity_text
+        and "agent_loop_guard_final_scope.txt" in parity_text,
+        findings,
+        "agent parity gate must self-test and write the final guard scope artifact",
+    )
+    require(
+        "agent_loop_guard_final_scope=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the final guard scope state",
+    )
+    require(
         "AGENT_PARITY_GATE_STEP registry_policy_contracts" in parity_text,
         findings,
         "agent parity gate must run the registry policy contract guard step",
@@ -1166,6 +1183,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "agent_parity_gate/policy_boundary_hard_reply.txt" in suite_artifact_contract_text
         and "agent_parity_gate/repair_no_user_text_fields.txt" in suite_artifact_contract_text
         and "agent_parity_gate/policy_decision_tokens.txt" in suite_artifact_contract_text
+        and "agent_parity_gate/agent_loop_guard_final_scope.txt" in suite_artifact_contract_text
         and "agent_parity_gate/registry_policy_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/skill_registry_aliases.txt" in suite_artifact_contract_text
         and "agent_parity_gate/long_tail_skill_contracts.txt" in suite_artifact_contract_text
@@ -1183,6 +1201,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and '"policy_boundary_hard_reply": "1"' in suite_artifact_contract_text
         and '"repair_no_user_text_fields": "1"' in suite_artifact_contract_text
         and '"policy_decision_tokens": "1"' in suite_artifact_contract_text
+        and '"agent_loop_guard_final_scope": "1"' in suite_artifact_contract_text
         and '"registry_policy_contracts": "1"' in suite_artifact_contract_text
         and '"skill_registry_aliases": "1"' in suite_artifact_contract_text
         and '"long_tail_skill_contracts": "1"' in suite_artifact_contract_text
@@ -1193,6 +1212,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "REPAIR_USER_TEXT_FIELD_CHECK ok" in suite_artifact_contract_text
         and "POLICY_DECISION_TOKEN_SELF_TEST ok" in suite_artifact_contract_text
         and "POLICY_DECISION_TOKEN_CHECK ok" in suite_artifact_contract_text
+        and "AGENT_LOOP_GUARD_FINAL_SCOPE_SELF_TEST ok" in suite_artifact_contract_text
+        and "AGENT_LOOP_GUARD_FINAL_SCOPE_CHECK findings=0" in suite_artifact_contract_text
         and "REGISTRY_POLICY_CONTRACT_SELF_TEST ok" in suite_artifact_contract_text
         and "REGISTRY_POLICY_CONTRACT_CHECK ok" in suite_artifact_contract_text
         and "SKILL_REGISTRY_ALIAS_SELF_TEST ok" in suite_artifact_contract_text
@@ -1309,6 +1330,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "bad-json" in suite_artifact_contract_text
         and "bad-shape" in suite_artifact_contract_text
         and '"agent_loop_static_contracts": "1"' in suite_artifact_contract_text
+        and '"agent_loop_guard_final_scope": "1"' in suite_artifact_contract_text
         and '"registry_policy_contracts": "1"' in suite_artifact_contract_text
         and '"skill_registry_aliases": "1"' in suite_artifact_contract_text
         and '"long_tail_skill_contracts": "1"' in suite_artifact_contract_text
@@ -1395,6 +1417,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             and "policy_boundary_hard_reply.txt" in readme_body
             and "repair_no_user_text_fields.txt" in readme_body
             and "policy_decision_tokens.txt" in readme_body
+            and "agent_loop_guard_final_scope.txt" in readme_body
             and "registry_policy_contracts.txt" in readme_body
             and "skill_registry_aliases.txt" in readme_body
             and "long_tail_skill_contracts.txt" in readme_body
@@ -1450,6 +1473,14 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "POLICY_DECISION_TOKEN_CHECK ok" in nl_tests_readme_text,
         findings,
         "NL tests README must document policy decision token artifact content",
+    )
+    require(
+        "agent_loop_guard_final_scope.txt" in nl_tests_readme_text
+        and "agent_loop_guard_final_scope=1" in nl_tests_readme_text
+        and "AGENT_LOOP_GUARD_FINAL_SCOPE_SELF_TEST ok" in nl_tests_readme_text
+        and "AGENT_LOOP_GUARD_FINAL_SCOPE_CHECK findings=0" in nl_tests_readme_text,
+        findings,
+        "NL tests README must document final agent-loop guard scope artifact content",
     )
     require(
         "registry_policy_contracts.txt" in nl_tests_readme_text
