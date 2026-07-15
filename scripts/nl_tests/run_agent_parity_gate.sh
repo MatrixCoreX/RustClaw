@@ -251,10 +251,12 @@ PY
 echo "AGENT_PARITY_GATE out_dir_ref=$(path_ref "$OUT_DIR")"
 
 echo "AGENT_PARITY_GATE_STEP runtime_hard_reply_baseline"
-python3 "${ROOT_DIR}/scripts/check_no_runtime_hard_reply.py" --all \
-  --baseline "${ROOT_DIR}/scripts/baselines/runtime_hard_reply_baseline.txt" \
-  --fail-on-new \
-  > "${OUT_DIR}/runtime_hard_reply_baseline.txt"
+{
+  python3 "${ROOT_DIR}/scripts/check_no_runtime_hard_reply.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_no_runtime_hard_reply.py" --all \
+    --baseline "${ROOT_DIR}/scripts/baselines/runtime_hard_reply_baseline.txt" \
+    --fail-on-new
+} > "${OUT_DIR}/runtime_hard_reply_baseline.txt"
 
 echo "AGENT_PARITY_GATE_STEP no_agent_mode_payload"
 {
@@ -371,6 +373,7 @@ fi
 
 {
   echo "out_dir_ref=$(path_ref "$OUT_DIR")"
+  echo "runtime_hard_reply_baseline=1"
   echo "no_agent_mode_payload=1"
   echo "agent_loop_static_contracts=1"
   echo "evidence_extractor_contracts=1"
