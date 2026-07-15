@@ -75,6 +75,75 @@ fn verifier_pass_promotes_latest_terminal_text_over_stale_machine_projection() {
 }
 
 #[test]
+fn verifier_pass_promotes_terminal_json_over_machine_kv_projection() {
+    let prompt = "Return only a JSON object with requested machine fields.";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+
+    let mut journal = verifier_pass_journal("task-verified-terminal-json-promotion", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "run_cmd",
+            r#"{"extra":{"exit_code":0,"stdout":"OK"}}"#,
+        ));
+    let latest_answer = r#"{"created_files":["run/tmp/calc_core.py","run/tmp/test_calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#;
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "synthesize_answer",
+            latest_answer,
+        ));
+
+    let mut answer_text =
+        r#"created_files=["run/tmp/calc_core.py","run/tmp/test_calc_core.py"] test_command test_status=passed"#
+            .to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(promote_verified_terminal_answer_after_verifier_pass(
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+    assert_eq!(answer_text, latest_answer);
+    assert_eq!(answer_messages, vec![latest_answer.to_string()]);
+    assert_eq!(journal.final_answer.as_deref(), Some(latest_answer));
+}
+
+#[test]
+fn verifier_pass_does_not_promote_internal_machine_json_payload() {
+    let prompt = "Return a natural summary.";
+    let mut route = route_result(crate::AskMode::act_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+
+    let mut journal = verifier_pass_journal("task-verified-terminal-internal-json", prompt);
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "respond",
+            r#"{"owner_layer":"agent_loop_control","output_format":"machine_json","status":"completed"}"#,
+        ));
+    let mut answer_text = "status=completed".to_string();
+    let mut answer_messages = vec![answer_text.clone()];
+
+    assert!(!promote_verified_terminal_answer_after_verifier_pass(
+        &route,
+        &mut journal,
+        &mut answer_text,
+        &mut answer_messages,
+    ));
+    assert_eq!(answer_text, "status=completed");
+    assert_eq!(answer_messages, vec!["status=completed".to_string()]);
+}
+
+#[test]
 fn verifier_recovered_terminal_answer_is_not_overwritten_by_stale_step_answer() {
     let prompt = "Read the title of ALPHA_DOC. Output only the title.";
     let mut route = route_result(crate::AskMode::act_plain());

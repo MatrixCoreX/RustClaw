@@ -24,7 +24,7 @@ fn verified_terminal_answer_from_step(
     }
     let answer = step.output_excerpt.as_deref()?.trim();
     if answer.is_empty()
-        || serde_json::from_str::<Value>(answer).is_ok()
+        || terminal_answer_is_internal_machine_payload(answer)
         || crate::finalize::looks_like_planner_artifact(answer)
         || crate::finalize::looks_like_internal_trace_artifact(answer)
         || crate::finalize::is_execution_summary_message(answer)
@@ -32,6 +32,29 @@ fn verified_terminal_answer_from_step(
         return None;
     }
     Some(answer.to_string())
+}
+
+fn terminal_answer_is_internal_machine_payload(answer: &str) -> bool {
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(answer.trim()) else {
+        return false;
+    };
+    if object.contains_key("owner_layer")
+        || object
+            .get("output_format")
+            .and_then(Value::as_str)
+            .is_some_and(|format| format == "machine_json")
+    {
+        return true;
+    }
+    [
+        "message_key",
+        "reason_code",
+        "error_code",
+        "missing_evidence_fields",
+        "answer_incomplete_reason",
+    ]
+    .iter()
+    .any(|key| object.contains_key(*key))
 }
 
 pub(super) fn deterministic_structured_evidence_table_recovery(
