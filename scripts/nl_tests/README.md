@@ -468,9 +468,13 @@ Chinese model catalog must report `status=ok` with all Chinese providers, its
 after covering TOML/env-file structured failure findings, and
 the coding repair fixture metrics must satisfy the configured pass-rate,
 prompt-truncation, provider-error, and average-LLM-call thresholds. When
-provider smoke is enabled, the contract also checks the case coverage artifact,
-provider tag shape, Chinese catalog/provider matrix row-list shape, provider
-summary JSONL row shape/JSON errors, and each MiniMax/MiMo/Qwen/DeepSeek matrix row for the
+provider smoke is enabled, the contract also checks
+`CHINESE_PROVIDER_SMOKE_MATRIX_SELF_TEST ok`,
+`CHINESE_PROVIDER_SMOKE_SUMMARY_SELF_TEST ok`, and
+`CHINESE_PROVIDER_SMOKE_SUMMARY_CHECK ok` in `chinese_provider_smoke.txt`, plus
+the case coverage artifact, provider tag shape, Chinese catalog/provider matrix
+row-list shape, provider summary JSONL row shape/JSON errors, and each
+MiniMax/MiMo/Qwen/DeepSeek matrix row for the
 expected dry-run or `provider_not_in_live_scope` reason based on
 `chinese_provider_live_providers`. That scope field must be `all` or a CSV of
 known Chinese provider machine tokens, and env-file state/source must remain in
@@ -609,9 +613,12 @@ safe aggregate.
   covers MiniMax, MiMo, Qwen, and DeepSeek adapter boundaries, including
   OpenAI-compatible provider config, vendor patches, strict JSON behavior,
   large-context metadata, and MiniMax multimodal-understanding versus media
-  generation-skill separation. It is metadata-gated by the compact coverage
-  check and does not require live provider generation. After running
-  `scripts/nl_tests/run_chinese_provider_smoke_matrix.sh`, validate the emitted
+generation-skill separation. It is metadata-gated by the compact coverage
+check and does not require live provider generation. After running
+  `scripts/nl_tests/run_chinese_provider_smoke_matrix.sh`, confirm its output
+  includes `CHINESE_PROVIDER_SMOKE_MATRIX_SELF_TEST ok`,
+  `CHINESE_PROVIDER_SMOKE_SUMMARY_SELF_TEST ok`, and
+  `CHINESE_PROVIDER_SMOKE_SUMMARY_CHECK ok`, then validate the emitted
   `matrix_summary.json` with
   `python3 scripts/nl_tests/check_chinese_provider_smoke_summary.py <matrix_summary.json>`;
   this checks provider rows, readiness counters, live-scope counters, and
