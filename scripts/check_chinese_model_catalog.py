@@ -29,6 +29,8 @@ AUDIO_CONFIG = ROOT / "configs/audio.toml"
 VIDEO_CONFIG = ROOT / "configs/video.toml"
 MUSIC_CONFIG = ROOT / "configs/music.toml"
 CHINESE_CASE_FILE = ROOT / "scripts/nl_tests/cases/nl_cases_chinese_model_adapter_20260715.txt"
+CHINESE_PROVIDER_SMOKE_RUNNER = ROOT / "scripts/nl_tests/run_chinese_provider_smoke_matrix.sh"
+AGENT_PARITY_GATE_RUNNER = ROOT / "scripts/nl_tests/run_agent_parity_gate.sh"
 VENDOR_PATCH_ROOT = ROOT / "prompts/layers/vendor_patches"
 
 TEXT_PROVIDER_FIELDS = [
@@ -474,6 +476,67 @@ def check_runtime_catalog_shape(findings: list[str], catalog: list[dict[str, Any
         require(not missing, findings, f"catalog entry {provider}: missing runtime fields {missing}")
 
 
+def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
+    require(
+        CHINESE_PROVIDER_SMOKE_RUNNER.exists(),
+        findings,
+        f"missing {CHINESE_PROVIDER_SMOKE_RUNNER.relative_to(ROOT)}",
+    )
+    require(
+        AGENT_PARITY_GATE_RUNNER.exists(),
+        findings,
+        f"missing {AGENT_PARITY_GATE_RUNNER.relative_to(ROOT)}",
+    )
+    if not CHINESE_PROVIDER_SMOKE_RUNNER.exists() or not AGENT_PARITY_GATE_RUNNER.exists():
+        return
+
+    smoke_text = CHINESE_PROVIDER_SMOKE_RUNNER.read_text(encoding="utf-8")
+    parity_text = AGENT_PARITY_GATE_RUNNER.read_text(encoding="utf-8")
+    require(
+        'DEFAULT_LIVE_PROVIDERS="${CHINESE_PROVIDER_LIVE_PROVIDERS:-minimax}"'
+        in smoke_text,
+        findings,
+        "Chinese provider smoke runner must default live scope to minimax",
+    )
+    require(
+        'if [[ "$LIVE_SCOPE_SET" -eq 0 ]]' in smoke_text
+        and 'add_csv_live_providers "$DEFAULT_LIVE_PROVIDERS"' in smoke_text,
+        findings,
+        "Chinese provider smoke runner must apply the default live scope when no override is passed",
+    )
+    require(
+        'if [[ "$item" == "all" ]]' in smoke_text and "LIVE_SCOPE_ALL=1" in smoke_text,
+        findings,
+        "Chinese provider smoke runner must keep explicit all-provider opt-in",
+    )
+    require(
+        '"provider_not_in_live_scope"' in smoke_text,
+        findings,
+        "Chinese provider smoke runner must preserve provider_not_in_live_scope attribution",
+    )
+    require(
+        "live_scope_providers=$(live_scope_csv)" in smoke_text,
+        findings,
+        "Chinese provider smoke runner must report the effective live scope as a machine token",
+    )
+    require(
+        'CHINESE_PROVIDER_LIVE_PROVIDERS="${CHINESE_PROVIDER_LIVE_PROVIDERS:-minimax}"'
+        in parity_text,
+        findings,
+        "agent parity gate must default Chinese-provider live scope to minimax",
+    )
+    require(
+        '--live-providers "$CHINESE_PROVIDER_LIVE_PROVIDERS"' in parity_text,
+        findings,
+        "agent parity gate must pass the configured Chinese-provider live scope to the smoke runner",
+    )
+    require(
+        "chinese_provider_live_providers=${CHINESE_PROVIDER_LIVE_PROVIDERS}" in parity_text,
+        findings,
+        "agent parity gate summary must record the Chinese-provider live scope",
+    )
+
+
 def build_report() -> dict[str, Any]:
     findings: list[str] = []
     main = load_toml(MAIN_CONFIG)
@@ -486,6 +549,7 @@ def build_report() -> dict[str, Any]:
     check_chinese_case_gate(findings)
     catalog = build_catalog(main)
     check_runtime_catalog_shape(findings, catalog)
+    check_chinese_provider_smoke_live_scope(findings)
     return {
         "schema_version": 1,
         "status": "ok" if not findings else "error",
