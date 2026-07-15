@@ -80,11 +80,153 @@ export function formatWorkspaceUpdateApiError(error: string | null | undefined, 
   return code ? labels[code] || code : copy(lang, "未知错误", "Unknown error");
 }
 
+export function formatWorkspaceUpdateNextStep(
+  status: WorkspaceUpdateStatus | null | undefined,
+  lang: UiLanguage,
+): string | null {
+  const key = status?.next_step_key?.trim();
+  if (!key) return status?.next_step || null;
+  const args = status?.next_step_args ?? {};
+  const count = numberArg(args, "count");
+  const labels: Record<string, string> = {
+    "workspace_update.cancel_requested": copy(lang, "正在停止当前编译进程。", "Stopping the current build process."),
+    "workspace_update.invalid_git_repo": copy(lang, "请确认 RustClaw 目录是有效 Git 仓库。", "Confirm the RustClaw directory is a valid Git repository."),
+    "workspace_update.git_unavailable": copy(lang, "请确认当前用户可以在 RustClaw 目录中运行 git。", "Confirm the current user can run git in the RustClaw directory."),
+    "workspace_update.remote_fetch_required_failed": copy(
+      lang,
+      "更新要求以远端为准；远端检查失败时不会继续编译本地代码。请确认网络、Git remote 和 SSH key 后重试。",
+      "Updates require the remote state first. Local code will not be built when the remote check fails. Confirm network, Git remote, and SSH key, then retry.",
+    ),
+    "workspace_update.upstream_missing": copy(
+      lang,
+      "未能读取 upstream，无法确认远端目标版本。请确认当前分支已设置 upstream 后重试。",
+      "The upstream branch could not be read, so the target remote version cannot be confirmed. Set the upstream branch, then retry.",
+    ),
+    "workspace_update.pull_conflict_detection_failed": copy(
+      lang,
+      "拉取失败，且无法可靠识别冲突文件；已保留本地文件，请手动处理后重试。",
+      "Pull failed and conflicting files could not be identified reliably. Local files were preserved; resolve manually, then retry.",
+    ),
+    "workspace_update.pull_failed_no_conflicts": copy(
+      lang,
+      "拉取失败，但没有发现远端变更与本地未提交文件的直接冲突；已保留本地文件，请手动检查分支是否分叉或权限是否正常。",
+      "Pull failed, but no direct conflict was found between remote changes and local uncommitted files. Local files were preserved; check branch divergence or permissions manually.",
+    ),
+    "workspace_update.conflict_overwrite_failed": copy(
+      lang,
+      "覆盖冲突文件失败；未冲突的本地文件已保持不动，请手动处理后重试。",
+      "Overwriting conflicting files failed. Non-conflicting local files were left unchanged; resolve manually, then retry.",
+    ),
+    "workspace_update.conflicts_overwritten_retrying_pull": copy(
+      lang,
+      `已只覆盖 ${count ?? 0} 个冲突路径；其他本地改动和额外文件保持不动，正在重新拉取远端。`,
+      `Only ${count ?? 0} conflicting path(s) were overwritten. Other local changes and extra files were left unchanged; pulling remote again.`,
+    ),
+    "workspace_update.pull_failed_after_conflict_overwrite": copy(
+      lang,
+      "已覆盖识别到的冲突文件，但重新拉取仍失败；其他本地文件未动，请查看 Git 输出后手动处理。",
+      "Detected conflict files were overwritten, but pulling again still failed. Other local files were untouched; inspect Git output and resolve manually.",
+    ),
+    "workspace_update.pull_failed_preserved": copy(
+      lang,
+      "拉取远端失败；已保留本地文件，请确认 Git 和网络状态后重试。",
+      "Pulling remote failed. Local files were preserved; confirm Git and network state, then retry.",
+    ),
+    "workspace_update.no_remote_changes_building": copy(
+      lang,
+      "远端没有新版本；本地文件保持不动，将继续执行完整编译。",
+      "No newer remote version was found. Local files remain unchanged; the full build will continue.",
+    ),
+    "workspace_update.build_logs_refreshing": copy(lang, "正在编译，编译日志会持续刷新。", "Building. Build logs will keep refreshing."),
+    "workspace_update.full_build_failed": copy(
+      lang,
+      "请查看构建日志摘要；修复依赖或编译错误后再重试。",
+      "Check the build log summary. Fix dependency or compile errors, then retry.",
+    ),
+    "workspace_update.full_build_dependency_check": copy(
+      lang,
+      "请确认服务器依赖完整，并查看构建日志。",
+      "Confirm server dependencies are complete and inspect the build logs.",
+    ),
+    "workspace_update.restart_wait": copy(
+      lang,
+      "RustClaw 正在重启，请等待 10-20 秒后刷新页面。",
+      "RustClaw is restarting. Wait 10-20 seconds, then refresh the page.",
+    ),
+    "workspace_update.full_restart_failed": copy(
+      lang,
+      "构建已完成，但自动重启失败。请在服务器上手动重启 clawd。",
+      "The build completed, but automatic restart failed. Restart clawd manually on the server.",
+    ),
+    "workspace_update.ui_build_failed": copy(
+      lang,
+      "请查看 UI 编译日志；修复依赖或编译错误后再重试。",
+      "Check the UI build log. Fix dependency or compile errors, then retry.",
+    ),
+    "workspace_update.ui_dependency_check": copy(
+      lang,
+      "请确认 UI 依赖完整，并查看编译日志。",
+      "Confirm UI dependencies are complete and inspect the build logs.",
+    ),
+    "workspace_update.clawd_build_failed": copy(
+      lang,
+      "请查看 clawd 编译日志；修复 Rust 编译错误后再重试。",
+      "Check the clawd build log. Fix Rust compile errors, then retry.",
+    ),
+    "workspace_update.clawd_dependency_check": copy(
+      lang,
+      "请确认 Rust 依赖完整，并查看编译日志。",
+      "Confirm Rust dependencies are complete and inspect the build logs.",
+    ),
+    "workspace_update.clawd_restart_failed": copy(
+      lang,
+      "clawd 构建已完成，但自动重启失败。请在服务器上手动重启 clawd。",
+      "The clawd build completed, but automatic restart failed. Restart clawd manually on the server.",
+    ),
+    "workspace_update.release_deploy_downloading": copy(
+      lang,
+      "正在下载并部署当前机器对应的 Release 包。",
+      "Downloading and deploying the Release package for this machine.",
+    ),
+    "workspace_update.release_deploy_check_network_or_permissions": copy(
+      lang,
+      "请查看部署日志；修复网络、GitHub Release 或写入权限问题后再重试。",
+      "Check the deployment log. Fix network, GitHub Release, or write-permission issues, then retry.",
+    ),
+    "workspace_update.release_deploy_restart_scheduled": copy(
+      lang,
+      "Release 包已部署，RustClaw 正在重启，请等待 10-20 秒后刷新页面。",
+      "The Release package was deployed and RustClaw is restarting. Wait 10-20 seconds, then refresh the page.",
+    ),
+    "workspace_update.release_deploy_restart_failed": copy(
+      lang,
+      "Release 包已部署，但自动重启失败。请在服务器上手动重启 clawd。",
+      "The Release package was deployed, but automatic restart failed. Restart clawd manually on the server.",
+    ),
+    "workspace_update.canceled": copy(
+      lang,
+      "编译已停止；可以修复问题后重新编译。",
+      "The build stopped. Fix any issues, then build again.",
+    ),
+  };
+  return labels[key] || status?.next_step || key;
+}
+
 export function formatWorkspaceUpdateTime(ts: number | null | undefined, lang: UiLanguage): string {
   if (!ts) return "--";
   return new Date(ts * 1000).toLocaleString(lang === "zh" ? "zh-CN" : "en-US", {
     hour12: false,
   });
+}
+
+function numberArg(args: Record<string, unknown>, key: string): number | null {
+  const value = args[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
 }
 
 function workspaceUpdateProgressPercent(status: WorkspaceUpdateStatus | null | undefined, running: boolean): number {
@@ -181,11 +323,12 @@ function workspaceUpdateNotice(
   lang: UiLanguage,
 ): WorkspaceUpdateNotice | null {
   if (!status) return null;
+  const nextStep = formatWorkspaceUpdateNextStep(status, lang);
   if (status.status === "canceled") {
     return {
       tone: "info",
       title: copy(lang, "编译已停止。", "Build stopped."),
-      detail: copy(
+      detail: nextStep ?? copy(
         lang,
         "当前编译进程已结束；如果需要继续，请修复问题后重新点击完整编译。",
         "The current build process has ended. Fix any issues and run Build All again when ready.",
@@ -197,7 +340,7 @@ function workspaceUpdateNotice(
     return {
       tone: "error",
       title: errorNotice.title,
-      detail: errorNotice.detail,
+      detail: nextStep ?? errorNotice.detail,
     };
   }
   if (restarting) {
@@ -208,7 +351,7 @@ function workspaceUpdateNotice(
         status.mode === "release_deploy" ? "Release 包已部署，RustClaw 正在重启。" : "构建已完成，RustClaw 正在重启。",
         status.mode === "release_deploy" ? "Release package deployed and RustClaw is restarting." : "Build completed and RustClaw is restarting.",
       ),
-      detail: copy(
+      detail: nextStep ?? copy(
         lang,
         "请等待 10-20 秒；如果页面没有自动恢复，可以稍后点击“检查远端版本”。",
         "Wait 10-20 seconds. If the page does not recover automatically, click Check remote shortly.",
@@ -219,7 +362,7 @@ function workspaceUpdateNotice(
     return {
       tone: "info",
       title: formatWorkspaceUpdateStep(status.step, lang),
-      detail: copy(
+      detail: nextStep ?? copy(
         lang,
         status.mode === "release_deploy"
           ? "Release 部署正在进行，日志会在下方持续刷新。"

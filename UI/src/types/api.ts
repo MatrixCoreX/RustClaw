@@ -181,6 +181,8 @@ export interface WorkspaceUpdateStatus {
   stderr_tail: string;
   error?: string | null;
   next_step?: string | null;
+  next_step_key?: string | null;
+  next_step_args?: Record<string, unknown> | null;
 }
 
 export interface PiAppStatusResponse {

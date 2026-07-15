@@ -5,6 +5,7 @@ import type { WorkspaceUpdateStatus } from "../types/api";
 import {
   buildWorkspaceUpdateView,
   formatWorkspaceUpdateApiError,
+  formatWorkspaceUpdateNextStep,
   formatWorkspaceUpdateStatus,
   formatWorkspaceUpdateStep,
   formatWorkspaceUpdateTime,
@@ -59,6 +60,67 @@ test("builds failed and canceled notices", () => {
   const canceled = buildWorkspaceUpdateView(status({ status: "canceled" }), "zh");
   assert.equal(canceled.notice?.tone, "info");
   assert.equal(canceled.notice?.title, "编译已停止。");
+});
+
+test("formats workspace update next-step keys and legacy fallback", () => {
+  assert.equal(
+    formatWorkspaceUpdateNextStep(
+      status({
+        next_step_key: "workspace_update.conflicts_overwritten_retrying_pull",
+        next_step_args: { count: 3 },
+      }),
+      "en",
+    ),
+    "Only 3 conflicting path(s) were overwritten. Other local changes and extra files were left unchanged; pulling remote again.",
+  );
+  assert.equal(
+    formatWorkspaceUpdateNextStep(
+      status({
+        next_step_key: "workspace_update.restart_wait",
+      }),
+      "zh",
+    ),
+    "RustClaw 正在重启，请等待 10-20 秒后刷新页面。",
+  );
+  assert.equal(
+    formatWorkspaceUpdateNextStep(status({ next_step: "legacy next step" }), "en"),
+    "legacy next step",
+  );
+  assert.equal(
+    formatWorkspaceUpdateNextStep(status({ next_step_key: "workspace_update.unknown" }), "en"),
+    "workspace_update.unknown",
+  );
+});
+
+test("uses workspace update next-step keys in notices", () => {
+  const running = buildWorkspaceUpdateView(
+    status({
+      status: "running",
+      step: "building_ui",
+      next_step_key: "workspace_update.build_logs_refreshing",
+    }),
+    "en",
+  );
+  assert.equal(running.notice?.detail, "Building. Build logs will keep refreshing.");
+
+  const failed = buildWorkspaceUpdateView(
+    status({
+      status: "failed",
+      error: "git fetch failed",
+      next_step_key: "workspace_update.remote_fetch_required_failed",
+    }),
+    "zh",
+  );
+  assert.match(failed.notice?.detail ?? "", /远端检查失败/);
+
+  const canceled = buildWorkspaceUpdateView(
+    status({
+      status: "canceled",
+      next_step_key: "workspace_update.canceled",
+    }),
+    "en",
+  );
+  assert.equal(canceled.notice?.detail, "The build stopped. Fix any issues, then build again.");
 });
 
 test("explains oversized git path list failures", () => {
