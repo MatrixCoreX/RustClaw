@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "crates/clawd/src"
 AGENT_ENGINE_FILE = SRC_ROOT / "agent_engine.rs"
+AGENT_ENGINE_LOOP_STATE_SEED_FILE = SRC_ROOT / "agent_engine/loop_state_seed.rs"
 PREFERRED_RUN_CMD_FILE = SRC_ROOT / "agent_engine/scalar_count_deterministic_plan.rs"
 PREFERRED_STRUCTURED_ACTION_FILE = SRC_ROOT / "agent_engine/preferred_structured_action.rs"
 MIGRATION_CLASS_FILE = SRC_ROOT / "agent_engine/migration_class.rs"
@@ -1023,8 +1024,40 @@ def scan_schedule_preview_contract_marker() -> list[Finding]:
 
 
 def scan_current_workspace_scope_legacy_semantic_marker_removed() -> list[Finding]:
-    rel_path = rel(AGENT_ENGINE_FILE)
-    text = AGENT_ENGINE_FILE.read_text(encoding="utf-8")
+    candidates = (AGENT_ENGINE_FILE, AGENT_ENGINE_LOOP_STATE_SEED_FILE)
+    for path in candidates:
+        text = path.read_text(encoding="utf-8")
+        fn_start = text.find("fn current_workspace_scope_marks_scalar_count(")
+        if fn_start < 0:
+            continue
+        rel_path = rel(path)
+        fn_end = text.find("\nfn ", fn_start + 1)
+        body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
+        if '".chain(["semantic_kind"])' in body or '"semantic_kind"' in body:
+            return [
+                Finding(
+                    rel_path,
+                    1,
+                    "current_workspace_scope_legacy_semantic_marker",
+                    "current workspace scope marker reader must not accept legacy semantic_kind",
+                )
+            ]
+        return []
+    rel_path = rel(AGENT_ENGINE_LOOP_STATE_SEED_FILE)
+    return [
+        Finding(
+            rel_path,
+            1,
+            "current_workspace_scope_marker_reader_missing",
+            "missing current_workspace_scope_marks_scalar_count",
+        )
+    ]
+
+
+def scan_current_workspace_scope_legacy_semantic_marker_removed_text(
+    rel_path: str,
+    text: str,
+) -> list[Finding]:
     fn_start = text.find("fn current_workspace_scope_marks_scalar_count(")
     if fn_start < 0:
         return [
