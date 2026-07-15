@@ -289,51 +289,122 @@ pub(super) fn output_text_from_execution_result(
         return None;
     }
     if trimmed.eq_ignore_ascii_case("NOT_FOUND") {
-        return Some("file not found".to_string());
+        return Some(execution_summary_machine_json(serde_json::json!({
+            "message_key": "clawd.msg.execution.step_observation",
+            "reason_code": "not_found",
+            "step_id": &step.step_id,
+            "skill": &step.skill,
+            "status": step.status.as_str(),
+            "error_kind": "not_found",
+        })));
     }
-    if let Some(path) = trimmed.strip_prefix("__RC_READ_FILE_NOT_FOUND__:") {
-        return Some(crate::visible_text::sanitize_user_visible_text(&format!(
-            "file not found: {}",
-            path.trim()
-        )));
+    if let Some(path) = crate::skills::read_file_not_found_path(trimmed) {
+        return Some(execution_summary_machine_json(serde_json::json!({
+            "message_key": "clawd.msg.execution.step_observation",
+            "reason_code": "read_file_not_found",
+            "step_id": &step.step_id,
+            "skill": &step.skill,
+            "status": step.status.as_str(),
+            "error_kind": "not_found",
+            "path": path,
+        })));
     }
-    if crate::skills::parse_structured_skill_error(trimmed).is_some() {
-        return Some(crate::visible_text::sanitize_user_visible_text(
-            &crate::skills::normalize_skill_error_for_user(&step.skill, trimmed),
-        ));
+    if let Some(structured) = crate::skills::parse_structured_skill_error(trimmed) {
+        return Some(structured_execution_error_summary(step, &structured));
     }
     if !step.is_ok() && crate::skills::is_recoverable_skill_error(&step.skill, trimmed) {
-        return Some(crate::visible_text::sanitize_user_visible_text(
-            &crate::skills::normalize_skill_error_for_user(&step.skill, trimmed),
-        ));
+        return Some(execution_summary_machine_json(serde_json::json!({
+            "message_key": "clawd.msg.execution.step_observation",
+            "reason_code": "recoverable_skill_error",
+            "step_id": &step.step_id,
+            "skill": &step.skill,
+            "status": step.status.as_str(),
+            "error_kind": "recoverable_error",
+        })));
     }
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
-        if let Some(text) = value
-            .get("text")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            return Some(crate::visible_text::sanitize_user_visible_text(text));
-        }
-        if let Some(text) = value
-            .get("stdout")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            return Some(crate::visible_text::sanitize_user_visible_text(text));
-        }
-        if let Some(text) = value
-            .get("error_text")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            return Some(crate::visible_text::sanitize_user_visible_text(text));
-        }
+        return Some(execution_json_summary_without_user_text_fields(step, value));
     }
     Some(crate::visible_text::sanitize_user_visible_text(trimmed))
+}
+
+fn execution_summary_machine_json(mut value: serde_json::Value) -> String {
+    strip_user_visible_json_fields(&mut value);
+    crate::visible_text::sanitize_user_visible_text(&value.to_string())
+}
+
+fn structured_execution_error_summary(
+    step: &crate::executor::StepExecutionResult,
+    structured: &crate::skills::StructuredSkillError,
+) -> String {
+    let effective_skill = if structured.skill.trim().is_empty() {
+        step.skill.trim()
+    } else {
+        structured.skill.trim()
+    };
+    execution_summary_machine_json(serde_json::json!({
+        "message_key": "clawd.msg.execution.step_observation",
+        "reason_code": "structured_skill_error",
+        "step_id": &step.step_id,
+        "skill": effective_skill,
+        "status": step.status.as_str(),
+        "error_kind": &structured.error_kind,
+        "platform": &structured.platform,
+        "manager_type": &structured.manager_type,
+        "service_name": &structured.service_name,
+        "extra": &structured.extra,
+    }))
+}
+
+fn execution_json_summary_without_user_text_fields(
+    step: &crate::executor::StepExecutionResult,
+    mut value: serde_json::Value,
+) -> String {
+    strip_user_visible_json_fields(&mut value);
+    if let Some(object) = value.as_object_mut() {
+        object
+            .entry("message_key".to_string())
+            .or_insert_with(|| serde_json::json!("clawd.msg.execution.step_observation"));
+        object
+            .entry("reason_code".to_string())
+            .or_insert_with(|| serde_json::json!("json_observation"));
+        object
+            .entry("step_id".to_string())
+            .or_insert_with(|| serde_json::json!(&step.step_id));
+        object
+            .entry("skill".to_string())
+            .or_insert_with(|| serde_json::json!(&step.skill));
+        object
+            .entry("status".to_string())
+            .or_insert_with(|| serde_json::json!(step.status.as_str()));
+        return crate::visible_text::sanitize_user_visible_text(&value.to_string());
+    }
+    execution_summary_machine_json(serde_json::json!({
+        "message_key": "clawd.msg.execution.step_observation",
+        "reason_code": "json_observation",
+        "step_id": &step.step_id,
+        "skill": &step.skill,
+        "status": step.status.as_str(),
+        "value": value,
+    }))
+}
+
+fn strip_user_visible_json_fields(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(object) => {
+            object.remove("text");
+            object.remove("error_text");
+            for child in object.values_mut() {
+                strip_user_visible_json_fields(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for child in items {
+                strip_user_visible_json_fields(child);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]

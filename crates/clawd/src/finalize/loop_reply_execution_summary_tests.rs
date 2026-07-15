@@ -1,6 +1,102 @@
 use super::*;
 
 #[test]
+fn execution_output_not_found_projects_machine_json() {
+    let step = err_step_result(
+        "step_1",
+        "read_file",
+        "__RC_READ_FILE_NOT_FOUND__:/tmp/missing.txt",
+    );
+
+    let output = output_text_from_execution_result(&step).expect("machine output");
+    let value: serde_json::Value = serde_json::from_str(&output).expect("json output");
+
+    assert_eq!(
+        value
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.execution.step_observation")
+    );
+    assert_eq!(
+        value
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("read_file_not_found")
+    );
+    assert_eq!(
+        value
+            .pointer("/error_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("not_found")
+    );
+    assert_eq!(
+        value.pointer("/path").and_then(serde_json::Value::as_str),
+        Some("/tmp/missing.txt")
+    );
+    assert!(!output.contains("file not found"));
+}
+
+#[test]
+fn execution_output_structured_error_projects_machine_json_without_error_text() {
+    let step = err_step_result(
+        "step_1",
+        "run_cmd",
+        r#"__RC_SKILL_ERROR__:{"skill":"run_cmd","error_kind":"nonzero_exit","error_text":"Command failed with exit code 127","extra":{"command":"missing-bin","exit_code":127,"stderr":"missing-bin: command not found"}}"#,
+    );
+
+    let output = output_text_from_execution_result(&step).expect("machine output");
+    let value: serde_json::Value = serde_json::from_str(&output).expect("json output");
+
+    assert_eq!(
+        value
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("structured_skill_error")
+    );
+    assert_eq!(
+        value
+            .pointer("/error_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("nonzero_exit")
+    );
+    assert_eq!(
+        value
+            .pointer("/extra/exit_code")
+            .and_then(serde_json::Value::as_i64),
+        Some(127)
+    );
+    assert!(value.pointer("/error_text").is_none());
+    assert!(!output.contains("Command failed with exit code"));
+}
+
+#[test]
+fn execution_output_json_strips_text_and_error_text_fields() {
+    let step = ok_step_result(
+        "step_1",
+        "service_control",
+        r#"{"text":"visible prose should not be protocol","error_text":"error prose should not be protocol","extra":{"action":"status","service_name":"clawd","post_state":"running"}}"#,
+    );
+
+    let output = output_text_from_execution_result(&step).expect("machine output");
+    let value: serde_json::Value = serde_json::from_str(&output).expect("json output");
+
+    assert!(value.pointer("/text").is_none());
+    assert!(value.pointer("/error_text").is_none());
+    assert_eq!(
+        value
+            .pointer("/extra/action")
+            .and_then(serde_json::Value::as_str),
+        Some("status")
+    );
+    assert_eq!(
+        value
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("json_observation")
+    );
+}
+
+#[test]
 fn execution_summary_suppressed_for_grounded_content_answer() {
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
