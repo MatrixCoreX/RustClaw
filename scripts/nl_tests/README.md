@@ -215,6 +215,21 @@ the artifact must contain `RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings=0`,
 `ROUTE_REASON_MARKER_FACADE_CHECK findings=0`,
 `OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_SELF_TEST ok`, and
 `OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_CHECK findings=0`.
+It also writes `agent_architecture_boundary_contracts.txt` from
+`scripts/check_boundary_envelope_schema.py --self-test`,
+`scripts/check_intent_normalizer_boundary_schema.py --self-test`,
+`scripts/check_planner_no_pre_llm_deterministic_fast_path.py --self-test`,
+`scripts/check_capability_resolver_registry_only.py --self-test`,
+`scripts/check_finalizer_boundary.py --self-test`, and
+`scripts/check_evidence_policy_facade_boundary.py --self-test` plus their main
+checks. `gate_summary.env` records
+`agent_architecture_boundary_contracts=1`, and the artifact must contain
+`BOUNDARY_ENVELOPE_SCHEMA_CHECK findings=0`,
+`INTENT_NORMALIZER_BOUNDARY_SCHEMA_CHECK findings=0`,
+`PLANNER_PRE_LLM_DETERMINISTIC_FAST_PATH_CHECK strict_tests=false findings=0`,
+`CAPABILITY_RESOLVER_REGISTRY_ONLY_CHECK findings=0`,
+`FINALIZER_BOUNDARY_CHECK ok`, and
+`EVIDENCE_POLICY_FACADE_BOUNDARY_CHECK strict=false findings=0`.
 It also writes `evidence_extractor_contracts.txt` from
 `scripts/check_evidence_extractor_contracts.py --self-test` plus the main check.
 `gate_summary.env` records `evidence_extractor_contracts=1`, and the artifact
@@ -260,6 +275,7 @@ root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/clawcli_models_catalog_contracts.txt`,
 `agent_parity_gate/clawcli_models_readiness_contracts.txt`,
 `agent_parity_gate/agent_loop_static_contracts.txt`,
+`agent_parity_gate/agent_architecture_boundary_contracts.txt`,
 `agent_parity_gate/evidence_extractor_contracts.txt`, and
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
 They also write `suite_summary.env` with machine fields `suite`, `status`,
@@ -381,6 +397,13 @@ For `semantic_boundary_contracts.txt`, the required content includes
 `ROUTE_REASON_MARKER_FACADE_CHECK findings=0`,
 `OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_SELF_TEST ok`, and
 `OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_CHECK findings=0`.
+For `agent_architecture_boundary_contracts.txt`, the required content includes
+`BOUNDARY_ENVELOPE_SCHEMA_CHECK findings=0`,
+`INTENT_NORMALIZER_BOUNDARY_SCHEMA_CHECK findings=0`,
+`PLANNER_PRE_LLM_DETERMINISTIC_FAST_PATH_CHECK strict_tests=false findings=0`,
+`CAPABILITY_RESOLVER_REGISTRY_ONLY_CHECK findings=0`,
+`FINALIZER_BOUNDARY_CHECK ok`, and
+`EVIDENCE_POLICY_FACADE_BOUNDARY_CHECK strict=false findings=0`.
 It also checks
 that gate summary path fields use portable refs such as `out_dir_ref=out_dir`
 and never host absolute paths. It also checks artifact content: text reports

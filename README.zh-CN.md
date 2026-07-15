@@ -748,6 +748,8 @@ flowchart TD
     ALS --> ALA[Agent parity gate artifact<br/>agent_loop_static_contracts.txt]
     O --> SBC[Semantic boundary contracts<br/>runtime rewrite + contract repair + route marker + semantic-kind write guards]
     SBC --> SBCA[Agent parity gate artifact<br/>semantic_boundary_contracts.txt]
+    O --> ABC[架构边界合同<br/>boundary schema + normalizer + planner + resolver + finalizer + evidence facade guards]
+    ABC --> ABCA[Agent parity gate artifact<br/>agent_architecture_boundary_contracts.txt]
     O --> EE[Evidence extractor 合同<br/>结构化 evidence + text-legacy fallback guard]
     EE --> EEA[Agent parity gate artifact<br/>evidence_extractor_contracts.txt]
     O --> SC[密钥扫描合同<br/>check_secret_scan_contract.py]
@@ -781,6 +783,8 @@ Agent parity gate 还会运行 `scripts/check_agent_loop_guard_final_scope.py --
 `agent_loop_static_contracts.txt` 还会包含 frontdoor boundary dispatch 守卫：`scripts/check_frontdoor_boundary_dispatch.py --self-test` 和主检查必须输出 `AGENT_LOOP_STATIC_SELF_TEST check_frontdoor_boundary_dispatch.py` 与 `FRONTDOOR_BOUNDARY_DISPATCH_CHECK findings=0`，确保 ask front door 只保留 schedule/resume/边界准备入口，不重新决定普通请求该直答、澄清还是执行。
 
 同一 gate 还会写入 `semantic_boundary_contracts.txt` 并记录 `semantic_boundary_contracts=1`。该 artifact 必须包含 `RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings=0`、`CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0`、`ROUTE_REASON_MARKER_FACADE_SELF_TEST ok`、`ROUTE_REASON_MARKER_FACADE_CHECK findings=0`、`OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_SELF_TEST ok` 和 `OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_CHECK findings=0`，把 runtime semantic rewrite debt、worker contract repair mutation、临时 route-reason 解析和直接 semantic-kind 写入都纳入 release-gated 机器合同。
+
+同一 gate 还会写入 `agent_architecture_boundary_contracts.txt` 并记录 `agent_architecture_boundary_contracts=1`。该 artifact 必须包含 `BOUNDARY_ENVELOPE_SCHEMA_CHECK findings=0`、`INTENT_NORMALIZER_BOUNDARY_SCHEMA_CHECK findings=0`、`PLANNER_PRE_LLM_DETERMINISTIC_FAST_PATH_CHECK strict_tests=false findings=0`、`CAPABILITY_RESOLVER_REGISTRY_ONLY_CHECK findings=0`、`FINALIZER_BOUNDARY_CHECK ok` 和 `EVIDENCE_POLICY_FACADE_BOUNDARY_CHECK strict=false findings=0`，保证 boundary schema、normalizer、planner、resolver、finalizer 和 evidence-policy facade 不会悄悄退回旧的前置语义路由或静态兼容路径。
 
 同一 gate 也会写入 `task_lifecycle_contracts.txt` 并记录 `task_lifecycle_contracts=1`。该 artifact 来自 `scripts/check_task_lifecycle_contracts.py --self-test` 和主检查，必须包含 `TASK_LIFECYCLE_CONTRACT_SELF_TEST ok` 与 `TASK_LIFECYCLE_CONTRACT_CHECK findings=0`。它把后台执行、checkpoint/resume、resume executor lease、seeded agent-loop resume、async poll/cancel projection 以及 CLI/UI task lifecycle 展示都固定在机器字段上，而不是本地化 `text/error_text`。
 
