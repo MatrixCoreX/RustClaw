@@ -152,7 +152,7 @@ Chinese model catalog must report `status=ok` with all Chinese providers, and
 the coding repair fixture metrics must satisfy the configured pass-rate,
 prompt-truncation, provider-error, and average-LLM-call thresholds. When
 provider smoke is enabled, the contract also checks the case coverage artifact,
-provider summary JSONL row shape/JSON errors, and each MiniMax/MiMo/Qwen/DeepSeek matrix row for the
+provider tag shape, provider summary JSONL row shape/JSON errors, and each MiniMax/MiMo/Qwen/DeepSeek matrix row for the
 expected dry-run or `provider_not_in_live_scope` reason based on
 `chinese_provider_live_providers`. `live_metrics` is a required
 `gate_summary.env` machine field. `metrics=1` only means "the metrics gate was

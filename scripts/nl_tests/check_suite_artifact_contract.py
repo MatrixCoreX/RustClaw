@@ -428,7 +428,11 @@ def validate_provider_smoke_case_coverage(run_dir: Path) -> tuple[list[str], int
         findings.append("agent_parity_gate_provider_smoke_case_coverage_missing_provider_tags")
     if payload.get("forbidden_live_tag_hits") != []:
         findings.append("agent_parity_gate_provider_smoke_case_coverage_forbidden_live_tags")
-    provider_tags = set(payload.get("provider_tags") or [])
+    provider_tags_raw = payload.get("provider_tags") or []
+    if not isinstance(provider_tags_raw, list):
+        findings.append("agent_parity_gate_provider_smoke_case_coverage_bad_provider_tags")
+        provider_tags_raw = []
+    provider_tags = set(str(tag) for tag in provider_tags_raw)
     missing = sorted(AGENT_PARITY_CHINESE_MODEL_PROVIDERS - provider_tags)
     if missing:
         findings.append(f"agent_parity_gate_provider_smoke_case_coverage_missing_providers:{','.join(missing)}")
@@ -1009,6 +1013,41 @@ def run_self_test() -> int:
             print(
                 "SELF_TEST_FAIL provider_summary_jsonl_row_errors:"
                 f"rows={provider_summary_rows} findings={provider_summary_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        provider_case_coverage_run = root / "provider-case-coverage-bad-provider-tags"
+        write_minimal_self_test_run(provider_case_coverage_run, content_checked=True)
+        provider_case_coverage_path = (
+            provider_case_coverage_run
+            / "agent_parity_gate/chinese_provider_smoke/case_coverage.json"
+        )
+        provider_case_coverage_path.parent.mkdir(parents=True, exist_ok=True)
+        provider_case_coverage_path.write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "missing_coverage_tags": [],
+                    "missing_provider_tags": [],
+                    "forbidden_live_tag_hits": [],
+                    "provider_tags": 1,
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        provider_case_coverage_findings, _ = validate_provider_smoke_case_coverage(
+            provider_case_coverage_run
+        )
+        if (
+            "agent_parity_gate_provider_smoke_case_coverage_bad_provider_tags"
+            not in set(provider_case_coverage_findings)
+        ):
+            print(
+                "SELF_TEST_FAIL provider_case_coverage_bad_provider_tags:"
+                f"{provider_case_coverage_findings}",
                 file=sys.stderr,
             )
             return 1
