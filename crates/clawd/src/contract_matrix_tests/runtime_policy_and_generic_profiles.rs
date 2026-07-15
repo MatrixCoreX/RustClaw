@@ -860,7 +860,8 @@ failure_policy = "no_retry"
     )
     .expect_err("invalid runtime field should fail shape validation");
 
-    assert!(err.contains("invalid policy_mode"));
+    assert!(err.contains("contract_validation.invalid_field"));
+    assert!(err.contains("field=policy_mode"));
 }
 
 #[test]
@@ -872,7 +873,7 @@ fn contract_runtime_rejects_natural_language_evidence_profile() {
     let err = parse_contract_matrix_source(&source)
         .expect_err("natural-language evidence profile should fail shape validation");
 
-    assert!(err.contains("invalid evidence_profile"));
+    assert!(err.contains("contract_validation.invalid_evidence_profile"));
 }
 
 #[test]
@@ -884,9 +885,9 @@ fn configured_observation_extractors_must_exist_in_registry() {
     let err = parse_contract_matrix_source(&source)
         .expect_err("unregistered explicit extractor should fail validation");
 
-    assert!(err.contains(
-            "observation_extractor source `run_cmd` with extractor_kind `structured_json` is not declared in the evidence extractor registry"
-        ));
+    assert!(err.contains("contract_validation.observation_extractor_registry_missing"));
+    assert!(err.contains("source=run_cmd"));
+    assert!(err.contains("extractor_kind=structured_json"));
 }
 
 #[test]
