@@ -608,6 +608,16 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         findings,
         "agent parity gate summary must record the Chinese-provider env-file state",
     )
+    require(
+        "chinese_provider_env_file_source=${CHINESE_PROVIDER_ENV_FILE_SOURCE}" in parity_text,
+        findings,
+        "agent parity gate summary must record the Chinese-provider env-file source token",
+    )
+    require(
+        "chinese_provider_env_file=${CHINESE_PROVIDER_ENV_FILE}" not in parity_text,
+        findings,
+        "agent parity gate summary must not record the Chinese-provider env-file path",
+    )
 
 
 def build_report(env_file: Path | None = None) -> dict[str, Any]:
