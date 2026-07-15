@@ -1,8 +1,8 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::path::Path;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 mod arg_resolver;
 mod async_start_checkpoint;
@@ -16,6 +16,7 @@ pub(crate) mod loop_control;
 mod loop_state_contract_evidence;
 pub(crate) mod migration_class;
 pub(crate) mod observed_output;
+mod planner_skill_context;
 mod planning;
 mod planning_actions;
 mod planning_followup;
@@ -95,22 +96,6 @@ pub(crate) fn local_code_strict_json_projection_should_defer_finalizer_fallback(
     )
 }
 use self::execution_loop::execute_actions_once;
-use self::loop_control::{run_agent_with_loop, run_agent_with_loop_seeded};
-use self::loop_state_contract_evidence::{
-    active_plan_file_targets_for_loop_seed, boundary_observation_needs_clarify_for_loop_seed,
-    contract_repair_candidate_evidence_for_loop_seed,
-    default_main_config_contract_evidence_for_loop_seed, first_string_field,
-    pending_user_boundary_present_for_loop_seed, pre_loop_clarify_candidates_for_loop_seed,
-    registry_capability_contract_evidence_for_loop_seed, registry_capability_contract_refs,
-};
-use self::prepare_round::{prepare_round_actions, push_round_trace};
-use self::skill_quick_index::{
-    output_contract as quick_index_output_contract,
-    output_contract_metadata as quick_index_output_contract_metadata,
-    planner_capabilities as quick_index_planner_capabilities,
-    planner_capabilities_metadata as quick_index_planner_capabilities_metadata,
-};
-
 pub(crate) use self::filesystem_lifecycle_contract::{
     effective_filesystem_cleanup_recovery_output_contract_for_plan_steps,
     effective_filesystem_lifecycle_output_contract_for_plan_steps,
@@ -119,6 +104,18 @@ pub(crate) use self::filesystem_lifecycle_contract::{
     scratch_filesystem_lifecycle_action_allowed, scratch_filesystem_lifecycle_observed_steps_match,
     scratch_filesystem_lifecycle_plan_actions_match, scratch_filesystem_lifecycle_plan_steps_match,
 };
+use self::loop_control::{run_agent_with_loop, run_agent_with_loop_seeded};
+use self::loop_state_contract_evidence::{
+    active_plan_file_targets_for_loop_seed, boundary_observation_needs_clarify_for_loop_seed,
+    contract_repair_candidate_evidence_for_loop_seed,
+    default_main_config_contract_evidence_for_loop_seed, first_string_field,
+    pending_user_boundary_present_for_loop_seed, pre_loop_clarify_candidates_for_loop_seed,
+    registry_capability_contract_evidence_for_loop_seed, registry_capability_contract_refs,
+};
+use self::planner_skill_context::{
+    build_skill_playbooks_text_scoped, build_skill_quick_index_text_scoped,
+};
+use self::prepare_round::{prepare_round_actions, push_round_trace};
 use self::skill_execution::execute_prepared_skill_action;
 pub(crate) use self::support::append_delivery_message;
 use self::support::{
@@ -164,163 +161,6 @@ fn ensure_task_running(state: &AppState, task: &ClaimedTask) -> Result<(), Strin
         Ok(false) => Err(TASK_CANCELED_ERR.to_string()),
         Err(err) => Err(format!("check task running state failed: {err}")),
     }
-}
-
-/// Phase 2+: Planner 可见技能按 task/agent 动态收敛：
-/// （execution-enabled）∩（agent allowed_skills）。
-/// 每个可见技能需在 registry 中提供 skill prompt 的逻辑路径配置，才会注入 playbook。
-fn planner_available_skills_for_task_scoped(
-    state: &AppState,
-    task: &ClaimedTask,
-    skill_scope: Option<&BTreeSet<String>>,
-) -> Vec<String> {
-    let mut enabled = state.planner_available_skills_for_task(task);
-    if let Some(skill_scope) = skill_scope {
-        enabled.retain(|skill| skill_scope.contains(skill));
-    }
-    enabled
-}
-
-fn build_skill_playbooks_text_scoped(
-    state: &AppState,
-    task: &ClaimedTask,
-    skill_scope: Option<&BTreeSet<String>>,
-) -> String {
-    let enabled = planner_available_skills_for_task_scoped(state, task, skill_scope);
-    let enabled_count = enabled.len();
-    let agent_id = state.task_agent_id(task);
-    info!(
-        "planner skill playbooks: agent_id={} planner_visible_skills_count={} scoped={} skills=[{}]",
-        agent_id,
-        enabled_count,
-        skill_scope.is_some(),
-        enabled.join(", ")
-    );
-
-    let mut sections = Vec::new();
-    let mut skipped_no_prompt: Vec<String> = Vec::new();
-
-    for skill in &enabled {
-        let Some(registry_prompt_rel_path) = state.skill_registry_prompt_rel_path(skill) else {
-            warn!(
-                "planner skill playbook: skill={} registry prompt_file missing, skipping",
-                skill
-            );
-            skipped_no_prompt.push(skill.clone());
-            continue;
-        };
-
-        let prompt_body =
-            crate::load_prompt_template_for_state(state, &registry_prompt_rel_path, "").0;
-
-        debug!(
-            "planner skill playbook: skill={} prompt_logical_path={} source=registry",
-            skill, registry_prompt_rel_path
-        );
-
-        let trimmed = prompt_body.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let metadata = state
-            .skill_manifest(skill)
-            .map(|manifest| {
-                let mut parts = vec![format!(
-                    "planner_kind: {}",
-                    manifest.planner_kind.as_token()
-                )];
-                parts.extend(crate::skill_availability::availability_metadata_parts(
-                    &crate::skill_availability::evaluate_manifest_availability(&manifest),
-                ));
-                if let Some(capabilities) = quick_index_planner_capabilities_metadata(&manifest) {
-                    parts.push(capabilities);
-                }
-                parts.push(quick_index_output_contract_metadata(&manifest));
-                format!("Registry metadata: {}", parts.join("; "))
-            })
-            .unwrap_or_default();
-        if metadata.is_empty() {
-            sections.push(format!("### {skill}\n{trimmed}"));
-        } else {
-            sections.push(format!("### {skill}\n{trimmed}\n{metadata}"));
-        }
-    }
-
-    if !skipped_no_prompt.is_empty() {
-        warn!(
-            "planner skill playbooks: skipped_no_prompt_count={} skills=[{}]",
-            skipped_no_prompt.len(),
-            skipped_no_prompt.join(", ")
-        );
-    }
-
-    let included_count = sections.len();
-    info!(
-        "planner skill playbooks: included_count={} (enabled={} skipped={})",
-        included_count,
-        enabled_count,
-        enabled_count.saturating_sub(included_count)
-    );
-
-    if sections.is_empty() {
-        "No skill playbooks configured.".to_string()
-    } else {
-        sections.join("\n\n")
-    }
-}
-
-fn first_non_heading_line(text: &str) -> Option<String> {
-    text.lines()
-        .map(str::trim)
-        .find(|line| {
-            !line.is_empty()
-                && !line.starts_with('#')
-                && !line.starts_with("```")
-                && !line.starts_with("<!--")
-        })
-        .map(|line| {
-            let mut out = line.to_string();
-            if out.chars().count() > 90 {
-                out = out.chars().take(90).collect::<String>() + "...";
-            }
-            out
-        })
-}
-
-/// 首轮路由提示：给 LLM 一份“技能速览”，降低误判成纯 chat 的概率。
-fn build_skill_quick_index_text_scoped(
-    state: &AppState,
-    task: &ClaimedTask,
-    skill_scope: Option<&BTreeSet<String>>,
-) -> String {
-    let enabled = planner_available_skills_for_task_scoped(state, task, skill_scope);
-    if enabled.is_empty() {
-        return "- (no enabled skills)".to_string();
-    }
-    let mut lines = Vec::new();
-    for skill in &enabled {
-        let summary =
-            if let Some(registry_prompt_rel_path) = state.skill_registry_prompt_rel_path(skill) {
-                let prompt_body =
-                    crate::load_prompt_template_for_state(state, &registry_prompt_rel_path, "").0;
-                first_non_heading_line(&prompt_body).unwrap_or_else(|| {
-                    "use this skill when user intent matches its capability".to_string()
-                })
-            } else {
-                "skill enabled but registry prompt_file logical path missing".to_string()
-            };
-        if let Some(manifest) = state.skill_manifest(skill) {
-            lines.push(format!(
-                "- skill={skill}; summary={summary}; planner_kind={}{}{}",
-                manifest.planner_kind.as_token(),
-                quick_index_planner_capabilities(&manifest),
-                quick_index_output_contract(&manifest)
-            ));
-        } else {
-            lines.push(format!("- {skill}: {summary}"));
-        }
-    }
-    lines.join("\n")
 }
 
 #[derive(Debug, Deserialize)]
