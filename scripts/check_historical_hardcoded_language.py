@@ -511,12 +511,14 @@ def run_self_test() -> int:
         REPO_ROOT / "crates/clawd/src/delivery_utils/example.rs": (
             'fn f(request: &str) -> bool { request.contains("发给我") }\n'
         ),
+        REPO_ROOT / "crates/clawd/src/http/ui_routes/example.rs": 'fn f() { let s = "操作完成"; }\n',
         REPO_ROOT / "crates/skills/demo/src/main.rs": 'fn f() { let s = "未配置 API Key"; }\n',
         REPO_ROOT / "crates/skills/demo/src/i18n.rs": 'fn f() { let s = "处理完成"; }\n',
     }
     expected = {
         "runtime_visible",
         "semantic_hardmatch",
+        "ui_visible",
         "skill_visible",
         "allowed_i18n",
     }
@@ -556,6 +558,11 @@ def main(argv: list[str]) -> int:
         help="exit non-zero when runtime_visible or semantic_hardmatch findings exist",
     )
     parser.add_argument(
+        "--fail-on-ui-visible",
+        action="store_true",
+        help="exit non-zero when ui_visible findings exist",
+    )
+    parser.add_argument(
         "paths",
         nargs="*",
         help="optional Rust files or directories to scan; defaults to crates/",
@@ -578,6 +585,8 @@ def main(argv: list[str]) -> int:
     if args.fail_on_runtime and any(
         item.category in {"runtime_visible", "semantic_hardmatch"} for item in findings
     ):
+        return 1
+    if args.fail_on_ui_visible and any(item.category == "ui_visible" for item in findings):
         return 1
     return 0
 
