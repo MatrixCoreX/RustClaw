@@ -40,6 +40,8 @@ mod final_status;
 mod git_machine_kv_recovery;
 #[path = "task_tests/machine_kv_final_guard.rs"]
 mod machine_kv_final_guard;
+#[path = "task_tests/runtime_failure_payload.rs"]
+mod runtime_failure_payload;
 #[path = "task_tests/tree_summary_recovery.rs"]
 mod tree_summary_recovery;
 #[path = "task_tests/verified_terminal_promotion.rs"]
@@ -641,71 +643,6 @@ fn delivery_path_gap_without_observation_finalizes_as_clarify() {
         &[],
         &journal,
     ));
-}
-
-#[test]
-fn ask_runtime_failure_payload_is_machine_readable() {
-    let payload: serde_json::Value = serde_json::from_str(&ask_runtime_failure_machine_payload(
-        r#"provider=vendor-minimax failed: http 429: {"error":{"type":"rate_limit_error"}}"#,
-    ))
-    .unwrap();
-    assert_eq!(
-        payload
-            .pointer("/message_key")
-            .and_then(serde_json::Value::as_str),
-        Some("clawd.msg.ask_runtime_failure")
-    );
-    assert_eq!(
-        payload
-            .pointer("/reason_code")
-            .and_then(serde_json::Value::as_str),
-        Some("ask_runtime_failure")
-    );
-    assert_eq!(
-        payload
-            .pointer("/status_code")
-            .and_then(serde_json::Value::as_str),
-        Some("ask_runtime_failure")
-    );
-    assert_eq!(
-        payload
-            .pointer("/failure_attribution")
-            .and_then(serde_json::Value::as_str),
-        Some("provider_gap")
-    );
-    assert_eq!(
-        payload
-            .pointer("/retryable")
-            .and_then(serde_json::Value::as_bool),
-        Some(false)
-    );
-    assert_eq!(
-        payload
-            .pointer("/raw_error_present")
-            .and_then(serde_json::Value::as_bool),
-        Some(true)
-    );
-    assert_eq!(
-        payload
-            .pointer("/provider_error_class")
-            .and_then(serde_json::Value::as_str),
-        Some("rate_limited")
-    );
-    assert!(payload.pointer("/error_summary").is_none());
-}
-
-#[test]
-fn ask_runtime_failure_observed_facts_use_machine_payload_fields() {
-    let facts = machine_payload_observed_facts(&ask_runtime_failure_machine_payload(
-        r#"provider=vendor-minimax failed: http 429: {"error":{"type":"rate_limit_error"}}"#,
-    ));
-    assert!(facts.contains(&"message_key: clawd.msg.ask_runtime_failure".to_string()));
-    assert!(facts.contains(&"status_code: ask_runtime_failure".to_string()));
-    assert!(facts.contains(&"failure_attribution: provider_gap".to_string()));
-    assert!(facts.contains(&"retryable: false".to_string()));
-    assert!(facts.contains(&"raw_error_present: true".to_string()));
-    assert!(facts.contains(&"provider_error_class: rate_limited".to_string()));
-    assert!(!facts.iter().any(|fact| fact.starts_with("error_summary:")));
 }
 
 #[test]
