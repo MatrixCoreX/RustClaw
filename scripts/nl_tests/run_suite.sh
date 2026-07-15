@@ -165,31 +165,41 @@ write_suite_summary() {
   local run_dir="$2"
   local status="$3"
   local exit_code="$4"
+  local artifact_finalize_status="$5"
   local summary="${run_dir}/suite_summary.env"
   {
     echo "suite=${suite_name}"
     echo "status=${status}"
     echo "exit_code=${exit_code}"
+    echo "artifact_finalize_status=${artifact_finalize_status}"
     echo "run_log=run.log"
     echo "artifact_index=artifact_index.txt"
   } > "$summary"
 }
 
-print_wrapped_artifacts() {
+finalize_wrapped_suite() {
   local suite_name="$1"
   local run_dir="$2"
   local run_log="$3"
   local status="$4"
   local exit_code="$5"
   local artifact_index="${run_dir}/artifact_index.txt"
-  write_suite_summary "$suite_name" "$run_dir" "$status" "$exit_code"
-  write_artifact_index "$run_dir"
+  local artifact_finalize_status="ok"
+
+  write_suite_summary "$suite_name" "$run_dir" "$status" "$exit_code" "$artifact_finalize_status" \
+    || artifact_finalize_status="error"
+  write_artifact_index "$run_dir" || artifact_finalize_status="error"
+  if [[ "$artifact_finalize_status" != "ok" ]]; then
+    write_suite_summary "$suite_name" "$run_dir" "$status" "$exit_code" "$artifact_finalize_status" || true
+  fi
+
   echo
   echo "Artifacts:"
   echo "  - ${run_dir}"
   echo "  - ${run_log}"
   echo "  - ${artifact_index}"
   echo "  - ${run_dir}/suite_summary.env"
+  return 0
 }
 
 run_wrapped_suite() {
@@ -204,7 +214,7 @@ run_wrapped_suite() {
 
   (
     exec > >(tee -a "$run_log") 2>&1
-    trap 'exit_code=$?; suite_status=ok; if [[ "$exit_code" -ne 0 ]]; then suite_status=error; fi; print_wrapped_artifacts "$name" "$run_dir" "$run_log" "$suite_status" "$exit_code"; exit "$exit_code"' EXIT
+    trap 'exit_code=$?; suite_status=ok; if [[ "$exit_code" -ne 0 ]]; then suite_status=error; fi; finalize_wrapped_suite "$name" "$run_dir" "$run_log" "$suite_status" "$exit_code" || true; exit "$exit_code"' EXIT
     echo "NL suite: ${name}"
     echo "  run_dir: ${run_dir}"
     echo "  run_log: ${run_log}"
