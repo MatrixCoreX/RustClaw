@@ -259,6 +259,11 @@ if [[ "$SKIP_COVERAGE" -eq 0 ]]; then
 fi
 
 if [[ "$SKIP_MODEL_CATALOG" -eq 0 ]]; then
+  echo "AGENT_PARITY_GATE_STEP chinese_model_catalog_self_test"
+  python3 "${ROOT_DIR}/scripts/check_chinese_model_catalog.py" \
+    --self-test \
+    > "${OUT_DIR}/chinese_model_catalog_self_test.txt"
+
   echo "AGENT_PARITY_GATE_STEP chinese_model_catalog"
   python3 "${ROOT_DIR}/scripts/check_chinese_model_catalog.py" \
     --json \
