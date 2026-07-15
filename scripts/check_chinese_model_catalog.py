@@ -815,9 +815,10 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
     )
     require(
         "check_no_agent_mode_payload.py" in parity_text
+        and 'check_no_agent_mode_payload.py" --self-test' in parity_text
         and "no_agent_mode_payload.txt" in parity_text,
         findings,
-        "agent parity gate must write the no-agent-mode payload guard artifact",
+        "agent parity gate must self-test and write the no-agent-mode payload guard artifact",
     )
     require(
         "no_agent_mode_payload=1" in parity_text,

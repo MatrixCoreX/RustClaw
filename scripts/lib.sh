@@ -50,7 +50,6 @@ body = {
     "kind": "ask",
     "payload": {
         "text": prompt,
-        "agent_mode": True,
     },
 }
 if user_key:
@@ -73,22 +72,19 @@ submit_task() {
 
 build_submit_body_with_options() {
   local prompt="$1"
-  local agent_mode="$2"
+  local _legacy_loop_switch="${2:-}"
   local source="${3:-}"
-  python3 - "$USER_ID" "$CHAT_ID" "$prompt" "$agent_mode" "$source" "$(normalized_user_key)" <<'PY'
+  python3 - "$USER_ID" "$CHAT_ID" "$prompt" "$source" "$(normalized_user_key)" <<'PY'
 import json
 import sys
 
 user_id = int(sys.argv[1])
 chat_id = int(sys.argv[2])
 prompt = sys.argv[3]
-agent_mode_raw = (sys.argv[4] or "").strip().lower()
-source = (sys.argv[5] or "").strip()
-user_key = (sys.argv[6] or '').strip()
-agent_mode = False if agent_mode_raw in ("0", "false", "no") else True
+source = (sys.argv[4] or "").strip()
+user_key = (sys.argv[5] or '').strip()
 payload = {
     "text": prompt,
-    "agent_mode": agent_mode,
 }
 if source:
     payload["source"] = source
@@ -109,11 +105,11 @@ PY
 
 submit_task_with_options() {
   local prompt="$1"
-  local agent_mode="$2"
+  local legacy_loop_switch="${2:-}"
   local source="${3:-}"
   local body
   local -a auth_args=()
-  body="$(build_submit_body_with_options "$prompt" "$agent_mode" "$source")"
+  body="$(build_submit_body_with_options "$prompt" "$legacy_loop_switch" "$source")"
   array_from_command_lines auth_args curl_auth_args
   curl -sS -X POST "${BASE_URL}/v1/tasks" \
     -H "Content-Type: application/json" \
@@ -123,26 +119,23 @@ submit_task_with_options() {
 
 build_client_like_telegram_submit_body() {
   local prompt="$1"
-  local agent_mode="${2:-true}"
+  local _legacy_loop_switch="${2:-}"
   local source="${3:-}"
   local external_user_id="${4:-$USER_ID}"
   local external_chat_id="${5:-$CHAT_ID}"
-  python3 - "$USER_ID" "$CHAT_ID" "$prompt" "$agent_mode" "$source" "$(normalized_user_key)" "$external_user_id" "$external_chat_id" <<'PY'
+  python3 - "$USER_ID" "$CHAT_ID" "$prompt" "$source" "$(normalized_user_key)" "$external_user_id" "$external_chat_id" <<'PY'
 import json
 import sys
 
 user_id = int(sys.argv[1])
 chat_id = int(sys.argv[2])
 prompt = sys.argv[3]
-agent_mode_raw = (sys.argv[4] or "").strip().lower()
-source = (sys.argv[5] or "").strip()
-user_key = (sys.argv[6] or "").strip()
-external_user_id = (sys.argv[7] or str(user_id)).strip()
-external_chat_id = (sys.argv[8] or str(chat_id)).strip()
-agent_mode = False if agent_mode_raw in ("0", "false", "no") else True
+source = (sys.argv[4] or "").strip()
+user_key = (sys.argv[5] or "").strip()
+external_user_id = (sys.argv[6] or str(user_id)).strip()
+external_chat_id = (sys.argv[7] or str(chat_id)).strip()
 payload = {
     "text": prompt,
-    "agent_mode": agent_mode,
 }
 if source:
     payload["source"] = source
@@ -163,13 +156,13 @@ PY
 
 submit_client_like_telegram_task() {
   local prompt="$1"
-  local agent_mode="${2:-true}"
+  local legacy_loop_switch="${2:-}"
   local source="${3:-}"
   local external_user_id="${4:-$USER_ID}"
   local external_chat_id="${5:-$CHAT_ID}"
   local body
   local -a auth_args=()
-  body="$(build_client_like_telegram_submit_body "$prompt" "$agent_mode" "$source" "$external_user_id" "$external_chat_id")"
+  body="$(build_client_like_telegram_submit_body "$prompt" "$legacy_loop_switch" "$source" "$external_user_id" "$external_chat_id")"
   array_from_command_lines auth_args curl_auth_args
   curl -sS -X POST "${BASE_URL}/v1/tasks" \
     -H "Content-Type: application/json" \

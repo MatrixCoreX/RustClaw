@@ -217,8 +217,10 @@ python3 "${ROOT_DIR}/scripts/check_no_runtime_hard_reply.py" --all \
   > "${OUT_DIR}/runtime_hard_reply_baseline.txt"
 
 echo "AGENT_PARITY_GATE_STEP no_agent_mode_payload"
-python3 "${ROOT_DIR}/scripts/check_no_agent_mode_payload.py" \
-  > "${OUT_DIR}/no_agent_mode_payload.txt"
+{
+  python3 "${ROOT_DIR}/scripts/check_no_agent_mode_payload.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_no_agent_mode_payload.py"
+} > "${OUT_DIR}/no_agent_mode_payload.txt"
 
 echo "AGENT_PARITY_GATE_STEP agent_loop_static_contracts"
 {

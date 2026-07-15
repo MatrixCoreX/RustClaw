@@ -7,7 +7,6 @@ cd "$SCRIPT_DIR"
 
 KIND="ask"
 TEXT=""
-AGENT_MODE="on"
 SKILL_NAME=""
 SKILL_ARGS=""
 USER_ID="1"
@@ -31,7 +30,6 @@ Modes:
 Options:
   --kind ask|run_skill         Task kind (default: ask)
   --text TEXT                  Ask text when --kind ask
-  --agent-mode on|off          Ask payload agent_mode (default: on)
   --skill NAME                 Skill name when --kind run_skill
   --skill-args JSON_OR_TEXT    Skill args when --kind run_skill
   --user-id ID                 user_id (default: 1)
@@ -54,10 +52,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --text)
       TEXT="${2:-}"
-      shift 2
-      ;;
-    --agent-mode)
-      AGENT_MODE="${2:-}"
       shift 2
       ;;
     --skill)
@@ -138,7 +132,6 @@ fi
 
 export SIM_KIND="$KIND"
 export SIM_TEXT="$TEXT"
-export SIM_AGENT_MODE="$AGENT_MODE"
 export SIM_SKILL_NAME="$SKILL_NAME"
 export SIM_SKILL_ARGS="$SKILL_ARGS"
 export SIM_USER_ID="$USER_ID"
@@ -157,7 +150,6 @@ from pathlib import Path
 
 kind = os.environ["SIM_KIND"]
 text = os.environ["SIM_TEXT"]
-agent_mode = os.environ["SIM_AGENT_MODE"] == "on"
 skill_name = os.environ["SIM_SKILL_NAME"]
 skill_args_raw = os.environ["SIM_SKILL_ARGS"]
 user_id = int(os.environ["SIM_USER_ID"])
@@ -198,7 +190,7 @@ def parse_skill_args(raw: str):
         return raw
 
 if kind == "ask":
-    payload = {"text": text, "agent_mode": agent_mode}
+    payload = {"text": text}
 else:
     payload = {"skill_name": skill_name, "args": parse_skill_args(skill_args_raw)}
 
