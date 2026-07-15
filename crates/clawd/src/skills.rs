@@ -234,74 +234,6 @@ fn structured_extra_string(structured: &StructuredSkillError, key: &str) -> Opti
         .map(str::to_string)
 }
 
-fn structured_extra_i64(structured: &StructuredSkillError, key: &str) -> Option<i64> {
-    structured_extra_value(structured, key).and_then(|value| value.as_i64())
-}
-
-fn structured_extra_bool(structured: &StructuredSkillError, key: &str) -> bool {
-    structured_extra_value(structured, key)
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-}
-
-fn compact_stream_for_user(text: &str) -> String {
-    let compact = text
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(" | ");
-    crate::truncate_for_agent_trace(&compact)
-}
-
-fn normalize_run_cmd_structured_error_for_user(structured: &StructuredSkillError) -> String {
-    let mut message = match structured.error_kind.as_str() {
-        "nonzero_exit" => {
-            if let Some(exit_code) = structured_extra_i64(structured, "exit_code") {
-                match structured_extra_string(structured, "exit_category").as_deref() {
-                    Some("command_not_found") => {
-                        format!("command failed: command not found (exit code {exit_code})")
-                    }
-                    Some("command_not_executable") => {
-                        format!("command failed: command is not executable (exit code {exit_code})")
-                    }
-                    Some("terminated_by_signal_or_shell_status") => {
-                        format!("command failed: terminated by signal or shell status (exit code {exit_code})")
-                    }
-                    _ => format!("command failed with exit code {exit_code}"),
-                }
-            } else {
-                "command failed with a non-zero exit status".to_string()
-            }
-        }
-        "timeout" => "command timed out".to_string(),
-        "idle_timeout" => "command idle timed out".to_string(),
-        "spawn_failed" => "command failed to start".to_string(),
-        "wait_failed" => "command wait failed".to_string(),
-        "output_read_failed" => "command output read failed".to_string(),
-        "status_unavailable" => "command status unavailable".to_string(),
-        "invalid_input" => "command input is invalid".to_string(),
-        _ => structured.error_text.trim().to_string(),
-    };
-
-    if let Some(stderr) = structured_extra_string(structured, "stderr") {
-        message.push_str("; stderr: ");
-        message.push_str(&compact_stream_for_user(&stderr));
-    }
-    if let Some(stdout) = structured_extra_string(structured, "stdout") {
-        message.push_str("; stdout: ");
-        message.push_str(&compact_stream_for_user(&stdout));
-    }
-    if structured_extra_bool(structured, "output_truncated") {
-        message.push_str("; output was truncated");
-    }
-    if message.trim().is_empty() {
-        structured.error_text.trim().to_string()
-    } else {
-        message
-    }
-}
-
 pub(crate) fn policy_block_error(
     reason_code: &str,
     observed_facts: Vec<String>,
@@ -505,22 +437,6 @@ fn structured_crypto_account_access_error(
     parse_crypto_account_access_error(&structured.error_text)
 }
 
-fn crypto_account_access_error_observation(exchange: &str, detail: &str) -> String {
-    let mut parts = vec![
-        "message_key=crypto.err.account_access_failed".to_string(),
-        "error_kind=account_access_failed".to_string(),
-    ];
-    let exchange = exchange.trim();
-    if !exchange.is_empty() {
-        parts.push(format!("exchange={exchange}"));
-    }
-    let detail = detail.trim();
-    if !detail.is_empty() {
-        parts.push(format!("detail={detail}"));
-    }
-    parts.join(" ")
-}
-
 fn is_crypto_recoverable_i18n_message_key(message_key: &str) -> bool {
     matches!(
         message_key.trim(),
@@ -558,27 +474,6 @@ pub(crate) fn crypto_recoverable_i18n_error_key(skill_name: &str, err: &str) -> 
     let structured = parse_structured_skill_error(err)?;
     crypto_recoverable_i18n_error_from_structured(skill_name, &structured)
         .map(|(message_key, _, _, _)| message_key)
-}
-
-fn crypto_recoverable_i18n_error_observation(
-    message_key: &str,
-    error_kind: &str,
-    exchange: &str,
-    action: &str,
-) -> String {
-    let mut parts = vec![
-        format!("message_key={}", message_key.trim()),
-        format!("error_kind={}", error_kind.trim()),
-    ];
-    let exchange = exchange.trim();
-    if !exchange.is_empty() {
-        parts.push(format!("exchange={exchange}"));
-    }
-    let action = action.trim();
-    if !action.is_empty() {
-        parts.push(format!("action={action}"));
-    }
-    parts.join(" ")
 }
 
 pub(crate) fn policy_block_default_text(
@@ -927,6 +822,90 @@ pub(crate) fn read_file_not_found_path(err: &str) -> Option<&str> {
         .filter(|path| !path.is_empty())
 }
 
+pub(crate) fn skill_error_machine_observation(skill_name: &str, err: &str) -> Option<String> {
+    let trimmed = err.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(structured) = parse_structured_skill_error(trimmed) {
+        return Some(structured_skill_error_machine_observation(
+            skill_name,
+            &structured,
+        ));
+    }
+    if let Some(block) = parse_policy_block_error(trimmed) {
+        return Some(policy_block_machine_payload(&block));
+    }
+    if let Some(path) = read_file_not_found_path(trimmed) {
+        return Some(
+            json!({
+                "message_key": "clawd.msg.skill.error_observation",
+                "reason_code": "read_file_not_found",
+                "skill": if skill_name.trim().is_empty() { "read_file" } else { skill_name.trim() },
+                "error_kind": "not_found",
+                "path": path,
+            })
+            .to_string(),
+        );
+    }
+    if let Some((exchange, detail)) = parse_crypto_account_access_error(trimmed) {
+        return Some(
+            json!({
+                "message_key": "crypto.err.account_access_failed",
+                "reason_code": "crypto_account_access_failed",
+                "skill": if skill_name.trim().is_empty() { "crypto" } else { skill_name.trim() },
+                "error_kind": "account_access_failed",
+                "exchange": exchange,
+                "detail": detail,
+            })
+            .to_string(),
+        );
+    }
+    None
+}
+
+fn structured_skill_error_machine_observation(
+    skill_name: &str,
+    structured: &StructuredSkillError,
+) -> String {
+    let effective_skill = if structured.skill.trim().is_empty() {
+        skill_name.trim()
+    } else {
+        structured.skill.trim()
+    };
+    let mut extra = structured.extra.clone().unwrap_or(Value::Null);
+    strip_user_visible_skill_error_fields(&mut extra);
+    json!({
+        "message_key": "clawd.msg.skill.error_observation",
+        "reason_code": "structured_skill_error",
+        "skill": effective_skill,
+        "error_kind": structured.error_kind.trim(),
+        "platform": structured.platform,
+        "manager_type": structured.manager_type,
+        "service_name": structured.service_name,
+        "extra": extra,
+    })
+    .to_string()
+}
+
+fn strip_user_visible_skill_error_fields(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            object.remove("text");
+            object.remove("error_text");
+            for child in object.values_mut() {
+                strip_user_visible_skill_error_fields(child);
+            }
+        }
+        Value::Array(items) => {
+            for child in items {
+                strip_user_visible_skill_error_fields(child);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub(crate) fn is_observable_run_cmd_error(skill_name: &str, err: &str) -> bool {
     let Some(structured) = parse_structured_skill_error(err) else {
         return false;
@@ -952,100 +931,6 @@ pub(crate) fn is_observable_run_cmd_error(skill_name: &str, err: &str) -> bool {
 pub(crate) fn error_looks_like_os_permission_denied(error: &str) -> bool {
     parse_structured_skill_error(error)
         .is_some_and(|structured| structured.error_kind == "permission_denied")
-}
-
-pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> String {
-    if let Some(structured) = parse_structured_skill_error(err) {
-        let effective_skill = if structured.skill.trim().is_empty() {
-            skill_name
-        } else {
-            structured.skill.as_str()
-        };
-        if let Some((exchange, detail)) =
-            structured_crypto_account_access_error(skill_name, &structured)
-        {
-            return crypto_account_access_error_observation(&exchange, &detail);
-        }
-        if let Some((message_key, error_kind, exchange, action)) =
-            crypto_recoverable_i18n_error_from_structured(skill_name, &structured)
-        {
-            return crypto_recoverable_i18n_error_observation(
-                &message_key,
-                &error_kind,
-                &exchange,
-                &action,
-            );
-        }
-        if structured.error_kind.starts_with("contract_") {
-            return "planned tool step was not allowed for this request".to_string();
-        }
-        if matches_ignore_ascii_case(
-            effective_skill,
-            &[
-                "read_file",
-                "write_file",
-                "list_dir",
-                "make_dir",
-                "remove_file",
-            ],
-        ) {
-            return match structured.error_kind.as_str() {
-                "permission_denied" => {
-                    "file operation failed: permission denied by the operating system".to_string()
-                }
-                "is_directory" => {
-                    "file operation failed: target is a directory, not a regular file".to_string()
-                }
-                "not_a_directory" => {
-                    "directory operation failed: target is not a directory".to_string()
-                }
-                "not_found" => "file operation failed: target path was not found".to_string(),
-                "ambiguous_target" => {
-                    "directory operation failed: target matched multiple candidates".to_string()
-                }
-                "content_too_large" => "write operation failed: content is too large".to_string(),
-                "invalid_args" => "file operation failed: invalid arguments".to_string(),
-                _ => structured.error_text,
-            };
-        }
-        if effective_skill.eq_ignore_ascii_case("system_basic") {
-            return match structured.error_kind.as_str() {
-                "permission_denied" => {
-                    "read operation failed: permission denied by the operating system".to_string()
-                }
-                "is_directory" => {
-                    "read operation failed: target is a directory, not a regular file".to_string()
-                }
-                "not_a_directory" => {
-                    "directory operation failed: target is not a directory".to_string()
-                }
-                "not_found" => "read operation failed: target path was not found".to_string(),
-                _ => structured.error_text,
-            };
-        }
-        if effective_skill.eq_ignore_ascii_case("run_cmd") {
-            return normalize_run_cmd_structured_error_for_user(&structured);
-        }
-        return structured.error_text;
-    }
-    if let Some(policy_block) = parse_policy_block_error(err) {
-        return policy_block_machine_payload(&policy_block);
-    }
-    if skill_name.eq_ignore_ascii_case("read_file") {
-        if let Some(path) = err.strip_prefix(READ_FILE_NOT_FOUND_PREFIX) {
-            let trimmed = path.trim();
-            if !trimmed.is_empty() {
-                return format!("file not found: {trimmed}");
-            }
-            return "file not found".to_string();
-        }
-    }
-    if skill_name.eq_ignore_ascii_case("crypto") {
-        if let Some((exchange, detail)) = parse_crypto_account_access_error(err) {
-            return crypto_account_access_error_observation(&exchange, &detail);
-        }
-    }
-    err.trim().to_string()
 }
 
 fn matches_ignore_ascii_case(value: &str, candidates: &[&str]) -> bool {

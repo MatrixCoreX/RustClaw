@@ -726,7 +726,9 @@ pub(super) fn resume_failure_execution_failed_step_answer(
 
 fn resume_context_user_visible_step_error(error: &str) -> String {
     crate::skills::parse_structured_skill_error(error)
-        .map(|structured| crate::skills::normalize_skill_error_for_user(&structured.skill, error))
+        .and_then(|structured| {
+            crate::skills::skill_error_machine_observation(&structured.skill, error)
+        })
         .unwrap_or_else(|| error.to_string())
 }
 

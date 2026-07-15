@@ -27,7 +27,7 @@ fn observed_outputs_include_structured_run_cmd_error() {
     assert!(has_observed_answer_candidates(&loop_state));
     assert!(joined.contains("skill(run_cmd)"), "entries: {joined}");
     assert!(
-        joined.contains("execution_status: error"),
+        joined.contains("execution_status:error"),
         "entries: {joined}"
     );
     assert!(

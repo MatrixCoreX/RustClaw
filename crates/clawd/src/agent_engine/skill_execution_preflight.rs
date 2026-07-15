@@ -1415,7 +1415,8 @@ pub(super) fn handle_preflight_argument_failure(
     err: &str,
     action_trace_kind: &str,
 ) -> SkillActionOutcome {
-    let user_visible_err = crate::skills::normalize_skill_error_for_user(normalized_skill, err);
+    let error_observation = super::skill_error_observation_or_raw(normalized_skill, err);
+    let progress_error = super::skill_error_progress_token(normalized_skill, err);
     let metadata = preflight_failure_metadata(err);
     attempt_ledger::record_attempt_with_retry_instruction(
         loop_state,
@@ -1424,7 +1425,7 @@ pub(super) fn handle_preflight_argument_failure(
         crate::executor::StepExecutionStatus::Error,
         "",
         Some(metadata.error_kind.as_str()),
-        &user_visible_err,
+        &error_observation,
         Some(metadata.retry_instruction.as_str()),
     );
     let effect = crate::execution_recipe::classify_skill_action_effect(
@@ -1439,7 +1440,7 @@ pub(super) fn handle_preflight_argument_failure(
         global_step,
         &format!("skill({normalized_skill})"),
         false,
-        &user_visible_err,
+        &error_observation,
     );
     register_failed_step_output(
         loop_state,
@@ -1447,7 +1448,7 @@ pub(super) fn handle_preflight_argument_failure(
         step_in_round,
         &format!("skill.{normalized_skill}"),
         &format!("skill({normalized_skill})"),
-        &user_visible_err,
+        &error_observation,
     );
     let now = crate::now_ts_u64();
     let step_execution = crate::executor::StepExecutionResult {
@@ -1484,7 +1485,7 @@ pub(super) fn handle_preflight_argument_failure(
         loop_state,
         step_in_round,
         normalized_skill,
-        &user_visible_err,
+        &progress_error,
         "recoverable_failure_continue_round",
     );
     info!(
