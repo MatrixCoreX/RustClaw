@@ -160,16 +160,36 @@ write_artifact_index() {
   mv "$tmp" "$artifact_index"
 }
 
+write_suite_summary() {
+  local suite_name="$1"
+  local run_dir="$2"
+  local status="$3"
+  local exit_code="$4"
+  local summary="${run_dir}/suite_summary.env"
+  {
+    echo "suite=${suite_name}"
+    echo "status=${status}"
+    echo "exit_code=${exit_code}"
+    echo "run_log=run.log"
+    echo "artifact_index=artifact_index.txt"
+  } > "$summary"
+}
+
 print_wrapped_artifacts() {
-  local run_dir="$1"
-  local run_log="$2"
+  local suite_name="$1"
+  local run_dir="$2"
+  local run_log="$3"
+  local status="$4"
+  local exit_code="$5"
   local artifact_index="${run_dir}/artifact_index.txt"
+  write_suite_summary "$suite_name" "$run_dir" "$status" "$exit_code"
   write_artifact_index "$run_dir"
   echo
   echo "Artifacts:"
   echo "  - ${run_dir}"
   echo "  - ${run_log}"
   echo "  - ${artifact_index}"
+  echo "  - ${run_dir}/suite_summary.env"
 }
 
 run_wrapped_suite() {
@@ -184,7 +204,7 @@ run_wrapped_suite() {
 
   (
     exec > >(tee -a "$run_log") 2>&1
-    trap 'status=$?; print_wrapped_artifacts "$run_dir" "$run_log"; exit "$status"' EXIT
+    trap 'exit_code=$?; suite_status=ok; if [[ "$exit_code" -ne 0 ]]; then suite_status=error; fi; print_wrapped_artifacts "$name" "$run_dir" "$run_log" "$suite_status" "$exit_code"; exit "$exit_code"' EXIT
     echo "NL suite: ${name}"
     echo "  run_dir: ${run_dir}"
     echo "  run_log: ${run_log}"

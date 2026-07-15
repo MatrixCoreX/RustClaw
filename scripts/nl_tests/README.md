@@ -103,6 +103,9 @@ provided. Wrapped suite runs also write `artifact_index.txt` at the suite run
 root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/gate_summary.env` and
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
+They also write `suite_summary.env` with machine fields `suite`, `status`,
+`exit_code`, `run_log`, and `artifact_index` so a later task can resume from
+the run root without parsing prose logs.
 
 For rerun shards, use:
 
