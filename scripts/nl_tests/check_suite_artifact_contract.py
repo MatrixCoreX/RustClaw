@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import sys
+import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -31,6 +32,7 @@ AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
     "agent_parity_gate/agent_loop_static_contracts.txt",
     "agent_parity_gate/secret_scan_contract.json",
     "agent_parity_gate/suite_wrapper_contract.json",
+    "agent_parity_gate/suite_artifact_contract_self_test.txt",
     "agent_parity_gate/llm_raw_trace_runner_contract.txt",
 }
 
@@ -39,6 +41,7 @@ AGENT_PARITY_GATE_REQUIRED_FLAGS = {
     "agent_loop_static_contracts": "1",
     "secret_scan_contract": "1",
     "suite_wrapper_contract": "1",
+    "suite_artifact_contract_self_test": "1",
     "llm_raw_trace_runner_contract": "1",
 }
 
@@ -61,6 +64,9 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
     "agent_parity_gate/llm_raw_trace_runner_contract.txt": {
         "SELF_TEST_OK",
         "LLM_RAW_TRACE_RUNNER_CONTRACT ok",
+    },
+    "agent_parity_gate/suite_artifact_contract_self_test.txt": {
+        "SUITE_ARTIFACT_CONTRACT_SELF_TEST ok",
     },
 }
 
@@ -705,14 +711,128 @@ def validate_run_dir(
     return report
 
 
+def write_minimal_self_test_run(
+    run_dir: Path,
+    *,
+    content_checked: bool,
+    stored_summary_override: dict[str, str] | None = None,
+) -> dict[str, str]:
+    summary = {
+        "suite": "manual",
+        "status": "ok",
+        "exit_code": "0",
+        "artifact_finalize_status": "ok",
+        "run_log": "run.log",
+        "artifact_index": "artifact_index.txt",
+    }
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run.log").write_text("", encoding="utf-8")
+    (run_dir / "suite_summary.env").write_text(
+        "\n".join(f"{key}={value}" for key, value in summary.items()) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "artifact_index.txt").write_text(
+        "artifact_index.txt\nrun.log\nsuite_artifact_contract.json\nsuite_summary.env\n",
+        encoding="utf-8",
+    )
+    report_summary = dict(summary)
+    if stored_summary_override:
+        report_summary.update(stored_summary_override)
+    (run_dir / "suite_artifact_contract.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "run_dir": ".",
+                "require_contract_report": True,
+                "contract_report_content_checked": content_checked,
+                "summary": report_summary,
+                "findings": [],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return summary
+
+
+def run_self_test() -> int:
+    with tempfile.TemporaryDirectory(prefix="suite-artifact-contract-") as tmp:
+        root = Path(tmp)
+
+        positive_run = root / "positive"
+        write_minimal_self_test_run(positive_run, content_checked=True)
+        positive_report = validate_run_dir(
+            positive_run,
+            require_contract_report=True,
+            validate_contract_report_content=True,
+            require_contract_report_content_checked=True,
+        )
+        if not positive_report.get("ok"):
+            print(
+                f"SELF_TEST_FAIL positive:{positive_report.get('findings')}",
+                file=sys.stderr,
+            )
+            return 1
+
+        unchecked_run = root / "unchecked"
+        write_minimal_self_test_run(unchecked_run, content_checked=False)
+        unchecked_report = validate_run_dir(
+            unchecked_run,
+            require_contract_report=True,
+            validate_contract_report_content=True,
+            require_contract_report_content_checked=True,
+        )
+        unchecked_findings = set(unchecked_report.get("findings") or [])
+        if (
+            unchecked_report.get("ok")
+            or "contract_report_content_checked_not_true:False" not in unchecked_findings
+        ):
+            print(
+                f"SELF_TEST_FAIL unchecked:{unchecked_report.get('findings')}",
+                file=sys.stderr,
+            )
+            return 1
+
+        mismatch_run = root / "summary-mismatch"
+        write_minimal_self_test_run(
+            mismatch_run,
+            content_checked=True,
+            stored_summary_override={"status": "error"},
+        )
+        mismatch_report = validate_run_dir(
+            mismatch_run,
+            require_contract_report=True,
+            validate_contract_report_content=True,
+            require_contract_report_content_checked=True,
+        )
+        mismatch_findings = set(mismatch_report.get("findings") or [])
+        if mismatch_report.get("ok") or "contract_report_summary_mismatch" not in mismatch_findings:
+            print(
+                f"SELF_TEST_FAIL summary_mismatch:{mismatch_report.get('findings')}",
+                file=sys.stderr,
+            )
+            return 1
+
+    print("SUITE_ARTIFACT_CONTRACT_SELF_TEST ok")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("run_dir", type=Path)
+    parser.add_argument("run_dir", type=Path, nargs="?")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--require-contract-report", action="store_true")
     parser.add_argument("--validate-contract-report-content", action="store_true")
     parser.add_argument("--require-contract-report-content-checked", action="store_true")
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
+
+    if args.self_test:
+        return run_self_test()
+    if args.run_dir is None:
+        parser.error("run_dir is required unless --self-test is used")
 
     validate_contract_report_content = (
         args.validate_contract_report_content or args.require_contract_report_content_checked
