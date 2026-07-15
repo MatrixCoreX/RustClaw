@@ -203,7 +203,12 @@ safe aggregate.
   OpenAI-compatible provider config, vendor patches, strict JSON behavior,
   large-context metadata, and MiniMax multimodal-understanding versus media
   generation-skill separation. It is metadata-gated by the compact coverage
-  check and does not require live provider generation.
+  check and does not require live provider generation. After running
+  `scripts/nl_tests/run_chinese_provider_smoke_matrix.sh`, validate the emitted
+  `matrix_summary.json` with
+  `python3 scripts/nl_tests/check_chinese_provider_smoke_summary.py <matrix_summary.json>`;
+  this checks provider rows, readiness counters, live-scope counters, and
+  secret-free credential metadata.
 - Task execution async lifecycle: `scripts/nl_tests/cases/nl_cases_task_execution_async_lifecycle_20260626.txt`
   covers representative async start, local-process poll, cancel contract,
   timeout expiry, terminal projection, and media async dry-run handoff without
