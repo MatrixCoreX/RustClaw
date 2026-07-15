@@ -142,6 +142,32 @@ Available categories:
 EOF
 }
 
+write_artifact_index() {
+  local run_dir="$1"
+  local artifact_index="${run_dir}/artifact_index.txt"
+  local tmp
+  tmp="$(mktemp)"
+  find "$run_dir" \
+    -mindepth 1 \
+    -maxdepth 4 \
+    -type f \
+    ! -name "artifact_index.txt" \
+    | sort > "$tmp"
+  mv "$tmp" "$artifact_index"
+}
+
+print_wrapped_artifacts() {
+  local run_dir="$1"
+  local run_log="$2"
+  local artifact_index="${run_dir}/artifact_index.txt"
+  write_artifact_index "$run_dir"
+  echo
+  echo "Artifacts:"
+  echo "  - ${run_dir}"
+  echo "  - ${run_log}"
+  echo "  - ${artifact_index}"
+}
+
 run_wrapped_suite() {
   local name="$1"
   shift
@@ -154,15 +180,12 @@ run_wrapped_suite() {
 
   (
     exec > >(tee -a "$run_log") 2>&1
+    trap 'status=$?; print_wrapped_artifacts "$run_dir" "$run_log"; exit "$status"' EXIT
     echo "NL suite: ${name}"
     echo "  run_dir: ${run_dir}"
     echo "  run_log: ${run_log}"
     echo
     NL_SUITE_RUN_DIR="${run_dir}" "$@"
-    echo
-    echo "Artifacts:"
-    echo "  - ${run_dir}"
-    echo "  - ${run_log}"
   )
 }
 
