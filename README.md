@@ -775,6 +775,8 @@ flowchart TD
     LTC --> LTCA[Agent parity gate artifact<br/>long_tail_skill_contracts.txt]
     O --> TLC[Task lifecycle contracts<br/>check_task_lifecycle_contracts.py]
     TLC --> TLCA[Agent parity gate artifact<br/>task_lifecycle_contracts.txt]
+    O --> TECT[Task event/context/team contracts<br/>check_task_event_context_team_contracts.py]
+    TECT --> TECTA[Agent parity gate artifact<br/>task_event_context_team_contracts.txt]
     O --> AM[No legacy agent-mode payload guard<br/>check_no_agent_mode_payload.py]
     AM --> AA[Agent parity gate artifact<br/>no_agent_mode_payload.txt]
     O --> ALS[Agent-loop static contracts<br/>route authority + frontdoor boundary + legacy boundary + NL hardmatch guards]
@@ -812,6 +814,8 @@ The agent parity gate passes `CHINESE_PROVIDER_ENV_FILE` or `../runtime_env_fill
 The same gate writes `semantic_boundary_contracts.txt` and records `semantic_boundary_contracts=1`. This artifact must include `RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings=0`, `CONTRACT_REPAIR_LOOP_OBSERVATION_BOUNDARY findings=0`, `ROUTE_REASON_MARKER_FACADE_SELF_TEST ok`, `ROUTE_REASON_MARKER_FACADE_CHECK findings=0`, `OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_SELF_TEST ok`, and `OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_CHECK findings=0`, keeping runtime semantic rewrite debt, worker contract repair mutation, ad hoc route-reason parsing, and direct semantic-kind writes release-gated.
 
 The same gate also writes `task_lifecycle_contracts.txt` and records `task_lifecycle_contracts=1`. This artifact comes from `scripts/check_task_lifecycle_contracts.py --self-test` plus the main check, and must include `TASK_LIFECYCLE_CONTRACT_SELF_TEST ok` and `TASK_LIFECYCLE_CONTRACT_CHECK findings=0`. It keeps background execution, checkpoint/resume, resume executor leases, seeded agent-loop resume, async poll/cancel projection, and CLI/UI task lifecycle display tied to machine fields instead of localized `text/error_text`.
+
+The same gate also writes `task_event_context_team_contracts.txt` and records `task_event_context_team_contracts=1`. This artifact comes from `scripts/check_task_event_context_team_contracts.py --self-test` plus the main check, and must include `TASK_EVENT_CONTEXT_TEAM_CONTRACT_SELF_TEST ok` and `TASK_EVENT_CONTEXT_TEAM_CONTRACT_CHECK findings=0`. It keeps `task_goal`, `context_budget`, `context_compaction`, provider prompt-budget metrics, coding evidence, and read-only subagent/team lifecycle events available as structured event-stream fields for CLI, UI, teaching mode, and replay tooling.
 
 ## Main Components
 

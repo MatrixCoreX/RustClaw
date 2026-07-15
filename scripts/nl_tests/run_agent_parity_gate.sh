@@ -306,6 +306,12 @@ echo "AGENT_PARITY_GATE_STEP task_lifecycle_contracts"
   python3 "${ROOT_DIR}/scripts/check_task_lifecycle_contracts.py"
 } > "${OUT_DIR}/task_lifecycle_contracts.txt"
 
+echo "AGENT_PARITY_GATE_STEP task_event_context_team_contracts"
+{
+  python3 "${ROOT_DIR}/scripts/check_task_event_context_team_contracts.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_task_event_context_team_contracts.py"
+} > "${OUT_DIR}/task_event_context_team_contracts.txt"
+
 echo "AGENT_PARITY_GATE_STEP no_agent_mode_payload"
 {
   python3 "${ROOT_DIR}/scripts/check_no_agent_mode_payload.py" --self-test
@@ -445,6 +451,7 @@ fi
   echo "skill_registry_aliases=1"
   echo "long_tail_skill_contracts=1"
   echo "task_lifecycle_contracts=1"
+  echo "task_event_context_team_contracts=1"
   echo "no_agent_mode_payload=1"
   echo "agent_loop_static_contracts=1"
   echo "semantic_boundary_contracts=1"

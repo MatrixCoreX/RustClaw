@@ -1045,6 +1045,23 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate summary must record the task lifecycle contract guard state",
     )
     require(
+        "AGENT_PARITY_GATE_STEP task_event_context_team_contracts" in parity_text,
+        findings,
+        "agent parity gate must run the task event/context/team contract guard step",
+    )
+    require(
+        "check_task_event_context_team_contracts.py" in parity_text
+        and 'check_task_event_context_team_contracts.py" --self-test' in parity_text
+        and "task_event_context_team_contracts.txt" in parity_text,
+        findings,
+        "agent parity gate must self-test and write the task event/context/team artifact",
+    )
+    require(
+        "task_event_context_team_contracts=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the task event/context/team contract state",
+    )
+    require(
         "AGENT_PARITY_GATE_STEP no_agent_mode_payload" in parity_text,
         findings,
         "agent parity gate must run the no-agent-mode payload guard step",
@@ -1226,6 +1243,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "agent_parity_gate/skill_registry_aliases.txt" in suite_artifact_contract_text
         and "agent_parity_gate/long_tail_skill_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/task_lifecycle_contracts.txt" in suite_artifact_contract_text
+        and "agent_parity_gate/task_event_context_team_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/agent_loop_static_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/evidence_extractor_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/suite_wrapper_contract.json" in suite_artifact_contract_text
@@ -1245,6 +1263,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and '"skill_registry_aliases": "1"' in suite_artifact_contract_text
         and '"long_tail_skill_contracts": "1"' in suite_artifact_contract_text
         and '"task_lifecycle_contracts": "1"' in suite_artifact_contract_text
+        and '"task_event_context_team_contracts": "1"' in suite_artifact_contract_text
         and "RUNTIME_HARD_REPLY_ALL_SCAN" in suite_artifact_contract_text
         and "new=0" in suite_artifact_contract_text
         and "POLICY_BOUNDARY_HARD_REPLY_SELF_TEST ok" in suite_artifact_contract_text
@@ -1262,6 +1281,8 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "LONG_TAIL_SKILL_CONTRACT_CHECK ok" in suite_artifact_contract_text
         and "TASK_LIFECYCLE_CONTRACT_SELF_TEST ok" in suite_artifact_contract_text
         and "TASK_LIFECYCLE_CONTRACT_CHECK findings=0" in suite_artifact_contract_text
+        and "TASK_EVENT_CONTEXT_TEAM_CONTRACT_SELF_TEST ok" in suite_artifact_contract_text
+        and "TASK_EVENT_CONTEXT_TEAM_CONTRACT_CHECK findings=0" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_route_authority_legacy_keys.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_legacy_route_boundary.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_pre_planner_exit_inventory.py" in suite_artifact_contract_text
@@ -1388,6 +1409,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and '"skill_registry_aliases": "1"' in suite_artifact_contract_text
         and '"long_tail_skill_contracts": "1"' in suite_artifact_contract_text
         and '"task_lifecycle_contracts": "1"' in suite_artifact_contract_text
+        and '"task_event_context_team_contracts": "1"' in suite_artifact_contract_text
         and '"evidence_extractor_contracts": "1"' in suite_artifact_contract_text
         and '"suite_wrapper_contract": "1"' in suite_artifact_contract_text
         and '"suite_artifact_contract_self_test": "1"' in suite_artifact_contract_text
@@ -1476,6 +1498,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             and "skill_registry_aliases.txt" in readme_body
             and "long_tail_skill_contracts.txt" in readme_body
             and "task_lifecycle_contracts.txt" in readme_body
+            and "task_event_context_team_contracts.txt" in readme_body
             and "no_agent_mode_payload.txt" in readme_body
             and "semantic_boundary_contracts.txt" in readme_body
             and "evidence_extractor_contracts.txt" in readme_body
@@ -1584,6 +1607,14 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "TASK_LIFECYCLE_CONTRACT_CHECK findings=0" in nl_tests_readme_text,
         findings,
         "NL tests README must document task lifecycle contract artifact content",
+    )
+    require(
+        "task_event_context_team_contracts.txt" in nl_tests_readme_text
+        and "task_event_context_team_contracts=1" in nl_tests_readme_text
+        and "TASK_EVENT_CONTEXT_TEAM_CONTRACT_SELF_TEST ok" in nl_tests_readme_text
+        and "TASK_EVENT_CONTEXT_TEAM_CONTRACT_CHECK findings=0" in nl_tests_readme_text,
+        findings,
+        "NL tests README must document task event/context/team artifact content",
     )
     require(
         "evidence_extractor_contracts.txt" in nl_tests_readme_text
