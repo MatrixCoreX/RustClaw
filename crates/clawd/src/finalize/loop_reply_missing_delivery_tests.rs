@@ -383,7 +383,7 @@ async fn observed_execution_without_delivery_skips_summary_for_extract_field_res
 }
 
 #[tokio::test]
-async fn observed_execution_without_delivery_uses_structured_container_summary() {
+async fn observed_execution_without_delivery_preserves_structured_config_payload() {
     let state = test_state();
     let task = claimed_task("task-structured-container-summary");
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -413,18 +413,46 @@ async fn observed_execution_without_delivery_uses_structured_container_summary()
     .expect("observed execution reply");
 
     assert!(!reply.should_fail_task);
-    assert!(reply
-        .text
-        .contains("message_key=clawd.msg.structured_container.observed"));
-    assert!(reply
-        .text
-        .contains("reason_code=structured_container_observed"));
-    assert!(reply.text.contains("field_path=scripts"));
-    assert!(reply.text.contains("container_kind=object"));
-    assert!(reply.text.contains("item_count=3"));
-    assert!(reply.text.contains("item.1.label=build=echo build"));
-    assert!(reply.text.contains("item.2.label=dev=echo dev"));
-    assert!(reply.text.contains("item.3.label=lint=echo lint"));
+    let payload: serde_json::Value =
+        serde_json::from_str(&reply.text).expect("reply should remain structured JSON");
+    assert_eq!(
+        payload
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.config_edit.read_guard")
+    );
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("config_edit_read_guard")
+    );
+    assert_eq!(
+        payload
+            .pointer("/field_path")
+            .and_then(serde_json::Value::as_str),
+        Some("scripts")
+    );
+    let current_value = payload
+        .pointer("/current_value")
+        .and_then(serde_json::Value::as_str)
+        .expect("current_value should be a JSON object string");
+    let scripts: serde_json::Value =
+        serde_json::from_str(current_value).expect("current_value should parse as JSON");
+    assert_eq!(
+        scripts
+            .pointer("/build")
+            .and_then(serde_json::Value::as_str),
+        Some("echo build")
+    );
+    assert_eq!(
+        scripts.pointer("/dev").and_then(serde_json::Value::as_str),
+        Some("echo dev")
+    );
+    assert_eq!(
+        scripts.pointer("/lint").and_then(serde_json::Value::as_str),
+        Some("echo lint")
+    );
     assert_eq!(reply.messages, vec![reply.text.clone()]);
     assert_eq!(
         reply
