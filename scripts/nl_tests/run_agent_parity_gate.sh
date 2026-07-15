@@ -276,6 +276,24 @@ echo "AGENT_PARITY_GATE_STEP policy_decision_tokens"
   python3 "${ROOT_DIR}/scripts/check_policy_decision_tokens.py"
 } > "${OUT_DIR}/policy_decision_tokens.txt"
 
+echo "AGENT_PARITY_GATE_STEP registry_policy_contracts"
+{
+  python3 "${ROOT_DIR}/scripts/check_registry_policy_contracts.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_registry_policy_contracts.py"
+} > "${OUT_DIR}/registry_policy_contracts.txt"
+
+echo "AGENT_PARITY_GATE_STEP skill_registry_aliases"
+{
+  python3 "${ROOT_DIR}/scripts/check_skill_registry_aliases.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_skill_registry_aliases.py"
+} > "${OUT_DIR}/skill_registry_aliases.txt"
+
+echo "AGENT_PARITY_GATE_STEP long_tail_skill_contracts"
+{
+  python3 "${ROOT_DIR}/scripts/check_long_tail_skill_contracts.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_long_tail_skill_contracts.py"
+} > "${OUT_DIR}/long_tail_skill_contracts.txt"
+
 echo "AGENT_PARITY_GATE_STEP no_agent_mode_payload"
 {
   python3 "${ROOT_DIR}/scripts/check_no_agent_mode_payload.py" --self-test
@@ -395,6 +413,9 @@ fi
   echo "policy_boundary_hard_reply=1"
   echo "repair_no_user_text_fields=1"
   echo "policy_decision_tokens=1"
+  echo "registry_policy_contracts=1"
+  echo "skill_registry_aliases=1"
+  echo "long_tail_skill_contracts=1"
   echo "no_agent_mode_payload=1"
   echo "agent_loop_static_contracts=1"
   echo "evidence_extractor_contracts=1"
