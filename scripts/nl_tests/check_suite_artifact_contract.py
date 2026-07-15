@@ -52,6 +52,7 @@ AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
     "agent_parity_gate/maintainability_skill_contracts.txt",
     "agent_parity_gate/agent_parity_gate_inventory_contracts.txt",
     "agent_parity_gate/evidence_extractor_contracts.txt",
+    "agent_parity_gate/secret_scan_contract_self_test.txt",
     "agent_parity_gate/secret_scan_contract.json",
     "agent_parity_gate/suite_wrapper_contract.json",
     "agent_parity_gate/runner_path_ref_contract.json",
@@ -86,6 +87,7 @@ AGENT_PARITY_GATE_REQUIRED_FLAGS = {
     "maintainability_skill_contracts": "1",
     "agent_parity_gate_inventory_contracts": "1",
     "evidence_extractor_contracts": "1",
+    "secret_scan_contract_self_test": "1",
     "secret_scan_contract": "1",
     "suite_wrapper_contract": "1",
     "runner_path_ref_contract": "1",
@@ -235,6 +237,9 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
     "agent_parity_gate/evidence_extractor_contracts.txt": {
         "EVIDENCE_EXTRACTOR_CONTRACT_SELF_TEST ok",
         "EVIDENCE_EXTRACTOR_CONTRACT_CHECK findings=0",
+    },
+    "agent_parity_gate/secret_scan_contract_self_test.txt": {
+        "SECRET_SCAN_CONTRACT_SELF_TEST ok",
     },
     "agent_parity_gate/nl_suite_checker_self_tests.txt": {
         "SUITE_WRAPPER_CONTRACT_SELF_TEST ok",

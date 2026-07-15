@@ -265,11 +265,14 @@ It also writes `evidence_extractor_contracts.txt` from
 must contain both `EVIDENCE_EXTRACTOR_CONTRACT_SELF_TEST ok` and
 `EVIDENCE_EXTRACTOR_CONTRACT_CHECK findings=0`, so structured tool observation
 metadata cannot quietly drift back to strict language-text evidence paths.
-The gate also writes `secret_scan_contract.json` from
-`scripts/nl_tests/check_secret_scan_contract.py`, locking the shared scanner's
-forbidden-field and secret-like-value finding shapes. `gate_summary.env`
-records `secret_scan_contract=1` as a non-secret machine token so gate artifact
-readers can tell the contract was part of the run.
+The gate also writes `secret_scan_contract_self_test.txt` from
+`scripts/nl_tests/check_secret_scan_contract.py --self-test`, proving the
+shared scanner's forbidden-field and secret-like-value rejection paths before
+the main JSON report is trusted. It then writes `secret_scan_contract.json` from
+`scripts/nl_tests/check_secret_scan_contract.py`, locking the finding shapes.
+`gate_summary.env` records `secret_scan_contract_self_test=1` and
+`secret_scan_contract=1` as non-secret machine tokens so gate artifact readers
+can tell both contracts were part of the run.
 It also writes `suite_wrapper_contract.json` from
 `scripts/nl_tests/check_suite_wrapper_contract.py`, locking the wrapped-suite
 summary/index/report finalizer wiring and the agent parity nested artifact
@@ -314,6 +317,7 @@ root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/maintainability_skill_contracts.txt`,
 `agent_parity_gate/agent_parity_gate_inventory_contracts.txt`,
 `agent_parity_gate/evidence_extractor_contracts.txt`, and
+`agent_parity_gate/secret_scan_contract_self_test.txt`,
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
 They also write `suite_summary.env` with machine fields `suite`, `status`,
 `exit_code`, `artifact_finalize_status`, `run_log`, and `artifact_index` so a
@@ -458,6 +462,8 @@ For `agent_parity_gate_inventory_contracts.txt`, the required content includes
 `AGENT_PARITY_GATE_INVENTORY_CHECK ok`, plus
 `NL_TEST_CHECKER_INVENTORY_SELF_TEST ok` and
 `NL_TEST_CHECKER_INVENTORY_CHECK ok`.
+For `secret_scan_contract_self_test.txt`, the required content includes
+`SECRET_SCAN_CONTRACT_SELF_TEST ok`.
 For `nl_suite_checker_self_tests.txt`, the required content includes
 `SUITE_WRAPPER_CONTRACT_SELF_TEST ok`,
 `RUNNER_PATH_REF_CONTRACT_SELF_TEST ok`, and
