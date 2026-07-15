@@ -62,10 +62,11 @@ fn llm_trace_text_lines_number_calls_and_flow_tokens() {
     assert!(lines.contains(&"llm_trace_call_count: 2".to_string()));
     assert!(lines.contains(&"llm_trace_flow_stage_count: 2".to_string()));
     assert!(lines.iter().any(|line| {
-        line == "llm_trace_call: index=1 status=ok vendor=minimax provider=minimax model=MiniMax-M3 prompt_label=plan flow_stage=agent_loop.planner flow_node=planner_round code_module=crates/clawd/src/agent_engine/planning.rs code_entrypoint=plan_round_actions trigger_kind=normal prompt_tokens=11 completion_tokens=7 total_tokens=18"
+        line == "llm_trace_call: llm_call_ref=LLM#1 index=1 status=ok vendor=minimax provider=minimax model=MiniMax-M3 prompt_label=plan flow_stage=agent_loop.planner flow_node=planner_round code_module=crates/clawd/src/agent_engine/planning.rs code_entrypoint=plan_round_actions trigger_kind=normal prompt_tokens=11 completion_tokens=7 total_tokens=18"
     }));
     assert!(lines.iter().any(|line| {
-        line.contains("index=2")
+        line.contains("llm_call_ref=LLM#2")
+            && line.contains("index=2")
             && line.contains("prompt_label=answer_verifier")
             && line.contains("flow_stage=agent_loop.answer_verifier")
     }));
@@ -117,7 +118,9 @@ fn llm_trace_text_lines_limit_and_raw_fields() {
 
     let lines = llm_trace_text_lines(&debug, true, Some(1));
 
+    assert!(lines.iter().any(|line| line.contains("llm_call_ref=LLM#1")));
     assert!(lines.iter().any(|line| line.contains("index=1")));
+    assert!(!lines.iter().any(|line| line.contains("llm_call_ref=LLM#2")));
     assert!(!lines.iter().any(|line| line.contains("index=2")));
     assert!(lines.contains(&"llm_request_payload_1:".to_string()));
     assert!(lines.iter().any(|line| line.contains("TRACE_INPUT_TOKEN")));
