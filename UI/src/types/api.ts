@@ -653,6 +653,38 @@ export interface ModelConfigResponse {
   restart_required: boolean;
 }
 
+export interface ModelCatalogEntry {
+  schema_version: number;
+  provider: string;
+  model: string;
+  models: string[];
+  api_style: string;
+  base_url_kind: string;
+  context_window_tokens?: number | null;
+  timeout_seconds?: number | null;
+  supports_text: boolean;
+  supports_image_input: boolean;
+  supports_video_input: boolean;
+  supports_audio_input: boolean;
+  supports_image_understanding: boolean;
+  supports_audio_transcription: boolean;
+  supports_image_generation: boolean;
+  supports_audio_generation: boolean;
+  supports_video_generation: boolean;
+  supports_music_generation: boolean;
+  async_required: boolean;
+  dry_run_supported: boolean;
+  active_text_provider: boolean;
+  config_source: string[];
+}
+
+export interface ModelCatalogResponse {
+  schema_version: number;
+  selected_provider: string;
+  selected_model: string;
+  entries: ModelCatalogEntry[];
+}
+
 export interface LogLatestResponse {
   file: string;
   lines: number;
