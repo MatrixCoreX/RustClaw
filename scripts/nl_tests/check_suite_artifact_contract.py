@@ -42,6 +42,29 @@ AGENT_PARITY_GATE_REQUIRED_FLAGS = {
     "llm_raw_trace_runner_contract": "1",
 }
 
+AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
+    "agent_parity_gate/no_agent_mode_payload.txt": {
+        "SELF_TEST_OK",
+        "NO_AGENT_MODE_PAYLOAD ok",
+    },
+    "agent_parity_gate/agent_loop_static_contracts.txt": {
+        "ROUTE_AUTHORITY_LEGACY_KEY_CHECK findings=0",
+        "LEGACY_ROUTE_BOUNDARY_CHECK findings=0",
+        "PRE_PLANNER_EXIT_REMOVAL_CHECK findings=0",
+        "NL_HARDMATCH_SCAN unknown=0 known_legacy=0",
+        "HISTORICAL_HARDCODED_LANGUAGE_SCAN total=",
+    },
+    "agent_parity_gate/llm_raw_trace_runner_contract.txt": {
+        "SELF_TEST_OK",
+        "LLM_RAW_TRACE_RUNNER_CONTRACT ok",
+    },
+}
+
+AGENT_PARITY_GATE_JSON_OK_ARTIFACTS = {
+    "agent_parity_gate/secret_scan_contract.json",
+    "agent_parity_gate/suite_wrapper_contract.json",
+}
+
 
 def parse_env_file(path: Path) -> tuple[dict[str, str], list[str]]:
     values: dict[str, str] = {}
@@ -160,6 +183,38 @@ def validate_artifact_index_entries(
     return findings
 
 
+def read_text_artifact(path: Path, label: str) -> tuple[str, list[str]]:
+    try:
+        return path.read_text(encoding="utf-8"), []
+    except OSError as exc:
+        return "", [f"agent_parity_gate_artifact_read_failed:{label}:{exc.__class__.__name__}"]
+    except UnicodeDecodeError:
+        return "", [f"agent_parity_gate_artifact_decode_failed:{label}"]
+
+
+def validate_text_artifact_tokens(run_dir: Path, rel_path: str, tokens: set[str]) -> list[str]:
+    text, findings = read_text_artifact(run_dir / rel_path, rel_path)
+    if findings:
+        return findings
+    for token in sorted(tokens):
+        if token not in text:
+            findings.append(f"agent_parity_gate_artifact_missing_token:{rel_path}:{token}")
+    return findings
+
+
+def validate_json_artifact_ok(run_dir: Path, rel_path: str) -> list[str]:
+    text, findings = read_text_artifact(run_dir / rel_path, rel_path)
+    if findings:
+        return findings
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return [f"agent_parity_gate_artifact_bad_json:{rel_path}"]
+    if payload.get("ok") is not True:
+        return [f"agent_parity_gate_artifact_not_ok:{rel_path}:{payload.get('ok')}"]
+    return []
+
+
 def validate_agent_parity_gate_artifacts(run_dir: Path, entries: set[str]) -> list[str]:
     findings: list[str] = []
     for required in sorted(AGENT_PARITY_GATE_REQUIRED_ARTIFACTS):
@@ -177,6 +232,10 @@ def validate_agent_parity_gate_artifacts(run_dir: Path, entries: set[str]) -> li
         actual = gate_summary.get(key)
         if actual != expected:
             findings.append(f"agent_parity_gate_summary_bad_flag:{key}:{actual}")
+    for rel_path, tokens in sorted(AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS.items()):
+        findings.extend(validate_text_artifact_tokens(run_dir, rel_path, tokens))
+    for rel_path in sorted(AGENT_PARITY_GATE_JSON_OK_ARTIFACTS):
+        findings.extend(validate_json_artifact_ok(run_dir, rel_path))
     return findings
 
 
@@ -211,6 +270,10 @@ def validate_run_dir(run_dir: Path, require_contract_report: bool = False) -> di
             "checked": True,
             "required_artifact_count": len(AGENT_PARITY_GATE_REQUIRED_ARTIFACTS),
             "required_flag_count": len(AGENT_PARITY_GATE_REQUIRED_FLAGS),
+            "content_check_count": sum(
+                len(tokens) for tokens in AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS.values()
+            )
+            + len(AGENT_PARITY_GATE_JSON_OK_ARTIFACTS),
         }
 
     report = {

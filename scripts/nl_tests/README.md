@@ -129,9 +129,13 @@ artifact contract also validates nested gate artifacts such as
 `agent_parity_gate/agent_loop_static_contracts.txt` and checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
 the static agent-loop, secret-scan, wrapper, no-agent-mode, and raw LLM trace
-contracts participated in the run.
+contracts participated in the run. It also checks artifact content: text reports
+must contain their success tokens, and JSON reports such as
+`secret_scan_contract.json` and `suite_wrapper_contract.json` must expose
+`ok=true`.
 The JSON report includes `agent_parity_gate_contract.checked=true` plus the
-required artifact and flag counts when this suite-specific validation runs.
+required artifact, flag, and content-check counts when this suite-specific
+validation runs.
 
 For rerun shards, use:
 
