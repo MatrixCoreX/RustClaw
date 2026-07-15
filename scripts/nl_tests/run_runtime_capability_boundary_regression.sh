@@ -14,6 +14,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" "$1"
+}
+
 cd "$ROOT_DIR"
 
 set +e
@@ -35,7 +39,7 @@ fi
 python3 "${ROOT_DIR}/scripts/nl_tests/summarize_client_like_run.py" "$RUN_DIR"
 
 if [[ "$RUN_STATUS" -ne 0 ]]; then
-  echo "Runtime capability regression run failed before expectation evaluation: ${RUN_DIR}" >&2
+  echo "Runtime capability regression run failed before expectation evaluation: $(path_ref "${RUN_DIR}")" >&2
   exit "$RUN_STATUS"
 fi
 
@@ -43,4 +47,4 @@ python3 "${ROOT_DIR}/scripts/nl_tests/evaluate_client_like_run.py" \
   "$RUN_DIR" \
   --expectations "$EXPECTATIONS"
 
-echo "RUNTIME_CAPABILITY_BOUNDARY_REGRESSION_OK log_dir=${RUN_DIR}"
+echo "RUNTIME_CAPABILITY_BOUNDARY_REGRESSION_OK log_dir_ref=$(path_ref "${RUN_DIR}")"

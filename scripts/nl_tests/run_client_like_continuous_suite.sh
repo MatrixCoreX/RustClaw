@@ -116,6 +116,10 @@ join_case_files() {
   printf "%s" "$out"
 }
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" "$1"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base-url)
@@ -2122,15 +2126,23 @@ TASK_IDS=()
 
 echo "CLIENT_LIKE_CONTINUOUS_SUITE"
 echo "base_url=${BASE_URL}"
-echo "db_path=${DB_PATH_VALUE}"
+echo "db_path_ref=$(path_ref "$DB_PATH_VALUE")"
 echo "raw_user_id=${USER_ID}"
 echo "raw_chat_id=${CHAT_ID}"
 echo "external_user_id=${EXTERNAL_USER_ID_VALUE}"
 echo "external_chat_id=${EXTERNAL_CHAT_ID_VALUE}"
 echo "test_id=${TEST_ID}"
-echo "log_dir=${RUN_DIR}"
-echo "case_file=${CASE_FILE_VALUE:-<none>}"
-echo "case_jsonl=${CASE_JSONL_VALUE:-<none>}"
+echo "log_dir=$(path_ref "$RUN_DIR")"
+if [[ -n "${CASE_FILE_VALUE:-}" ]]; then
+  echo "case_file_ref=$(path_ref "$CASE_FILE_VALUE")"
+else
+  echo "case_file_ref=none"
+fi
+if [[ -n "${CASE_JSONL_VALUE:-}" ]]; then
+  echo "case_jsonl_ref=$(path_ref "$CASE_JSONL_VALUE")"
+else
+  echo "case_jsonl_ref=none"
+fi
 echo "case_limit=${CASE_LIMIT_VALUE:-<none>}"
 echo "case_group_limit=${CASE_GROUP_LIMIT_VALUE:-<none>}"
 echo "case_start=${CASE_START_VALUE:-1}"
@@ -2293,4 +2305,4 @@ fi
 print_prompt_budget_report "$RUN_DIR"
 print_llm_metrics_report "$RUN_DIR"
 
-echo "CLIENT_LIKE_CONTINUOUS_SUITE_OK turns=${turn} log_dir=${RUN_DIR}"
+echo "CLIENT_LIKE_CONTINUOUS_SUITE_OK turns=${turn} log_dir=$(path_ref "$RUN_DIR")"

@@ -23,6 +23,10 @@ CHAT_ID=""
 CASE_INDEX=0
 CASE_TOTAL=2
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" "$1"
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -349,4 +353,4 @@ run_nl_handoff_case "english_prompt" "$PROMPT_EN" "external-skill scaffold plan"
 run_nl_handoff_case "chinese_prompt" "$PROMPT_ZH" "外部技能脚手架方案"
 
 echo "PASS: self-extension natural-language handoff regression finished"
-echo "workspace_root=${TEMP_WORKSPACE}"
+echo "workspace_root_ref=$(path_ref "${TEMP_WORKSPACE}")"

@@ -572,7 +572,7 @@ if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   echo "NL multi-turn suite: ${SUITE}"
   echo "  run_dir_ref: $(path_ref "$RUN_DIR" "$RUN_DIR")"
   echo "  run_log_ref: $(path_ref "$RUN_DIR" "$RUN_LOG")"
-  echo "  case_file:  ${CASE_FILE}"
+  echo "  case_file_ref: $(path_ref "$RUN_DIR" "$CASE_FILE")"
   echo "  turn_count: ${TURN_COUNT}"
   echo "  base_url:   ${BASE_URL}"
   echo "  user_id:    ${USER_ID}"

@@ -47,6 +47,14 @@ Logs:
 EOF
 }
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" "$1"
+}
+
+run_path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" --anchor "$RUN_DIR" "$1"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base-url)
@@ -372,12 +380,14 @@ SUMMARY_JSONL="${RUN_DIR}/summary.jsonl"
 
 exec > >(tee -a "${RUN_LOG}") 2>&1
 
-echo "run_dir=${RUN_DIR}"
+echo "run_dir_ref=$(run_path_ref "${RUN_DIR}")"
+echo "run_log_ref=$(run_path_ref "${RUN_LOG}")"
+echo "summary_jsonl_ref=$(run_path_ref "${SUMMARY_JSONL}")"
 echo "base_url=${BASE_URL}"
 echo "user_id=${USER_ID}"
 echo "chat_id=${CHAT_ID}"
 echo "using_user_key=$(printf '%s' "$USER_KEY" | sed 's/^\(.\{6\}\).*/\1.../')"
-echo "db_path=${DB_PATH}"
+echo "db_path_ref=$(path_ref "${DB_PATH}")"
 
 pass_count=0
 fail_count=0
