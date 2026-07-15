@@ -44,6 +44,7 @@ RUN_SUITE_REQUIRED_SNIPPETS = {
 SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_required_artifacts": "AGENT_PARITY_GATE_REQUIRED_ARTIFACTS",
     "agent_parity_required_flags": "AGENT_PARITY_GATE_REQUIRED_FLAGS",
+    "agent_parity_required_machine_fields": "AGENT_PARITY_GATE_REQUIRED_MACHINE_FIELDS",
     "agent_parity_text_content_tokens": "AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS",
     "agent_parity_json_ok_artifacts": "AGENT_PARITY_GATE_JSON_OK_ARTIFACTS",
     "agent_parity_optional_artifacts": "AGENT_PARITY_GATE_OPTIONAL_ARTIFACTS_BY_FLAG",
@@ -59,11 +60,13 @@ SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_provider_scope_skip_reason": "provider_not_in_live_scope",
     "agent_parity_rollout_metrics_validator": "validate_rollout_metrics_artifact",
     "agent_parity_live_metrics_summary_flag": '"live_metrics"',
+    "agent_parity_bad_machine_field_finding": "agent_parity_gate_summary_bad_machine_field",
     "agent_parity_optional_validator": "validate_enabled_agent_parity_optional_artifacts",
     "agent_parity_nested_validator": "validate_agent_parity_gate_artifacts",
     "agent_parity_suite_branch": 'summary.get("suite") == "agent_parity_gate"',
     "agent_parity_contract_report_field": '"agent_parity_gate_contract"',
     "agent_parity_checked_flag": '"checked": True',
+    "agent_parity_required_machine_field_count": '"required_machine_field_count"',
     "agent_parity_content_check_count": '"content_check_count"',
 }
 
