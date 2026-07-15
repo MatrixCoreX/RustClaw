@@ -29,6 +29,20 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
         "llm_trace_verifier_call_count",
         "llm_trace_finalizer_call_count",
         "llm_trace_provider_error_count",
+        "llm_trace_model_readiness_line",
+        "llm_trace_model_readiness:",
+        "trace_ref=model_catalog_trace.readiness",
+        "MODEL_READINESS_SCALAR_FIELDS",
+        "MODEL_READINESS_BOOL_FIELDS",
+        "model_catalog_trace/readiness",
+        "selected_entry_status",
+        "matched_entry_count",
+        "credential_state",
+        "ready",
+        "image_understanding",
+        "video_generation",
+        "music_generation",
+        "dry_run",
         "llm_call_ref=LLM#",
         "index={call_index}",
         "status",
@@ -61,6 +75,15 @@ REQUIRED_TOKENS_BY_PATH: dict[str, tuple[str, ...]] = {
     ),
     "crates/clawcli/src/commands_llm_trace_tests.rs": (
         "llm_trace_text_lines_number_calls_and_flow_tokens",
+        "llm_trace_text_lines_project_missing_model_readiness",
+        "llm_trace_model_readiness:",
+        "trace_ref=model_catalog_trace.readiness",
+        "selected_entry_status=found",
+        "selected_entry_status=missing",
+        "credential_state=configured_env",
+        "credential_state=null",
+        "ready=true",
+        "ready=false",
         "llm_trace_text_lines_limit_and_raw_fields",
         "llm_call_ref=LLM#1",
         "llm_call_ref=LLM#2",
@@ -178,6 +201,11 @@ def scan_texts(texts: dict[str, str | None]) -> list[str]:
     llm_trace = texts.get("crates/clawcli/src/commands/llm_trace.rs") or ""
     for token in (
         "llm_call_ref=LLM#",
+        "llm_trace_model_readiness:",
+        "trace_ref=model_catalog_trace.readiness",
+        "selected_entry_status",
+        "credential_state",
+        "ready",
         "request_payload",
         "raw_response",
         "clean_response",
@@ -191,7 +219,15 @@ def scan_texts(texts: dict[str, str | None]) -> list[str]:
         findings.append("llm_trace_machine_projection_too_weak")
 
     tests = texts.get("crates/clawcli/src/commands_llm_trace_tests.rs") or ""
-    for token in ("LLM#1", "LLM#2", "TRACE_INPUT_TOKEN", "TRACE_RAW_TOKEN"):
+    for token in (
+        "LLM#1",
+        "LLM#2",
+        "TRACE_INPUT_TOKEN",
+        "TRACE_RAW_TOKEN",
+        "llm_trace_model_readiness:",
+        "selected_entry_status=missing",
+        "ready=false",
+    ):
         if token not in tests:
             findings.append(f"missing_llm_trace_test_token:{token}")
 
@@ -211,6 +247,11 @@ def minimal_good_texts() -> dict[str, str | None]:
         [
             *["push_token" for _ in range(10)],
             "llm_call_ref=LLM#",
+            "llm_trace_model_readiness:",
+            "trace_ref=model_catalog_trace.readiness",
+            "selected_entry_status",
+            "credential_state",
+            "ready",
             "request_payload",
             "raw_response",
             "clean_response",
@@ -221,6 +262,7 @@ def minimal_good_texts() -> dict[str, str | None]:
     )
     texts["crates/clawcli/src/commands_llm_trace_tests.rs"] += (
         "\nLLM#1\nLLM#2\nTRACE_INPUT_TOKEN\nTRACE_RAW_TOKEN\n"
+        "llm_trace_model_readiness:\nselected_entry_status=missing\nready=false\n"
     )
     return texts
 
