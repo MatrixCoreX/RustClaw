@@ -110,7 +110,6 @@ crates/clawcli/src/commands/task_control.rs	parse automation runs response	let b
 crates/clawcli/src/commands/task_control.rs	parse cancel-index response	let body: serde_json::Value = resp.json().context("parse cancel-index response")?;
 crates/clawcli/src/commands/task_control.rs	parse resume constraints json	.context("parse resume constraints json")?;
 crates/clawcli/src/commands/task_query.rs	wait_exit_code: {exit_code}	println!("wait_exit_code: {exit_code}");
-crates/clawcli/src/commands/tui.rs	keys: r refresh | w watch | c cancel | u resume | e export | q quit	println!("keys: r refresh | w watch | c cancel | u resume | e export | q quit");
 crates/clawcli/src/commands/tui.rs	list active tasks failed	.context("list active tasks failed")?;
 crates/clawcli/src/main.rs	Terminal CLI to interact with clawd	#[command(about = "Terminal CLI to interact with clawd")]
 crates/clawcli/src/output.rs	next_action: {next_action}	lines.push(format!("next_action: {next_action}"));
@@ -119,15 +118,12 @@ crates/clawcli/src/task.rs	parse cancel task response	let body: serde_json::Valu
 crates/clawcli/src/task.rs	parse get task response	let body: serde_json::Value = resp.json().context("parse get task response")?;
 crates/clawcli/src/task.rs	response missing data.task_id	.ok_or_else(|| anyhow::anyhow!("response missing data.task_id"))?;
 crates/clawd/src/agent_engine.rs	LLM should infer continuation from resume context and user follow-up.	"hint": "LLM should infer continuation from resume context and user follow-up."
-crates/clawd/src/agent_engine.rs	No skill playbooks configured.	"No skill playbooks configured.".to_string()
 crates/clawd/src/agent_engine.rs	User must explicitly confirm before executing the remaining actions.	"hint": "User must explicitly confirm before executing the remaining actions."
 crates/clawd/src/agent_engine.rs	check task running state failed: {err}	Err(err) => Err(format!("check task running state failed: {err}")),
 crates/clawd/src/agent_engine.rs	error_summary: {safe_err}	format!("error_summary: {safe_err}"),
 crates/clawd/src/agent_engine.rs	failed_action: {failed_action}	format!("failed_action: {failed_action}"),
 crates/clawd/src/agent_engine.rs	failed_step_index: {failed_index}	format!("failed_step_index: {failed_index}"),
 crates/clawd/src/agent_engine.rs	remaining_steps_count: {remaining_steps_count}	format!("remaining_steps_count: {remaining_steps_count}"),
-crates/clawd/src/agent_engine.rs	skill enabled but registry prompt_file logical path missing	"skill enabled but registry prompt_file logical path missing".to_string()
-crates/clawd/src/agent_engine.rs	use this skill when user intent matches its capability	"use this skill when user intent matches its capability".to_string()
 crates/clawd/src/agent_engine/arg_resolver.rs	double brace placeholder regex	Regex::new(r"\\{\\{\\s*([^{}]+?)\\s*\\}\\}").expect("double brace placeholder regex")
 crates/clawd/src/agent_engine/arg_resolver.rs	默认 path 兜底	// AUTO_LOCATOR 只是 turn 级"默认 path 兜底"，仅当 LLM 给的 path 看起来是
 crates/clawd/src/agent_engine/async_start_checkpoint.rs	agent-loop:{}:round-{}:step-{}:async-job:{}	"agent-loop:{}:round-{}:step-{}:async-job:{}",
@@ -156,7 +152,6 @@ crates/clawd/src/agent_engine/observed_output_entries.rs	### prior_turn_executio
 crates/clawd/src/agent_engine/observed_output_entries.rs	### prior_turn_observed_output\n{}	"### prior_turn_observed_output\\n{}",
 crates/clawd/src/agent_engine/observed_output_entries.rs	### route_contract_facts\nresolved_target_path: {resolved_path}\npath_rule: use resolved_target_path as the target file path; do not infer the target path from file content fields such as WorkingDirectory.	"### route_contract_facts\\nresolved_target_path: {resolved_path}\\npath_rule: use resolved_target_path as the target file path; do not infer the target path from file content fields such as WorkingDirectory."
 crates/clawd/src/agent_engine/observed_output_entries.rs	Most recent generated output:\n	const MARKER: &str = "Most recent generated output:\\n";
-crates/clawd/src/agent_engine/observed_output_entries.rs	execution_status: error\nerror_summary: {}	"execution_status: error\\nerror_summary: {}",
 crates/clawd/src/agent_engine/observed_output_entries.rs	{}:command:{command}:kind:{}:exit:{exit_code:?}	"{}:command:{command}:kind:{}:exit:{exit_code:?}",
 crates/clawd/src/agent_engine/observed_output_process_service.rs	no matching processes for filter:	.find_map(|line| line.strip_prefix("no matching processes for filter:"))
 crates/clawd/src/agent_engine/observed_output_success.rs	# Test Workspace\nThis directory is reserved.	"# Test Workspace\\nThis directory is reserved.",
@@ -412,7 +407,6 @@ crates/clawd/src/finalize/loop_reply_route_helpers.rs	clarify_case: {clarify_cas
 crates/clawd/src/finalize/task.rs	Unfinished goal\nUser request: {}\nCurrent blocker: {}	"Unfinished goal\\nUser request: {}\\nCurrent blocker: {}",
 crates/clawd/src/finalize/task.rs	上一次状态	// from = None 因为 dispatch 内部各分支态没向调用面回传"上一次状态"；
 crates/clawd/src/finalize/task_machine_kv_summary.rs	Return target, status, manager_type.	"Return target, status, manager_type.",
-crates/clawd/src/finalize/task_resume.rs	Execution failed.	.unwrap_or("Execution failed.");
 crates/clawd/src/finalize/task_terminal_clarify.rs	Which file do you want me to read?	args: json!({"content": "Which file do you want me to read?"}),
 crates/clawd/src/finalize/task_terminal_clarify.rs	Which file do you want me to read?	let mut answer_text = "Which file do you want me to read?".to_string();
 crates/clawd/src/fixture_replay_e2e.rs	acquire main-db conn for mark_running: {e}	.map_err(|e| format!("acquire main-db conn for mark_running: {e}"))?
@@ -558,8 +552,6 @@ crates/clawd/src/http/ui_routes/health_skills_import.rs	uploaded bundle is missi
 crates/clawd/src/http/ui_routes/health_skills_import.rs	write uploaded file failed: {err}	error: Some(format!("write uploaded file failed: {err}")),
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	build llm test client failed: {err}	.map_err(|err| format!("build llm test client failed: {err}"))?;
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	llm connectivity test failed: {err}	error: Some(format!("llm connectivity test failed: {err}")),
-crates/clawd/src/http/ui_routes/llm_skill_config.rs	model is not in the configured pool for vendor {selected_vendor}: {selected_model}	"model is not in the configured pool for vendor {selected_vendor}: {selected_model}"
-crates/clawd/src/http/ui_routes/llm_skill_config.rs	model is not in the configured pool for vendor {selected_vendor}: {selected_model}	"model is not in the configured pool for vendor {selected_vendor}: {selected_model}"
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	only imported external skills can be uninstalled here	error: Some("only imported external skills can be uninstalled here".to_string()),
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	read llm config failed: {err}	error: Some(format!("read llm config failed: {err}")),
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	read llm config failed: {err}	error: Some(format!("read llm config failed: {err}")),
@@ -587,7 +579,6 @@ crates/clawd/src/http/ui_routes/llm_skill_config.rs	write llm config failed: {er
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	write skills config failed: {err}	error: Some(format!("write skills config failed: {err}")),
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	write skills config failed: {err}	error: Some(format!("write skills config failed: {err}")),
 crates/clawd/src/http/ui_routes/llm_skill_config.rs	write skills registry failed: {err}	error: Some(format!("write skills registry failed: {err}")),
-crates/clawd/src/http/ui_routes/llm_skill_config.rs	连接测试通过：{provider_name} 可正常响应。	"连接测试通过：{provider_name} 可正常响应。",
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	load usage task meta failed: {err}	error: Some(format!("load usage task meta failed: {err}")),
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	load usage task meta failed: {err}	error: Some(format!("load usage task meta failed: {err}")),
 crates/clawd/src/http/ui_routes/logs_usage_debug.rs	open usage log failed: {err}	error: Some(format!("open usage log failed: {err}")),
@@ -627,7 +618,6 @@ crates/clawd/src/http/ui_routes/model_provider_config.rs	saved but re-read faile
 crates/clawd/src/http/ui_routes/model_provider_config.rs	saved but re-read failed: {err}	error: Some(format!("saved but re-read failed: {err}")),
 crates/clawd/src/http/ui_routes/model_provider_config.rs	write model config failed: {err}	error: Some(format!("write model config failed: {err}")),
 crates/clawd/src/http/ui_routes/model_provider_config.rs	write provider keys failed: {err}	error: Some(format!("write provider keys failed: {err}")),
-crates/clawd/src/http/ui_routes/nni_internal_llm.rs	NNI 设备签名操作完成。	"message": "NNI 设备签名操作完成。",
 crates/clawd/src/http/ui_routes/nni_internal_llm.rs	failed to run signature helper: {err}	return Err(format!("failed to run signature helper: {err}"));
 crates/clawd/src/http/ui_routes/nni_internal_llm.rs	internal llm call failed: {err}	format!("internal llm call failed: {err}"),
 crates/clawd/src/http/ui_routes/nni_internal_llm.rs	internal llm model override requires a loaded config path	return Err("internal llm model override requires a loaded config path".to_string());
@@ -643,14 +633,6 @@ crates/clawd/src/http/ui_routes/nni_internal_llm.rs	signature helper returned em
 crates/clawd/src/http/ui_routes/nni_internal_llm.rs	signature helper returned non-json output: {err}: {stdout}	format!("signature helper returned non-json output: {err}: {stdout}")
 crates/clawd/src/http/ui_routes/nni_internal_llm.rs	signature helper timed out after {NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS}s	"signature helper timed out after {NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS}s"
 crates/clawd/src/http/ui_routes/nni_internal_llm.rs	unsupported NNI action: {action}	format!("unsupported NNI action: {action}"),
-crates/clawd/src/http/ui_routes/nni_internal_llm.rs	如果这是无签名芯片设备，可以忽略本页签名操作；如果应当有芯片，请检查 I2C 接线、地址和 cryptoauthlib 环境。	"next_step": "如果这是无签名芯片设备，可以忽略本页签名操作；如果应当有芯片，请检查 I2C 接线、地址和 cryptoauthlib 环境。",
-crates/clawd/src/http/ui_routes/nni_internal_llm.rs	如果这是无签名芯片设备，可以忽略本页签名操作；如果应当有芯片，请检查 I2C 接线、地址和 cryptoauthlib 环境。	"next_step": "如果这是无签名芯片设备，可以忽略本页签名操作；如果应当有芯片，请检查 I2C 接线、地址和 cryptoauthlib 环境。",
-crates/clawd/src/http/ui_routes/nni_internal_llm.rs	已检测到设备签名芯片，NNI 设备签名可用。	"message": "已检测到设备签名芯片，NNI 设备签名可用。",
-crates/clawd/src/http/ui_routes/nni_internal_llm.rs	未检测到设备签名芯片。此设备仍可使用 RustClaw，NNI 的设备签名能力暂不可用。	"message": "未检测到设备签名芯片。此设备仍可使用 RustClaw，NNI 的设备签名能力暂不可用。",
-crates/clawd/src/http/ui_routes/nni_internal_llm.rs	未检测到设备签名芯片。此设备仍可使用 RustClaw，NNI 的设备签名能力暂不可用。	"message": "未检测到设备签名芯片。此设备仍可使用 RustClaw，NNI 的设备签名能力暂不可用。",
-crates/clawd/src/http/ui_routes/nni_internal_llm.rs	未检测到设备签名芯片，无法完成本次 NNI 签名操作。	"message": "未检测到设备签名芯片，无法完成本次 NNI 签名操作。",
-crates/clawd/src/http/ui_routes/nni_internal_llm.rs	未检测到设备签名芯片，无法完成本次 NNI 签名操作。	"message": "未检测到设备签名芯片，无法完成本次 NNI 签名操作。",
-crates/clawd/src/http/ui_routes/nni_internal_llm.rs	设备签名 helper 未安装，无法检测签名芯片。	"message": "设备签名 helper 未安装，无法检测签名芯片。",
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	heartbeat_request_body_failed: {err}	NniHeartbeatError::non_network(format!("heartbeat_request_body_failed: {err}"))
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	heartbeat_request_network_failed: {err}	NniHeartbeatError::network(format!("heartbeat_request_network_failed: {err}"))
 crates/clawd/src/http/ui_routes/nni_remote_join.rs	heartbeat_signature_helper_failed: {err}	NniHeartbeatError::non_network(format!("heartbeat_signature_helper_failed: {err}"))
@@ -701,10 +683,7 @@ crates/clawd/src/http/ui_routes/skill_import_config.rs	write prompt file failed:
 crates/clawd/src/http/ui_routes/skill_import_config.rs	write skills registry failed: {err}	error: Some(format!("write skills registry failed: {err}")),
 crates/clawd/src/http/ui_routes/workspace_update.rs	... output truncated ...	if raw.starts_with("... output truncated ...") {
 crates/clawd/src/http/ui_routes/workspace_update.rs	; fi; cargo build -p clawd --release	r#"set -euo pipefail; if [[ -f "$HOME/.cargo/env" ]]; then . "$HOME/.cargo/env"; fi; cargo build -p clawd --release"#,
-crates/clawd/src/http/ui_routes/workspace_update.rs	RustClaw 正在重启，请等待 10-20 秒后刷新页面。	guard.next_step = Some("RustClaw 正在重启，请等待 10-20 秒后刷新页面。".to_string());
-crates/clawd/src/http/ui_routes/workspace_update.rs	RustClaw 正在重启，请等待 10-20 秒后刷新页面。	guard.next_step = Some("RustClaw 正在重启，请等待 10-20 秒后刷新页面。".to_string());
 crates/clawd/src/http/ui_routes/workspace_update.rs	cargo build -p clawd --release failed	"cargo build -p clawd --release failed",
-crates/clawd/src/http/ui_routes/workspace_update.rs	clawd 构建已完成，但自动重启失败。请在服务器上手动重启 clawd。	"clawd 构建已完成，但自动重启失败。请在服务器上手动重启 clawd。",
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to capture {program} stderr	.ok_or_else(|| format!("failed to capture {program} stderr"))?;
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to capture {program} stdout	.ok_or_else(|| format!("failed to capture {program} stdout"))?;
 crates/clawd/src/http/ui_routes/workspace_update.rs	failed to read build log stream: {err}	&format!("failed to read build log stream: {err}"),
@@ -725,31 +704,6 @@ crates/clawd/src/http/ui_routes/workspace_update.rs	set -euo pipefail; if [[ -f 
 crates/clawd/src/http/ui_routes/workspace_update.rs	workspace update canceled by user	guard.error = Some("workspace update canceled by user".to_string());
 crates/clawd/src/http/ui_routes/workspace_update.rs	{program} timed out after {timeout_seconds}s	.map_err(|_| format!("{program} timed out after {timeout_seconds}s"))?
 crates/clawd/src/http/ui_routes/workspace_update.rs	{program} timed out after {timeout_seconds}s	return Err(format!("{program} timed out after {timeout_seconds}s"));
-crates/clawd/src/http/ui_routes/workspace_update.rs	已只覆盖 {} 个冲突路径；其他本地改动和额外文件保持不动，正在重新拉取远端。	"已只覆盖 {} 个冲突路径；其他本地改动和额外文件保持不动，正在重新拉取远端。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	已覆盖识别到的冲突文件，但重新拉取仍失败；其他本地文件未动，请查看 Git 输出后手动处理。	"已覆盖识别到的冲突文件，但重新拉取仍失败；其他本地文件未动，请查看 Git 输出后手动处理。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	已覆盖识别到的冲突文件，但重新拉取仍失败；其他本地文件未动，请查看 Git 输出后手动处理。	"已覆盖识别到的冲突文件，但重新拉取仍失败；其他本地文件未动，请查看 Git 输出后手动处理。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	拉取失败，且无法可靠识别冲突文件；已保留本地文件，请手动处理后重试。	"拉取失败，且无法可靠识别冲突文件；已保留本地文件，请手动处理后重试。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	拉取失败，但没有发现远端变更与本地未提交文件的直接冲突；已保留本地文件，请手动检查分支是否分叉或权限是否正常。	"拉取失败，但没有发现远端变更与本地未提交文件的直接冲突；已保留本地文件，请手动检查分支是否分叉或权限是否正常。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	拉取远端失败；已保留本地文件，请确认 Git 和网络状态后重试。	"拉取远端失败；已保留本地文件，请确认 Git 和网络状态后重试。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	更新要求以远端为准；远端检查失败时不会继续编译本地代码。请确认网络、Git remote 和 SSH key 后重试。	"更新要求以远端为准；远端检查失败时不会继续编译本地代码。请确认网络、Git remote 和 SSH key 后重试。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	更新要求以远端为准；远端检查失败时不会继续编译本地代码。请确认网络、Git remote 和 SSH key 后重试。	"更新要求以远端为准；远端检查失败时不会继续编译本地代码。请确认网络、Git remote 和 SSH key 后重试。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	未能读取 upstream，无法确认远端目标版本。请确认当前分支已设置 upstream 后重试。	"未能读取 upstream，无法确认远端目标版本。请确认当前分支已设置 upstream 后重试。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	未能读取 upstream，无法确认远端目标版本。请确认当前分支已设置 upstream 后重试。	"未能读取 upstream，无法确认远端目标版本。请确认当前分支已设置 upstream 后重试。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	构建已完成，但自动重启失败。请在服务器上手动重启 clawd。	"构建已完成，但自动重启失败。请在服务器上手动重启 clawd。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	正在停止当前编译进程。	status_guard.next_step = Some("正在停止当前编译进程。".to_string());
-crates/clawd/src/http/ui_routes/workspace_update.rs	正在编译，编译日志会持续刷新。	guard.next_step = Some("正在编译，编译日志会持续刷新。".to_string());
-crates/clawd/src/http/ui_routes/workspace_update.rs	正在编译，编译日志会持续刷新。	guard.next_step = Some("正在编译，编译日志会持续刷新。".to_string());
-crates/clawd/src/http/ui_routes/workspace_update.rs	编译已停止；可以修复问题后重新编译。	guard.next_step = Some("编译已停止；可以修复问题后重新编译。".to_string());
-crates/clawd/src/http/ui_routes/workspace_update.rs	覆盖冲突文件失败；未冲突的本地文件已保持不动，请手动处理后重试。	"覆盖冲突文件失败；未冲突的本地文件已保持不动，请手动处理后重试。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	请查看 UI 编译日志；修复依赖或编译错误后再重试。	"请查看 UI 编译日志；修复依赖或编译错误后再重试。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	请查看 clawd 编译日志；修复 Rust 编译错误后再重试。	"请查看 clawd 编译日志；修复 Rust 编译错误后再重试。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	请查看构建日志摘要；修复依赖或编译错误后再重试。	"请查看构建日志摘要；修复依赖或编译错误后再重试。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	请确认 Rust 依赖完整，并查看编译日志。	fail_workspace_update_with_error(&shared, err, "请确认 Rust 依赖完整，并查看编译日志。");
-crates/clawd/src/http/ui_routes/workspace_update.rs	请确认 RustClaw 目录是有效 Git 仓库。	"请确认 RustClaw 目录是有效 Git 仓库。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	请确认 UI 依赖完整，并查看编译日志。	"请确认 UI 依赖完整，并查看编译日志。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	请确认当前用户可以在 RustClaw 目录中运行 git。	"请确认当前用户可以在 RustClaw 目录中运行 git。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	请确认服务器依赖完整，并查看构建日志。	"请确认服务器依赖完整，并查看构建日志。",
-crates/clawd/src/http/ui_routes/workspace_update.rs	远端没有新版本；本地文件保持不动，将继续执行完整编译。	Some("远端没有新版本；本地文件保持不动，将继续执行完整编译。".to_string());
 crates/clawd/src/intent/continuation_resolver.rs	Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}	"Continue the previous request that was waiting for clarification: {}\\nUser now provides the missing target or content: {}",
 crates/clawd/src/intent/continuation_resolver.rs	Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}	"Continue the previous request that was waiting for clarification: {}\\nUser now provides the missing target or content: {}",
 crates/clawd/src/intent/continuation_resolver.rs	Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}	"Continue the previous request that was waiting for clarification: {}\\nUser now provides the missing target or content: {}",
@@ -917,36 +871,12 @@ crates/clawd/src/providers/output.rs	read model io archives dir failed: {err}	wa
 crates/clawd/src/providers/output.rs	write model io log failed: {err}	warn!("write model io log failed: {err}");
 crates/clawd/src/providers/output.rs	按日归档 + 旧档过期	// 完成"按日归档 + 旧档过期"，append 侧保持 O(1)。
 crates/clawd/src/repo/audit.rs	INSERT INTO audit_logs (ts, user_id, action, detail_json, error_text) VALUES (?1, ?2, ?3, ?4, ?5)	"INSERT INTO audit_logs (ts, user_id, action, detail_json, error_text) VALUES (?1, ?2, ?3, ?4, ?5)",
-crates/clawd/src/repo/auth.rs	ALTER TABLE audit_logs ADD COLUMN user_key TEXT	"ALTER TABLE audit_logs ADD COLUMN user_key TEXT",
-crates/clawd/src/repo/auth.rs	ALTER TABLE long_term_memories ADD COLUMN user_key TEXT	"ALTER TABLE long_term_memories ADD COLUMN user_key TEXT",
-crates/clawd/src/repo/auth.rs	ALTER TABLE memories ADD COLUMN user_key TEXT	"ALTER TABLE memories ADD COLUMN user_key TEXT",
-crates/clawd/src/repo/auth.rs	ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_device_code TEXT	"ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_device_code TEXT",
-crates/clawd/src/repo/auth.rs	ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_poll_interval_seconds INTEGER	"ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_poll_interval_seconds INTEGER",
-crates/clawd/src/repo/auth.rs	ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_verification_url TEXT	"ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_verification_url TEXT",
-crates/clawd/src/repo/auth.rs	ALTER TABLE scheduled_jobs ADD COLUMN isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace'	"ALTER TABLE scheduled_jobs ADD COLUMN isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace'",
-crates/clawd/src/repo/auth.rs	ALTER TABLE scheduled_jobs ADD COLUMN isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace'	"ALTER TABLE scheduled_jobs ADD COLUMN isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace'",
-crates/clawd/src/repo/auth.rs	ALTER TABLE scheduled_jobs ADD COLUMN last_thread_task_id TEXT	"ALTER TABLE scheduled_jobs ADD COLUMN last_thread_task_id TEXT",
-crates/clawd/src/repo/auth.rs	ALTER TABLE scheduled_jobs ADD COLUMN last_thread_task_id TEXT	"ALTER TABLE scheduled_jobs ADD COLUMN last_thread_task_id TEXT",
-crates/clawd/src/repo/auth.rs	ALTER TABLE scheduled_jobs ADD COLUMN permission_policy_json TEXT NOT NULL DEFAULT '{}'	"ALTER TABLE scheduled_jobs ADD COLUMN permission_policy_json TEXT NOT NULL DEFAULT '{}'",
-crates/clawd/src/repo/auth.rs	ALTER TABLE scheduled_jobs ADD COLUMN permission_policy_json TEXT NOT NULL DEFAULT '{}'	"ALTER TABLE scheduled_jobs ADD COLUMN permission_policy_json TEXT NOT NULL DEFAULT '{}'",
-crates/clawd/src/repo/auth.rs	ALTER TABLE scheduled_jobs ADD COLUMN thread_resume_enabled INTEGER NOT NULL DEFAULT 1	"ALTER TABLE scheduled_jobs ADD COLUMN thread_resume_enabled INTEGER NOT NULL DEFAULT 1",
-crates/clawd/src/repo/auth.rs	ALTER TABLE scheduled_jobs ADD COLUMN thread_resume_enabled INTEGER NOT NULL DEFAULT 1	"ALTER TABLE scheduled_jobs ADD COLUMN thread_resume_enabled INTEGER NOT NULL DEFAULT 1",
-crates/clawd/src/repo/auth.rs	ALTER TABLE scheduled_jobs ADD COLUMN user_key TEXT	"ALTER TABLE scheduled_jobs ADD COLUMN user_key TEXT",
-crates/clawd/src/repo/auth.rs	ALTER TABLE tasks ADD COLUMN user_key TEXT	"ALTER TABLE tasks ADD COLUMN user_key TEXT",
-crates/clawd/src/repo/auth.rs	ALTER TABLE user_preferences ADD COLUMN user_key TEXT	"ALTER TABLE user_preferences ADD COLUMN user_key TEXT",
-crates/clawd/src/repo/auth.rs	CHECK (role IN ('admin', 'user'))	let needs_rebuild = table_sql.contains("CHECK (role IN ('admin', 'user'))")
-crates/clawd/src/repo/auth.rs	CHECK(role IN ('admin', 'user'))	|| table_sql.contains("CHECK(role IN ('admin', 'user'))");
 crates/clawd/src/repo/auth.rs	DELETE FROM audit_logs	conn.execute("DELETE FROM audit_logs", [])
 crates/clawd/src/repo/auth.rs	DELETE FROM {table_name}	let sql = format!("DELETE FROM {table_name}");
 crates/clawd/src/repo/auth.rs	SELECT COUNT(*) FROM auth_keys	db.query_row("SELECT COUNT(*) FROM auth_keys", [], |row| row.get(0))?;
-crates/clawd/src/repo/auth.rs	UNIQUE(user_id, chat_id)	if !table_sql.contains("UNIQUE(user_id, chat_id)") {
-crates/clawd/src/repo/auth.rs	UNIQUE(user_id, chat_id, pref_key)	if !table_sql.contains("UNIQUE(user_id, chat_id, pref_key)") {
-crates/clawd/src/repo/auth.rs	UNIQUE(user_id, chat_id, user_key)	if table_sql.contains("UNIQUE(user_id, chat_id, user_key)") {
-crates/clawd/src/repo/auth.rs	UNIQUE(user_id, chat_id, user_key, pref_key)	if table_sql.contains("UNIQUE(user_id, chat_id, user_key, pref_key)") {
 crates/clawd/src/repo/auth.rs	admin key already exists	return Err(anyhow::anyhow!("admin key already exists"));
 crates/clawd/src/repo/auth.rs	admin key cannot be deleted; rotate a new admin key instead	"admin key cannot be deleted; rotate a new admin key instead"
 crates/clawd/src/repo/auth.rs	api_key and api_secret are required	return Err(anyhow::anyhow!("api_key and api_secret are required"));
-crates/clawd/src/repo/auth.rs	auth_keys schema: skip single-admin unique index because multiple admin rows already exist	info!("auth_keys schema: skip single-admin unique index because multiple admin rows already exist");
 crates/clawd/src/repo/auth.rs	cannot change current admin key role	return Err(anyhow::anyhow!("cannot change current admin key role"));
 crates/clawd/src/repo/auth.rs	cannot change the admin key role	return Err(anyhow::anyhow!("cannot change the admin key role"));
 crates/clawd/src/repo/auth.rs	cannot delete current key	return Err(anyhow::anyhow!("cannot delete current key"));
@@ -975,6 +905,30 @@ crates/clawd/src/repo/auth.rs	rebound user_key in audit_logs after admin rotatio
 crates/clawd/src/repo/auth.rs	user_key is required	anyhow::bail!("user_key is required");
 crates/clawd/src/repo/auth.rs	user_key is required	return Err(anyhow::anyhow!("user_key is required"));
 crates/clawd/src/repo/auth.rs	verification_url is required	anyhow::bail!("verification_url is required");
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE audit_logs ADD COLUMN user_key TEXT	"ALTER TABLE audit_logs ADD COLUMN user_key TEXT",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE long_term_memories ADD COLUMN user_key TEXT	"ALTER TABLE long_term_memories ADD COLUMN user_key TEXT",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE memories ADD COLUMN user_key TEXT	"ALTER TABLE memories ADD COLUMN user_key TEXT",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_device_code TEXT	"ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_device_code TEXT",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_poll_interval_seconds INTEGER	"ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_poll_interval_seconds INTEGER",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_verification_url TEXT	"ALTER TABLE pending_channel_bind_sessions ADD COLUMN install_verification_url TEXT",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE scheduled_jobs ADD COLUMN isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace'	"ALTER TABLE scheduled_jobs ADD COLUMN isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace'",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE scheduled_jobs ADD COLUMN isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace'	"ALTER TABLE scheduled_jobs ADD COLUMN isolation_profile TEXT NOT NULL DEFAULT 'local_current_workspace'",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE scheduled_jobs ADD COLUMN last_thread_task_id TEXT	"ALTER TABLE scheduled_jobs ADD COLUMN last_thread_task_id TEXT",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE scheduled_jobs ADD COLUMN last_thread_task_id TEXT	"ALTER TABLE scheduled_jobs ADD COLUMN last_thread_task_id TEXT",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE scheduled_jobs ADD COLUMN permission_policy_json TEXT NOT NULL DEFAULT '{}'	"ALTER TABLE scheduled_jobs ADD COLUMN permission_policy_json TEXT NOT NULL DEFAULT '{}'",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE scheduled_jobs ADD COLUMN permission_policy_json TEXT NOT NULL DEFAULT '{}'	"ALTER TABLE scheduled_jobs ADD COLUMN permission_policy_json TEXT NOT NULL DEFAULT '{}'",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE scheduled_jobs ADD COLUMN thread_resume_enabled INTEGER NOT NULL DEFAULT 1	"ALTER TABLE scheduled_jobs ADD COLUMN thread_resume_enabled INTEGER NOT NULL DEFAULT 1",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE scheduled_jobs ADD COLUMN thread_resume_enabled INTEGER NOT NULL DEFAULT 1	"ALTER TABLE scheduled_jobs ADD COLUMN thread_resume_enabled INTEGER NOT NULL DEFAULT 1",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE scheduled_jobs ADD COLUMN user_key TEXT	"ALTER TABLE scheduled_jobs ADD COLUMN user_key TEXT",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE tasks ADD COLUMN user_key TEXT	"ALTER TABLE tasks ADD COLUMN user_key TEXT",
+crates/clawd/src/repo/auth/schema.rs	ALTER TABLE user_preferences ADD COLUMN user_key TEXT	"ALTER TABLE user_preferences ADD COLUMN user_key TEXT",
+crates/clawd/src/repo/auth/schema.rs	CHECK (role IN ('admin', 'user'))	let needs_rebuild = table_sql.contains("CHECK (role IN ('admin', 'user'))")
+crates/clawd/src/repo/auth/schema.rs	CHECK(role IN ('admin', 'user'))	|| table_sql.contains("CHECK(role IN ('admin', 'user'))");
+crates/clawd/src/repo/auth/schema.rs	UNIQUE(user_id, chat_id)	if !table_sql.contains("UNIQUE(user_id, chat_id)") {
+crates/clawd/src/repo/auth/schema.rs	UNIQUE(user_id, chat_id, pref_key)	if !table_sql.contains("UNIQUE(user_id, chat_id, pref_key)") {
+crates/clawd/src/repo/auth/schema.rs	UNIQUE(user_id, chat_id, user_key)	if table_sql.contains("UNIQUE(user_id, chat_id, user_key)") {
+crates/clawd/src/repo/auth/schema.rs	UNIQUE(user_id, chat_id, user_key, pref_key)	if table_sql.contains("UNIQUE(user_id, chat_id, user_key, pref_key)") {
+crates/clawd/src/repo/auth/schema.rs	auth_keys schema: skip single-admin unique index because multiple admin rows already exist	info!("auth_keys schema: skip single-admin unique index because multiple admin rows already exist");
 crates/clawd/src/repo/auth_webd.rs	invalid stored password hash: {e}	.map_err(|e| anyhow::anyhow!("invalid stored password hash: {e}"))?;
 crates/clawd/src/repo/auth_webd.rs	user_key does not exist or is disabled in auth_keys	anyhow::bail!("user_key does not exist or is disabled in auth_keys");
 crates/clawd/src/repo/auth_webd.rs	username already assigned to another key	anyhow::bail!("username already assigned to another key");
@@ -1029,34 +983,12 @@ crates/clawd/src/self_extension.rs	missing permanent extension plan	let detail =
 crates/clawd/src/self_extension.rs	missing temporary fix plan	let detail = "missing temporary fix plan";
 crates/clawd/src/self_extension.rs	skill semaphore closed: {err}	.map_err(|err| format!("skill semaphore closed: {err}"))?;
 crates/clawd/src/semantic_judge.rs	最终文本是否对外发布	//! - finalize 层是"最终文本是否对外发布"的唯一仲裁点；planning / skill_execution
-crates/clawd/src/skills.rs	command failed to start	"spawn_failed" => "command failed to start".to_string(),
-crates/clawd/src/skills.rs	command failed with a non-zero exit status	"command failed with a non-zero exit status".to_string()
-crates/clawd/src/skills.rs	command failed with exit code {exit_code}	_ => format!("command failed with exit code {exit_code}"),
-crates/clawd/src/skills.rs	command failed: command is not executable (exit code {exit_code})	format!("command failed: command is not executable (exit code {exit_code})")
-crates/clawd/src/skills.rs	command failed: command not found (exit code {exit_code})	format!("command failed: command not found (exit code {exit_code})")
-crates/clawd/src/skills.rs	command failed: terminated by signal or shell status (exit code {exit_code})	format!("command failed: terminated by signal or shell status (exit code {exit_code})")
-crates/clawd/src/skills.rs	command idle timed out	"idle_timeout" => "command idle timed out".to_string(),
-crates/clawd/src/skills.rs	command input is invalid	"invalid_input" => "command input is invalid".to_string(),
-crates/clawd/src/skills.rs	command output read failed	"output_read_failed" => "command output read failed".to_string(),
-crates/clawd/src/skills.rs	directory operation failed: target is not a directory	"directory operation failed: target is not a directory".to_string()
-crates/clawd/src/skills.rs	directory operation failed: target is not a directory	"directory operation failed: target is not a directory".to_string()
-crates/clawd/src/skills.rs	directory operation failed: target matched multiple candidates	"directory operation failed: target matched multiple candidates".to_string()
-crates/clawd/src/skills.rs	file not found: {trimmed}	return format!("file not found: {trimmed}");
-crates/clawd/src/skills.rs	file operation failed: invalid arguments	"invalid_args" => "file operation failed: invalid arguments".to_string(),
-crates/clawd/src/skills.rs	file operation failed: permission denied by the operating system	"file operation failed: permission denied by the operating system".to_string()
-crates/clawd/src/skills.rs	file operation failed: target is a directory, not a regular file	"file operation failed: target is a directory, not a regular file".to_string()
-crates/clawd/src/skills.rs	file operation failed: target path was not found	"not_found" => "file operation failed: target path was not found".to_string(),
-crates/clawd/src/skills.rs	planned tool step was not allowed for this request	return "planned tool step was not allowed for this request".to_string();
 crates/clawd/src/skills.rs	policy_token: {policy_token}	format!("policy_token: {policy_token}"),
 crates/clawd/src/skills.rs	private exchange account access failed	"private exchange account access failed".to_string()
 crates/clawd/src/skills.rs	private exchange account access failed	.unwrap_or("private exchange account access failed")
-crates/clawd/src/skills.rs	read operation failed: permission denied by the operating system	"read operation failed: permission denied by the operating system".to_string()
-crates/clawd/src/skills.rs	read operation failed: target is a directory, not a regular file	"read operation failed: target is a directory, not a regular file".to_string()
-crates/clawd/src/skills.rs	read operation failed: target path was not found	"not_found" => "read operation failed: target path was not found".to_string(),
 crates/clawd/src/skills.rs	secrets 成为唯一渠道	///   契约下来 —— 这才是 §3.4 "secrets 成为唯一渠道" 的真正落地。
 crates/clawd/src/skills.rs	skill semaphore closed: {err}	.map_err(|err| format!("skill semaphore closed: {err}"))?;
 crates/clawd/src/skills.rs	skill_name is empty	return Err("skill_name is empty".to_string());
-crates/clawd/src/skills.rs	write operation failed: content is too large	"content_too_large" => "write operation failed: content is too large".to_string(),
 crates/clawd/src/skills.rs	假装 registry 没加载	/// - 直接调本函数等价于"假装 registry 没加载"，会丢掉别名归一化能力。
 crates/clawd/src/skills.rs	双来源真相	/// 是典型的"双来源真相"。现在已经把那张表里的所有别名（包括拼写错容错 `fs_rearch`）
 crates/clawd/src/skills.rs	哪些 skill 是 builtin（in-process）	/// 用这个常量名单兜底"哪些 skill 是 builtin（in-process）"。**真正生效的是
@@ -2381,7 +2313,6 @@ crates/telegramd/src/media_handlers.rs	submit audio_synthesize failed: {err}	war
 crates/telegramd/src/media_handlers.rs	submit audio_transcribe task failed	.context("submit audio_transcribe task failed")?;
 crates/telegramd/src/media_handlers.rs	telegram get_file failed	.context("telegram get_file failed")?;
 crates/telegramd/src/media_handlers.rs	write downloaded file failed	.context("write downloaded file failed")?;
-crates/telegramd/src/message_handler.rs	agent mode lock poisoned	.map_err(|_| anyhow!("agent mode lock poisoned"))?;
 crates/telegramd/src/message_handler.rs	join rustclaw config task failed: {err}	.map_err(|err| anyhow!("join rustclaw config task failed: {err}"))?;
 crates/telegramd/src/message_handler.rs	send ask error failed	.context("send ask error failed")?;
 crates/telegramd/src/message_handler.rs	send empty prompt reply failed	.context("send empty prompt reply failed")?;

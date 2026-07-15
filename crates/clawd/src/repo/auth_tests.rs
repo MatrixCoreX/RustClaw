@@ -1,8 +1,8 @@
+use super::schema::{rebuild_auth_keys_for_flexible_roles, rebuild_channel_tables_for_ui};
 use super::*;
 use super::{
     get_auth_key_value_by_id_from_db, normalize_auth_key_role, rebind_user_key_references,
-    rebuild_auth_keys_for_flexible_roles, rebuild_channel_tables_for_ui, upsert_webd_login_account,
-    verify_webd_password_login,
+    upsert_webd_login_account, verify_webd_password_login,
 };
 use rusqlite::{params, Connection};
 
