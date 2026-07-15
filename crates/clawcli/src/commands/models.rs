@@ -50,7 +50,8 @@ pub(super) fn model_catalog_text_lines(body: &serde_json::Value) -> Vec<String> 
         .and_then(serde_json::Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or(&[]);
-    entries
+    let mut lines = vec![model_catalog_summary_line(body, entries.len())];
+    lines.extend(entries
         .iter()
         .map(|entry| {
             let provider = token(entry, "provider");
@@ -102,7 +103,18 @@ pub(super) fn model_catalog_text_lines(body: &serde_json::Value) -> Vec<String> 
             "model_catalog_entry provider={provider} model={model} active={active} api_style={api_style} base_url_kind={base_url_kind} credential_state={credential_state} context_window_tokens={context} input_modalities={input_modalities} output_modalities={output_modalities} {capabilities}"
             )
         })
-        .collect()
+    );
+    lines
+}
+
+fn model_catalog_summary_line(body: &serde_json::Value, entry_count: usize) -> String {
+    let data = body.pointer("/data").unwrap_or(&serde_json::Value::Null);
+    let schema_version = token(data, "schema_version");
+    let selected_provider = token(data, "selected_provider");
+    let selected_model = token(data, "selected_model");
+    format!(
+        "model_catalog_summary schema_version={schema_version} selected_provider={selected_provider} selected_model={selected_model} entry_count={entry_count}"
+    )
 }
 
 fn token(entry: &serde_json::Value, key: &str) -> String {

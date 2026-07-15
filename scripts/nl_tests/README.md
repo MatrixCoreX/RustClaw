@@ -186,6 +186,14 @@ must contain `CLAWCLI_LLM_TRACE_CONTRACT_SELF_TEST ok` and
 `LLM#1..N` / `llm_call_ref=LLM#` numbering, flow/code attribution, usage
 tokens, raw request/response fields, and UI teaching trace helpers remain
 machine-field driven.
+It also writes `clawcli_models_catalog_contracts.txt` from
+`scripts/check_clawcli_models_catalog_contracts.py --self-test` plus the main
+check. `gate_summary.env` records `clawcli_models_catalog_contracts=1`, and the
+artifact must contain `CLAWCLI_MODELS_CATALOG_CONTRACT_SELF_TEST ok` and
+`CLAWCLI_MODELS_CATALOG_CONTRACT_CHECK findings=0`, so `clawcli models catalog`,
+`model_catalog_summary`, `model_catalog_entry`, `credential_state`, provider
+filtering, modalities, capability flags, async/dry-run metadata, and UI model
+catalog display remain secret-free machine-field contracts.
 It also writes `semantic_boundary_contracts.txt` from
 `scripts/check_runtime_semantic_rewrite_boundary.py --self-test`,
 `scripts/check_contract_repair_loop_observation_boundary.py --self-test`,
@@ -240,6 +248,7 @@ root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/clawcli_session_tui_contracts.txt`,
 `agent_parity_gate/clawcli_goal_contracts.txt`,
 `agent_parity_gate/clawcli_llm_trace_contracts.txt`,
+`agent_parity_gate/clawcli_models_catalog_contracts.txt`,
 `agent_parity_gate/agent_loop_static_contracts.txt`,
 `agent_parity_gate/evidence_extractor_contracts.txt`, and
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
@@ -334,6 +343,13 @@ For `clawcli_llm_trace_contracts.txt`, the required content includes
 keeps `LLM#1..N` / `llm_call_ref=LLM#` numbering, flow/code attribution,
 provider/model/status/usage tokens, raw request/response fields, and UI teaching
 trace helpers as machine-field contracts.
+For `clawcli_models_catalog_contracts.txt`, the required content includes
+`CLAWCLI_MODELS_CATALOG_CONTRACT_SELF_TEST ok` and
+`CLAWCLI_MODELS_CATALOG_CONTRACT_CHECK findings=0`. This proves `clawcli models
+catalog` keeps `model_catalog_summary`, `model_catalog_entry`,
+`credential_state`, provider filtering, modalities, capability flags,
+async/dry-run metadata, and UI model catalog display as secret-free machine
+fields.
 For `agent_loop_static_contracts.txt`, the required content includes the six
 route/frontdoor/static `AGENT_LOOP_STATIC_SELF_TEST ...` labels as well as the
 main guard success tokens, including
