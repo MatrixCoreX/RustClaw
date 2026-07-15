@@ -212,6 +212,10 @@ python3 "${ROOT_DIR}/scripts/check_no_runtime_hard_reply.py" --all \
   --fail-on-new \
   > "${OUT_DIR}/runtime_hard_reply_baseline.txt"
 
+echo "AGENT_PARITY_GATE_STEP secret_scan_contract"
+python3 "${SCRIPT_DIR}/check_secret_scan_contract.py" --json \
+  > "${OUT_DIR}/secret_scan_contract.json"
+
 if [[ "$SKIP_COVERAGE" -eq 0 ]]; then
   echo "AGENT_PARITY_GATE_STEP compact_coverage"
   python3 "${SCRIPT_DIR}/check_compact_coverage.py" --report \
