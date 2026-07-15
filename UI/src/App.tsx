@@ -21,6 +21,7 @@ import {
 import {
   MULTIMODAL_KEYS,
   buildMultimodalMetaView,
+  buildModelCatalogEntryViews,
   type MultimodalKey,
 } from "./lib/model-config";
 import {
@@ -403,6 +404,9 @@ export default function App() {
     multimodalConfigSaving,
     multimodalConfigSaveMessage,
     modelsAdvancedOpen,
+    modelCatalogData,
+    modelCatalogLoading,
+    modelCatalogError,
     selectedLlmVendorInfo,
     hasCustomLlmVendor,
     hasUnsavedLlmChanges,
@@ -418,6 +422,7 @@ export default function App() {
     saveLlmConfig,
     testLlmConfig,
     fetchMultimodalConfig,
+    fetchModelCatalog,
     saveMultimodalConfig,
     setMultimodalDraftKey,
     applyLlmVendorDraft,
@@ -1087,6 +1092,7 @@ export default function App() {
     void fetchSkillsConfig();
     void fetchLlmConfig();
     void fetchMultimodalConfig();
+    void fetchModelCatalog();
     void fetchNniConfig();
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1165,6 +1171,7 @@ export default function App() {
     void fetchFeishuConfig();
     void fetchTelegramConfig();
     void fetchLlmConfig();
+    void fetchModelCatalog();
     void fetchNniConfig();
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1537,6 +1544,10 @@ export default function App() {
               llmTestError={llmTestError}
               hasUnsavedLlmChanges={hasUnsavedLlmChanges}
               modelsAdvancedOpen={modelsAdvancedOpen}
+              modelCatalogData={modelCatalogData}
+              modelCatalogLoading={modelCatalogLoading}
+              modelCatalogError={modelCatalogError}
+              modelCatalogEntryViews={buildModelCatalogEntryViews(modelCatalogData, lang)}
               multimodalDraft={multimodalDraft}
               multimodalConfigLoading={multimodalConfigLoading}
               multimodalConfigSaving={multimodalConfigSaving}
@@ -1551,6 +1562,7 @@ export default function App() {
               onTestLlmConfig={testLlmConfig}
               onSaveLlmConfig={saveLlmConfig}
               onToggleModelsAdvanced={() => setModelsAdvancedOpen((open) => !open)}
+              onFetchModelCatalog={fetchModelCatalog}
               onFetchMultimodalConfig={fetchMultimodalConfig}
               onSaveMultimodalConfig={saveMultimodalConfig}
               onMultimodalDraftChange={setMultimodalDraftKey}

@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import { ChevronDown, Database, Loader2, RefreshCw, Sparkles } from "lucide-react";
 
 import { llmVendorSupportsApiFormat } from "../lib/llm-config";
-import type { MultimodalDraft, MultimodalKey } from "../lib/model-config";
-import type { LlmConfigResponse, LlmVendorOption, ModelConfigItem } from "../types/api";
+import type { ModelCatalogEntryView, MultimodalDraft, MultimodalKey } from "../lib/model-config";
+import type { LlmConfigResponse, LlmVendorOption, ModelCatalogResponse, ModelConfigItem } from "../types/api";
 import { MultimodalConfigSection } from "./MultimodalConfigSection";
 
 type Translate = (zh: string, en: string) => string;
@@ -29,6 +29,10 @@ export interface ModelConfigPageProps {
   llmTestError: string | null;
   hasUnsavedLlmChanges: boolean;
   modelsAdvancedOpen: boolean;
+  modelCatalogData: ModelCatalogResponse | null;
+  modelCatalogLoading: boolean;
+  modelCatalogError: string | null;
+  modelCatalogEntryViews: ModelCatalogEntryView[];
   multimodalDraft: MultimodalDraft;
   multimodalConfigLoading: boolean;
   multimodalConfigSaving: boolean;
@@ -43,6 +47,7 @@ export interface ModelConfigPageProps {
   onTestLlmConfig: () => unknown | Promise<unknown>;
   onSaveLlmConfig: () => unknown | Promise<unknown>;
   onToggleModelsAdvanced: () => void;
+  onFetchModelCatalog: () => unknown | Promise<unknown>;
   onFetchMultimodalConfig: () => unknown | Promise<unknown>;
   onSaveMultimodalConfig: () => unknown | Promise<unknown>;
   onMultimodalDraftChange: (key: MultimodalKey, field: keyof ModelConfigItem, value: string) => void;
@@ -69,6 +74,10 @@ export function ModelConfigPage({
   llmTestError,
   hasUnsavedLlmChanges,
   modelsAdvancedOpen,
+  modelCatalogData,
+  modelCatalogLoading,
+  modelCatalogError,
+  modelCatalogEntryViews,
   multimodalDraft,
   multimodalConfigLoading,
   multimodalConfigSaving,
@@ -83,6 +92,7 @@ export function ModelConfigPage({
   onTestLlmConfig,
   onSaveLlmConfig,
   onToggleModelsAdvanced,
+  onFetchModelCatalog,
   onFetchMultimodalConfig,
   onSaveMultimodalConfig,
   onMultimodalDraftChange,
@@ -273,6 +283,77 @@ export function ModelConfigPage({
             </p>
           ) : null}
         </div>
+      </div>
+
+      <div className="mb-5 rounded-2xl border border-white/10 bg-black/20 p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold">{t("模型能力目录", "Model Capability Catalog")}</h3>
+            <p className="mt-1 text-sm text-white/55">
+              {t("这里展示运行时从配置读取到的模型、能力和长尾任务边界。", "This shows runtime model, capability, and long-tail task boundaries read from configuration.")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void onFetchModelCatalog()}
+            disabled={modelCatalogLoading}
+            className="theme-topbar-btn px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {modelCatalogLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            {t("刷新", "Refresh")}
+          </button>
+        </div>
+
+        {modelCatalogError ? (
+          <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{modelCatalogError}</p>
+        ) : null}
+
+        <div className="grid gap-3 lg:grid-cols-2">
+          {modelCatalogEntryViews.map((entry) => (
+            <div key={entry.key} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-white">{entry.provider}</p>
+                  <p className="mt-1 break-all text-xs text-white/55">{entry.model}</p>
+                </div>
+                {entry.active ? (
+                  <span className="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-100">
+                    active_text_provider
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {entry.capabilityBadges.map((badge) => (
+                  <span key={`${entry.key}-cap-${badge}`} className="rounded-md border border-sky-400/25 bg-sky-500/10 px-2 py-1 text-[11px] text-sky-100/85">
+                    {badge}
+                  </span>
+                ))}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {entry.metaBadges.map((badge) => (
+                  <span key={`${entry.key}-meta-${badge}`} className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-white/60">
+                    {badge}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {!modelCatalogLoading && modelCatalogEntryViews.length === 0 ? (
+          <p className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/55">
+            {t("暂未读取到模型能力目录。", "No model capability catalog is available yet.")}
+          </p>
+        ) : null}
+
+        {modelCatalogData ? (
+          <details className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
+            <summary className="cursor-pointer text-xs font-medium text-white/65">raw_model_catalog_json</summary>
+            <pre className="mt-3 max-h-72 overflow-auto rounded-lg bg-black/30 p-3 text-[11px] leading-relaxed text-white/70">
+              {JSON.stringify(modelCatalogData, null, 2)}
+            </pre>
+          </details>
+        ) : null}
       </div>
 
       <div className="mt-6 space-y-6">

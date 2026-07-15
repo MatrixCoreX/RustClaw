@@ -15,6 +15,7 @@ import type {
   ApiResponse,
   LlmConfigResponse,
   LlmTestResponse,
+  ModelCatalogResponse,
   ModelConfigItem,
   ModelConfigResponse,
 } from "../types/api";
@@ -53,6 +54,9 @@ export function useModelConfigRuntime({
   const [multimodalConfigSaving, setMultimodalConfigSaving] = useState(false);
   const [multimodalConfigSaveMessage, setMultimodalConfigSaveMessage] = useState<string | null>(null);
   const [modelsAdvancedOpen, setModelsAdvancedOpen] = useState(false);
+  const [modelCatalogData, setModelCatalogData] = useState<ModelCatalogResponse | null>(null);
+  const [modelCatalogLoading, setModelCatalogLoading] = useState(false);
+  const [modelCatalogError, setModelCatalogError] = useState<string | null>(null);
 
   const selectedLlmVendorInfo = useMemo(
     () => llmConfigData?.vendors.find((vendor) => vendor.name === llmDraftVendor) ?? null,
@@ -169,6 +173,7 @@ export function useModelConfigRuntime({
         ),
       );
       await fetchLlmConfig();
+      await fetchModelCatalog();
     } catch (err) {
       const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
       setLlmConfigError(message);
@@ -240,6 +245,23 @@ export function useModelConfigRuntime({
     }
   };
 
+  const fetchModelCatalog = async () => {
+    setModelCatalogLoading(true);
+    setModelCatalogError(null);
+    try {
+      const res = await apiFetch("/v1/models/catalog");
+      const body = (await res.json()) as ApiResponse<ModelCatalogResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `model catalog fetch failed (${res.status})`);
+      }
+      setModelCatalogData(body.data);
+    } catch (err) {
+      setModelCatalogError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
+    } finally {
+      setModelCatalogLoading(false);
+    }
+  };
+
   const saveMultimodalConfig = async () => {
     setMultimodalConfigSaving(true);
     setMultimodalConfigSaveMessage(null);
@@ -257,6 +279,7 @@ export function useModelConfigRuntime({
       }
       setMultimodalConfigSaveMessage(t("多模态模块配置已保存，需重启 clawd 生效。", "Multimodal config saved. Restart clawd to apply."));
       await fetchMultimodalConfig();
+      await fetchModelCatalog();
     } catch (err) {
       setMultimodalConfigError(err instanceof Error ? err.message : t("未知错误", "Unknown error"));
     } finally {
@@ -308,6 +331,9 @@ export function useModelConfigRuntime({
     multimodalConfigSaving,
     multimodalConfigSaveMessage,
     modelsAdvancedOpen,
+    modelCatalogData,
+    modelCatalogLoading,
+    modelCatalogError,
     selectedLlmVendorInfo,
     hasCustomLlmVendor,
     hasUnsavedLlmChanges,
@@ -324,6 +350,7 @@ export function useModelConfigRuntime({
     saveLlmConfig,
     testLlmConfig,
     fetchMultimodalConfig,
+    fetchModelCatalog,
     saveMultimodalConfig,
     setMultimodalDraftKey,
     applyLlmVendorDraft,

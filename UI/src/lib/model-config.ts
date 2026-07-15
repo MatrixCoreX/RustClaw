@@ -1,4 +1,4 @@
-import type { ModelConfigItem, ModelConfigResponse } from "../types/api";
+import type { ModelCatalogEntry, ModelCatalogResponse, ModelConfigItem, ModelConfigResponse } from "../types/api";
 
 export type UiLanguage = "zh" | "en";
 
@@ -19,6 +19,15 @@ export interface MultimodalMetaView {
   capabilityBadges: string[];
   visibleModels: string[];
   hiddenModelCount: number;
+  metaBadges: string[];
+}
+
+export interface ModelCatalogEntryView {
+  key: string;
+  provider: string;
+  model: string;
+  active: boolean;
+  capabilityBadges: string[];
   metaBadges: string[];
 }
 
@@ -155,4 +164,51 @@ export function buildMultimodalMetaView(item: ModelConfigItem | null | undefined
     hiddenModelCount: Math.max(modelOptions.length - visibleModels.length, 0),
     metaBadges,
   };
+}
+
+const CATALOG_CAPABILITY_FIELDS: Array<[keyof ModelCatalogEntry, string]> = [
+  ["supports_text", "text"],
+  ["supports_image_input", "image_input"],
+  ["supports_video_input", "video_input"],
+  ["supports_audio_input", "audio_input"],
+  ["supports_image_understanding", "image_understanding"],
+  ["supports_audio_transcription", "audio_transcription"],
+  ["supports_image_generation", "image_generation"],
+  ["supports_audio_generation", "audio_generation"],
+  ["supports_video_generation", "video_generation"],
+  ["supports_music_generation", "music_generation"],
+];
+
+export function buildModelCatalogEntryViews(
+  catalog: ModelCatalogResponse | null | undefined,
+  lang: UiLanguage,
+): ModelCatalogEntryView[] {
+  return (catalog?.entries ?? []).map((entry) => {
+    const capabilityBadges = CATALOG_CAPABILITY_FIELDS.filter(([field]) => entry[field] === true).map(([, token]) =>
+      formatMultimodalToken(token),
+    );
+    const metaBadges = [
+      `${copy(lang, "接口", "API")}: ${formatMultimodalToken(entry.api_style)}`,
+      `${copy(lang, "地址", "Endpoint")}: ${formatMultimodalToken(entry.base_url_kind)}`,
+    ];
+    if (typeof entry.context_window_tokens === "number" && entry.context_window_tokens > 0) {
+      metaBadges.push(formatContextWindow(entry.context_window_tokens, lang));
+    }
+    if (typeof entry.timeout_seconds === "number" && entry.timeout_seconds > 0) {
+      metaBadges.push(`${copy(lang, "超时", "Timeout")}: ${entry.timeout_seconds}s`);
+    }
+    metaBadges.push(entry.async_required ? "async_required=1" : "async_required=0");
+    metaBadges.push(entry.dry_run_supported ? "dry_run_supported=1" : "dry_run_supported=0");
+    if (entry.models.length > 0) {
+      metaBadges.push(`${copy(lang, "模型池", "Pool")}: ${entry.models.slice(0, 4).join(", ")}${entry.models.length > 4 ? ` +${entry.models.length - 4}` : ""}`);
+    }
+    return {
+      key: `${entry.provider}:${entry.model}`,
+      provider: entry.provider,
+      model: entry.model,
+      active: entry.active_text_provider,
+      capabilityBadges,
+      metaBadges,
+    };
+  });
 }

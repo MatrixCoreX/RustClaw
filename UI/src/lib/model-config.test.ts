@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import type { ModelConfigResponse } from "../types/api";
 import {
   MULTIMODAL_KEYS,
+  buildModelCatalogEntryViews,
   buildMultimodalDraft,
   buildMultimodalMetaView,
   buildMultimodalSavePayload,
@@ -115,4 +116,49 @@ test("builds multimodal meta view from structured model fields", () => {
 
 test("omits empty multimodal meta", () => {
   assert.equal(buildMultimodalMetaView(model(), "en"), null);
+});
+
+test("builds model catalog views from structured capability fields", () => {
+  const views = buildModelCatalogEntryViews(
+    {
+      schema_version: 1,
+      selected_provider: "minimax",
+      selected_model: "MiniMax-M3",
+      entries: [
+        {
+          schema_version: 1,
+          provider: "minimax",
+          model: "MiniMax-M3",
+          models: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-M2"],
+          api_style: "openai_compatible",
+          base_url_kind: "minimax_official_openai_compat",
+          context_window_tokens: 1_000_000,
+          timeout_seconds: 180,
+          supports_text: true,
+          supports_image_input: true,
+          supports_video_input: true,
+          supports_audio_input: false,
+          supports_image_understanding: true,
+          supports_audio_transcription: true,
+          supports_image_generation: true,
+          supports_audio_generation: true,
+          supports_video_generation: true,
+          supports_music_generation: true,
+          async_required: true,
+          dry_run_supported: true,
+          active_text_provider: true,
+          config_source: [],
+        },
+      ],
+    },
+    "en",
+  );
+
+  assert.equal(views.length, 1);
+  assert.equal(views[0].active, true);
+  assert.ok(views[0].capabilityBadges.includes("image / input"));
+  assert.ok(!views[0].capabilityBadges.includes("audio / input"));
+  assert.ok(views[0].metaBadges.includes("Context: 1M"));
+  assert.ok(views[0].metaBadges.includes("async_required=1"));
+  assert.ok(views[0].metaBadges.some((badge) => badge.includes("MiniMax-M3")));
 });
