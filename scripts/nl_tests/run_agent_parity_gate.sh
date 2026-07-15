@@ -22,6 +22,7 @@ MAX_PROVIDER_FINAL_ERRORS="${MAX_PROVIDER_FINAL_ERRORS:-0}"
 MAX_PROVIDER_RETRYABLE_ERRORS="${MAX_PROVIDER_RETRYABLE_ERRORS:-}"
 MAX_VERIFIER_CALLS="${MAX_VERIFIER_CALLS:-}"
 MAX_PROMPT_BYTES_BEFORE="${MAX_PROMPT_BYTES_BEFORE:-}"
+CHINESE_PROVIDER_LIVE_PROVIDERS="${CHINESE_PROVIDER_LIVE_PROVIDERS:-minimax}"
 
 usage() {
   cat <<'EOF'
@@ -50,6 +51,7 @@ Options:
   --max-provider-retryable-errors N
   --max-verifier-calls N
   --max-prompt-bytes-before N
+  --chinese-live-providers CSV  Chinese-provider live scope for smoke matrix. Default: CHINESE_PROVIDER_LIVE_PROVIDERS or minimax. Use all for every requested provider.
   -h, --help
 EOF
 }
@@ -122,6 +124,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --max-prompt-bytes-before)
       MAX_PROMPT_BYTES_BEFORE="${2:-}"
+      shift 2
+      ;;
+    --chinese-live-providers)
+      CHINESE_PROVIDER_LIVE_PROVIDERS="${2:-}"
       shift 2
       ;;
     -*)
@@ -197,6 +203,7 @@ if [[ "$SKIP_PROVIDER_SMOKE" -eq 0 ]]; then
   echo "AGENT_PARITY_GATE_STEP chinese_provider_smoke_dry_run"
   bash "${SCRIPT_DIR}/run_chinese_provider_smoke_matrix.sh" \
     --dry-run \
+    --live-providers "$CHINESE_PROVIDER_LIVE_PROVIDERS" \
     --out-dir "${OUT_DIR}/chinese_provider_smoke" \
     > "${OUT_DIR}/chinese_provider_smoke.txt"
 fi
@@ -234,6 +241,7 @@ fi
   echo "max_avg_llm_calls=${MAX_AVG_LLM_CALLS}"
   echo "max_prompt_truncations=${MAX_PROMPT_TRUNCATIONS}"
   echo "max_provider_final_errors=${MAX_PROVIDER_FINAL_ERRORS}"
+  echo "chinese_provider_live_providers=${CHINESE_PROVIDER_LIVE_PROVIDERS}"
 } > "${OUT_DIR}/gate_summary.env"
 
 echo "AGENT_PARITY_GATE_OK out_dir=${OUT_DIR}"

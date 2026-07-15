@@ -15,6 +15,9 @@ QUALITY_GUARD=1
 DRY_RUN=0
 PROVIDERS=()
 LIVE_PROVIDERS=()
+LIVE_SCOPE_ALL=0
+LIVE_SCOPE_SET=0
+DEFAULT_LIVE_PROVIDERS="${CHINESE_PROVIDER_LIVE_PROVIDERS:-minimax}"
 
 usage() {
   cat <<'EOF'
@@ -24,8 +27,8 @@ Usage:
 Options:
   --provider NAME         Add one provider to run. May be repeated.
   --providers CSV        Provider list. Default: minimax,mimo,qwen,deepseek.
-  --live-provider NAME    Mark one provider as in current live scope. May be repeated.
-  --live-providers CSV    Current live-scope providers. Empty means all requested providers.
+  --live-provider NAME    Mark one provider as in current live scope. May be repeated. Use all for every requested provider.
+  --live-providers CSV    Current live-scope providers. Default: CHINESE_PROVIDER_LIVE_PROVIDERS or minimax. Use all for every requested provider.
   --case-file PATH       NL case file. Default: chinese model adapter compact set.
   --case-limit N         Limit appended cases passed to the client-like runner.
   --out-dir PATH         Output directory for matrix metadata and run logs.
@@ -67,10 +70,19 @@ add_csv_providers() {
 add_csv_live_providers() {
   local raw="$1"
   local item
+  LIVE_SCOPE_SET=1
   IFS=',' read -r -a items <<< "$raw"
   for item in "${items[@]}"; do
     item="$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]' | xargs)"
     if [[ -n "$item" ]]; then
+      if [[ "$item" == "all" ]]; then
+        LIVE_SCOPE_ALL=1
+        LIVE_PROVIDERS=()
+        continue
+      fi
+      if [[ "$LIVE_SCOPE_ALL" -eq 1 ]]; then
+        continue
+      fi
       LIVE_PROVIDERS+=("$item")
     fi
   done
@@ -79,6 +91,9 @@ add_csv_live_providers() {
 provider_in_live_scope() {
   local provider="$1"
   local item
+  if [[ "$LIVE_SCOPE_ALL" -eq 1 ]]; then
+    return 0
+  fi
   if [[ "${#LIVE_PROVIDERS[@]}" -eq 0 ]]; then
     return 0
   fi
@@ -93,6 +108,10 @@ provider_in_live_scope() {
 live_scope_csv() {
   local item
   local out=""
+  if [[ "$LIVE_SCOPE_ALL" -eq 1 ]]; then
+    printf '%s' "all"
+    return 0
+  fi
   for item in "${LIVE_PROVIDERS[@]}"; do
     if [[ -z "$out" ]]; then
       out="$item"
@@ -176,7 +195,9 @@ write_metadata() {
   local credential_required_env
   credential_state="$(provider_credential_state "$provider")"
   credential_required_env="$(required_env_csv "$provider")"
-  if [[ "${#LIVE_PROVIDERS[@]}" -gt 0 ]]; then
+  if [[ "$LIVE_SCOPE_ALL" -eq 1 ]]; then
+    live_scope="all"
+  elif [[ "${#LIVE_PROVIDERS[@]}" -gt 0 ]]; then
     if provider_in_live_scope "$provider"; then
       live_scope="included"
     else
@@ -310,6 +331,10 @@ if [[ "${#PROVIDERS[@]}" -eq 0 ]]; then
   add_csv_providers "minimax,mimo,qwen,deepseek"
 fi
 
+if [[ "$LIVE_SCOPE_SET" -eq 0 ]]; then
+  add_csv_live_providers "$DEFAULT_LIVE_PROVIDERS"
+fi
+
 if [[ ! -f "$CASE_FILE" ]]; then
   echo "case file not found: $CASE_FILE" >&2
   exit 2
@@ -325,7 +350,7 @@ python3 "${ROOT_DIR}/scripts/nl_tests/check_chinese_provider_smoke_matrix.py" \
 echo "CHINESE_PROVIDER_SMOKE_MATRIX out_dir=${OUT_DIR}"
 echo "case_file=${CASE_FILE}"
 echo "providers=${PROVIDERS[*]}"
-echo "live_scope_providers=${LIVE_PROVIDERS[*]:-all}"
+echo "live_scope_providers=$(live_scope_csv)"
 echo "dry_run=${DRY_RUN}"
 
 matrix_status=0

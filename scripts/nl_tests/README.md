@@ -75,10 +75,12 @@ Agent parity gate:
 This is the default lightweight gate after a Codex/Claude-style agent-loop
 implementation batch. It runs the static compact coverage check, the
 Chinese-provider model catalog guard, a dry-run Chinese-provider smoke matrix
-with summary validation, the offline coding-loop repair fixture expectations,
-and bounded rollout metrics for that fixture. When you pass one or more
-finished client-like run directories, it also applies the same metrics gates to
-the real NL run. The defaults require
+with MiniMax as the default live scope, the offline coding-loop repair fixture
+expectations, and bounded rollout metrics for that fixture. MiMo, Qwen, and
+DeepSeek remain in the metadata matrix but are recorded as out of live scope
+unless `--chinese-live-providers all` or a provider CSV is passed. When you pass
+one or more finished client-like run directories, it also applies the same
+metrics gates to the real NL run. The defaults require
 `pass_rate=1.0`, `avg_llm_calls_per_turn<=4`, no prompt truncation, and no final
 provider errors. Override with `--min-pass-rate`, `--max-avg-llm-calls`,
 `--max-prompt-truncations`, `--max-provider-final-errors`, or environment
@@ -210,7 +212,9 @@ safe aggregate.
   `matrix_summary.json` with
   `python3 scripts/nl_tests/check_chinese_provider_smoke_summary.py <matrix_summary.json>`;
   this checks provider rows, readiness counters, live-scope counters, and
-  secret-free credential metadata.
+  secret-free credential metadata. The default live scope is MiniMax because it
+  is the current purchased provider; use `--live-providers all` only when all
+  provider accounts are intentionally in scope.
 - Task execution async lifecycle: `scripts/nl_tests/cases/nl_cases_task_execution_async_lifecycle_20260626.txt`
   covers representative async start, local-process poll, cancel contract,
   timeout expiry, terminal projection, and media async dry-run handoff without
