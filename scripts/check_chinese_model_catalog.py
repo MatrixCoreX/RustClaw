@@ -968,6 +968,10 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "gate-summary-host-path" in suite_wrapper_text
         and "out_dir_ref" in suite_wrapper_text
         and "RUN_SUITE_FORBIDDEN_SNIPPETS" in suite_wrapper_text
+        and "RUN_MULTI_TURN_SUITE" in suite_wrapper_text
+        and "RUN_MULTI_TURN_FORBIDDEN_SNIPPETS" in suite_wrapper_text
+        and "multi_turn_run_dir_ref" in suite_wrapper_text
+        and "multi_turn_run_log_ref" in suite_wrapper_text
         and "run_dir_ref" in suite_wrapper_text
         and "run_log_ref" in suite_wrapper_text
         and "suite_artifact_contract_ref" in suite_wrapper_text

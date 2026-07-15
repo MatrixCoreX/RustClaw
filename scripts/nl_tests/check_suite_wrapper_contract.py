@@ -11,6 +11,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN_SUITE = ROOT / "scripts/nl_tests/run_suite.sh"
+RUN_MULTI_TURN_SUITE = ROOT / "scripts/nl_tests/run_multi_turn_suite.sh"
 SUITE_ARTIFACT_CONTRACT = ROOT / "scripts/nl_tests/check_suite_artifact_contract.py"
 
 RUN_SUITE_REQUIRED_SNIPPETS = {
@@ -76,6 +77,18 @@ RUN_SUITE_FORBIDDEN_SNIPPETS = {
     "context_run_dir_absolute_printf": 'printf "context_run_dir: %s\\n" "$latest_context"',
     "context_run_log_absolute_printf": 'printf "context_run_log: %s/run.log\\n" "$latest_context"',
     "context_summary_absolute_printf": 'printf "context_summary_jsonl: %s/summary.jsonl\\n" "$latest_context"',
+}
+
+RUN_MULTI_TURN_REQUIRED_SNIPPETS = {
+    "multi_turn_path_ref_fn": "path_ref()",
+    "multi_turn_path_ref_run_dir_ref": 'print("run_dir" if str(rel) == "." else f"run_dir/{rel.as_posix()}")',
+    "multi_turn_run_dir_ref_printed": 'echo "  run_dir_ref: $(path_ref "$RUN_DIR" "$RUN_DIR")"',
+    "multi_turn_run_log_ref_printed": 'echo "  run_log_ref: $(path_ref "$RUN_DIR" "$RUN_LOG")"',
+}
+
+RUN_MULTI_TURN_FORBIDDEN_SNIPPETS = {
+    "multi_turn_run_dir_absolute_print": 'echo "  run_dir:    ${RUN_DIR}"',
+    "multi_turn_run_log_absolute_print": 'echo "  run_log:    ${RUN_LOG}"',
 }
 
 SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
@@ -236,6 +249,7 @@ def build_report() -> dict[str, Any]:
     checked_count = 0
     for path, snippets, prefix in (
         (RUN_SUITE, RUN_SUITE_REQUIRED_SNIPPETS, "run_suite"),
+        (RUN_MULTI_TURN_SUITE, RUN_MULTI_TURN_REQUIRED_SNIPPETS, "run_multi_turn_suite"),
         (
             SUITE_ARTIFACT_CONTRACT,
             SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS,
@@ -252,6 +266,13 @@ def build_report() -> dict[str, Any]:
     )
     findings.extend(run_suite_forbidden_findings)
     checked_count += run_suite_forbidden_count
+    run_multi_turn_forbidden_findings, run_multi_turn_forbidden_count = check_forbidden_snippets(
+        RUN_MULTI_TURN_SUITE,
+        RUN_MULTI_TURN_FORBIDDEN_SNIPPETS,
+        "run_multi_turn_suite",
+    )
+    findings.extend(run_multi_turn_forbidden_findings)
+    checked_count += run_multi_turn_forbidden_count
     forbidden_findings, forbidden_checked_count = check_forbidden_snippets(
         SUITE_ARTIFACT_CONTRACT,
         SUITE_ARTIFACT_CONTRACT_FORBIDDEN_SNIPPETS,
@@ -264,6 +285,7 @@ def build_report() -> dict[str, Any]:
         "ok": not findings,
         "paths": [
             str(RUN_SUITE.relative_to(ROOT)),
+            str(RUN_MULTI_TURN_SUITE.relative_to(ROOT)),
             str(SUITE_ARTIFACT_CONTRACT.relative_to(ROOT)),
         ],
         "checked_count": checked_count,

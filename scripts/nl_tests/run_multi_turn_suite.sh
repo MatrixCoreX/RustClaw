@@ -105,6 +105,46 @@ print(name or "case")
 PY
 }
 
+path_ref() {
+  local run_dir="$1"
+  local value="$2"
+  python3 - "$ROOT_DIR" "$run_dir" "$value" <<'PY'
+import sys
+from pathlib import Path, PurePosixPath
+
+root = Path(sys.argv[1]).resolve()
+run_dir = Path(sys.argv[2]).resolve()
+raw = sys.argv[3]
+
+try:
+    candidate = Path(raw).resolve()
+except OSError:
+    print("external_path")
+    raise SystemExit
+
+try:
+    rel = candidate.relative_to(run_dir)
+    print("run_dir" if str(rel) == "." else f"run_dir/{rel.as_posix()}")
+    raise SystemExit
+except ValueError:
+    pass
+
+try:
+    print(candidate.relative_to(root).as_posix())
+    raise SystemExit
+except ValueError:
+    pass
+
+if not raw.startswith("/") and "\\" not in raw:
+    rel = PurePosixPath(raw)
+    if rel.parts and all(part not in {"", ".", ".."} for part in rel.parts):
+        print(rel.as_posix())
+        raise SystemExit
+
+print("external_path")
+PY
+}
+
 extract_status() {
   python3 - "$1" <<'PY'
 import json
@@ -530,8 +570,8 @@ exec > >(tee -a "$RUN_LOG") 2>&1
 BASE_CHAT_ID="$(compute_effective_chat_id_base "$CHAT_ID" "$ISOLATE_CHAT_ID_BASE")"
 if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   echo "NL multi-turn suite: ${SUITE}"
-  echo "  run_dir:    ${RUN_DIR}"
-  echo "  run_log:    ${RUN_LOG}"
+  echo "  run_dir_ref: $(path_ref "$RUN_DIR" "$RUN_DIR")"
+  echo "  run_log_ref: $(path_ref "$RUN_DIR" "$RUN_LOG")"
   echo "  case_file:  ${CASE_FILE}"
   echo "  turn_count: ${TURN_COUNT}"
   echo "  base_url:   ${BASE_URL}"
