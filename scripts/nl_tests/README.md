@@ -161,7 +161,8 @@ summary JSONL row shape/JSON errors, and each MiniMax/MiMo/Qwen/DeepSeek matrix 
 expected dry-run or `provider_not_in_live_scope` reason based on
 `chinese_provider_live_providers`. That scope field must be `all` or a CSV of
 known Chinese provider machine tokens, and env-file state/source must remain in
-their allowed machine-token sets. Provider smoke metadata path fields
+their allowed machine-token sets. Provider smoke metadata path fields, including
+`case_coverage.json`,
 (`case_file`, `output_file`, `run_dir`) must be portable refs such as
 repo-relative paths, `out_dir/...`, or `external_path`, never host absolute
 paths. `live_metrics` is a required

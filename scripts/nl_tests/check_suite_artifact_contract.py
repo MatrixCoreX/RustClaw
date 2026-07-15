@@ -497,6 +497,8 @@ def validate_provider_smoke_case_coverage(run_dir: Path) -> tuple[list[str], int
     checks += 5
     if payload.get("ok") is not True:
         findings.append("agent_parity_gate_provider_smoke_case_coverage_not_ok")
+    if not provider_smoke_path_ref_is_safe(payload.get("case_file")):
+        findings.append("agent_parity_gate_provider_smoke_case_coverage_bad_case_file")
     if payload.get("missing_coverage_tags") != []:
         findings.append("agent_parity_gate_provider_smoke_case_coverage_missing_tags")
     if payload.get("missing_provider_tags") != []:
@@ -1263,6 +1265,42 @@ def run_self_test() -> int:
             print(
                 "SELF_TEST_FAIL provider_case_coverage_bad_provider_tags:"
                 f"{provider_case_coverage_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        provider_case_file_run = root / "provider-case-coverage-bad-case-file"
+        write_minimal_self_test_run(provider_case_file_run, content_checked=True)
+        provider_case_file_path = (
+            provider_case_file_run
+            / "agent_parity_gate/chinese_provider_smoke/case_coverage.json"
+        )
+        provider_case_file_path.parent.mkdir(parents=True, exist_ok=True)
+        provider_case_file_path.write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "case_file": "/tmp/cases.txt",
+                    "missing_coverage_tags": [],
+                    "missing_provider_tags": [],
+                    "forbidden_live_tag_hits": [],
+                    "provider_tags": sorted(AGENT_PARITY_CHINESE_MODEL_PROVIDERS),
+                },
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        provider_case_file_findings, _ = validate_provider_smoke_case_coverage(
+            provider_case_file_run
+        )
+        if (
+            "agent_parity_gate_provider_smoke_case_coverage_bad_case_file"
+            not in set(provider_case_file_findings)
+        ):
+            print(
+                "SELF_TEST_FAIL provider_case_coverage_bad_case_file:"
+                f"{provider_case_file_findings}",
                 file=sys.stderr,
             )
             return 1

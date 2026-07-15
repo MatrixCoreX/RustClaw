@@ -79,6 +79,8 @@ SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "agent_parity_provider_smoke_case_coverage_validator": "validate_provider_smoke_case_coverage",
     "agent_parity_provider_case_coverage_bad_tags": "agent_parity_gate_provider_smoke_case_coverage_bad_provider_tags",
     "agent_parity_provider_case_coverage_bad_tags_self_test": "provider-case-coverage-bad-provider-tags",
+    "agent_parity_provider_case_coverage_bad_case_file": "agent_parity_gate_provider_smoke_case_coverage_bad_case_file",
+    "agent_parity_provider_case_coverage_bad_case_file_self_test": "provider-case-coverage-bad-case-file",
     "agent_parity_provider_summary_jsonl_parser": "parse_provider_summary_jsonl",
     "agent_parity_provider_summary_bad_json_line": "agent_parity_gate_provider_summary_bad_json_line",
     "agent_parity_provider_summary_bad_row": "agent_parity_gate_provider_summary_bad_row",
