@@ -212,7 +212,7 @@ timeout_seconds = 120
 #
 # Historical MiniMax example (commented keep) / 历史 MiniMax 示例（注释保留）
 # [audio_transcribe.providers.minimax]
-# base_url = "https://api.minimax.ocom/v1"
+# base_url = "https://api.minimaxi.com/v1"
 # api_key = ""
 # model = "speech-01"
 # timeout_seconds = 90
