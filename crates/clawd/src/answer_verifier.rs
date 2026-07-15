@@ -51,6 +51,8 @@ const OUTPUT_CONTRACT_ROUTE_MARKERS: &[&str] = &[
     "tool_discovery",
 ];
 
+#[path = "answer_verifier_control_envelope.rs"]
+mod answer_verifier_control_envelope;
 #[path = "answer_verifier_delivery_raw.rs"]
 mod answer_verifier_delivery_raw;
 #[path = "answer_verifier_evidence_policy.rs"]

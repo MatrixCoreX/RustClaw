@@ -712,7 +712,8 @@ pub(super) fn structured_machine_projection_can_skip_answer_verifier(
         return true;
     }
     finalizer_grounded_machine_payload_can_skip_verifier(journal)
-        && is_structured_machine_projection(candidate_answer)
+        && (is_structured_machine_projection(candidate_answer)
+            || super::answer_verifier_control_envelope::control_machine_envelope_answer_can_skip_answer_verifier(candidate_answer))
 }
 
 pub(crate) fn post_write_content_evidence_missing_before_verifier(
