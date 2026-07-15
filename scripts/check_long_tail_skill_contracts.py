@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 import tomllib
 from pathlib import Path
@@ -290,7 +291,83 @@ def check_registry(path: Path) -> tuple[int, list[str]]:
     return len(skills), [f"{path.relative_to(ROOT)}: {finding}" for finding in findings]
 
 
-def main() -> int:
+def run_self_test() -> int:
+    bad_timeout = [{"name": "bad_timeout", "timeout_seconds": 0}]
+    if not check_timeouts(bad_timeout):
+        print("SELF_TEST_FAIL missing_timeout_finding", file=sys.stderr)
+        return 1
+
+    good_sync = [
+        {
+            "name": "good_sync",
+            "planner_capabilities": [
+                {"name": "good.observe", "execution_mode": "sync_short"}
+            ],
+        }
+    ]
+    if check_capability_execution_modes(good_sync):
+        print("SELF_TEST_FAIL good_sync_execution_mode_false_positive", file=sys.stderr)
+        return 1
+
+    bad_async = [
+        {
+            "name": "bad_async",
+            "planner_capabilities": [
+                {"name": "bad.start", "execution_mode": "async_required"}
+            ],
+        }
+    ]
+    if not any("async_adapter_kind" in finding for finding in check_capability_execution_modes(bad_async)):
+        print("SELF_TEST_FAIL missing_async_adapter_finding", file=sys.stderr)
+        return 1
+
+    bad_media_skill = {
+        "name": "image_generate",
+        "input_schema": {"properties": {}},
+        "planner_capabilities": [
+            {
+                "name": "image.generate",
+                "action": "generate",
+                "execution_mode": "sync_short",
+                "optional": [],
+            }
+        ],
+    }
+    bad_media = {"image_generate": bad_media_skill}
+    dry_run_findings = check_media_dry_run_contract(bad_media)
+    pollable_findings = check_pollable_media_contracts(bad_media)
+    expected_tokens = {
+        "input_schema missing dry_run",
+        "optional missing dry_run",
+        "execution_mode must be async",
+        "missing image.poll capability",
+        "missing image.cancel capability",
+    }
+    observed_tokens = {
+        token
+        for finding in dry_run_findings + pollable_findings
+        for token in expected_tokens
+        if token in finding
+    }
+    if not expected_tokens.issubset(observed_tokens):
+        print(
+            "SELF_TEST_FAIL missing_long_tail_findings:"
+            f"{dry_run_findings + pollable_findings}",
+            file=sys.stderr,
+        )
+        return 1
+
+    print("LONG_TAIL_SKILL_CONTRACT_SELF_TEST ok")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args(argv)
+    if args.self_test:
+        return run_self_test()
+
     registry_paths = [REGISTRY_PATH]
     if DOCKER_REGISTRY_PATH.exists():
         registry_paths.append(DOCKER_REGISTRY_PATH)
@@ -313,4 +390,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -32,6 +32,9 @@ AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
     "agent_parity_gate/policy_boundary_hard_reply.txt",
     "agent_parity_gate/repair_no_user_text_fields.txt",
     "agent_parity_gate/policy_decision_tokens.txt",
+    "agent_parity_gate/registry_policy_contracts.txt",
+    "agent_parity_gate/skill_registry_aliases.txt",
+    "agent_parity_gate/long_tail_skill_contracts.txt",
     "agent_parity_gate/no_agent_mode_payload.txt",
     "agent_parity_gate/agent_loop_static_contracts.txt",
     "agent_parity_gate/evidence_extractor_contracts.txt",
@@ -48,6 +51,9 @@ AGENT_PARITY_GATE_REQUIRED_FLAGS = {
     "policy_boundary_hard_reply": "1",
     "repair_no_user_text_fields": "1",
     "policy_decision_tokens": "1",
+    "registry_policy_contracts": "1",
+    "skill_registry_aliases": "1",
+    "long_tail_skill_contracts": "1",
     "no_agent_mode_payload": "1",
     "agent_loop_static_contracts": "1",
     "evidence_extractor_contracts": "1",
@@ -89,6 +95,18 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
     "agent_parity_gate/policy_decision_tokens.txt": {
         "POLICY_DECISION_TOKEN_SELF_TEST ok",
         "POLICY_DECISION_TOKEN_CHECK ok",
+    },
+    "agent_parity_gate/registry_policy_contracts.txt": {
+        "REGISTRY_POLICY_CONTRACT_SELF_TEST ok",
+        "REGISTRY_POLICY_CONTRACT_CHECK ok",
+    },
+    "agent_parity_gate/skill_registry_aliases.txt": {
+        "SKILL_REGISTRY_ALIAS_SELF_TEST ok",
+        "SKILL_REGISTRY_ALIAS_CHECK ok",
+    },
+    "agent_parity_gate/long_tail_skill_contracts.txt": {
+        "LONG_TAIL_SKILL_CONTRACT_SELF_TEST ok",
+        "LONG_TAIL_SKILL_CONTRACT_CHECK ok",
     },
     "agent_parity_gate/no_agent_mode_payload.txt": {
         "SELF_TEST_OK",

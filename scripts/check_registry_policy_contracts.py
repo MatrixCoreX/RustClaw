@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 import tomllib
 from pathlib import Path
@@ -87,10 +88,10 @@ def check_skill_capability_surface(registry_path: Path, skill: dict[str, Any]) -
     return [f"{prefix}: planner_visible_enabled_skill_missing_planner_capabilities"]
 
 
-def main() -> int:
+def scan_registries(registries: list[Path]) -> tuple[list[str], int]:
     findings: list[str] = []
     capability_count = 0
-    for registry_path in REGISTRIES:
+    for registry_path in registries:
         for skill in load_registry(registry_path):
             findings.extend(check_skill_capability_surface(registry_path, skill))
             for index, capability in enumerate(skill.get("planner_capabilities") or []):
@@ -98,6 +99,65 @@ def main() -> int:
                 findings.extend(
                     check_capability(registry_path, skill, index, capability)
                 )
+    return findings, capability_count
+
+
+def run_self_test() -> int:
+    registry_path = REGISTRIES[0]
+    good_skill = {
+        "name": "good_skill",
+        "planner_capabilities": [
+            {
+                "name": "good.observe",
+                "effect": "observe",
+                "risk_level": "low",
+                "idempotent": True,
+                "dedup_scope": "args",
+            }
+        ],
+    }
+    bad_capability = {
+        "name": "bad.mutate",
+        "effect": "mutate",
+        "risk_level": "high",
+        "idempotent": True,
+        "dedup_scope": "bad_scope",
+    }
+    missing_surface = {"name": "visible_without_capabilities"}
+    if check_capability(registry_path, good_skill, 0, good_skill["planner_capabilities"][0]):
+        print("SELF_TEST_FAIL good_policy_metadata_false_positive", file=sys.stderr)
+        return 1
+    bad_findings = check_capability(registry_path, {"name": "bad_skill"}, 0, bad_capability)
+    expected_tokens = {
+        "invalid_or_missing_dedup_scope",
+        "controlled_side_effect_must_be_non_idempotent",
+        "controlled_side_effect_requires_once_per_task",
+    }
+    observed_tokens = {
+        token
+        for finding in bad_findings
+        for token in expected_tokens
+        if token in finding
+    }
+    if not expected_tokens.issubset(observed_tokens):
+        print(f"SELF_TEST_FAIL missing_bad_policy_findings:{bad_findings}", file=sys.stderr)
+        return 1
+    surface_findings = check_skill_capability_surface(registry_path, missing_surface)
+    if not any("planner_visible_enabled_skill_missing_planner_capabilities" in finding for finding in surface_findings):
+        print(f"SELF_TEST_FAIL missing_surface_finding:{surface_findings}", file=sys.stderr)
+        return 1
+    print("REGISTRY_POLICY_CONTRACT_SELF_TEST ok")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args(argv)
+    if args.self_test:
+        return run_self_test()
+
+    findings, capability_count = scan_registries(REGISTRIES)
 
     if findings:
         print(
@@ -116,4 +176,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
