@@ -41,6 +41,7 @@ AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
 }
 
 AGENT_PARITY_GATE_REQUIRED_FLAGS = {
+    "runtime_hard_reply_baseline": "1",
     "no_agent_mode_payload": "1",
     "agent_loop_static_contracts": "1",
     "evidence_extractor_contracts": "1",
@@ -66,6 +67,11 @@ AGENT_PARITY_GATE_ENV_FILE_STATE_VALUES = {"present", "missing", "disabled"}
 AGENT_PARITY_GATE_ENV_FILE_SOURCE_VALUES = {"default", "explicit", "disabled"}
 
 AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
+    "agent_parity_gate/runtime_hard_reply_baseline.txt": {
+        "SELF_TEST_OK",
+        "RUNTIME_HARD_REPLY_ALL_SCAN",
+        "new=0",
+    },
     "agent_parity_gate/no_agent_mode_payload.txt": {
         "SELF_TEST_OK",
         "NO_AGENT_MODE_PAYLOAD ok",

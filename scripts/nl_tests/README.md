@@ -99,6 +99,12 @@ Codex/Claude-style agent-loop boundary checks were part of the run. The artifact
 also records `AGENT_LOOP_STATIC_SELF_TEST ...` labels before the main checks, so
 the route-authority, legacy-route, pre-planner, NL-hardmatch, and hardcoded
 language guards prove their self-tests before the run is trusted.
+The gate also writes `runtime_hard_reply_baseline.txt` from
+`scripts/check_no_runtime_hard_reply.py --self-test` plus the baseline scan.
+`gate_summary.env` records `runtime_hard_reply_baseline=1`, and the artifact
+must contain `RUNTIME_HARD_REPLY_ALL_SCAN` plus `new=0`, so newly-added
+production Rust sentence-like literals cannot quietly become fixed user-facing
+reply templates.
 It also writes `evidence_extractor_contracts.txt` from
 `scripts/check_evidence_extractor_contracts.py --self-test` plus the main check.
 `gate_summary.env` records `evidence_extractor_contracts=1`, and the artifact
@@ -127,6 +133,7 @@ provided. `gate_summary.env` records the artifact location as the portable
 suite runs also write `artifact_index.txt` at the suite run
 root, listing run-root-relative nested artifacts such as
 `agent_parity_gate/gate_summary.env`,
+`agent_parity_gate/runtime_hard_reply_baseline.txt`,
 `agent_parity_gate/agent_loop_static_contracts.txt`,
 `agent_parity_gate/evidence_extractor_contracts.txt`, and
 `agent_parity_gate/secret_scan_contract.json` for easier resume and review.
@@ -164,8 +171,11 @@ runs, the artifact contract also validates nested gate artifacts such as
 the artifact checker's dynamic machine fields such as the Chinese provider live
 scope, then checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
-the static agent-loop, evidence-extractor, secret-scan, wrapper, no-agent-mode,
-suite-artifact self-test, and raw LLM trace contracts participated in the run.
+the runtime hard-reply, static agent-loop, evidence-extractor, secret-scan,
+wrapper, no-agent-mode, suite-artifact self-test, and raw LLM trace contracts
+participated in the run.
+For `runtime_hard_reply_baseline.txt`, the required content includes
+`SELF_TEST_OK`, `RUNTIME_HARD_REPLY_ALL_SCAN`, and `new=0`.
 For `agent_loop_static_contracts.txt`, the required content includes the five
 `AGENT_LOOP_STATIC_SELF_TEST ...` labels as well as the main guard success
 tokens.

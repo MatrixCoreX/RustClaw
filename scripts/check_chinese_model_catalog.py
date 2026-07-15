@@ -892,6 +892,23 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate summary must not record the Chinese-provider env-file path",
     )
     require(
+        "AGENT_PARITY_GATE_STEP runtime_hard_reply_baseline" in parity_text,
+        findings,
+        "agent parity gate must run the runtime hard-reply baseline guard step",
+    )
+    require(
+        "check_no_runtime_hard_reply.py" in parity_text
+        and 'check_no_runtime_hard_reply.py" --self-test' in parity_text
+        and "runtime_hard_reply_baseline.txt" in parity_text,
+        findings,
+        "agent parity gate must self-test and write the runtime hard-reply baseline artifact",
+    )
+    require(
+        "runtime_hard_reply_baseline=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the runtime hard-reply baseline guard state",
+    )
+    require(
         "AGENT_PARITY_GATE_STEP no_agent_mode_payload" in parity_text,
         findings,
         "agent parity gate must run the no-agent-mode payload guard step",
@@ -1043,6 +1060,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
     )
     require(
         "AGENT_PARITY_GATE_REQUIRED_ARTIFACTS" in suite_artifact_contract_text
+        and "agent_parity_gate/runtime_hard_reply_baseline.txt" in suite_artifact_contract_text
         and "agent_parity_gate/agent_loop_static_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/evidence_extractor_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/suite_wrapper_contract.json" in suite_artifact_contract_text
@@ -1053,6 +1071,9 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "AGENT_PARITY_GATE_DYNAMIC_MACHINE_FIELDS" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_JSON_OK_ARTIFACTS" in suite_artifact_contract_text
+        and '"runtime_hard_reply_baseline": "1"' in suite_artifact_contract_text
+        and "RUNTIME_HARD_REPLY_ALL_SCAN" in suite_artifact_contract_text
+        and "new=0" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_route_authority_legacy_keys.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_legacy_route_boundary.py" in suite_artifact_contract_text
         and "AGENT_LOOP_STATIC_SELF_TEST check_pre_planner_exit_inventory.py" in suite_artifact_contract_text
@@ -1242,6 +1263,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
     for label, readme_body in (("README.md", readme_text), ("README.zh-CN.md", readme_zh_text)):
         require(
             "agent_loop_static_contracts.txt" in readme_body
+            and "runtime_hard_reply_baseline.txt" in readme_body
             and "no_agent_mode_payload.txt" in readme_body
             and "evidence_extractor_contracts.txt" in readme_body
             and "self-test" in readme_body
@@ -1264,6 +1286,14 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             findings,
             f"{label} must document agent parity nested/static/raw-trace gate artifacts",
         )
+    require(
+        "runtime_hard_reply_baseline.txt" in nl_tests_readme_text
+        and "runtime_hard_reply_baseline=1" in nl_tests_readme_text
+        and "RUNTIME_HARD_REPLY_ALL_SCAN" in nl_tests_readme_text
+        and "new=0" in nl_tests_readme_text,
+        findings,
+        "NL tests README must document runtime hard-reply baseline artifact content",
+    )
     require(
         "evidence_extractor_contracts.txt" in nl_tests_readme_text
         and "AGENT_LOOP_STATIC_SELF_TEST" in nl_tests_readme_text
