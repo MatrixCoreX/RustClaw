@@ -632,6 +632,17 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         findings,
         "agent parity gate summary must not record the Chinese-provider env-file path",
     )
+    require(
+        "AGENT_PARITY_GATE_STEP secret_scan_contract" in parity_text,
+        findings,
+        "agent parity gate must run the shared secret scan contract step",
+    )
+    require(
+        "check_secret_scan_contract.py" in parity_text
+        and "secret_scan_contract.json" in parity_text,
+        findings,
+        "agent parity gate must write the shared secret scan contract artifact",
+    )
 
 
 def build_report(env_file: Path | None = None) -> dict[str, Any]:
