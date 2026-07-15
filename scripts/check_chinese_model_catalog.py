@@ -789,6 +789,26 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate summary must record the no-agent-mode payload guard state",
     )
     require(
+        "AGENT_PARITY_GATE_STEP agent_loop_static_contracts" in parity_text,
+        findings,
+        "agent parity gate must run the agent-loop static contracts step",
+    )
+    require(
+        "check_route_authority_legacy_keys.py" in parity_text
+        and "check_legacy_route_boundary.py" in parity_text
+        and "check_pre_planner_exit_inventory.py" in parity_text
+        and "check_no_nl_hardmatch.py" in parity_text
+        and "check_historical_hardcoded_language.py" in parity_text
+        and "agent_loop_static_contracts.txt" in parity_text,
+        findings,
+        "agent parity gate must write the agent-loop static contracts artifact",
+    )
+    require(
+        "agent_loop_static_contracts=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the agent-loop static contracts state",
+    )
+    require(
         "AGENT_PARITY_GATE_STEP secret_scan_contract" in parity_text,
         findings,
         "agent parity gate must run the shared secret scan contract step",
