@@ -531,9 +531,30 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate must pass the configured Chinese-provider live scope to the smoke runner",
     )
     require(
+        'CHINESE_PROVIDER_ENV_FILE="${CHINESE_PROVIDER_ENV_FILE:-${ROOT_DIR}/../runtime_env_filled.sh}"'
+        in parity_text,
+        findings,
+        "agent parity gate must default Chinese-provider preflight env file to ../runtime_env_filled.sh",
+    )
+    require(
+        "--chinese-env-file)" in parity_text and "--no-chinese-env-file)" in parity_text,
+        findings,
+        "agent parity gate must expose explicit Chinese-provider env-file override and disable options",
+    )
+    require(
+        '--env-file "$CHINESE_PROVIDER_ENV_FILE"' in parity_text,
+        findings,
+        "agent parity gate must pass an existing Chinese-provider env file to the smoke runner",
+    )
+    require(
         "chinese_provider_live_providers=${CHINESE_PROVIDER_LIVE_PROVIDERS}" in parity_text,
         findings,
         "agent parity gate summary must record the Chinese-provider live scope",
+    )
+    require(
+        "chinese_provider_env_file_state=${CHINESE_PROVIDER_ENV_FILE_STATE}" in parity_text,
+        findings,
+        "agent parity gate summary must record the Chinese-provider env-file state",
     )
 
 
