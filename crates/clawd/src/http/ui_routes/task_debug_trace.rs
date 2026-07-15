@@ -69,6 +69,7 @@ fn build_model_catalog_trace_for_debug(state: &AppState, entries: &[TaskDebugEnt
                 "model": entry.model,
                 "api_style": entry.api_style,
                 "base_url_kind": entry.base_url_kind,
+                "credential_state": entry.credential_state,
                 "context_window_tokens": entry.context_window_tokens,
                 "supports_text": entry.supports_text,
                 "supports_image_input": entry.supports_image_input,
@@ -361,6 +362,7 @@ minimax_models = ["MiniMax-M3"]
         assert_eq!(trace["observed_providers"][0], "minimax");
         assert_eq!(trace["entries"][0]["supports_image_input"], true);
         assert_eq!(trace["entries"][0]["active_text_provider"], true);
+        assert_eq!(trace["entries"][0]["credential_state"], "configured_inline");
         assert_eq!(trace["vendor_patch_names"][0], "minimax");
         assert!(!trace.to_string().contains("catalog-secret"));
     }
