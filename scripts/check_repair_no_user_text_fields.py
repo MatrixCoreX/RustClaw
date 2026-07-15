@@ -33,6 +33,17 @@ PRESENCE_CHECK_ONLY_FILES = [
 
 MONITORED_FILES = CORE_RECOVERY_FILES + PRESENCE_CHECK_ONLY_FILES
 
+NORMALIZE_FOR_USER_FORBIDDEN_FILES = [
+    "crates/clawd/src/agent_engine.rs",
+    "crates/clawd/src/agent_engine/observed_output_entries.rs",
+    "crates/clawd/src/agent_engine/skill_execution.rs",
+    "crates/clawd/src/agent_engine/skill_execution_preflight.rs",
+    "crates/clawd/src/finalize/loop_reply_content_evidence_failure.rs",
+    "crates/clawd/src/finalize/task_resume.rs",
+    "crates/clawd/src/task_journal_evidence_registry.rs",
+]
+NORMALIZE_FOR_USER_FORBIDDEN_SNIPPET = "normalize_skill_error_for_user("
+
 FINALIZER_RESUME_FILE = "crates/clawd/src/finalize/task_resume.rs"
 EXECUTION_SUMMARY_FILE = "crates/clawd/src/finalize/loop_reply_execution_summary.rs"
 FINALIZER_RESUME_FORBIDDEN_SNIPPETS = [
@@ -108,12 +119,32 @@ def scan_source(relative: str, text: str) -> list[str]:
     return findings
 
 
+def scan_normalize_for_user_text(relative: str, text: str) -> list[str]:
+    findings: list[str] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if NORMALIZE_FOR_USER_FORBIDDEN_SNIPPET in line:
+            findings.append(
+                f"{relative}:{line_no}: normalize_for_user_boundary: {line.strip()}"
+            )
+    return findings
+
+
+def scan_normalize_for_user_call_sites() -> list[str]:
+    findings: list[str] = []
+    for relative in NORMALIZE_FOR_USER_FORBIDDEN_FILES:
+        path = ROOT / relative
+        text = path.read_text(encoding="utf-8")
+        findings.extend(scan_normalize_for_user_text(relative, text))
+    return findings
+
+
 def scan_repo() -> list[str]:
     findings: list[str] = []
     for relative in MONITORED_FILES:
         path = ROOT / relative
         text = path.read_text(encoding="utf-8")
         findings.extend(scan_source(relative, text))
+    findings.extend(scan_normalize_for_user_call_sites())
     return findings
 
 
@@ -132,6 +163,9 @@ def run_self_test() -> int:
     execution_summary_normalizer_bad = (
         "fn bad() { crate::skills::normalize_skill_error_for_user(\"run_cmd\", \"err\"); }"
     )
+    normalize_for_user_call_site_bad = (
+        "let value = crate::skills::normalize_skill_error_for_user(\"run_cmd\", err);"
+    )
     lifecycle_presence_ok = 'fn ok(value: &Value) -> bool { value.get("text").is_none() }'
     lifecycle_read_bad = (
         'fn bad(value: &Value) { let text = value.get("error_text").and_then(Value::as_str); }'
@@ -142,6 +176,10 @@ def run_self_test() -> int:
     assert scan_source(FINALIZER_RESUME_FILE, finalizer_text_classifier_bad)
     assert scan_source(EXECUTION_SUMMARY_FILE, execution_summary_text_bad)
     assert scan_source(EXECUTION_SUMMARY_FILE, execution_summary_normalizer_bad)
+    assert scan_normalize_for_user_text(
+        NORMALIZE_FOR_USER_FORBIDDEN_FILES[0],
+        normalize_for_user_call_site_bad,
+    )
     assert not scan_source(PRESENCE_CHECK_ONLY_FILES[0], lifecycle_presence_ok)
     assert scan_source(PRESENCE_CHECK_ONLY_FILES[0], lifecycle_read_bad)
     print("SELF_TEST_OK")

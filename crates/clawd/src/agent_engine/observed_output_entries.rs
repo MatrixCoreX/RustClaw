@@ -9,13 +9,15 @@ pub(super) fn observed_error_step_body(
     {
         return None;
     }
-    let normalized = crate::skills::normalize_skill_error_for_user(&step.skill, body);
-    let sanitized = crate::visible_text::sanitize_user_visible_text(&normalized);
+    let observation = crate::skills::skill_error_machine_observation(&step.skill, body)
+        .unwrap_or_else(|| body.trim().to_string());
+    let sanitized = crate::visible_text::sanitize_user_visible_text(&observation);
     (!sanitized.trim().is_empty()).then(|| {
-        format!(
-            "execution_status: error\nerror_summary: {}",
-            sanitized.trim()
-        )
+        [
+            "execution_status:error".to_string(),
+            format!("error_observation:{}", sanitized.trim()),
+        ]
+        .join("\n")
     })
 }
 
@@ -316,21 +318,21 @@ pub(super) fn execution_failed_step_guard_entry(
                     extra.get("stderr"),
                 );
             }
-            let summary = crate::visible_text::sanitize_user_visible_text(
-                &crate::skills::normalize_skill_error_for_user(&step.skill, error),
-            )
-            .replace('\n', " ");
-            if !summary.trim().is_empty() {
+            let observation = crate::skills::skill_error_machine_observation(&step.skill, error)
+                .unwrap_or_else(|| error.trim().to_string());
+            let observation =
+                crate::visible_text::sanitize_user_visible_text(&observation).replace('\n', " ");
+            if !observation.trim().is_empty() {
                 lines.push(format!(
-                    "failed_step.{failed_count}.error_summary={}",
-                    trim_for_observed_prompt(&summary, 360)
+                    "failed_step.{failed_count}.error_observation={}",
+                    trim_for_observed_prompt(&observation, 360)
                 ));
             }
         } else {
             let summary = crate::visible_text::sanitize_user_visible_text(error).replace('\n', " ");
             if !summary.trim().is_empty() {
                 lines.push(format!(
-                    "failed_step.{failed_count}.error_summary={}",
+                    "failed_step.{failed_count}.error_observation={}",
                     trim_for_observed_prompt(&summary, 360)
                 ));
             }

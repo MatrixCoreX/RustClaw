@@ -1523,9 +1523,9 @@ fn user_safe_step_error(err: &str, _prefer_english: bool) -> String {
         } else {
             structured.skill.as_str()
         };
-        return crate::truncate_for_agent_trace(&crate::skills::normalize_skill_error_for_user(
-            skill, trimmed,
-        ));
+        if let Some(observation) = crate::skills::skill_error_machine_observation(skill, trimmed) {
+            return crate::truncate_for_agent_trace(&observation);
+        }
     }
     crate::truncate_for_agent_trace(trimmed)
 }

@@ -1,8 +1,8 @@
 use super::{
     collect_whitelisted_env_pairs, crypto_recoverable_i18n_error_key, extract_task_request_text,
     is_crypto_account_access_error, is_missing_target_skill_error, is_recoverable_skill_error,
-    normalize_skill_error_for_user, parse_policy_block_error, parse_structured_skill_error,
-    policy_block_default_text, policy_block_error, request_reply_language,
+    parse_policy_block_error, parse_structured_skill_error, policy_block_default_text,
+    policy_block_error, request_reply_language, skill_error_machine_observation,
     skill_runner_env_strict_enabled, structured_skill_error_from_parts,
     structured_skill_error_string, task_allows_path_outside_workspace, task_allows_sudo,
     task_request_locale_tag, RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX,
@@ -305,7 +305,8 @@ async fn disabled_skill_preflight_returns_policy_decision_payload() {
     .expect_err("disabled skill should fail before execution");
     let parsed = parse_policy_block_error(&err).expect("policy block error");
     let normalized: serde_json::Value =
-        serde_json::from_str(&normalize_skill_error_for_user("write_file", &err)).unwrap();
+        serde_json::from_str(&skill_error_machine_observation("write_file", &err).unwrap())
+            .unwrap();
 
     assert_eq!(parsed.reason_code, "skill_disabled");
     assert_eq!(parsed.decision, "deny");
@@ -1061,9 +1062,20 @@ fn read_file_not_found_is_recoverable() {
     let err = format!("{}/etc/missing", READ_FILE_NOT_FOUND_PREFIX);
     assert!(is_recoverable_skill_error("read_file", &err));
     assert!(is_recoverable_skill_error("READ_FILE", &err));
-    let normalized = normalize_skill_error_for_user("read_file", &err);
-    assert!(normalized.contains("file not found"));
-    assert!(normalized.contains("/etc/missing"));
+    let observation: serde_json::Value =
+        serde_json::from_str(&skill_error_machine_observation("read_file", &err).unwrap()).unwrap();
+    assert_eq!(
+        observation
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("read_file_not_found")
+    );
+    assert_eq!(
+        observation
+            .pointer("/path")
+            .and_then(serde_json::Value::as_str),
+        Some("/etc/missing")
+    );
     assert!(is_missing_target_skill_error("read_file", &err));
 }
 
@@ -1103,10 +1115,16 @@ fn builtin_read_only_structured_file_errors_are_recoverable() {
     assert!(is_recoverable_skill_error("read_file", &read_err));
     assert!(is_recoverable_skill_error("list_dir", &list_err));
     assert!(!is_recoverable_skill_error("remove_file", &remove_err));
+    let observation: serde_json::Value =
+        serde_json::from_str(&skill_error_machine_observation("list_dir", &list_err).unwrap())
+            .unwrap();
     assert_eq!(
-        normalize_skill_error_for_user("list_dir", &list_err),
-        "directory operation failed: target matched multiple candidates"
+        observation
+            .pointer("/error_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("ambiguous_target")
     );
+    assert!(observation.pointer("/error_text").is_none());
 }
 
 #[test]
@@ -1167,16 +1185,32 @@ fn system_basic_read_failures_are_recoverable() {
         &structured_dir_err
     ));
 
-    let n1 = normalize_skill_error_for_user("system_basic", &structured_perm_err);
-    assert!(n1.contains("permission denied"), "got: {n1}");
-    let n2 = normalize_skill_error_for_user("system_basic", &structured_dir_err);
-    assert!(n2.contains("directory"), "got: {n2}");
-    let n3 = normalize_skill_error_for_user("system_basic", &structured_nf_err);
-    assert!(n3.contains("not found"), "got: {n3}");
-    let n4 = normalize_skill_error_for_user("system_basic", &structured_dir_err);
+    let n1: serde_json::Value = serde_json::from_str(
+        &skill_error_machine_observation("system_basic", &structured_perm_err).unwrap(),
+    )
+    .unwrap();
     assert_eq!(
-        n4,
-        "read operation failed: target is a directory, not a regular file"
+        n1.pointer("/error_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("permission_denied")
+    );
+    let n2: serde_json::Value = serde_json::from_str(
+        &skill_error_machine_observation("system_basic", &structured_dir_err).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        n2.pointer("/error_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("is_directory")
+    );
+    let n3: serde_json::Value = serde_json::from_str(
+        &skill_error_machine_observation("system_basic", &structured_nf_err).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        n3.pointer("/error_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("not_found")
     );
 }
 
@@ -1230,7 +1264,7 @@ fn structured_skill_error_accepts_extra_machine_fields() {
 }
 
 #[test]
-fn run_cmd_structured_error_normalization_uses_extra_streams() {
+fn run_cmd_structured_error_machine_observation_uses_extra_streams() {
     let err = format!(
         "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
         json!({
@@ -1258,15 +1292,30 @@ fn run_cmd_structured_error_normalization_uses_extra_streams() {
         Some("problem")
     );
 
-    let normalized = normalize_skill_error_for_user("run_cmd", &err);
+    let observation: serde_json::Value =
+        serde_json::from_str(&skill_error_machine_observation("run_cmd", &err).unwrap()).unwrap();
     assert_eq!(
-        normalized,
-        "command failed with exit code 7; stderr: problem; stdout: progress"
+        observation
+            .pointer("/extra/exit_code")
+            .and_then(serde_json::Value::as_i64),
+        Some(7)
+    );
+    assert_eq!(
+        observation
+            .pointer("/extra/stderr")
+            .and_then(serde_json::Value::as_str),
+        Some("problem")
+    );
+    assert_eq!(
+        observation
+            .pointer("/extra/stdout")
+            .and_then(serde_json::Value::as_str),
+        Some("progress")
     );
 }
 
 #[test]
-fn run_cmd_structured_error_normalization_uses_exit_category() {
+fn run_cmd_structured_error_machine_observation_uses_exit_category() {
     let err = format!(
         "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
         json!({
@@ -1284,12 +1333,24 @@ fn run_cmd_structured_error_normalization_uses_exit_category() {
         })
     );
 
-    let normalized = normalize_skill_error_for_user("run_cmd", &err);
+    let observation: serde_json::Value =
+        serde_json::from_str(&skill_error_machine_observation("run_cmd", &err).unwrap()).unwrap();
 
     assert_eq!(
-        normalized,
-        "command failed: command not found (exit code 127); stderr: shell-specific message"
+        observation
+            .pointer("/extra/exit_category")
+            .and_then(serde_json::Value::as_str),
+        Some("command_not_found")
     );
+    assert_eq!(
+        observation
+            .pointer("/extra/exit_code")
+            .and_then(serde_json::Value::as_i64),
+        Some(127)
+    );
+    assert!(!observation
+        .to_string()
+        .contains("Command failed with exit code"));
 }
 
 #[test]
@@ -1303,11 +1364,26 @@ fn crypto_account_access_errors_are_recoverable() {
     assert!(is_recoverable_skill_error("crypto", &err));
     assert!(is_crypto_account_access_error("crypto", &err));
     assert!(is_recoverable_skill_error("CRYPTO", &err));
-    let normalized = normalize_skill_error_for_user("crypto", &err);
-    assert!(normalized.contains("message_key=crypto.err.account_access_failed"));
-    assert!(normalized.contains("error_kind=account_access_failed"));
-    assert!(normalized.contains("exchange=binance"));
-    assert!(normalized.contains("Invalid API-key"));
+    let observation: serde_json::Value =
+        serde_json::from_str(&skill_error_machine_observation("crypto", &err).unwrap()).unwrap();
+    assert_eq!(
+        observation
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("crypto.err.account_access_failed")
+    );
+    assert_eq!(
+        observation
+            .pointer("/error_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("account_access_failed")
+    );
+    assert_eq!(
+        observation
+            .pointer("/exchange")
+            .and_then(serde_json::Value::as_str),
+        Some("binance")
+    );
 }
 
 #[test]
@@ -1331,12 +1407,17 @@ fn wrapped_crypto_account_access_errors_are_recoverable() {
 
     assert!(is_recoverable_skill_error("crypto", &err));
     assert!(is_crypto_account_access_error("crypto", &err));
-    let normalized = normalize_skill_error_for_user("crypto", &err);
-    assert!(normalized.contains("message_key=crypto.err.account_access_failed"));
-    assert!(normalized.contains("error_kind=account_access_failed"));
-    assert!(normalized.contains("exchange=binance"));
-    assert!(normalized.contains("Invalid API-key"));
-    assert!(!normalized.contains(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX));
+    let observation: serde_json::Value =
+        serde_json::from_str(&skill_error_machine_observation("crypto", &err).unwrap()).unwrap();
+    assert_eq!(
+        observation
+            .pointer("/error_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("unknown")
+    );
+    assert!(!observation
+        .to_string()
+        .contains(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX));
 }
 
 #[test]
@@ -1358,12 +1439,23 @@ fn structured_crypto_account_access_extra_is_recoverable_without_sentinel() {
 
     assert!(is_recoverable_skill_error("crypto", &err));
     assert!(is_crypto_account_access_error("crypto", &err));
-    let normalized = normalize_skill_error_for_user("crypto", &err);
-    assert!(normalized.contains("message_key=crypto.err.account_access_failed"));
-    assert!(normalized.contains("error_kind=account_access_failed"));
-    assert!(normalized.contains("exchange=binance"));
-    assert!(normalized.contains("Invalid API-key"));
-    assert!(!normalized.contains(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX));
+    let observation: serde_json::Value =
+        serde_json::from_str(&skill_error_machine_observation("crypto", &err).unwrap()).unwrap();
+    assert_eq!(
+        observation
+            .pointer("/extra/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("crypto.err.account_access_failed")
+    );
+    assert_eq!(
+        observation
+            .pointer("/extra/exchange")
+            .and_then(serde_json::Value::as_str),
+        Some("binance")
+    );
+    assert!(!observation
+        .to_string()
+        .contains(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX));
 }
 
 #[test]
@@ -1390,15 +1482,24 @@ fn structured_crypto_credential_errors_are_recoverable_i18n() {
         crypto_recoverable_i18n_error_key("crypto", &err).as_deref(),
         Some("crypto.err.okx_not_bound")
     );
-    let normalized = normalize_skill_error_for_user("crypto", &err);
-    assert!(normalized.contains("message_key=crypto.err.okx_not_bound"));
-    assert!(normalized.contains("error_kind=credential_not_bound"));
-    assert!(normalized.contains("exchange=okx"));
-    assert!(normalized.contains("action=cancel_all_orders"));
+    let observation: serde_json::Value =
+        serde_json::from_str(&skill_error_machine_observation("crypto", &err).unwrap()).unwrap();
+    assert_eq!(
+        observation
+            .pointer("/extra/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("crypto.err.okx_not_bound")
+    );
+    assert_eq!(
+        observation
+            .pointer("/extra/action")
+            .and_then(serde_json::Value::as_str),
+        Some("cancel_all_orders")
+    );
 }
 
 #[test]
-fn contract_structured_errors_normalize_without_internal_payload() {
+fn contract_structured_errors_project_machine_observation() {
     let err = structured_skill_error_from_parts(
         "system_basic",
         "contract_action_rejected",
@@ -1410,15 +1511,23 @@ fn contract_structured_errors_normalize_without_internal_payload() {
         })),
     );
 
-    let normalized = normalize_skill_error_for_user("system_basic", &err);
+    let observation: serde_json::Value =
+        serde_json::from_str(&skill_error_machine_observation("system_basic", &err).unwrap())
+            .unwrap();
 
     assert_eq!(
-        normalized,
-        "planned tool step was not allowed for this request"
+        observation
+            .pointer("/error_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("contract_action_rejected")
     );
-    assert!(!normalized.contains("__RC_SKILL_ERROR__"));
-    assert!(!normalized.contains("excerpt_kind_judgment"));
-    assert!(!normalized.contains("system_basic.inventory_dir"));
+    assert_eq!(
+        observation
+            .pointer("/extra/contract_match")
+            .and_then(serde_json::Value::as_str),
+        Some("excerpt_kind_judgment")
+    );
+    assert!(!observation.to_string().contains("__RC_SKILL_ERROR__"));
 }
 
 #[test]
@@ -1457,7 +1566,8 @@ fn policy_block_error_roundtrips_structured_payload() {
         vec!["Do not access the denied path."]
     );
     let normalized: serde_json::Value =
-        serde_json::from_str(&normalize_skill_error_for_user("read_file", &encoded)).unwrap();
+        serde_json::from_str(&skill_error_machine_observation("read_file", &encoded).unwrap())
+            .unwrap();
     assert_eq!(
         normalized
             .pointer("/decision")
@@ -1482,6 +1592,79 @@ fn policy_block_error_roundtrips_structured_payload() {
             .and_then(serde_json::Value::as_str),
         Some("path_outside_workspace")
     );
+}
+
+#[test]
+fn skill_error_machine_observation_strips_user_visible_fields() {
+    let encoded = format!(
+        "{}{}",
+        STRUCTURED_SKILL_ERROR_PREFIX,
+        serde_json::json!({
+            "skill": "run_cmd",
+            "error_kind": "nonzero_exit",
+            "error_text": "Command failed with exit code 127",
+            "text": "visible prose",
+            "extra": {
+                "command": "missing-bin",
+                "exit_code": 127,
+                "stderr": "missing-bin: command not found",
+                "nested": {
+                    "text": "nested visible prose",
+                    "error_text": "nested error prose",
+                    "error_code": "command_not_found"
+                }
+            }
+        })
+    );
+
+    let observation =
+        skill_error_machine_observation("run_cmd", &encoded).expect("machine observation");
+    let value: serde_json::Value = serde_json::from_str(&observation).expect("json observation");
+
+    assert_eq!(
+        value
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("structured_skill_error")
+    );
+    assert_eq!(
+        value
+            .pointer("/extra/exit_code")
+            .and_then(serde_json::Value::as_i64),
+        Some(127)
+    );
+    assert!(value.pointer("/error_text").is_none());
+    assert!(value.pointer("/text").is_none());
+    assert!(value.pointer("/extra/nested/error_text").is_none());
+    assert!(value.pointer("/extra/nested/text").is_none());
+    assert!(!observation.contains("Command failed with exit code"));
+    assert!(!observation.contains("visible prose"));
+}
+
+#[test]
+fn skill_error_machine_observation_projects_read_file_not_found_marker() {
+    let marker = format!("{READ_FILE_NOT_FOUND_PREFIX}/tmp/missing.md");
+    let observation =
+        skill_error_machine_observation("read_file", &marker).expect("machine observation");
+    let value: serde_json::Value = serde_json::from_str(&observation).expect("json observation");
+
+    assert_eq!(
+        value
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("read_file_not_found")
+    );
+    assert_eq!(
+        value
+            .pointer("/error_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("not_found")
+    );
+    assert_eq!(
+        value.pointer("/path").and_then(serde_json::Value::as_str),
+        Some("/tmp/missing.md")
+    );
+    assert!(!observation.contains("file not found"));
 }
 
 #[test]

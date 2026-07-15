@@ -106,8 +106,8 @@ const EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         source_action_ref: None,
         provided_evidence: &[
             "command_output",
-            "error_text",
             "error_kind",
+            "exit_code",
             "field_value",
             "generic_json_fields",
         ],
@@ -1203,9 +1203,16 @@ pub(super) fn observed_evidence_from_error(error: Option<&str>) -> Option<Value>
     let extractor = if let Some(structured) = crate::skills::parse_structured_skill_error(error) {
         collector.push(json_observed_evidence_item(
             "structured_error",
-            "error_text",
-            &json!(structured.error_text),
+            "error_kind",
+            &json!(structured.error_kind),
         ));
+        if !structured.skill.trim().is_empty() {
+            collector.push(json_observed_evidence_item(
+                "structured_error",
+                "skill",
+                &json!(structured.skill),
+            ));
+        }
         if let Some(extra) = structured.extra.as_ref() {
             collect_json_observed_evidence(&mut collector, "structured_error.extra", "", extra, 0);
         }
@@ -1288,31 +1295,20 @@ pub(super) fn collect_structured_error_command_output_evidence(
     if !has_run_cmd_failure_shape {
         return;
     }
-    let summary_skill = if structured.skill.trim().is_empty() {
-        "run_cmd"
-    } else {
-        structured.skill.as_str()
-    };
-    let structured_error = crate::skills::structured_skill_error_from_parts(
-        summary_skill,
-        structured.error_kind.as_str(),
-        structured.error_text.as_str(),
-        structured.platform.as_deref(),
-        structured.extra.clone(),
-    );
-    let summary = crate::skills::normalize_skill_error_for_user(summary_skill, &structured_error);
-    let summary = summary.trim();
-    if summary.is_empty() {
-        return;
+    collector.push(json_observed_evidence_item(
+        "structured_error",
+        "error_kind",
+        &json!(structured.error_kind),
+    ));
+    if let Some(extra) = structured.extra.as_ref() {
+        for field in ["exit_code", "exit_category", "stderr", "stdout", "command"] {
+            if let Some(value) = extra.get(field) {
+                collector.push(json_observed_evidence_item(
+                    "structured_error.extra",
+                    field,
+                    value,
+                ));
+            }
+        }
     }
-    collector.push(text_extracted_evidence_item_with_source(
-        "command_output",
-        "structured_error.extractor",
-        summary,
-    ));
-    collector.push(text_extracted_evidence_item_with_source(
-        "field_value",
-        "structured_error.extractor",
-        summary,
-    ));
 }

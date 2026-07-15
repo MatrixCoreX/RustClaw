@@ -627,6 +627,29 @@ fn compact_progress_error(err: &str) -> String {
     )
 }
 
+fn skill_error_observation_or_raw(skill: &str, err: &str) -> String {
+    crate::skills::skill_error_machine_observation(skill, err).unwrap_or_else(|| err.to_string())
+}
+
+fn skill_error_progress_token(_skill: &str, err: &str) -> String {
+    if let Some(structured) = crate::skills::parse_structured_skill_error(err) {
+        return format!(
+            "error_kind={}",
+            crate::truncate_for_agent_trace(structured.error_kind.trim())
+        );
+    }
+    if let Some(policy_block) = crate::skills::parse_policy_block_error(err) {
+        return format!(
+            "reason_code={}",
+            crate::truncate_for_agent_trace(policy_block.reason_code.trim())
+        );
+    }
+    if crate::skills::read_file_not_found_path(err).is_some() {
+        return "error_kind=not_found".to_string();
+    }
+    compact_progress_error(err)
+}
+
 fn publish_failure_progress(
     state: &AppState,
     task: &ClaimedTask,
@@ -788,14 +811,14 @@ async fn try_auto_sudo_retry_after_permission_denied(
         );
         return Ok(Some(outcome.stop_signal));
     }
-    let user_visible_err = crate::skills::normalize_skill_error_for_user(normalized_skill, err);
+    let progress_error = skill_error_progress_token(normalized_skill, err);
     publish_failure_recovery_progress(
         state,
         task,
         loop_state,
         step_in_round,
         normalized_skill,
-        &user_visible_err,
+        &progress_error,
         "auto_sudo_retry",
     );
     let retry_action = crate::AgentAction::CallSkill {
@@ -872,14 +895,13 @@ async fn try_auto_sudo_retry_after_permission_denied(
         }
         None => {
             let retry_err = retry_step.error.clone().unwrap_or_default();
-            let user_visible_retry_err =
-                crate::skills::normalize_skill_error_for_user("run_cmd", &retry_err);
+            let retry_error_observation = skill_error_observation_or_raw("run_cmd", &retry_err);
             crate::append_subtask_result(
                 &mut loop_state.subtask_results,
                 global_step,
                 "skill(run_cmd:auto_sudo_retry)",
                 false,
-                &user_visible_retry_err,
+                &retry_error_observation,
             );
             register_failed_step_output(
                 loop_state,
@@ -887,7 +909,7 @@ async fn try_auto_sudo_retry_after_permission_denied(
                 step_in_round,
                 "skill.run_cmd",
                 "skill(run_cmd:auto_sudo_retry)",
-                &user_visible_retry_err,
+                &retry_error_observation,
             );
             loop_state.executed_step_results.push(retry_step.clone());
             log_step_journal_summary(
@@ -914,7 +936,7 @@ async fn try_auto_sudo_retry_after_permission_denied(
                 return Ok(Some(Some("policy_block_user_visible".to_string())));
             }
             let message =
-                auto_sudo_retry_failed_delivery(state, task, user_text, &user_visible_retry_err)
+                auto_sudo_retry_failed_delivery(state, task, user_text, &retry_error_observation)
                     .await;
             super::append_delivery_message(
                 &task.task_id,
@@ -926,7 +948,7 @@ async fn try_auto_sudo_retry_after_permission_denied(
                 loop_state.round_no,
                 step_in_round,
                 normalized_skill,
-                crate::truncate_for_agent_trace(&user_visible_retry_err)
+                crate::truncate_for_agent_trace(&retry_error_observation)
             ));
             Ok(Some(Some(
                 "auto_sudo_retry_failed_user_visible".to_string(),
@@ -1314,7 +1336,8 @@ async fn handle_skill_step_failure(
     err: &str,
     action_trace_kind: &str,
 ) -> Result<Option<String>, String> {
-    let user_visible_err = crate::skills::normalize_skill_error_for_user(normalized_skill, err);
+    let error_observation = skill_error_observation_or_raw(normalized_skill, err);
+    let progress_error = skill_error_progress_token(normalized_skill, err);
     let ledger_args_summary = recovery_args
         .map(|args| {
             super::build_safe_skill_args_summary(args, super::PROGRESS_ARGS_SUMMARY_MAX_LEN)
@@ -1327,7 +1350,7 @@ async fn handle_skill_step_failure(
         crate::executor::StepExecutionStatus::Error,
         "",
         None,
-        &user_visible_err,
+        &error_observation,
     );
     let effect = recovery_args
         .map(|args| {
@@ -1348,7 +1371,7 @@ async fn handle_skill_step_failure(
         global_step,
         &format!("skill({normalized_skill})"),
         false,
-        &user_visible_err,
+        &error_observation,
     );
     info!(
         "executor_result_error task_id={} round={} step={} type={} error={}",
@@ -1356,7 +1379,7 @@ async fn handle_skill_step_failure(
         loop_state.round_no,
         step_in_round,
         action_trace_kind,
-        crate::truncate_for_log(&user_visible_err)
+        crate::truncate_for_log(&error_observation)
     );
     loop_state
         .executed_step_results
@@ -1380,7 +1403,7 @@ async fn handle_skill_step_failure(
             step_in_round,
             &format!("skill.{normalized_skill}"),
             &format!("skill({normalized_skill})"),
-            &user_visible_err,
+            &error_observation,
         );
         let message =
             compose_policy_block_delivery(state, task, goal, user_text, &policy_block).await;
@@ -1422,7 +1445,7 @@ async fn handle_skill_step_failure(
             step_in_round,
             &format!("skill.{normalized_skill}"),
             &format!("skill({normalized_skill})"),
-            &user_visible_err,
+            &error_observation,
         );
         register_failed_step_structured_error_fields(
             loop_state,
@@ -1434,7 +1457,7 @@ async fn handle_skill_step_failure(
             loop_state.round_no,
             step_in_round,
             normalized_skill,
-            crate::truncate_for_agent_trace(&user_visible_err)
+            crate::truncate_for_agent_trace(&error_observation)
         ));
         publish_failure_recovery_progress(
             state,
@@ -1442,7 +1465,7 @@ async fn handle_skill_step_failure(
             loop_state,
             step_in_round,
             normalized_skill,
-            &user_visible_err,
+            &progress_error,
             stop_reason,
         );
         return Ok(Some(stop_reason.to_string()));
@@ -1458,7 +1481,7 @@ async fn handle_skill_step_failure(
         &loop_state.delivery_messages,
         step_in_round,
         &format!("skill({normalized_skill})"),
-        &user_visible_err,
+        &error_observation,
         Some(err),
     )
     .await;

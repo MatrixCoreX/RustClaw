@@ -925,19 +925,22 @@ fn raw_command_output_error_step_supplies_command_output_evidence() {
                 .is_some_and(|value| value.contains("No such file or directory"))
     }));
     assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("command_output")
+        item.get("field").and_then(Value::as_str) == Some("exit_code")
             && item
                 .get("excerpt")
                 .and_then(Value::as_str)
-                .is_some_and(|value| value.contains("command failed"))
+                .is_some_and(|value| value == "1")
     }));
     assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("field_value")
+        item.get("field").and_then(Value::as_str) == Some("error_kind")
             && item
-                .get("source")
+                .get("excerpt")
                 .and_then(Value::as_str)
-                .is_some_and(|value| value == "structured_error.extractor")
+                .is_some_and(|value| value == "nonzero_exit")
     }));
+    assert!(!items
+        .iter()
+        .any(|item| item.get("field").and_then(Value::as_str) == Some("error_text")));
 }
 
 #[test]

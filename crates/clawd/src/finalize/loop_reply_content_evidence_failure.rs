@@ -421,15 +421,16 @@ pub(super) async fn content_evidence_step_failure_answer(
         crate::skills::is_recoverable_skill_error(&failed_step.skill, raw_error);
     let observable_run_cmd_error =
         crate::skills::is_observable_run_cmd_error(&failed_step.skill, raw_error);
-    let user_visible_error = if crate::skills::parse_structured_skill_error(raw_error).is_some()
+    let error_observation = if crate::skills::parse_structured_skill_error(raw_error).is_some()
         || recoverable_skill_error
         || observable_run_cmd_error
     {
-        crate::skills::normalize_skill_error_for_user(&failed_step.skill, raw_error)
+        crate::skills::skill_error_machine_observation(&failed_step.skill, raw_error)
+            .unwrap_or_else(|| raw_error.to_string())
     } else {
         raw_error.to_string()
     };
-    let error = user_visible_error.as_str();
+    let error = error_observation.as_str();
 
     if let Some(answer) =
         service_status_failure_answer(state, user_text, raw_error, agent_run_context)
@@ -530,7 +531,10 @@ pub(super) async fn content_evidence_step_failure_answer(
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let mut observed_facts = vec![
         format!("failed_skill: {}", failed_step.skill.trim()),
-        format!("error_summary: {}", crate::truncate_for_agent_trace(error)),
+        format!(
+            "error_observation: {}",
+            crate::truncate_for_agent_trace(error)
+        ),
         "content_evidence_observed: false".to_string(),
     ];
     if let Some(locator) = locator.as_deref() {
