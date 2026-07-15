@@ -37,10 +37,11 @@ fn observed_fallback_prompt_renders_language_and_response_style_hints() {
 #[test]
 fn observed_fallback_prompt_uses_compact_template_for_terminal_status_contracts() {
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route_result.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route_result.output_contract.semantic_kind = OutputSemanticKind::None;
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.delivery_required = false;
     route_result.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    route_result.resolved_intent = "capability_ref=system.runtime_status".to_string();
     let agent_run_context = AgentRunContext {
         route_result: Some(route_result),
         ..AgentRunContext::default()
@@ -55,24 +56,34 @@ fn observed_fallback_prompt_uses_compact_template_for_terminal_status_contracts(
 }
 
 #[test]
-fn observed_fallback_prompt_uses_compact_template_for_docker_capability_ref() {
+fn observed_fallback_prompt_uses_compact_template_for_machine_capability_refs() {
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     route_result.output_contract.semantic_kind = OutputSemanticKind::None;
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.delivery_required = false;
     route_result.output_contract.delivery_intent = OutputDeliveryIntent::None;
-    route_result.resolved_intent = "capability_ref=docker.version".to_string();
-    let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
-        ..AgentRunContext::default()
-    };
+    for capability_ref in [
+        "database.list_tables",
+        "docker.version",
+        "docker.read_logs",
+        "package.detect_manager",
+    ] {
+        route_result.resolved_intent = format!("capability_ref={capability_ref}");
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result.clone()),
+            ..AgentRunContext::default()
+        };
 
-    let path = observed_answer_fallback_prompt_logical_path(
-        Some(&agent_run_context),
-        "field_value=24.0\nstatus=ok",
-    );
+        let path = observed_answer_fallback_prompt_logical_path(
+            Some(&agent_run_context),
+            "field_value=24.0\nstatus=ok",
+        );
 
-    assert_eq!(path, "prompts/observed_answer_fallback_compact_prompt.md");
+        assert_eq!(
+            path, "prompts/observed_answer_fallback_compact_prompt.md",
+            "{capability_ref} should use compact finalizer"
+        );
+    }
 }
 
 #[test]
@@ -169,6 +180,24 @@ fn observed_fallback_prompt_keeps_full_template_for_complex_or_large_contracts()
         "prompts/observed_answer_fallback_prompt.md"
     );
 
+    let mut docker_mutation_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    docker_mutation_route.output_contract.semantic_kind = OutputSemanticKind::None;
+    docker_mutation_route.output_contract.requires_content_evidence = true;
+    docker_mutation_route.output_contract.delivery_required = false;
+    docker_mutation_route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    docker_mutation_route.resolved_intent = "capability_ref=docker.restart".to_string();
+    let docker_mutation_context = AgentRunContext {
+        route_result: Some(docker_mutation_route),
+        ..AgentRunContext::default()
+    };
+    assert_eq!(
+        observed_answer_fallback_prompt_logical_path(
+            Some(&docker_mutation_context),
+            "status=ok\nchanged=true"
+        ),
+        "prompts/observed_answer_fallback_prompt.md"
+    );
+
     let mut terminal_route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
     terminal_route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let terminal_context = AgentRunContext {
@@ -187,9 +216,7 @@ fn observed_fallback_prompt_uses_compact_template_for_short_listing_and_scalar_c
     for semantic_kind in [
         OutputSemanticKind::FileNames,
         OutputSemanticKind::DirectoryEntryGroups,
-        OutputSemanticKind::ScalarCount,
         OutputSemanticKind::ExistenceWithPath,
-        OutputSemanticKind::SqliteTableListing,
     ] {
         let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
         route_result.output_contract.semantic_kind = semantic_kind;
