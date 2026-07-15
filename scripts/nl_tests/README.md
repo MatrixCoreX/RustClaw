@@ -250,12 +250,15 @@ artifact must contain `LONG_FILE_CHECK ok`, layered prompt success text, and
 `REGISTRY_PARITY mode=all ... differences=0`, so file-size maintainability,
 generated skill prompts, and main/docker registry parity are release artifacts.
 It also writes `agent_parity_gate_inventory_contracts.txt` from
-`scripts/check_agent_parity_gate_inventory.py --self-test` plus the main check.
+`scripts/check_agent_parity_gate_inventory.py --self-test`,
+`scripts/check_nl_test_checker_inventory.py --self-test`, and their main checks.
 `gate_summary.env` records `agent_parity_gate_inventory_contracts=1`, and the
 artifact must contain `AGENT_PARITY_GATE_INVENTORY_SELF_TEST ok` and
-`AGENT_PARITY_GATE_INVENTORY_CHECK ok`, so top-level `scripts/check_*.py`
-guards are either release-gated or explicitly exempted for live-run-only
-compatibility reasons.
+`AGENT_PARITY_GATE_INVENTORY_CHECK ok` plus
+`NL_TEST_CHECKER_INVENTORY_SELF_TEST ok` and
+`NL_TEST_CHECKER_INVENTORY_CHECK ok`, so top-level `scripts/check_*.py` guards
+and nested `scripts/nl_tests/check_*.py` checkers are release-runner wired or
+explicitly exempted for live-run-only compatibility reasons.
 It also writes `evidence_extractor_contracts.txt` from
 `scripts/check_evidence_extractor_contracts.py --self-test` plus the main check.
 `gate_summary.env` records `evidence_extractor_contracts=1`, and the artifact
@@ -343,7 +346,7 @@ scope, then checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
 the runtime hard-reply, policy-boundary hard-reply, repair no-user-text,
 policy-decision-token, registry-policy, registry-alias, long-tail-skill,
-maintainability-skill, gate-inventory, task-lifecycle,
+maintainability-skill, gate-inventory, NL-suite checker inventory, task-lifecycle,
 task-event/context/team, clawcli model-readiness, static agent-loop,
 evidence-extractor, secret-scan, wrapper, no-agent-mode,
 suite-artifact self-test, and raw LLM trace contracts participated in the run.
@@ -446,7 +449,9 @@ For `maintainability_skill_contracts.txt`, the required content includes
 `REGISTRY_PARITY mode=all`, and `differences=0`.
 For `agent_parity_gate_inventory_contracts.txt`, the required content includes
 `AGENT_PARITY_GATE_INVENTORY_SELF_TEST ok` and
-`AGENT_PARITY_GATE_INVENTORY_CHECK ok`.
+`AGENT_PARITY_GATE_INVENTORY_CHECK ok`, plus
+`NL_TEST_CHECKER_INVENTORY_SELF_TEST ok` and
+`NL_TEST_CHECKER_INVENTORY_CHECK ok`.
 It also checks
 that gate summary path fields use portable refs such as `out_dir_ref=out_dir`
 and never host absolute paths. It also checks artifact content: text reports

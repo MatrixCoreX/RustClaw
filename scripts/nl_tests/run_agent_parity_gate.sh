@@ -429,6 +429,8 @@ echo "AGENT_PARITY_GATE_STEP agent_parity_gate_inventory_contracts"
 {
   python3 "${ROOT_DIR}/scripts/check_agent_parity_gate_inventory.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_agent_parity_gate_inventory.py"
+  python3 "${ROOT_DIR}/scripts/check_nl_test_checker_inventory.py" --self-test
+  python3 "${ROOT_DIR}/scripts/check_nl_test_checker_inventory.py"
 } > "${OUT_DIR}/agent_parity_gate_inventory_contracts.txt"
 
 echo "AGENT_PARITY_GATE_STEP evidence_extractor_contracts"
