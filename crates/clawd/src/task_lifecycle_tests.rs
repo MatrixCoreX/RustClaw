@@ -822,6 +822,78 @@ fn task_query_lifecycle_projects_checkpoint_product_contract_fields() {
 }
 
 #[test]
+fn task_query_lifecycle_projects_provider_blocker_machine_fields() {
+    let mut checkpoint = checkpoint_value("ckpt-provider", vec![]);
+    checkpoint["attempt_ledger"] = json!([
+        {
+            "attempt_id": "a1",
+            "action_ref": "image_generate",
+            "tool_or_skill": "image_generate",
+            "recovery_action": "wait_background",
+            "repair_signal": {
+                "source": "executor",
+                "status_code": "provider_retryable_response",
+                "reason_code": "executor_step_failed",
+                "next_recovery_kind": "wait_background",
+                "provider_status": {
+                    "provider": "minimax",
+                    "status_code": "rate_limited",
+                    "provider_error_class": "rate_limited",
+                    "message_key": "provider.rate_limited",
+                    "external_provider_blocked": true,
+                    "retry_after_seconds": 60,
+                    "provider_supported": true
+                }
+            }
+        }
+    ]);
+    let result = json!({
+        "task_lifecycle": {
+            "schema_version": 1,
+            "state": "background",
+            "resume_reason": "provider_blocker_wait_background",
+            "next_check_after": 1781800460,
+            "checkpoint_id": "ckpt-provider"
+        },
+        "task_checkpoint": checkpoint
+    });
+
+    let lifecycle = task_query_lifecycle_projection("running", Some(&result), Some(4567));
+
+    assert_eq!(lifecycle["state"], "background");
+    assert_eq!(
+        lifecycle["waiting_reason_code"],
+        "provider_blocker_wait_background"
+    );
+    assert_eq!(lifecycle["provider_blocker_active"], true);
+    assert_eq!(lifecycle["provider_blocker_provider"], "minimax");
+    assert_eq!(lifecycle["provider_blocker_status_code"], "rate_limited");
+    assert_eq!(lifecycle["provider_blocker_external_blocked"], true);
+    assert_eq!(lifecycle["provider_blocker_retry_after_seconds"], 60);
+    assert_eq!(lifecycle["provider_blocker_provider_supported"], true);
+    assert_eq!(
+        lifecycle["provider_blocker_next_recovery_kind"],
+        "wait_background"
+    );
+    assert_eq!(lifecycle["provider_blocker_signal_source"], "executor");
+    assert_eq!(
+        lifecycle["provider_blocker_reason_code"],
+        "executor_step_failed"
+    );
+    assert_eq!(lifecycle["provider_blocker_action_ref"], "image_generate");
+    assert_eq!(
+        lifecycle["provider_blocker_tool_or_skill"],
+        "image_generate"
+    );
+    assert_eq!(
+        lifecycle["provider_blocker_recovery_action"],
+        "wait_background"
+    );
+    assert_eq!(lifecycle["next_action_kind"], "resume_checkpoint");
+    assert_eq!(lifecycle["next_action_ref"], "ckpt-provider");
+}
+
+#[test]
 fn task_query_lifecycle_reads_journal_summary_payload() {
     let result = json!({
         "task_journal": {

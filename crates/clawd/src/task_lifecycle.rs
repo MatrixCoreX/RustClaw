@@ -837,6 +837,171 @@ fn append_lifecycle_product_contract_fields(
         obj.entry("async_job_message_key".to_string())
             .or_insert(json!(job.message_key.as_str()));
     }
+    append_lifecycle_provider_blocker_fields(obj, &checkpoint);
+}
+
+fn append_lifecycle_provider_blocker_fields(
+    obj: &mut serde_json::Map<String, Value>,
+    checkpoint: &TaskCheckpoint,
+) {
+    let Some(fields) = checkpoint_provider_blocker_fields(checkpoint) else {
+        return;
+    };
+    for (key, value) in fields {
+        obj.entry(key).or_insert(value);
+    }
+}
+
+fn checkpoint_provider_blocker_fields(
+    checkpoint: &TaskCheckpoint,
+) -> Option<serde_json::Map<String, Value>> {
+    if let Some(signal) = checkpoint.repair_signal.as_ref() {
+        if let Some(fields) = provider_blocker_fields_from_signal(signal, None) {
+            return Some(fields);
+        }
+    }
+    let Some(entries) = checkpoint.attempt_ledger.as_ref().and_then(Value::as_array) else {
+        return None;
+    };
+    for entry in entries.iter().rev() {
+        let Some(signal) = entry.get("repair_signal") else {
+            continue;
+        };
+        if let Some(fields) = provider_blocker_fields_from_signal(signal, Some(entry)) {
+            return Some(fields);
+        }
+    }
+    None
+}
+
+fn provider_blocker_fields_from_signal(
+    signal: &Value,
+    attempt_entry: Option<&Value>,
+) -> Option<serde_json::Map<String, Value>> {
+    let provider_status = signal
+        .get("provider_status")
+        .or_else(|| signal.pointer("/repair_envelope/provider_status"))?;
+    let next_recovery_kind = string_value(signal.get("next_recovery_kind"))
+        .or_else(|| string_value(signal.pointer("/repair_envelope/next_recovery_kind")))
+        .or_else(|| attempt_entry.and_then(|entry| string_value(entry.get("recovery_action"))));
+    let status_code = string_value(provider_status.get("status_code"))
+        .or_else(|| string_value(provider_status.get("provider_error_class")))
+        .or_else(|| string_value(signal.get("status_code")));
+    let external_provider_blocked = provider_status
+        .get("external_provider_blocked")
+        .and_then(Value::as_bool);
+    let retry_after_seconds = provider_status
+        .get("retry_after_seconds")
+        .and_then(Value::as_i64);
+    let is_provider_blocker = external_provider_blocked == Some(true)
+        || retry_after_seconds.is_some()
+        || next_recovery_kind.as_deref() == Some("wait_background")
+        || status_code
+            .as_deref()
+            .is_some_and(provider_blocker_status_code);
+    if !is_provider_blocker {
+        return None;
+    }
+
+    let mut fields = serde_json::Map::new();
+    fields.insert("provider_blocker_active".to_string(), json!(true));
+    insert_string_projection(
+        &mut fields,
+        "provider_blocker_status_code",
+        status_code.as_deref(),
+    );
+    insert_string_projection(
+        &mut fields,
+        "provider_blocker_next_recovery_kind",
+        next_recovery_kind.as_deref(),
+    );
+    insert_string_projection(
+        &mut fields,
+        "provider_blocker_provider",
+        string_value(provider_status.get("provider")).as_deref(),
+    );
+    insert_string_projection(
+        &mut fields,
+        "provider_blocker_message_key",
+        string_value(provider_status.get("message_key")).as_deref(),
+    );
+    insert_string_projection(
+        &mut fields,
+        "provider_blocker_unsupported_reason",
+        string_value(provider_status.get("unsupported_reason")).as_deref(),
+    );
+    insert_string_projection(
+        &mut fields,
+        "provider_blocker_signal_source",
+        string_value(signal.get("source")).as_deref(),
+    );
+    insert_string_projection(
+        &mut fields,
+        "provider_blocker_reason_code",
+        string_value(signal.get("reason_code")).as_deref(),
+    );
+    if let Some(value) = external_provider_blocked {
+        fields.insert(
+            "provider_blocker_external_blocked".to_string(),
+            json!(value),
+        );
+    }
+    if let Some(value) = provider_status
+        .get("provider_supported")
+        .and_then(Value::as_bool)
+    {
+        fields.insert(
+            "provider_blocker_provider_supported".to_string(),
+            json!(value),
+        );
+    }
+    if let Some(value) = retry_after_seconds {
+        fields.insert(
+            "provider_blocker_retry_after_seconds".to_string(),
+            json!(value),
+        );
+    }
+    if let Some(entry) = attempt_entry {
+        insert_string_projection(
+            &mut fields,
+            "provider_blocker_action_ref",
+            string_value(entry.get("action_ref")).as_deref(),
+        );
+        insert_string_projection(
+            &mut fields,
+            "provider_blocker_tool_or_skill",
+            string_value(entry.get("tool_or_skill")).as_deref(),
+        );
+        insert_string_projection(
+            &mut fields,
+            "provider_blocker_recovery_action",
+            string_value(entry.get("recovery_action")).as_deref(),
+        );
+    }
+    Some(fields)
+}
+
+fn provider_blocker_status_code(status_code: &str) -> bool {
+    matches!(
+        status_code.trim(),
+        "rate_limited"
+            | "quota_exhausted"
+            | "quota_exceeded"
+            | "provider_retryable_response"
+            | "provider_error"
+            | "timeout"
+    )
+}
+
+fn insert_string_projection(
+    obj: &mut serde_json::Map<String, Value>,
+    key: &str,
+    value: Option<&str>,
+) {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    obj.insert(key.to_string(), json!(value));
 }
 
 fn append_lifecycle_reason_code_field(obj: &mut serde_json::Map<String, Value>, state: &str) {
@@ -889,6 +1054,14 @@ fn non_empty_state_token(state: &str) -> Option<String> {
 
 fn string_field(obj: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
     obj.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn string_value(value: Option<&Value>) -> Option<String> {
+    value
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
