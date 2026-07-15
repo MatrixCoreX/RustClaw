@@ -227,6 +227,8 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
     "agent_parity_gate/agent_parity_gate_inventory_contracts.txt": {
         "AGENT_PARITY_GATE_INVENTORY_SELF_TEST ok",
         "AGENT_PARITY_GATE_INVENTORY_CHECK ok",
+        "NL_TEST_CHECKER_INVENTORY_SELF_TEST ok",
+        "NL_TEST_CHECKER_INVENTORY_CHECK ok",
     },
     "agent_parity_gate/evidence_extractor_contracts.txt": {
         "EVIDENCE_EXTRACTOR_CONTRACT_SELF_TEST ok",
