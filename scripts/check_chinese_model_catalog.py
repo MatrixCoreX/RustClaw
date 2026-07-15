@@ -884,6 +884,9 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and "--validate-contract-report-content" in suite_wrapper_text
         and "--require-contract-report-content-checked" in suite_wrapper_text
         and "validate_existing_contract_report" in suite_wrapper_text
+        and "SUITE_ARTIFACT_CONTRACT_FORBIDDEN_SNIPPETS" in suite_wrapper_text
+        and "check_forbidden_snippets" in suite_wrapper_text
+        and "forbidden_snippet" in suite_wrapper_text
         and "agent_parity_gate_contract" in suite_wrapper_text,
         findings,
         "wrapped suite contract guard must statically protect agent parity nested artifact checks",
@@ -938,6 +941,10 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         and '"suite_artifact_contract_self_test": "1"' in suite_artifact_contract_text
         and "SUITE_ARTIFACT_CONTRACT_SELF_TEST ok" in suite_artifact_contract_text
         and '"live_metrics": {"0", "1"}' in suite_artifact_contract_text
+        and (
+            'live_metrics_enabled = gate_summary.get("live_metrics") == "1"'
+            in suite_artifact_contract_text
+        )
         and "agent_parity_gate_summary_bad_machine_field" in suite_artifact_contract_text
         and '"required_machine_field_count"' in suite_artifact_contract_text
         and '"content_check_count"' in suite_artifact_contract_text
