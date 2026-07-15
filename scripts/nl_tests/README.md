@@ -115,7 +115,9 @@ summary/index write step. Validate a wrapped run root with
 Wrapped runs also write this validation result to
 `suite_artifact_contract.json` and list it in `artifact_index.txt`. The
 auto-generated report uses `run_dir="."` so the artifact can be moved or shared
-without embedding the local workspace path.
+without embedding the local workspace path. Auto-generated reports are strict:
+they are created with `--require-contract-report`, so the report must also be
+present in `artifact_index.txt`.
 
 For rerun shards, use:
 

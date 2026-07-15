@@ -31,6 +31,8 @@ REQUIRED_SNIPPETS = {
     "checker_script": 'check_suite_artifact_contract.py',
     "checker_runs_from_run_root": 'cd "$run_dir"',
     "checker_uses_dot": 'check_suite_artifact_contract.py" . --json',
+    "checker_requires_contract_report": "--require-contract-report",
+    "contract_report_pending_placeholder": "contract_report_pending",
     "contract_report_printed": 'echo "  - ${contract_report}"',
     "suite_summary_printed": 'echo "  - ${run_dir}/suite_summary.env"',
     "trap_captures_exit_code": "trap 'exit_code=$?",
