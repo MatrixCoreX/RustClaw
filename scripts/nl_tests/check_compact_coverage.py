@@ -303,6 +303,7 @@ def run_self_test() -> int:
         forbidden_report = coverage_for([forbidden_path])
         assert forbidden_report["forbidden_live_publish_rows"], forbidden_report
     print("SELF_TEST_OK")
+    print("COMPACT_COVERAGE_SELF_TEST ok")
     return 0
 
 
