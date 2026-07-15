@@ -281,6 +281,10 @@ echo "AGENT_PARITY_GATE_STEP suite_wrapper_contract"
 python3 "${SCRIPT_DIR}/check_suite_wrapper_contract.py" --json \
   > "${OUT_DIR}/suite_wrapper_contract.json"
 
+echo "AGENT_PARITY_GATE_STEP runner_path_ref_contract"
+python3 "${SCRIPT_DIR}/check_runner_path_ref_contract.py" --json \
+  > "${OUT_DIR}/runner_path_ref_contract.json"
+
 echo "AGENT_PARITY_GATE_STEP suite_artifact_contract_self_test"
 python3 "${SCRIPT_DIR}/check_suite_artifact_contract.py" --self-test \
   > "${OUT_DIR}/suite_artifact_contract_self_test.txt"
@@ -355,6 +359,7 @@ fi
   echo "agent_loop_static_contracts=1"
   echo "secret_scan_contract=1"
   echo "suite_wrapper_contract=1"
+  echo "runner_path_ref_contract=1"
   echo "suite_artifact_contract_self_test=1"
   echo "llm_raw_trace_runner_contract=1"
   echo "rollout_metrics_contract=1"

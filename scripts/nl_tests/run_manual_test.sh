@@ -104,6 +104,10 @@ Artifacts:
 EOF
 }
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" --anchor "$1" "$2"
+}
+
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "Missing command: $1" >&2
@@ -725,11 +729,15 @@ handle_interrupt() {
   local code=130
   echo
   echo "[INTERRUPTED]"
-  echo "  run_dir:              ${RUN_DIR:-<not-created>}"
+  if [[ -n "${RUN_DIR:-}" ]]; then
+    echo "  run_dir_ref:          $(path_ref "$RUN_DIR" "$RUN_DIR")"
+  else
+    echo "  run_dir_ref:          not_created"
+  fi
   echo "  current_source_line:  ${CURRENT_SOURCE_LINE:-0}"
   echo "  last_completed_line:  ${LAST_COMPLETED_LINE:-0}"
   echo "Resume by reusing the same args and adding:"
-  echo "  --resume-dir ${RUN_DIR:-<run_dir>} --resume-line ${LAST_COMPLETED_LINE:-0}"
+  echo "  --resume-dir <run_dir_ref> --resume-line ${LAST_COMPLETED_LINE:-0}"
   exit "$code"
 }
 
@@ -1203,10 +1211,10 @@ prepare_run_dir
 
 if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   echo "Natural-language manual regression"
-  echo "  case_file:     $CASE_FILE"
-  echo "  run_dir:       $RUN_DIR"
-  echo "  run_log:       $RUN_LOG"
-  echo "  summary_jsonl: $SUMMARY_JSONL"
+  echo "  case_file_ref:     $(path_ref "$RUN_DIR" "$CASE_FILE")"
+  echo "  run_dir_ref:       $(path_ref "$RUN_DIR" "$RUN_DIR")"
+  echo "  run_log_ref:       $(path_ref "$RUN_DIR" "$RUN_LOG")"
+  echo "  summary_jsonl_ref: $(path_ref "$RUN_DIR" "$SUMMARY_JSONL")"
   echo "  base_url:      $BASE_URL"
   echo "  user_id:       $USER_ID"
   echo "  chat_id:       $CHAT_ID"
@@ -1294,9 +1302,9 @@ if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   print_final_summary
   echo
   echo "Artifacts:"
-  echo "  - $RUN_DIR"
-  echo "  - $RUN_LOG"
-  echo "  - $SUMMARY_JSONL"
+  echo "  - run_dir_ref=$(path_ref "$RUN_DIR" "$RUN_DIR")"
+  echo "  - run_log_ref=$(path_ref "$RUN_DIR" "$RUN_LOG")"
+  echo "  - summary_jsonl_ref=$(path_ref "$RUN_DIR" "$SUMMARY_JSONL")"
 fi
 
 summary_exit_code

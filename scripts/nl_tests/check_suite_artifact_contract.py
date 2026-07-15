@@ -33,6 +33,7 @@ AGENT_PARITY_GATE_REQUIRED_ARTIFACTS = {
     "agent_parity_gate/agent_loop_static_contracts.txt",
     "agent_parity_gate/secret_scan_contract.json",
     "agent_parity_gate/suite_wrapper_contract.json",
+    "agent_parity_gate/runner_path_ref_contract.json",
     "agent_parity_gate/suite_artifact_contract_self_test.txt",
     "agent_parity_gate/llm_raw_trace_runner_contract.txt",
     "agent_parity_gate/rollout_metrics_contract.txt",
@@ -43,6 +44,7 @@ AGENT_PARITY_GATE_REQUIRED_FLAGS = {
     "agent_loop_static_contracts": "1",
     "secret_scan_contract": "1",
     "suite_wrapper_contract": "1",
+    "runner_path_ref_contract": "1",
     "suite_artifact_contract_self_test": "1",
     "llm_raw_trace_runner_contract": "1",
     "rollout_metrics_contract": "1",
@@ -88,6 +90,7 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
 AGENT_PARITY_GATE_JSON_OK_ARTIFACTS = {
     "agent_parity_gate/secret_scan_contract.json",
     "agent_parity_gate/suite_wrapper_contract.json",
+    "agent_parity_gate/runner_path_ref_contract.json",
 }
 
 AGENT_PARITY_GATE_OPTIONAL_ARTIFACTS_BY_FLAG = {

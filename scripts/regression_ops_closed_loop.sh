@@ -24,6 +24,10 @@ This local suite covers the closed-loop regression stack for ops/repair flows:
 EOF
 }
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" --anchor "$1" "$2"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --log-root)
@@ -61,8 +65,8 @@ run_case() {
 }
 
 echo "Local ops_closed_loop regression"
-echo "  run_dir: ${RUN_DIR}"
-echo "  run_log: ${RUN_LOG}"
+echo "  run_dir_ref: $(path_ref "$RUN_DIR" "$RUN_DIR")"
+echo "  run_log_ref: $(path_ref "$RUN_DIR" "$RUN_LOG")"
 
 cd "$ROOT_DIR"
 
@@ -91,5 +95,5 @@ fi
 echo
 echo "PASS: local ops_closed_loop regression finished"
 echo "Artifacts:"
-echo "  - ${RUN_DIR}"
-echo "  - ${RUN_LOG}"
+echo "  - run_dir_ref=$(path_ref "$RUN_DIR" "$RUN_DIR")"
+echo "  - run_log_ref=$(path_ref "$RUN_DIR" "$RUN_LOG")"

@@ -952,10 +952,27 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "agent parity gate summary must record the wrapped suite contract state",
     )
     require(
+        "AGENT_PARITY_GATE_STEP runner_path_ref_contract" in parity_text,
+        findings,
+        "agent parity gate must run the runner path-ref contract step",
+    )
+    require(
+        "check_runner_path_ref_contract.py" in parity_text
+        and "runner_path_ref_contract.json" in parity_text,
+        findings,
+        "agent parity gate must write the runner path-ref contract artifact",
+    )
+    require(
+        "runner_path_ref_contract=1" in parity_text,
+        findings,
+        "agent parity gate summary must record the runner path-ref contract state",
+    )
+    require(
         "SUITE_ARTIFACT_CONTRACT" in suite_wrapper_text
         and "AGENT_PARITY_GATE_REQUIRED_ARTIFACTS" in suite_wrapper_text
         and "AGENT_PARITY_GATE_REQUIRED_FLAGS" in suite_wrapper_text
         and "AGENT_PARITY_GATE_DYNAMIC_MACHINE_FIELDS" in suite_wrapper_text
+        and "runner_path_ref_contract" in suite_wrapper_text
         and "agent_parity_gate_summary_bad_live_provider_scope" in suite_wrapper_text
         and "agent_parity_gate_summary_missing_live_provider_scope" in suite_wrapper_text
         and "validate_chinese_provider_env_file_summary" in suite_wrapper_text
@@ -1001,12 +1018,14 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "AGENT_PARITY_GATE_REQUIRED_ARTIFACTS" in suite_artifact_contract_text
         and "agent_parity_gate/agent_loop_static_contracts.txt" in suite_artifact_contract_text
         and "agent_parity_gate/suite_wrapper_contract.json" in suite_artifact_contract_text
+        and "agent_parity_gate/runner_path_ref_contract.json" in suite_artifact_contract_text
         and "agent_parity_gate/suite_artifact_contract_self_test.txt" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_REQUIRED_FLAGS" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_REQUIRED_MACHINE_FIELDS" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_DYNAMIC_MACHINE_FIELDS" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS" in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_JSON_OK_ARTIFACTS" in suite_artifact_contract_text
+        and '"runner_path_ref_contract": "1"' in suite_artifact_contract_text
         and "AGENT_PARITY_GATE_OPTIONAL_ARTIFACTS_BY_FLAG" in suite_artifact_contract_text
         and "AGENT_PARITY_CHINESE_MODEL_PROVIDERS" in suite_artifact_contract_text
         and "validate_text_artifact_tokens" in suite_artifact_contract_text
@@ -1200,6 +1219,7 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
             and "out_dir_ref" in readme_body
             and "run_dir_ref" in readme_body
             and "run_log_ref" in readme_body
+            and "runner_path_ref_contract.json" in readme_body
             and "llm_raw_trace_runner_contract.txt" in readme_body,
             findings,
             f"{label} must document agent parity nested/static/raw-trace gate artifacts",

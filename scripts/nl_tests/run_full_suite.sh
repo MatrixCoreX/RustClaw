@@ -75,6 +75,10 @@ Artifacts:
 EOF
 }
 
+path_ref() {
+  python3 "${ROOT_DIR}/scripts/path_ref.py" --root "$ROOT_DIR" --anchor "$1" "$2"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --case-file)
@@ -197,9 +201,10 @@ exec > >(tee -a "$RUN_LOG") 2>&1
 
 if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   echo "NL full regression suite"
-  echo "  run_dir:          $RUN_DIR"
-  echo "  case_file:        $CASE_FILE"
-  echo "  trace_case_file:  $TRACE_CASE_FILE"
+  echo "  run_dir_ref:      $(path_ref "$RUN_DIR" "$RUN_DIR")"
+  echo "  run_log_ref:      $(path_ref "$RUN_DIR" "$RUN_LOG")"
+  echo "  case_file_ref:    $(path_ref "$RUN_DIR" "$CASE_FILE")"
+  echo "  trace_case_file_ref: $(path_ref "$RUN_DIR" "$TRACE_CASE_FILE")"
   echo "  base_url:         $BASE_URL_VALUE"
   echo "  user_id:          $USER_ID_VALUE"
   echo "  chat_id:          $CHAT_ID_VALUE"
@@ -210,7 +215,11 @@ if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   echo "  net_sleep:        ${NETWORK_RETRY_SLEEP_SECONDS_VALUE}s"
   echo "  model_sleep:      ${MODEL_EXHAUST_SLEEP_SECONDS_VALUE}s"
   echo "  model_retries:    ${MODEL_EXHAUST_MAX_RETRIES_VALUE}"
-  echo "  resume_dir:       ${RESUME_DIR:-<new run>}"
+  if [[ -n "$RESUME_DIR" ]]; then
+    echo "  resume_dir_ref:   $(path_ref "$RUN_DIR" "$RESUME_DIR")"
+  else
+    echo "  resume_dir_ref:   new_run"
+  fi
   echo "  resume_line:      ${RESUME_LINE:-<none>}"
   echo "  with_trace:       $WITH_TRACE"
   echo "  with_resume:      $WITH_RESUME"
@@ -313,15 +322,15 @@ fi
 if [[ "$PROMPT_REPLY_ONLY" -ne 1 ]]; then
   echo
   echo "Artifacts:"
-  echo "  - $RUN_LOG"
-  echo "  - ${RUN_DIR}/simple_nl.log"
+  echo "  - run_log_ref=$(path_ref "$RUN_DIR" "$RUN_LOG")"
+  echo "  - simple_nl_log_ref=$(path_ref "$RUN_DIR" "${RUN_DIR}/simple_nl.log")"
   if [[ "$WITH_TRACE" -eq 1 ]]; then
-    echo "  - ${RUN_DIR}/trace_ask.log"
+    echo "  - trace_ask_log_ref=$(path_ref "$RUN_DIR" "${RUN_DIR}/trace_ask.log")"
   fi
   if [[ "$WITH_RESUME" -eq 1 ]]; then
-    echo "  - ${RUN_DIR}/resume_continue.log"
+    echo "  - resume_continue_log_ref=$(path_ref "$RUN_DIR" "${RUN_DIR}/resume_continue.log")"
   fi
   if [[ "$WITH_SELF_EXTENSION" -eq 1 ]]; then
-    echo "  - ${RUN_DIR}/self_extension.log"
+    echo "  - self_extension_log_ref=$(path_ref "$RUN_DIR" "${RUN_DIR}/self_extension.log")"
   fi
 fi
