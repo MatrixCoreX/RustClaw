@@ -292,6 +292,157 @@ models = ["mimo-v2.5-pro"]
 }
 
 #[test]
+fn ensure_string_array_contains_in_section_appends_future_model() {
+    let raw = r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M3"
+
+[llm.minimax]
+model = "MiniMax-M3"
+models = [
+    "MiniMax-M3",
+    "MiniMax-M2.7",
+]
+"#;
+
+    let updated = ensure_string_array_contains_in_section(
+        raw,
+        "llm.minimax",
+        "models",
+        &["MiniMax-M3".to_string(), "MiniMax-M2.7".to_string()],
+        "MiniMax-M4",
+    );
+    let parsed = toml::from_str::<toml::Value>(&updated).expect("updated toml parses");
+    let models = parsed
+        .get("llm")
+        .and_then(|llm| llm.get("minimax"))
+        .and_then(|minimax| minimax.get("models"))
+        .and_then(|models| models.as_array())
+        .expect("models array")
+        .iter()
+        .filter_map(|item| item.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(models, vec!["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M4"]);
+}
+
+#[tokio::test]
+async fn update_llm_config_saves_future_model_into_provider_pool() {
+    let root = temp_workspace_root();
+    std::fs::create_dir_all(root.join("configs")).expect("configs dir");
+    std::fs::write(
+        root.join("configs/config.toml"),
+        r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M3"
+
+[llm.minimax]
+api_key = ""
+base_url = "https://api.minimaxi.com/v1"
+model = "MiniMax-M3"
+models = [
+    "MiniMax-M3",
+    "MiniMax-M2.7",
+]
+input_modalities = ["text", "image", "video"]
+output_modalities = ["text"]
+timeout_seconds = 180
+"#,
+    )
+    .expect("write config");
+    let mut state = AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.clone();
+    insert_ui_route_auth_key(&state);
+
+    let (status, Json(body)) = update_llm_config(
+        State(state),
+        ui_route_auth_headers(),
+        Json(UpdateLlmConfigRequest {
+            selected_vendor: "minimax".to_string(),
+            selected_model: "MiniMax-M4".to_string(),
+            vendor_base_url: Some("https://api.minimaxi.com/v1".to_string()),
+            vendor_api_key: Some(String::new()),
+            vendor_api_format: Some("openai_compat".to_string()),
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.ok);
+    let updated = std::fs::read_to_string(root.join("configs/config.toml")).expect("read config");
+    let parsed = toml::from_str::<toml::Value>(&updated).expect("updated toml parses");
+    let llm = parsed.get("llm").expect("llm");
+    let minimax = llm.get("minimax").expect("llm.minimax");
+    let models = minimax
+        .get("models")
+        .and_then(|models| models.as_array())
+        .expect("models")
+        .iter()
+        .filter_map(|item| item.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        llm.get("selected_model").and_then(|v| v.as_str()),
+        Some("MiniMax-M4")
+    );
+    assert_eq!(
+        minimax.get("model").and_then(|v| v.as_str()),
+        Some("MiniMax-M4")
+    );
+    assert_eq!(models, vec!["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M4"]);
+}
+
+#[tokio::test]
+async fn test_llm_config_allows_future_model_before_pool_update() {
+    let root = temp_workspace_root();
+    std::fs::create_dir_all(root.join("configs")).expect("configs dir");
+    std::fs::write(
+        root.join("configs/config.toml"),
+        r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M3"
+
+[llm.minimax]
+api_key = ""
+base_url = "https://api.minimaxi.com/v1"
+model = "MiniMax-M3"
+models = ["MiniMax-M3", "MiniMax-M2.7"]
+"#,
+    )
+    .expect("write config");
+    let mut state = AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root;
+    insert_ui_route_auth_key(&state);
+
+    let (status, Json(body)) = test_llm_config(
+        State(state),
+        ui_route_auth_headers(),
+        Json(UpdateLlmConfigRequest {
+            selected_vendor: "minimax".to_string(),
+            selected_model: "MiniMax-M4".to_string(),
+            vendor_base_url: Some("http://127.0.0.1:9/v1".to_string()),
+            vendor_api_key: Some("test-key".to_string()),
+            vendor_api_format: Some("openai_compat".to_string()),
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert!(!body.ok);
+    assert!(
+        !body
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("model is not in the configured pool"),
+        "future model should reach connectivity testing instead of pool validation"
+    );
+}
+
+#[test]
 fn model_provider_keys_include_video_and_music_sections() {
     let parsed = toml::from_str::<toml::Value>(
         r#"
