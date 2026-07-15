@@ -440,6 +440,8 @@ echo "AGENT_PARITY_GATE_STEP evidence_extractor_contracts"
 } > "${OUT_DIR}/evidence_extractor_contracts.txt"
 
 echo "AGENT_PARITY_GATE_STEP secret_scan_contract"
+python3 "${SCRIPT_DIR}/check_secret_scan_contract.py" --self-test \
+  > "${OUT_DIR}/secret_scan_contract_self_test.txt"
 python3 "${SCRIPT_DIR}/check_secret_scan_contract.py" --json \
   > "${OUT_DIR}/secret_scan_contract.json"
 
@@ -552,6 +554,7 @@ fi
   echo "maintainability_skill_contracts=1"
   echo "agent_parity_gate_inventory_contracts=1"
   echo "evidence_extractor_contracts=1"
+  echo "secret_scan_contract_self_test=1"
   echo "secret_scan_contract=1"
   echo "suite_wrapper_contract=1"
   echo "runner_path_ref_contract=1"

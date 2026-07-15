@@ -52,9 +52,9 @@ def contract_cases() -> list[ContractCase]:
     ]
 
 
-def build_report() -> dict[str, Any]:
+def build_report(cases: list[ContractCase] | None = None) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
-    cases = contract_cases()
+    cases = contract_cases() if cases is None else cases
     for case in cases:
         actual = secret_scan_findings(case.value)
         if actual != case.expected_findings:
@@ -72,10 +72,58 @@ def build_report() -> dict[str, Any]:
     }
 
 
+def run_self_test() -> int:
+    positive = build_report()
+    if not positive["ok"] or positive["case_count"] != len(contract_cases()):
+        print(f"SECRET_SCAN_CONTRACT_SELF_TEST_FAIL positive:{positive['failures']}")
+        return 1
+
+    negative = build_report(
+        [
+            ContractCase(
+                case_id="negative_missing_forbidden_field",
+                value={"providers": [{"metadata": {"api-key": "redacted"}}]},
+                expected_findings=[],
+            )
+        ]
+    )
+    if negative["ok"] or not any(
+        failure.get("case_id") == "negative_missing_forbidden_field"
+        for failure in negative["failures"]
+    ):
+        print(f"SECRET_SCAN_CONTRACT_SELF_TEST_FAIL negative:{negative['failures']}")
+        return 1
+
+    secret_like_negative = build_report(
+        [
+            ContractCase(
+                case_id="negative_secret_like_value",
+                value={"catalog": [{"note": "tp-" + ("A" * 20)}]},
+                expected_findings=[],
+            )
+        ]
+    )
+    if secret_like_negative["ok"] or not any(
+        failure.get("case_id") == "negative_secret_like_value"
+        for failure in secret_like_negative["failures"]
+    ):
+        print(
+            "SECRET_SCAN_CONTRACT_SELF_TEST_FAIL secret_like_negative:"
+            f"{secret_like_negative['failures']}"
+        )
+        return 1
+    print("SECRET_SCAN_CONTRACT_SELF_TEST ok")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
+
+    if args.self_test:
+        return run_self_test()
 
     report = build_report()
     if args.json:
