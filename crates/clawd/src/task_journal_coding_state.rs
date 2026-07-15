@@ -27,6 +27,15 @@ pub(super) fn coding_state_transition_observation(
         return None;
     }
     let status = step_result.status.as_str();
+    if status == "error" {
+        if let Some(command) = signals.command.clone() {
+            push_unique(&mut signals.failed_commands, command);
+            push_unique(
+                &mut signals.failed_command_refs,
+                format!("step:{}", step_result.step_id),
+            );
+        }
+    }
     let phase = coding_phase(step_result, &signals);
     let next_phase_hint = coding_next_phase_hint(status, phase, &signals);
     let mut payload = json!({
@@ -58,6 +67,13 @@ pub(super) fn coding_state_transition_observation(
     insert_string_array(object, "diff_refs", &signals.diff_refs);
     insert_string_array(object, "changed_files", &signals.changed_files);
     insert_string_array(object, "files_read", &signals.files_read);
+    insert_string_array(object, "failed_commands", &signals.failed_commands);
+    insert_string_array(object, "failed_command_refs", &signals.failed_command_refs);
+    insert_string_array(
+        object,
+        "failed_command_stderr_refs",
+        &signals.failed_command_stderr_refs,
+    );
     insert_string_array(
         object,
         "completed_side_effect_refs",
@@ -104,6 +120,9 @@ pub(super) fn coding_milestone_checkpoint_observation(
     copy_transition_field(object, transition, "diff_refs");
     copy_transition_field(object, transition, "changed_files");
     copy_transition_field(object, transition, "files_read");
+    copy_transition_field(object, transition, "failed_commands");
+    copy_transition_field(object, transition, "failed_command_refs");
+    copy_transition_field(object, transition, "failed_command_stderr_refs");
     copy_transition_field(object, transition, "completed_side_effect_refs");
     Some(payload)
 }
@@ -117,6 +136,9 @@ struct CodingTransitionSignals {
     diff_refs: Vec<String>,
     changed_files: Vec<String>,
     files_read: Vec<String>,
+    failed_commands: Vec<String>,
+    failed_command_refs: Vec<String>,
+    failed_command_stderr_refs: Vec<String>,
     checkpoint_kind: Option<String>,
     checkpoint_ref: Option<String>,
     completed_side_effect_refs: Vec<String>,
@@ -132,6 +154,9 @@ impl CodingTransitionSignals {
             || !self.diff_refs.is_empty()
             || !self.changed_files.is_empty()
             || !self.files_read.is_empty()
+            || !self.failed_commands.is_empty()
+            || !self.failed_command_refs.is_empty()
+            || !self.failed_command_stderr_refs.is_empty()
             || self.checkpoint_kind.is_some()
             || self.checkpoint_ref.is_some()
             || !self.completed_side_effect_refs.is_empty()
@@ -246,6 +271,31 @@ fn collect_map_signals(map: &Map<String, Value>, signals: &mut CodingTransitionS
         "completed_side_effect_refs",
         &mut signals.completed_side_effect_refs,
     );
+    if let Some(failed_command) = string_field(map, "failed_command") {
+        push_unique(&mut signals.failed_commands, failed_command.clone());
+        collect_command(&failed_command, signals);
+    }
+    collect_string_list_field(map, "failed_commands", &mut signals.failed_commands);
+    collect_string_field(map, "failed_command_ref", &mut signals.failed_command_refs);
+    collect_string_field(map, "failed_step_ref", &mut signals.failed_command_refs);
+    collect_string_list_field(map, "failed_command_refs", &mut signals.failed_command_refs);
+    collect_string_field(map, "stderr_ref", &mut signals.failed_command_stderr_refs);
+    collect_string_field(
+        map,
+        "stderr_evidence_ref",
+        &mut signals.failed_command_stderr_refs,
+    );
+    collect_string_field(
+        map,
+        "failure_stderr_ref",
+        &mut signals.failed_command_stderr_refs,
+    );
+    collect_string_list_field(map, "stderr_refs", &mut signals.failed_command_stderr_refs);
+    collect_string_list_field(
+        map,
+        "failed_command_stderr_refs",
+        &mut signals.failed_command_stderr_refs,
+    );
     if map_action_is_mutating_file(signals.action.as_deref()) {
         collect_string_list_field(map, "changed_files", &mut signals.changed_files);
         collect_string_list_field(map, "files_changed", &mut signals.changed_files);
@@ -276,6 +326,26 @@ fn collect_machine_line_signals(text: &str, signals: &mut CodingTransitionSignal
         if let Some(diff_ref) = line.strip_prefix("diff_ref=") {
             if let Some(diff_ref) = bounded_token(diff_ref) {
                 push_unique(&mut signals.diff_refs, diff_ref);
+            }
+        }
+        if let Some(failed_command) = line.strip_prefix("failed_command=") {
+            if let Some(failed_command) = bounded_token(failed_command) {
+                push_unique(&mut signals.failed_commands, failed_command.clone());
+                collect_command(&failed_command, signals);
+            }
+        }
+        if let Some(failed_ref) = line.strip_prefix("failed_command_ref=") {
+            if let Some(failed_ref) = bounded_token(failed_ref) {
+                push_unique(&mut signals.failed_command_refs, failed_ref);
+            }
+        }
+        if let Some(stderr_ref) = line
+            .strip_prefix("stderr_ref=")
+            .or_else(|| line.strip_prefix("failure_stderr_ref="))
+            .or_else(|| line.strip_prefix("failure_evidence_ref="))
+        {
+            if let Some(stderr_ref) = bounded_token(stderr_ref) {
+                push_unique(&mut signals.failed_command_stderr_refs, stderr_ref);
             }
         }
     }

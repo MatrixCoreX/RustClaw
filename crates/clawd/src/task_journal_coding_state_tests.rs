@@ -84,7 +84,7 @@ fn step_result_records_failed_verification_transition_observation() {
         "run_cmd",
         crate::executor::StepExecutionStatus::Error,
         None,
-        Some("exit=101 command=cargo test -p clawd".to_string()),
+        Some("exit=101 command=cargo test -p clawd\nstderr_ref=artifact:stderr:step_2".to_string()),
     ));
 
     let transition = observation(&journal, "coding_state_transition");
@@ -93,11 +93,23 @@ fn step_result_records_failed_verification_transition_observation() {
     assert_eq!(transition["status"], "error");
     assert_eq!(transition["command"], "cargo test -p clawd");
     assert_eq!(transition["verification_command"], "cargo test -p clawd");
+    assert_eq!(transition["failed_commands"][0], "cargo test -p clawd");
+    assert_eq!(transition["failed_command_refs"][0], "step:step_2");
+    assert_eq!(
+        transition["failed_command_stderr_refs"][0],
+        "artifact:stderr:step_2"
+    );
     assert_eq!(transition["failure_kind"], "test");
 
     let checkpoint = observation(&journal, "coding_checkpoint");
     assert_eq!(checkpoint["checkpoint_kind"], "failed_step");
     assert_eq!(checkpoint["verification_status"], "failed");
+    assert_eq!(checkpoint["failed_commands"][0], "cargo test -p clawd");
+    assert_eq!(checkpoint["failed_command_refs"][0], "step:step_2");
+    assert_eq!(
+        checkpoint["failed_command_stderr_refs"][0],
+        "artifact:stderr:step_2"
+    );
     assert_eq!(checkpoint["failure_kind"], "test");
 }
 
