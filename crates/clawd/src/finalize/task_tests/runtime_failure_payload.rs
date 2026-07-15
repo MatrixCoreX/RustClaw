@@ -35,6 +35,20 @@ fn ask_runtime_failure_observed_facts_use_machine_payload_fields() {
 }
 
 #[test]
+fn ask_runtime_failure_default_text_preserves_provider_blocker_payload() {
+    let text = ask_runtime_failure_default_text(
+        r#"provider=vendor-qwen failed: http 404: {"error":{"code":"model_not_found","type":"invalid_request_error"}}"#,
+    );
+    let payload: serde_json::Value = serde_json::from_str(&text).unwrap();
+
+    assert_eq!(payload["message_key"], "clawd.msg.ask_runtime_failure");
+    assert_eq!(payload["reason_code"], "provider_model_unavailable");
+    assert_eq!(payload["status_code"], "provider_model_unavailable");
+    assert_eq!(payload["provider_error_class"], "model_unavailable");
+    assert_eq!(payload["external_provider_blocked"], true);
+}
+
+#[test]
 fn ask_runtime_failure_payload_classifies_provider_quota_blocker() {
     let payload: serde_json::Value = serde_json::from_str(&ask_runtime_failure_machine_payload(
         r#"provider=vendor-mimo failed: http 429: {"error":{"code":"429","type":"limitation"}}"#,

@@ -880,7 +880,7 @@ async fn compose_ask_failure_user_message(
         "brief_failure_with_next_step",
         &language_hint,
     );
-    let default_text = ask_runtime_failure_default_text(state, &language_hint);
+    let default_text = ask_runtime_failure_default_text(err_text);
     crate::fallback::compose_user_response_from_contract_with_default(
         state,
         task,
@@ -891,15 +891,8 @@ async fn compose_ask_failure_user_message(
     .await
 }
 
-fn ask_runtime_failure_default_text(state: &AppState, language_hint: &str) -> String {
-    let default_payload = ask_runtime_failure_machine_payload("");
-    crate::i18n_t_for_language_hint_with_default_vars(
-        state,
-        language_hint,
-        "clawd.msg.ask_runtime_failure",
-        &default_payload,
-        &[],
-    )
+fn ask_runtime_failure_default_text(err: &str) -> String {
+    ask_runtime_failure_machine_payload(err)
 }
 
 pub(crate) async fn finalize_ask_direct_success(
