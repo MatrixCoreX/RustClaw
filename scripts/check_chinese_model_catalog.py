@@ -54,34 +54,30 @@ TEXT_PROVIDER_FIELDS = [
 CHINESE_TEXT_PROVIDERS = {
     "deepseek": {
         "base_url": "https://api.deepseek.com/v1",
-        "model": "deepseek-chat",
-        "models": {"deepseek-chat", "deepseek-reasoner"},
-        "input_modalities": {"text"},
-        "output_modalities": {"text"},
+        "required_models": {"deepseek-chat", "deepseek-reasoner"},
+        "required_input_modalities": {"text"},
+        "required_output_modalities": {"text"},
         "timeout_min": 60,
     },
     "qwen": {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": "qwen-max-latest",
-        "models": {"qwen-max-latest", "qwen-plus-latest", "qwen-turbo-latest"},
-        "input_modalities": {"text"},
-        "output_modalities": {"text"},
+        "required_models": {"qwen-max-latest", "qwen-plus-latest", "qwen-turbo-latest"},
+        "required_input_modalities": {"text"},
+        "required_output_modalities": {"text"},
         "timeout_min": 60,
     },
     "minimax": {
         "base_url": "https://api.minimaxi.com/v1",
-        "model": "MiniMax-M3",
-        "models": {"MiniMax-M3", "MiniMax-M2.7"},
-        "input_modalities": {"text", "image", "video"},
-        "output_modalities": {"text"},
+        "required_models": {"MiniMax-M3", "MiniMax-M2.7"},
+        "required_input_modalities": {"text", "image", "video"},
+        "required_output_modalities": {"text"},
         "timeout_min": 180,
         "context_window_min": 1_000_000,
     },
     "mimo": {
-        "model": "mimo-v2.5-pro",
-        "models": {"mimo-v2.5-pro", "mimo-v2.5"},
-        "input_modalities": {"text"},
-        "output_modalities": {"text"},
+        "required_models": {"mimo-v2.5-pro", "mimo-v2.5"},
+        "required_input_modalities": {"text"},
+        "required_output_modalities": {"text"},
         "timeout_min": 180,
     },
 }
@@ -235,6 +231,10 @@ def modality_list(llm_table: dict[str, Any], key: str, fallback: list[str]) -> l
     return out
 
 
+def modality_set(llm_table: dict[str, Any], key: str) -> set[str]:
+    return {value.strip().lower() for value in as_list(llm_table.get(key)) if value.strip()}
+
+
 def credential_state(llm_table: dict[str, Any], provider: str, env_values: dict[str, str]) -> str:
     if str(llm_table.get("api_key") or "").strip():
         return "configured_inline"
@@ -377,11 +377,21 @@ def check_text_provider_config(
         findings,
         f"{label}: [llm].selected_vendor must stay minimax for Chinese-provider default",
     )
-    require(
-        llm.get("selected_model") == "MiniMax-M3",
-        findings,
-        f"{label}: [llm].selected_model must stay MiniMax-M3 for 1M multimodal default",
-    )
+    selected_vendor = str(llm.get("selected_vendor") or "").strip()
+    selected_model = str(llm.get("selected_model") or "").strip()
+    selected_table = llm.get(selected_vendor)
+    if isinstance(selected_table, dict):
+        selected_provider_model = str(selected_table.get("model") or "").strip()
+        require(
+            selected_provider_model != "",
+            findings,
+            f"{label}: [llm.{selected_vendor}].model must be non-empty",
+        )
+        require(
+            selected_model == selected_provider_model,
+            findings,
+            f"{label}: [llm].selected_model must match [llm.{selected_vendor}].model",
+        )
 
     for provider, expected in CHINESE_TEXT_PROVIDERS.items():
         table = llm.get(provider)
@@ -394,34 +404,37 @@ def check_text_provider_config(
                 findings,
                 f"{label}: [llm.{provider}].base_url expected {expected['base_url']!r}",
             )
+        model = str(table.get("model") or "").strip()
         require(
-            table.get("model") == expected["model"],
+            model != "",
             findings,
-            f"{label}: [llm.{provider}].model expected {expected['model']!r}",
+            f"{label}: [llm.{provider}].model must be non-empty",
         )
         models = set(as_list(table.get("models")))
         require(
-            str(table.get("model") or "") in models,
+            model in models,
             findings,
             f"{label}: [llm.{provider}].model must be present in models",
         )
-        missing_models = sorted(expected["models"] - models)
+        missing_models = sorted(expected["required_models"] - models)
         require(
             not missing_models,
             findings,
-            f"{label}: [llm.{provider}].models missing {missing_models}",
+            f"{label}: [llm.{provider}].models missing required fallbacks {missing_models}",
         )
-        input_modalities = set(as_list(table.get("input_modalities")))
-        output_modalities = set(as_list(table.get("output_modalities")))
+        input_modalities = modality_set(table, "input_modalities")
+        output_modalities = modality_set(table, "output_modalities")
+        missing_input_modalities = sorted(expected["required_input_modalities"] - input_modalities)
+        missing_output_modalities = sorted(expected["required_output_modalities"] - output_modalities)
         require(
-            input_modalities == expected["input_modalities"],
+            not missing_input_modalities,
             findings,
-            f"{label}: [llm.{provider}].input_modalities expected {sorted(expected['input_modalities'])}",
+            f"{label}: [llm.{provider}].input_modalities missing required {missing_input_modalities}",
         )
         require(
-            output_modalities == expected["output_modalities"],
+            not missing_output_modalities,
             findings,
-            f"{label}: [llm.{provider}].output_modalities expected {sorted(expected['output_modalities'])}",
+            f"{label}: [llm.{provider}].output_modalities missing required {missing_output_modalities}",
         )
         timeout = table.get("timeout_seconds")
         require(
@@ -457,41 +470,52 @@ def check_main_docker_text_parity(findings: list[str], main: dict[str, Any], doc
             )
 
 
-def check_media_config(findings: list[str]) -> None:
+def check_media_config(findings: list[str], main: dict[str, Any]) -> None:
     image = load_toml(IMAGE_CONFIG)
     audio = load_toml(AUDIO_CONFIG)
     video = load_toml(VIDEO_CONFIG)
     music = load_toml(MUSIC_CONFIG)
+    main_llm = main.get("llm") if isinstance(main.get("llm"), dict) else {}
+    minimax_table = main_llm.get("minimax") if isinstance(main_llm, dict) else {}
+    active_minimax_text_model = (
+        str(minimax_table.get("model") or "").strip() if isinstance(minimax_table, dict) else ""
+    )
 
     image_edit = image.get("image_edit", {})
     image_generation = image.get("image_generation", {})
     image_vision = image.get("image_vision", {})
     require(image_edit.get("default_model") == "image-01", findings, "image_edit.default_model must be image-01")
     require(
-        "MiniMax-M3" not in as_list(image_edit.get("minimax_models")),
-        findings,
-        "image_edit.minimax_models must not treat MiniMax-M3 as a generation/edit model",
-    )
-    require(
         image_generation.get("default_model") == "image-01",
         findings,
         "image_generation.default_model must be image-01",
     )
     require(
-        "MiniMax-M3" not in as_list(image_generation.get("minimax_models")),
+        active_minimax_text_model != "",
         findings,
-        "image_generation.minimax_models must not treat MiniMax-M3 as a generation/edit model",
+        "configs/config.toml: [llm.minimax].model must be non-empty before media-boundary checks",
     )
-    require(
-        image_vision.get("default_model") == "MiniMax-M3",
-        findings,
-        "image_vision.default_model must be MiniMax-M3",
-    )
-    require(
-        "MiniMax-M3" in as_list(image_vision.get("minimax_models")),
-        findings,
-        "image_vision.minimax_models must include MiniMax-M3",
-    )
+    if active_minimax_text_model:
+        require(
+            active_minimax_text_model not in as_list(image_edit.get("minimax_models")),
+            findings,
+            "image_edit.minimax_models must not treat active MiniMax text model as a generation/edit model",
+        )
+        require(
+            active_minimax_text_model not in as_list(image_generation.get("minimax_models")),
+            findings,
+            "image_generation.minimax_models must not treat active MiniMax text model as a generation/edit model",
+        )
+        require(
+            image_vision.get("default_model") == active_minimax_text_model,
+            findings,
+            "image_vision.default_model must match [llm.minimax].model",
+        )
+        require(
+            active_minimax_text_model in as_list(image_vision.get("minimax_models")),
+            findings,
+            "image_vision.minimax_models must include the active MiniMax text model",
+        )
     require(
         bool(set(as_list(image_vision.get("mimo_models"))) & {"mimo-v2.5", "mimo-v2-omni"}),
         findings,
@@ -724,7 +748,7 @@ def build_report(env_file: Path | None = None) -> dict[str, Any]:
     check_text_provider_config(findings, "configs/config.toml", main)
     check_text_provider_config(findings, "docker/config/config.toml", docker)
     check_main_docker_text_parity(findings, main, docker)
-    check_media_config(findings)
+    check_media_config(findings, main)
     check_vendor_patches(findings)
     check_chinese_case_gate(findings)
     catalog = build_catalog(main, env_values)
