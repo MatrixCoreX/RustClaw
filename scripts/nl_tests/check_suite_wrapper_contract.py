@@ -77,6 +77,8 @@ SUITE_ARTIFACT_CONTRACT_REQUIRED_SNIPPETS = {
     "contract_report_content_checked_not_true": "contract_report_content_checked_not_true",
     "contract_report_summary_mismatch": "contract_report_summary_mismatch",
     "contract_report_agent_contract_mismatch": "contract_report_agent_parity_contract_mismatch",
+    "contract_report_unexpected_agent_contract": "contract_report_unexpected_agent_parity_contract",
+    "contract_report_unexpected_agent_self_test": "unexpected_agent_contract",
     "agent_parity_optional_validator": "validate_enabled_agent_parity_optional_artifacts",
     "agent_parity_nested_validator": "validate_agent_parity_gate_artifacts",
     "agent_parity_suite_branch": 'summary.get("suite") == "agent_parity_gate"',
