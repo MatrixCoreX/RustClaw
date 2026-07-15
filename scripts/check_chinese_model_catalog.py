@@ -920,6 +920,9 @@ def check_chinese_provider_smoke_live_scope(findings: list[str]) -> None:
         "SUITE_ARTIFACT_CONTRACT" in suite_wrapper_text
         and "AGENT_PARITY_GATE_REQUIRED_ARTIFACTS" in suite_wrapper_text
         and "AGENT_PARITY_GATE_REQUIRED_FLAGS" in suite_wrapper_text
+        and "AGENT_PARITY_GATE_DYNAMIC_MACHINE_FIELDS" in suite_wrapper_text
+        and "agent_parity_gate_summary_bad_live_provider_scope" in suite_wrapper_text
+        and "agent_parity_gate_summary_missing_live_provider_scope" in suite_wrapper_text
         and "--validate-contract-report-content" in suite_wrapper_text
         and "--require-contract-report-content-checked" in suite_wrapper_text
         and "validate_existing_contract_report" in suite_wrapper_text

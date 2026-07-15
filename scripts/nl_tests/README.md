@@ -132,7 +132,9 @@ contract counts. The final confirmation uses
 carry `contract_report_content_checked=true`. For wrapped `agent_parity_gate`
 runs, the artifact contract also validates nested gate artifacts such as
 `agent_parity_gate/agent_loop_static_contracts.txt` and
-`agent_parity_gate/suite_artifact_contract_self_test.txt`, then checks
+`agent_parity_gate/suite_artifact_contract_self_test.txt`, statically guards
+the artifact checker's dynamic machine fields such as the Chinese provider live
+scope, then checks
 `agent_parity_gate/gate_summary.env` for the non-secret machine flags that prove
 the static agent-loop, secret-scan, wrapper, no-agent-mode, suite-artifact
 self-test, and raw LLM trace contracts participated in the run. It also checks
