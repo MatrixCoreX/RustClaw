@@ -607,7 +607,7 @@ def validate_agent_parity_gate_artifacts(run_dir: Path, entries: set[str]) -> tu
     summary_path = run_dir / "agent_parity_gate/gate_summary.env"
     if not summary_path.is_file():
         findings.append("agent_parity_gate_summary_missing")
-        return findings
+        return findings, content_checks
 
     gate_summary, parse_findings = parse_env_file(summary_path)
     findings.extend(f"agent_parity_gate_{finding}" for finding in parse_findings)
@@ -814,6 +814,37 @@ def run_self_test() -> int:
         if mismatch_report.get("ok") or "contract_report_summary_mismatch" not in mismatch_findings:
             print(
                 f"SELF_TEST_FAIL summary_mismatch:{mismatch_report.get('findings')}",
+                file=sys.stderr,
+            )
+            return 1
+
+        agent_summary_missing_run = root / "agent-parity-missing-gate-summary"
+        write_minimal_self_test_run(agent_summary_missing_run, content_checked=True)
+        (agent_summary_missing_run / "suite_summary.env").write_text(
+            "\n".join(
+                [
+                    "suite=agent_parity_gate",
+                    "status=ok",
+                    "exit_code=0",
+                    "artifact_finalize_status=ok",
+                    "run_log=run.log",
+                    "artifact_index=artifact_index.txt",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        agent_summary_missing_report = validate_run_dir(agent_summary_missing_run)
+        agent_summary_missing_findings = set(
+            agent_summary_missing_report.get("findings") or []
+        )
+        if (
+            agent_summary_missing_report.get("ok")
+            or "agent_parity_gate_summary_missing" not in agent_summary_missing_findings
+        ):
+            print(
+                "SELF_TEST_FAIL agent_parity_missing_gate_summary:"
+                f"{agent_summary_missing_report.get('findings')}",
                 file=sys.stderr,
             )
             return 1

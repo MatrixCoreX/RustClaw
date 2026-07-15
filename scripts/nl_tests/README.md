@@ -142,7 +142,9 @@ artifact content: text reports must contain their success tokens, and JSON repor
 and non-object contract reports; base report fields (`ok`, `run_dir`,
 `require_contract_report`, `findings`); unchecked final reports; summary
 mismatch; nested `agent_parity_gate_contract` mismatch; and unexpected nested
-agent parity contracts in non-agent-parity reports. Enabled optional steps are also content-checked from
+agent parity contracts in non-agent-parity reports. If the nested agent parity
+gate summary is missing, the checker returns the structured
+`agent_parity_gate_summary_missing` finding instead of crashing. Enabled optional steps are also content-checked from
 `gate_summary.env`: compact coverage must have no missing/forbidden rows,
 Chinese model catalog must report `status=ok` with all Chinese providers, and
 the coding repair fixture metrics must satisfy the configured pass-rate,
