@@ -55,6 +55,8 @@ const OUTPUT_CONTRACT_ROUTE_MARKERS: &[&str] = &[
 mod answer_verifier_delivery_raw;
 #[path = "answer_verifier_evidence_policy.rs"]
 mod answer_verifier_evidence_policy;
+#[path = "answer_verifier_machine_kv.rs"]
+mod answer_verifier_machine_kv;
 #[path = "answer_verifier_runtime.rs"]
 mod answer_verifier_runtime;
 #[path = "answer_verifier_scalar.rs"]

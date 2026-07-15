@@ -686,6 +686,36 @@ fn planner_plain_answer_with_tool_observation_still_uses_answer_verifier() {
 }
 
 #[test]
+fn grounded_machine_kv_projection_skips_answer_verifier() {
+    let mut route = route_with_mode(crate::AskMode::act_plain());
+    route.route_reason = "execution_with_observed_tool".to_string();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "AGENTS.md".to_string();
+    route.wants_file_delivery = false;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-machine-kv-projection-skip",
+        "ask",
+        "Only keep no_hardmatch_guard=check_no_nl_hardmatch.py.",
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"extra":{"action":"grep_text","matches":[{"line":246,"path":"AGENTS.md","text":"run `python3 scripts/check_no_nl_hardmatch.py` after boundary changes"}],"query":"check_no_nl_hardmatch.py","results":["AGENTS.md"]},"text":"AGENTS.md"}"#,
+        ));
+
+    assert!(!should_verify_answer(
+        &route,
+        &journal,
+        "no_hardmatch_guard=check_no_nl_hardmatch.py"
+    ));
+    assert!(should_verify_answer(&route, &journal, "AGENTS.md"));
+}
+
+#[test]
 fn pure_chat_agent_loop_backend_identity_marker_still_uses_answer_verifier() {
     let mut route = backend_identity_guard_route();
     route.output_contract.requires_content_evidence = false;
