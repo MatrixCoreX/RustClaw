@@ -73,10 +73,12 @@ Agent parity gate:
 - `bash scripts/nl_tests/run_agent_parity_gate.sh scripts/nl_suite_logs/client_like_continuous/<run_id>`
 
 This is the default lightweight gate after a Codex/Claude-style agent-loop
-implementation batch. It runs the static compact coverage check, the offline
-coding-loop repair fixture expectations, and bounded rollout metrics for that
-fixture. When you pass one or more finished client-like run directories, it also
-applies the same metrics gates to the real NL run. The defaults require
+implementation batch. It runs the static compact coverage check, the
+Chinese-provider model catalog guard, a dry-run Chinese-provider smoke matrix
+with summary validation, the offline coding-loop repair fixture expectations,
+and bounded rollout metrics for that fixture. When you pass one or more
+finished client-like run directories, it also applies the same metrics gates to
+the real NL run. The defaults require
 `pass_rate=1.0`, `avg_llm_calls_per_turn<=4`, no prompt truncation, and no final
 provider errors. Override with `--min-pass-rate`, `--max-avg-llm-calls`,
 `--max-prompt-truncations`, `--max-provider-final-errors`, or environment
