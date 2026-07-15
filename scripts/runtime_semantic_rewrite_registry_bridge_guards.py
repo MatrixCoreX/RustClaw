@@ -37,6 +37,9 @@ PRE_ROUTE_REPAIR_MARKER_ALLOWLIST_FILES: tuple[Path, ...] = (
 )
 ANSWER_VERIFIER_FILE = SRC_ROOT / "answer_verifier.rs"
 ANSWER_VERIFIER_RUNTIME_FILE = SRC_ROOT / "answer_verifier_runtime.rs"
+ANSWER_VERIFIER_PROMPT_EVIDENCE_BLOCKS_FILE = (
+    SRC_ROOT / "answer_verifier_runtime/prompt_evidence_blocks.rs"
+)
 VERIFIER_FILE = SRC_ROOT / "verifier.rs"
 PROMPT_UTILS_OUTPUT_CONTRACT_FILE = SRC_ROOT / "prompt_utils_output_contract.rs"
 PROMPT_UTILS_CONTRACT_REPAIR_JUDGE_FILE = (
@@ -457,9 +460,9 @@ def scan_answer_verifier_registry_bridge_markers() -> list[Finding]:
 
 
 def scan_answer_verifier_output_contract_prompt_marker() -> list[Finding]:
-    rel_path = rel(ANSWER_VERIFIER_RUNTIME_FILE)
-    text = ANSWER_VERIFIER_RUNTIME_FILE.read_text(encoding="utf-8")
-    fn_start = text.find("pub(super) fn output_contract_prompt_block(")
+    rel_path = rel(ANSWER_VERIFIER_PROMPT_EVIDENCE_BLOCKS_FILE)
+    text = ANSWER_VERIFIER_PROMPT_EVIDENCE_BLOCKS_FILE.read_text(encoding="utf-8")
+    fn_start = text.find("fn output_contract_prompt_block(")
     if fn_start < 0:
         return [
             Finding(
@@ -469,7 +472,7 @@ def scan_answer_verifier_output_contract_prompt_marker() -> list[Finding]:
                 "missing output_contract_prompt_block",
             )
         ]
-    fn_end = text.find("\nfn verifier_contract_matrix_prompt_trace", fn_start)
+    fn_end = text.find("\nfn verifier_evidence_policy_prompt_trace", fn_start)
     body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
     findings: list[Finding] = []
     if '"final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str)' not in body:

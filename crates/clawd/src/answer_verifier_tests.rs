@@ -868,7 +868,14 @@ fn local_compound_listing_gap_rejects_answer_that_drops_observed_names() {
     .expect("compound listing gap");
 
     assert_eq!(gap.missing_evidence_fields, vec!["candidates"]);
-    assert!(gap.answer_incomplete_reason.contains("archive"));
+    assert_eq!(
+        gap.answer_incomplete_reason,
+        "observed_listing_candidates_omitted"
+    );
+    assert_eq!(
+        gap.retry_instruction,
+        "retry_policy=use_observed_listing_candidates_and_content_excerpt;repeat_rejected_answer=false"
+    );
     assert!(gap.should_retry);
 }
 
@@ -966,7 +973,14 @@ fn local_compound_listing_gap_applies_to_directory_purpose_summary() {
     .expect("directory purpose summary should require observed listing items");
 
     assert_eq!(gap.missing_evidence_fields, vec!["candidates"]);
-    assert!(gap.answer_incomplete_reason.contains("beta.json"));
+    assert_eq!(
+        gap.answer_incomplete_reason,
+        "observed_listing_candidates_omitted"
+    );
+    assert_eq!(
+        gap.retry_instruction,
+        "retry_policy=use_observed_listing_candidates_and_content_excerpt;repeat_rejected_answer=false"
+    );
 }
 
 #[test]
