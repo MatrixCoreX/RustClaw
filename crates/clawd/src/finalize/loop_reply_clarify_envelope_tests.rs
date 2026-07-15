@@ -324,6 +324,38 @@ async fn finalize_loop_reply_keeps_agent_loop_clarify_machine_fields_structured_
         "reply should not attach route-owned clarify JSON envelope: {}",
         reply.text
     );
+    let observation = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| {
+            journal.task_observations.iter().find(|observation| {
+                observation.get("kind").and_then(serde_json::Value::as_str)
+                    == Some("terminal_clarify_machine_line")
+            })
+        })
+        .expect("terminal clarify machine observation");
+    assert_eq!(
+        observation
+            .pointer("/terminal_intent")
+            .and_then(serde_json::Value::as_str),
+        Some("clarify")
+    );
+    assert_eq!(
+        observation
+            .pointer("/missing_slot")
+            .and_then(serde_json::Value::as_str),
+        Some("locator")
+    );
+    assert_eq!(
+        observation
+            .pointer("/locator_kind")
+            .and_then(serde_json::Value::as_str),
+        Some("path")
+    );
+    assert!(observation
+        .pointer("/machine_line")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|line| line.contains("missing_slot=locator")));
 }
 
 #[tokio::test]

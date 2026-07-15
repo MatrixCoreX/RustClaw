@@ -41,7 +41,7 @@ codex_parity_runtime_smoke|resume_context_cli_surface_zh|covers:resume,clawcli,n
 
 codex_parity_runtime_smoke|agent_loop_control_trace_act_read_zh|covers:agent_loop,act,control_trace,fs_basic,verifier;requires_tool_call=true;local_readonly|用只读能力读取 README.md 的标题行，并在最终回答中保留 decision_envelope 的 control_intent=act 或对应机器 trace；不要用 shell cat 兜底。|expect=control_intent
 
-codex_parity_runtime_smoke|agent_loop_control_trace_clarify_missing_target_en|covers:agent_loop,clarify,control_trace,missing_slot,no_write;requires_tool_call=false;local_readonly|Read the first line of that file and answer only the line. If the target is missing, ask for the missing locator through structured clarification fields rather than guessing a file.|expect=missing
+codex_parity_runtime_smoke|agent_loop_control_trace_clarify_missing_target_en|covers:agent_loop,clarify,control_trace,missing_slot,no_write;requires_tool_call=false;local_readonly|Read the first line of that file and answer only the line. If the target is missing, ask for the missing locator through structured clarification fields rather than guessing a file.|expect=json_exists:/data/result_json/task_journal/trace/rounds/0/decision_envelope/missing_slot;json_exists:/data/result_json/task_journal/trace/rounds/0/decision_envelope/message_key
 
 codex_parity_runtime_smoke|agent_loop_control_trace_direct_answer_zh|covers:agent_loop,direct_answer,control_trace,status_query,no_write;requires_tool_call=false;local_readonly|不要调用工具，只根据运行时结构化状态回答：当前是否有等待用户确认的任务？最终回答需要保留 approval_wait 或等价机器字段。|expect=approval_wait
 

@@ -1,6 +1,6 @@
 use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::ClaimedTask;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::log_deterministic_delivery_record;
 use super::route_helpers::{route_clarify_reason_code, route_output_contract_machine_json};
@@ -28,6 +28,14 @@ pub(super) fn attach_agent_loop_clarify_machine_line(
     let Some(machine_line) = agent_loop_clarify_machine_line(loop_state) else {
         return false;
     };
+    if !has_agent_loop_clarify_machine_line_observation(loop_state) {
+        loop_state
+            .task_observations
+            .push(agent_loop_clarify_machine_line_observation(
+                loop_state,
+                &machine_line,
+            ));
+    }
     log_deterministic_delivery_record(
         &task.task_id,
         "agent_loop_clarify_machine_line",
@@ -35,8 +43,7 @@ pub(super) fn attach_agent_loop_clarify_machine_line(
         agent_run_context,
         loop_state.executed_step_results.len(),
     );
-    let _ = machine_line;
-    false
+    true
 }
 
 pub(super) fn attach_route_clarify_machine_envelope(
@@ -278,6 +285,47 @@ fn agent_loop_clarify_machine_line(loop_state: &LoopState) -> Option<String> {
         }
     }
     (parts.len() > 1).then(|| parts.join(" "))
+}
+
+fn has_agent_loop_clarify_machine_line_observation(loop_state: &LoopState) -> bool {
+    loop_state.task_observations.iter().any(|observation| {
+        observation
+            .get("kind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kind == "terminal_clarify_machine_line")
+            && observation
+                .get("owner_layer")
+                .and_then(Value::as_str)
+                .is_some_and(|owner| owner == "agent_loop")
+    })
+}
+
+fn agent_loop_clarify_machine_line_observation(
+    loop_state: &LoopState,
+    machine_line: &str,
+) -> Value {
+    let mut observation = json!({
+        "kind": "terminal_clarify_machine_line",
+        "owner_layer": "agent_loop",
+        "schema_version": 1,
+        "terminal_intent": "clarify",
+        "machine_line": machine_line
+    });
+    let Some(object) = observation.as_object_mut() else {
+        return observation;
+    };
+    for field in [
+        "clarify_reason_code",
+        "missing_slot",
+        "message_key",
+        "field_path",
+        "locator_kind",
+    ] {
+        if let Some(value) = output_var_or_decision_envelope(loop_state, field) {
+            object.insert(field.to_string(), json!(value));
+        }
+    }
+    observation
 }
 
 fn ensure_output_var(loop_state: &mut LoopState, key: &str, value: &str) {
