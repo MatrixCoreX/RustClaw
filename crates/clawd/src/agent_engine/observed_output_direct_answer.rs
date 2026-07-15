@@ -586,6 +586,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
                             prefers_english_presence_answer,
                         )
                     } else if action == Some("path_batch_facts")
+                        && !existence_with_path_should_use_llm_synthesis
                         && !matches!(response_shape, Some(crate::OutputResponseShape::FileToken))
                         && route.is_none_or(|route| !route.output_contract.delivery_required)
                     {

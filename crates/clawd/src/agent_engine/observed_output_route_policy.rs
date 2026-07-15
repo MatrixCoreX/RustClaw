@@ -4,6 +4,13 @@ pub(super) fn observed_request_language_hint(user_text: &str) -> &'static str {
     crate::language_policy::request_language_hint(user_text)
 }
 
+pub(super) fn observed_text_conflicts_with_language_hint(
+    candidate: &str,
+    request_language_hint: &str,
+) -> bool {
+    crate::language_policy::text_language_conflicts_with_hint(candidate, request_language_hint)
+}
+
 pub(super) fn observed_language_supports_bilingual_template(language_hint: &str) -> bool {
     let hint = language_hint.trim().to_ascii_lowercase();
     hint == "config_default" || hint.starts_with("en") || hint.starts_with("zh")
