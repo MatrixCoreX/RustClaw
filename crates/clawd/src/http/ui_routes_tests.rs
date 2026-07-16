@@ -844,3 +844,104 @@ fn capability_items_include_disabled_machine_reason() {
         Some("skill_disabled")
     );
 }
+
+#[test]
+fn workspace_update_git_path_parser_is_nul_delimited_and_not_log_limited() {
+    let mut raw = Vec::new();
+    for index in 0..2_000 {
+        raw.extend_from_slice(format!("generated/path_{index:04}.txt").as_bytes());
+        raw.push(0);
+    }
+    assert!(raw.len() > WORKSPACE_UPDATE_LOG_MAX_CHARS);
+    let paths = parse_git_name_list_bytes(&raw).expect("parse complete git path list");
+    assert_eq!(paths.len(), 2_000);
+    assert_eq!(
+        paths.first().map(String::as_str),
+        Some("generated/path_0000.txt")
+    );
+    assert_eq!(
+        paths.last().map(String::as_str),
+        Some("generated/path_1999.txt")
+    );
+}
+
+#[test]
+fn workspace_update_git_path_parser_preserves_spaces_and_rejects_escape_paths() {
+    let paths = parse_git_name_list_bytes(b"dir/file with spaces.txt\0README.md\0").unwrap();
+    assert_eq!(paths, vec!["dir/file with spaces.txt", "README.md"]);
+    assert!(parse_git_name_list_bytes(b"../outside.txt\0").is_err());
+    assert!(parse_git_name_list_bytes(b"/absolute.txt\0").is_err());
+}
+
+fn run_workspace_update_test_git(root: &Path, args: &[&str]) -> String {
+    let output = StdCommand::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .expect("run git command");
+    assert!(
+        output.status.success(),
+        "git {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+#[tokio::test]
+async fn workspace_update_conflict_detection_ignores_large_unrelated_file_lists() {
+    let root = temp_workspace_root();
+    run_workspace_update_test_git(&root, &["init"]);
+    run_workspace_update_test_git(&root, &["config", "user.name", "RustClaw Test"]);
+    run_workspace_update_test_git(&root, &["config", "user.email", "test@rustclaw.local"]);
+
+    std::fs::write(root.join("tracked.txt"), "base\n").expect("write base file");
+    run_workspace_update_test_git(&root, &["add", "tracked.txt"]);
+    run_workspace_update_test_git(&root, &["commit", "-m", "base"]);
+    let base_commit = run_workspace_update_test_git(&root, &["rev-parse", "HEAD"]);
+    let branch = run_workspace_update_test_git(&root, &["branch", "--show-current"]);
+
+    std::fs::write(root.join("tracked.txt"), "remote\n").expect("write remote change");
+    std::fs::write(root.join("new_remote.txt"), "remote\n").expect("write remote file");
+    run_workspace_update_test_git(&root, &["add", "tracked.txt", "new_remote.txt"]);
+    run_workspace_update_test_git(&root, &["commit", "-m", "remote"]);
+    let remote_commit = run_workspace_update_test_git(&root, &["rev-parse", "HEAD"]);
+
+    run_workspace_update_test_git(&root, &["reset", "--hard", &base_commit]);
+    let upstream_ref = format!("refs/remotes/origin/{branch}");
+    run_workspace_update_test_git(&root, &["update-ref", &upstream_ref, &remote_commit]);
+    run_workspace_update_test_git(&root, &["config", "remote.origin.url", "."]);
+    run_workspace_update_test_git(
+        &root,
+        &[
+            "config",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ],
+    );
+    let branch_remote_key = format!("branch.{branch}.remote");
+    let branch_merge_key = format!("branch.{branch}.merge");
+    let branch_merge_ref = format!("refs/heads/{branch}");
+    run_workspace_update_test_git(&root, &["config", &branch_remote_key, "origin"]);
+    run_workspace_update_test_git(&root, &["config", &branch_merge_key, &branch_merge_ref]);
+
+    std::fs::write(root.join("tracked.txt"), "local\n").expect("write local change");
+    std::fs::write(root.join("new_remote.txt"), "local\n").expect("write local conflict");
+    let unrelated = root.join("unrelated");
+    std::fs::create_dir_all(&unrelated).expect("create unrelated directory");
+    for index in 0..600 {
+        std::fs::write(
+            unrelated.join(format!("generated_path_{index:04}.txt")),
+            b"x",
+        )
+        .expect("write unrelated path");
+    }
+
+    let conflicts = detect_workspace_update_conflict_paths(&root)
+        .await
+        .expect("detect conflicts");
+    assert_eq!(conflicts.tracked, vec!["tracked.txt"]);
+    assert_eq!(conflicts.untracked, vec!["new_remote.txt"]);
+
+    std::fs::remove_dir_all(root).expect("remove test repository");
+}
