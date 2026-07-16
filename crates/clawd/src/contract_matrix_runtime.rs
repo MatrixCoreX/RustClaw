@@ -1,10 +1,9 @@
 #[cfg(test)]
 use super::MatchedContract;
 use super::{
-    ActionPolicyDecision, ActionRef, ArgPolicyDecision, ContractMatrix, EvidenceExpression,
-    FinalAnswerShape, FinalAnswerShapeClass, IntentOutputContract, ObservationExtractor,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
-    BUNDLED_CONTRACT_MATRIX,
+    ActionPolicyDecision, ActionRef, ContractMatrix, EvidenceExpression, FinalAnswerShape,
+    FinalAnswerShapeClass, IntentOutputContract, ObservationExtractor, OutputResponseShape,
+    OutputSemanticKind, RouteResult, BUNDLED_CONTRACT_MATRIX,
 };
 use claw_core::skill_registry::SkillsRegistry;
 use serde_json::{json, Value};
@@ -51,35 +50,12 @@ pub(crate) struct ContractActionPolicy {
     pub(crate) evidence_profile: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ContractArgPolicy {
-    pub(crate) decision: ArgPolicyDecision,
-    pub(crate) action_key: String,
-    pub(crate) contract_match: String,
-    pub(crate) required_evidence: Vec<String>,
-    pub(crate) missing_target_args: Vec<String>,
-    pub(crate) deferred_target_args: Vec<String>,
-    pub(crate) expected_target_args: Vec<String>,
-    pub(crate) final_answer_shape: String,
-    pub(crate) policy_mode: String,
-    pub(crate) evidence_scope: String,
-    pub(crate) freshness: String,
-    pub(crate) artifact_kind: String,
-    pub(crate) channel_visibility: String,
-    pub(crate) evidence_profile: String,
-}
-
-impl ContractArgPolicy {
-    pub(crate) fn is_allowed(&self) -> bool {
-        self.decision == ArgPolicyDecision::Allowed
-    }
-}
-
 impl ContractActionPolicy {
     pub(crate) fn is_allowed(&self) -> bool {
         self.decision == ActionPolicyDecision::Allowed
     }
 
+    #[cfg(test)]
     pub(crate) fn action_matches_preferred(&self) -> bool {
         action_matches_policy_tokens(&self.action_key, &self.preferred_actions)
     }
@@ -1136,219 +1112,9 @@ fn machine_action_has_any_segment(action: &str, needles: &[&str]) -> bool {
         .any(|segment| needles.iter().any(|needle| segment == needle))
 }
 
-#[cfg(test)]
-pub(crate) fn arg_policy_decision(
-    output_contract: Option<&IntentOutputContract>,
-    normalized_skill: &str,
-    resolved_args: &Value,
-) -> Option<ContractArgPolicy> {
-    let output_contract = output_contract?;
-    if output_contract.semantic_kind_is_unclassified()
-        && !output_contract.requires_content_evidence
-        && !output_contract.delivery_required
-    {
-        return None;
-    }
-    let matrix = bundled_contract_matrix()?;
-    let matched = matrix.match_output_contract(output_contract)?;
-    let action = policy_action_ref_for_match(&matched, normalized_skill, resolved_args)?;
-    let final_answer_shape_kind = matched.final_answer_shape_kind()?;
-    let (expected_target_args, missing_target_args, deferred_target_args, decision) =
-        arg_target_policy_decision(output_contract, &action.effective, resolved_args);
-    Some(ContractArgPolicy {
-        decision,
-        action_key: action.effective.as_key(),
-        contract_match: matched.match_name().to_string(),
-        required_evidence: matched.required_evidence(),
-        missing_target_args,
-        deferred_target_args,
-        expected_target_args,
-        final_answer_shape: final_answer_shape_kind.as_str().to_string(),
-        policy_mode: matched.policy_mode(),
-        evidence_scope: matched.evidence_scope(),
-        freshness: matched.freshness(),
-        artifact_kind: matched.artifact_kind(),
-        channel_visibility: matched.channel_visibility(),
-        evidence_profile: matched.evidence_profile(),
-    })
-}
-
-fn arg_target_policy_decision(
-    output_contract: &IntentOutputContract,
-    action: &ActionRef,
-    resolved_args: &Value,
-) -> (Vec<String>, Vec<String>, Vec<String>, ArgPolicyDecision) {
-    let target_groups = contract_target_arg_groups(output_contract, action);
-    let expected_target_args = target_groups
-        .iter()
-        .flat_map(|group| group.iter().copied())
-        .map(str::to_string)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let mut missing_target_args = Vec::new();
-    let mut deferred_target_args = Vec::new();
-    for group in &target_groups {
-        if arg_group_has_concrete_value(resolved_args, group) {
-            continue;
-        }
-        let group_label = group.join("|");
-        if arg_group_has_unresolved_template(resolved_args, group) {
-            deferred_target_args.push(group_label);
-        } else {
-            missing_target_args.push(group_label);
-        }
-    }
-    let decision = if !deferred_target_args.is_empty() {
-        ArgPolicyDecision::DeferredTemplateArg
-    } else if !missing_target_args.is_empty() {
-        ArgPolicyDecision::MissingTargetBinding
-    } else {
-        ArgPolicyDecision::Allowed
-    };
-    (
-        expected_target_args,
-        missing_target_args,
-        deferred_target_args,
-        decision,
-    )
-}
-
-pub(crate) fn arg_policy_decision_for_route(
-    route: Option<&RouteResult>,
-    normalized_skill: &str,
-    resolved_args: &Value,
-) -> Option<ContractArgPolicy> {
-    let route = route?;
-    route_capability_ref_arg_policy(route, normalized_skill, resolved_args)
-}
-
-fn route_capability_ref_arg_policy(
-    route: &RouteResult,
-    normalized_skill: &str,
-    resolved_args: &Value,
-) -> Option<ContractArgPolicy> {
-    if !route_capability_ref_allows_action(route, normalized_skill, resolved_args) {
-        return None;
-    }
-    let output_contract = route.effective_output_contract();
-    let action = route_capability_policy_action_ref(normalized_skill, resolved_args)?;
-    let final_answer_shape_kind =
-        final_answer_shape_for_route_capability_ref(route).unwrap_or(FinalAnswerShape::Free);
-    let (expected, missing, deferred, decision) =
-        arg_target_policy_decision(&output_contract, &action.effective, resolved_args);
-    Some(ContractArgPolicy {
-        decision,
-        action_key: action.effective.as_key(),
-        contract_match: "capability_ref".to_string(),
-        required_evidence: crate::evidence_policy::required_evidence_fields_for_route(route),
-        missing_target_args: missing,
-        deferred_target_args: deferred,
-        expected_target_args: expected,
-        final_answer_shape: final_answer_shape_kind.as_str().to_string(),
-        policy_mode: "observe".to_string(),
-        evidence_scope: "conversation".to_string(),
-        freshness: "conversation".to_string(),
-        artifact_kind: "text".to_string(),
-        channel_visibility: "user_visible".to_string(),
-        evidence_profile: "capability_ref".to_string(),
-    })
-}
-
 pub(crate) fn action_matches_policy_tokens(action_key: &str, policies: &[String]) -> bool {
     let Some(action) = ActionRef::parse(action_key) else {
         return false;
     };
     action_matches_any(&action, policies)
-}
-
-fn contract_target_arg_groups(
-    output_contract: &IntentOutputContract,
-    action: &ActionRef,
-) -> Vec<Vec<&'static str>> {
-    if !output_contract.requires_content_evidence && !output_contract.delivery_required {
-        return Vec::new();
-    }
-    if !matches!(
-        output_contract.locator_kind,
-        OutputLocatorKind::Path | OutputLocatorKind::Filename
-    ) && !output_contract.delivery_required
-    {
-        return Vec::new();
-    }
-    match (action.skill.as_str(), action.action.as_deref()) {
-        ("fs_basic", Some("compare_paths")) => vec![vec!["left_path"], vec!["right_path"]],
-        ("fs_basic", Some("stat_paths")) => vec![vec!["path", "paths"]],
-        ("fs_basic", Some("count_entries")) => vec![vec!["path"]],
-        ("fs_basic", Some("list_dir" | "read_text_range")) => vec![vec!["path"]],
-        ("fs_basic", Some("grep_text")) => vec![vec!["root", "path"]],
-        ("fs_basic", Some("write_text" | "append_text" | "make_dir" | "remove_path")) => {
-            vec![vec!["path"]]
-        }
-        ("doc_parse", _) => vec![vec!["path", "file_path", "requested_path"]],
-        ("archive_basic", Some("list" | "read")) => vec![vec!["archive", "archive_path", "path"]],
-        ("archive_basic", Some("pack")) => vec![vec!["source", "source_path", "path"]],
-        ("archive_basic", Some("unpack")) => {
-            vec![
-                vec!["archive", "archive_path", "path"],
-                vec!["dest", "dest_path"],
-            ]
-        }
-        (
-            "config_basic",
-            Some("read_field" | "read_fields" | "list_keys" | "validate" | "guard_rustclaw_config"),
-        ) => vec![vec!["path"]],
-        (
-            "config_edit",
-            Some(
-                "plan_config_change"
-                | "apply_config_change"
-                | "validate_config"
-                | "guard_config"
-                | "read_back"
-                | "restart_if_requested",
-            ),
-        ) => vec![vec!["path"]],
-        ("db_basic", _) => vec![vec!["db_path", "path"]],
-        _ => Vec::new(),
-    }
-}
-
-fn arg_group_has_concrete_value(args: &Value, group: &[&str]) -> bool {
-    group
-        .iter()
-        .any(|name| args.get(*name).is_some_and(arg_value_is_concrete))
-}
-
-fn arg_group_has_unresolved_template(args: &Value, group: &[&str]) -> bool {
-    group.iter().any(|name| {
-        args.get(*name)
-            .is_some_and(arg_value_has_unresolved_template)
-    })
-}
-
-fn arg_value_is_concrete(value: &Value) -> bool {
-    match value {
-        Value::String(text) => {
-            let trimmed = text.trim();
-            !trimmed.is_empty() && !string_has_unresolved_template(trimmed)
-        }
-        Value::Array(values) => values.iter().any(arg_value_is_concrete),
-        Value::Object(map) => map.values().any(arg_value_is_concrete),
-        Value::Null => false,
-        Value::Bool(_) | Value::Number(_) => true,
-    }
-}
-
-fn arg_value_has_unresolved_template(value: &Value) -> bool {
-    match value {
-        Value::String(text) => string_has_unresolved_template(text),
-        Value::Array(values) => values.iter().any(arg_value_has_unresolved_template),
-        Value::Object(map) => map.values().any(arg_value_has_unresolved_template),
-        _ => false,
-    }
-}
-
-fn string_has_unresolved_template(value: &str) -> bool {
-    value.contains("{{") && value.contains("}}")
 }

@@ -3,8 +3,7 @@ use std::path::{Component, Path, PathBuf};
 use tracing::info;
 
 use super::skill_execution_preflight::{
-    evidence_policy_action_policy_error, evidence_policy_arg_policy_error,
-    handle_preflight_argument_failure,
+    evidence_policy_action_policy_error, handle_preflight_argument_failure,
 };
 use super::{
     compose_policy_block_delivery, handle_skill_step_success, log_step_journal_summary,
@@ -424,20 +423,6 @@ pub(super) async fn try_auto_sudo_retry_after_permission_denied(
         &retry_args,
         retry_trace_kind,
     ) {
-        let outcome = handle_preflight_argument_failure(
-            state,
-            task,
-            loop_state,
-            global_step,
-            step_in_round,
-            "run_cmd",
-            &retry_args,
-            &err,
-            retry_trace_kind,
-        );
-        return Ok(Some(outcome.stop_signal));
-    }
-    if let Some(err) = evidence_policy_arg_policy_error(loop_state, "run_cmd", &retry_args) {
         let outcome = handle_preflight_argument_failure(
             state,
             task,

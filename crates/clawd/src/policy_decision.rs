@@ -81,16 +81,6 @@ impl PolicyDecision {
             | crate::evidence_policy::ActionPolicyDecision::RejectedNoActionsAllowed => Self::Deny,
         }
     }
-
-    pub(crate) fn from_evidence_arg_policy(
-        decision: crate::evidence_policy::ArgPolicyDecision,
-    ) -> Self {
-        match decision {
-            crate::evidence_policy::ArgPolicyDecision::Allowed => Self::Allow,
-            crate::evidence_policy::ArgPolicyDecision::DeferredTemplateArg
-            | crate::evidence_policy::ArgPolicyDecision::MissingTargetBinding => Self::Deny,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -168,24 +158,6 @@ mod tests {
         assert_eq!(
             PolicyDecision::from_evidence_action_policy(
                 crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
-            ),
-            PolicyDecision::Deny
-        );
-        assert_eq!(
-            PolicyDecision::from_evidence_arg_policy(
-                crate::evidence_policy::ArgPolicyDecision::Allowed
-            ),
-            PolicyDecision::Allow
-        );
-        assert_eq!(
-            PolicyDecision::from_evidence_arg_policy(
-                crate::evidence_policy::ArgPolicyDecision::MissingTargetBinding
-            ),
-            PolicyDecision::Deny
-        );
-        assert_eq!(
-            PolicyDecision::from_evidence_arg_policy(
-                crate::evidence_policy::ArgPolicyDecision::DeferredTemplateArg
             ),
             PolicyDecision::Deny
         );

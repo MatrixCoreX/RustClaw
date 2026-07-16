@@ -1,11 +1,10 @@
-use claw_core::skill_registry::{PlannerCapabilityEffect, SkillRiskLevel};
+use claw_core::skill_registry::SkillRiskLevel;
 use serde_json::{json, Value};
 use tracing::info;
 
 use super::{register_failed_step_output, AppState, ClaimedTask, LoopState, SkillActionOutcome};
 use crate::agent_engine::{
-    action_has_user_named_output_path_marker, attempt_ledger,
-    maybe_publish_execution_recipe_phase_hint, CLAWD_LITERAL_COMMAND_ARG,
+    attempt_ledger, maybe_publish_execution_recipe_phase_hint, CLAWD_LITERAL_COMMAND_ARG,
 };
 
 fn matches_json_schema_type(value: &Value, expected_type: &str) -> bool {
@@ -158,12 +157,7 @@ pub(super) fn evidence_policy_action_policy_error(
     ) {
         return None;
     }
-    if let Some(err) = run_cmd_dry_run_policy_error(
-        state,
-        loop_state.route_policy_context.as_ref(),
-        normalized_skill,
-        classification_args,
-    ) {
+    if let Some(err) = run_cmd_dry_run_policy_error(state, normalized_skill, classification_args) {
         return Some(err);
     }
     if let Some(err) =
@@ -179,184 +173,7 @@ pub(super) fn evidence_policy_action_policy_error(
     ) {
         return Some(err);
     }
-    let (policy_skill, policy_args) =
-        evidence_policy_contract_view(normalized_skill, classification_args);
-    let policy = loop_state.route_policy_context.as_ref().and_then(|route| {
-        crate::evidence_policy::capability_ref_action_policy_for_route(
-            Some(route),
-            policy_skill.as_str(),
-            &policy_args,
-        )
-    })?;
-    if policy.is_allowed() {
-        return None;
-    }
-    if literal_run_cmd_allows_contract_override(
-        normalized_skill,
-        classification_args,
-        policy.decision,
-    ) {
-        info!(
-            "preflight_keep_literal_run_cmd_despite_contract skill={} action={} contract={}",
-            normalized_skill, policy.action_key, policy.contract_match
-        );
-        return None;
-    }
-    if active_ops_recipe_allows_mutation_despite_contract(
-        state,
-        loop_state,
-        normalized_skill,
-        classification_args,
-        policy.decision,
-    ) {
-        info!(
-            "preflight_keep_active_ops_recipe_mutation_despite_contract skill={} action={} contract={} phase={}",
-            normalized_skill,
-            policy.action_key,
-            policy.contract_match,
-            loop_state.execution_recipe.phase.as_str()
-        );
-        return None;
-    }
-    if runtime_async_job_start_allows_run_cmd_despite_contract(
-        normalized_skill,
-        classification_args,
-        policy.decision,
-    ) {
-        info!(
-            "preflight_keep_runtime_async_job_start_despite_contract skill={} action={} contract={}",
-            normalized_skill, policy.action_key, policy.contract_match
-        );
-        return None;
-    }
-    if registry_action_can_extend_summary_contract(
-        state,
-        policy_skill.as_str(),
-        &policy_args,
-        &policy.contract_match,
-    ) {
-        info!(
-            "preflight_keep_registry_non_mutating_action skill={} action={} contract={}",
-            policy_skill, policy.action_key, policy.contract_match
-        );
-        return None;
-    }
-    let canonical_skill = state.resolve_canonical_skill_name(policy_skill.as_str());
-    if task_control_lifecycle_dry_run_can_extend_contract(
-        &canonical_skill,
-        &policy_args,
-        &policy.contract_match,
-    ) {
-        info!(
-            "preflight_keep_task_control_lifecycle_dry_run skill={} action={} contract={}",
-            canonical_skill, policy.action_key, policy.contract_match
-        );
-        return None;
-    }
-    if action_has_user_named_output_path_marker(classification_args) {
-        return None;
-    }
-    let mut error_text = format!(
-        "action `{}` is rejected by contract `{}` ({})",
-        policy.action_key,
-        policy.contract_match,
-        policy.decision.as_str()
-    );
-    if !policy.preferred_actions.is_empty() {
-        error_text.push_str(&format!(
-            "; prefer action(s): {}",
-            policy.preferred_actions.join(", ")
-        ));
-    }
-    let evidence_expression = policy
-        .evidence_expression
-        .to_trace_json(&policy.required_evidence);
-    Some(crate::skills::structured_skill_error_from_parts(
-        normalized_skill,
-        "contract_action_rejected",
-        &error_text,
-        None,
-        Some(json!({
-            "reason_code": "contract_action_rejected",
-            "failure_attribution": crate::evidence_policy::FailureAttribution::ContractGap.as_str(),
-            "decision": policy.decision.as_str(),
-            "action": policy.action_key,
-            "original_action_ref": policy.original_action_ref,
-            "replacement_action_ref": policy.replacement_action_ref,
-            "contract_repair_source": policy.contract_repair_source,
-            "preferred_replacement_reason_code": policy.preferred_replacement_reason_code,
-            "contract_match": policy.contract_match,
-            "required_evidence": policy.required_evidence,
-            "preferred_actions": policy.preferred_actions,
-            "evidence_expression": evidence_expression,
-            "final_answer_shape": policy.final_answer_shape,
-            "policy_mode": policy.policy_mode,
-            "evidence_scope": policy.evidence_scope,
-            "freshness": policy.freshness,
-            "artifact_kind": policy.artifact_kind,
-            "channel_visibility": policy.channel_visibility,
-            "evidence_profile": policy.evidence_profile,
-            "permission_decision": preflight_permission_decision(
-                state,
-                normalized_skill,
-                classification_args,
-                "contract_action_rejected",
-                "evidence_policy_preflight",
-            ),
-        })),
-    ))
-}
-
-fn evidence_policy_contract_view(normalized_skill: &str, args: &Value) -> (String, Value) {
-    crate::virtual_tools::canonicalize_legacy_tool_call(normalized_skill, args.clone())
-        .map(|call| (call.tool, call.args))
-        .unwrap_or_else(|| (normalized_skill.to_string(), args.clone()))
-}
-
-fn literal_run_cmd_allows_contract_override(
-    normalized_skill: &str,
-    classification_args: &Value,
-    decision: crate::evidence_policy::ActionPolicyDecision,
-) -> bool {
-    normalized_skill.eq_ignore_ascii_case("run_cmd")
-        && run_cmd_is_literal_user_command(classification_args)
-        && classification_args
-            .get("command")
-            .and_then(Value::as_str)
-            .is_some_and(|command| !command.trim().is_empty())
-        && matches!(
-            decision,
-            crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
-                | crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed
-        )
-}
-
-fn runtime_async_job_start_allows_run_cmd_despite_contract(
-    normalized_skill: &str,
-    classification_args: &Value,
-    decision: crate::evidence_policy::ActionPolicyDecision,
-) -> bool {
-    if !normalized_skill.eq_ignore_ascii_case("run_cmd")
-        || !matches!(
-            decision,
-            crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
-                | crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed
-        )
-        || classification_args
-            .get("async_start")
-            .and_then(Value::as_bool)
-            != Some(true)
-        || classification_args
-            .get("command")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .is_none()
-    {
-        return false;
-    }
-    positive_bounded_i64_arg(classification_args, "poll_after_seconds", 1, 86_400)
-        && positive_bounded_i64_arg(classification_args, "expires_in_seconds", 1, 604_800)
+    None
 }
 
 fn run_cmd_async_start_policy_error(
@@ -401,12 +218,11 @@ fn run_cmd_async_start_policy_error(
 
 fn run_cmd_dry_run_policy_error(
     state: &AppState,
-    route: Option<&crate::RouteResult>,
     normalized_skill: &str,
     classification_args: &Value,
 ) -> Option<String> {
     if !normalized_skill.eq_ignore_ascii_case("run_cmd")
-        || !run_cmd_dry_run_requested(route, classification_args)
+        || !run_cmd_dry_run_requested(classification_args)
         || classification_args
             .get("command")
             .and_then(Value::as_str)
@@ -441,12 +257,8 @@ fn run_cmd_dry_run_policy_error(
     ))
 }
 
-fn run_cmd_dry_run_requested(
-    route: Option<&crate::RouteResult>,
-    classification_args: &Value,
-) -> bool {
+fn run_cmd_dry_run_requested(classification_args: &Value) -> bool {
     classification_args.get("dry_run").and_then(Value::as_bool) == Some(true)
-        || route.is_some_and(crate::async_job_contract::route_requests_async_dry_run_contract)
 }
 
 fn positive_bounded_i64_arg(args: &Value, key: &str, min: i64, max: i64) -> bool {
@@ -576,76 +388,6 @@ fn normalized_action_arg(args: &Value) -> Option<String> {
                 })
                 .collect()
         })
-}
-
-fn registry_declares_non_mutating_planner_action(
-    state: &AppState,
-    canonical_skill: &str,
-    args: &Value,
-) -> bool {
-    let Some(action) = normalized_action_arg(args) else {
-        return false;
-    };
-    state
-        .skill_manifest(canonical_skill)
-        .is_some_and(|manifest| {
-            manifest.planner_capabilities.into_iter().any(|mapping| {
-                mapping
-                    .action
-                    .as_deref()
-                    .map(|value| {
-                        value
-                            .trim()
-                            .to_ascii_lowercase()
-                            .chars()
-                            .map(|ch| {
-                                if matches!(ch, '-' | ' ' | '.') {
-                                    '_'
-                                } else {
-                                    ch
-                                }
-                            })
-                            .collect::<String>()
-                    })
-                    .is_some_and(|mapped| mapped == action)
-                    && matches!(
-                        mapping.effect,
-                        Some(PlannerCapabilityEffect::Observe | PlannerCapabilityEffect::Validate)
-                    )
-            })
-        })
-}
-
-fn registry_action_can_extend_summary_contract(
-    state: &AppState,
-    canonical_skill: &str,
-    args: &Value,
-    contract_match: &str,
-) -> bool {
-    contract_match == "command_output_summary"
-        && registry_declares_non_mutating_planner_action(state, canonical_skill, args)
-}
-
-fn task_control_lifecycle_dry_run_can_extend_contract(
-    canonical_skill: &str,
-    args: &Value,
-    contract_match: &str,
-) -> bool {
-    matches!(contract_match, "service_status" | "command_output_summary")
-        && task_control_lifecycle_dry_run_action(canonical_skill, args)
-}
-
-fn task_control_lifecycle_dry_run_action(canonical_skill: &str, args: &Value) -> bool {
-    if canonical_skill != "task_control" {
-        return false;
-    }
-    if args.get("dry_run").and_then(Value::as_bool) != Some(true) {
-        return false;
-    }
-    matches!(
-        normalized_action_arg(args).as_deref(),
-        Some("resume" | "pause")
-    )
 }
 
 fn action_scoped_risk_level(
@@ -1020,94 +762,6 @@ pub(super) fn preflight_permission_decision(
             })
         }),
     })
-}
-
-fn active_ops_recipe_allows_mutation_despite_contract(
-    state: &AppState,
-    loop_state: &LoopState,
-    normalized_skill: &str,
-    args: &Value,
-    policy_decision: crate::evidence_policy::ActionPolicyDecision,
-) -> bool {
-    if policy_decision != crate::evidence_policy::ActionPolicyDecision::RejectedNotAllowed {
-        return false;
-    }
-    let recipe = loop_state.execution_recipe;
-    if !matches!(
-        recipe.kind,
-        crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop
-    ) || !matches!(
-        recipe.phase,
-        crate::execution_recipe::ExecutionRecipePhase::Apply
-            | crate::execution_recipe::ExecutionRecipePhase::Repair
-    ) {
-        return false;
-    }
-    let effect =
-        crate::execution_recipe::classify_skill_action_effect(state, normalized_skill, args);
-    effect.mutates
-        && !crate::execution_recipe::action_conflicts_with_recipe_target_scope(
-            recipe,
-            state,
-            normalized_skill,
-            args,
-        )
-}
-
-pub(super) fn evidence_policy_arg_policy_error(
-    loop_state: &LoopState,
-    normalized_skill: &str,
-    exec_args: &Value,
-) -> Option<String> {
-    let (policy_skill, policy_args) = evidence_policy_contract_view(normalized_skill, exec_args);
-    let policy = loop_state.route_policy_context.as_ref().and_then(|route| {
-        crate::evidence_policy::arg_policy_decision_for_route(
-            Some(route),
-            policy_skill.as_str(),
-            &policy_args,
-        )
-    })?;
-    if policy.is_allowed()
-        || policy.decision == crate::evidence_policy::ArgPolicyDecision::DeferredTemplateArg
-    {
-        return None;
-    }
-    let mut error_text = format!(
-        "action `{}` is missing target binding required by contract `{}`",
-        policy.action_key, policy.contract_match
-    );
-    if !policy.expected_target_args.is_empty() {
-        error_text.push_str(&format!(
-            "; expected target arg(s): {}",
-            policy.expected_target_args.join(", ")
-        ));
-    }
-    Some(crate::skills::structured_skill_error_from_parts(
-        normalized_skill,
-        "contract_arg_rejected",
-        &error_text,
-        None,
-        Some(json!({
-            "reason_code": "contract_arg_rejected",
-            "failure_attribution": crate::evidence_policy::FailureAttribution::ModelError.as_str(),
-            "decision": policy.decision.as_str(),
-            "policy_decision": crate::policy_decision::PolicyDecision::from_evidence_arg_policy(
-                policy.decision
-            ).as_token(),
-            "action": policy.action_key,
-            "contract_match": policy.contract_match,
-            "required_evidence": policy.required_evidence,
-            "missing_target_args": policy.missing_target_args,
-            "expected_target_args": policy.expected_target_args,
-            "final_answer_shape": policy.final_answer_shape,
-            "policy_mode": policy.policy_mode,
-            "evidence_scope": policy.evidence_scope,
-            "freshness": policy.freshness,
-            "artifact_kind": policy.artifact_kind,
-            "channel_visibility": policy.channel_visibility,
-            "evidence_profile": policy.evidence_profile,
-        })),
-    ))
 }
 
 fn is_path_like_arg_key(key: &str) -> bool {

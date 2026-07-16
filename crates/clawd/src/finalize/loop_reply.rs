@@ -1846,12 +1846,15 @@ fn effective_agent_run_context_for_finalization(
     agent_run_context: Option<&AgentRunContext>,
     loop_state: &LoopState,
 ) -> Option<AgentRunContext> {
-    if agent_run_context.is_none() && loop_state.route_policy_context.is_none() {
+    if agent_run_context.is_none() && loop_state.output_contract.is_none() {
         return None;
     }
     let mut context = agent_run_context.cloned().unwrap_or_default();
-    if let Some(contract) = loop_state.route_policy_context.as_ref() {
-        context.route_result = Some(contract.clone());
+    if let Some(output_contract) = loop_state.output_contract.as_ref() {
+        let route = context.route_result.get_or_insert_with(|| {
+            crate::RouteResult::from_planner_output_contract(output_contract.clone())
+        });
+        route.output_contract = output_contract.clone();
     }
     Some(context)
 }

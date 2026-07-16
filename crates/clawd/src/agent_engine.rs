@@ -90,9 +90,12 @@ pub(crate) fn local_code_strict_json_projection_should_defer_finalizer_fallback(
     )
 }
 use self::execution_loop::execute_actions_once;
+#[cfg(test)]
 pub(crate) use self::filesystem_lifecycle_contract::{
     effective_filesystem_cleanup_recovery_output_contract_for_plan_steps,
     effective_filesystem_lifecycle_output_contract_for_plan_steps,
+};
+pub(crate) use self::filesystem_lifecycle_contract::{
     enrich_scratch_filesystem_cleanup_runtime_args,
     output_contract_can_upgrade_scratch_filesystem_lifecycle,
     scratch_filesystem_cleanup_recovery_action_allowed,
@@ -120,8 +123,7 @@ use self::support::{
     AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN,
 };
 pub(crate) use self::user_output_path::{
-    action_has_user_named_output_path_marker, action_is_user_named_new_workspace_write,
-    CLAWD_USER_NAMED_OUTPUT_PATH_ARG,
+    action_is_user_named_new_workspace_write, CLAWD_USER_NAMED_OUTPUT_PATH_ARG,
 };
 
 use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
@@ -292,9 +294,6 @@ pub(crate) struct LoopState {
     /// existence_with_path / scalar / file_token 契约答成自由段落。
     /// 默认 None：测试与不走 RouteResult 的 ad-hoc 路径保持向后兼容。
     pub(crate) output_contract: Option<crate::IntentOutputContract>,
-    /// Route-level policy context keeps planner capability refs available to
-    /// preflight paths that otherwise only see `output_contract`.
-    pub(crate) route_policy_context: Option<crate::RouteResult>,
     /// True only while executing the current round's verifier-approved actions.
     /// Preflight uses this as a narrow bridge from legacy route guards to the
     /// agent-loop authority model; it must be cleared immediately after action

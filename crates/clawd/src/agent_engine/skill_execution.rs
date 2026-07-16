@@ -40,9 +40,9 @@ use skill_execution_observations::{
 };
 use skill_execution_preflight::{
     capability_isolation_artifact_refs, capability_isolation_policy_error,
-    evidence_policy_action_policy_error, evidence_policy_arg_policy_error,
-    handle_preflight_argument_failure, structured_observation_path_argument_error,
-    unresolved_runtime_template_argument_error, validate_skill_output_contract,
+    evidence_policy_action_policy_error, handle_preflight_argument_failure,
+    structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
+    validate_skill_output_contract,
 };
 use skill_execution_subagent::record_subagent_step_execution;
 
@@ -730,19 +730,6 @@ pub(super) async fn execute_prepared_skill_action(
         classification_args,
         action_trace_kind,
     ) {
-        return Ok(handle_preflight_argument_failure(
-            state,
-            task,
-            loop_state,
-            global_step,
-            step_in_round,
-            normalized_skill,
-            classification_args,
-            &err,
-            action_trace_kind,
-        ));
-    }
-    if let Some(err) = evidence_policy_arg_policy_error(loop_state, normalized_skill, &exec_args) {
         return Ok(handle_preflight_argument_failure(
             state,
             task,

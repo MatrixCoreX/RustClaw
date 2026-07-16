@@ -6,12 +6,12 @@ use std::sync::{Arc, RwLock};
 use super::{
     admitted_extra_field_exists, build_auto_sudo_retry_args,
     contains_unresolved_runtime_template_arg, evidence_policy_action_policy_error,
-    evidence_policy_arg_policy_error, handle_skill_step_failure, handle_skill_step_success,
-    merge_isolation_artifact_refs, preflight_failure_metadata, preflight_permission_decision,
-    record_subagent_step_execution, skill_extra_requests_user_input,
-    structured_extra_evidence_output, structured_observation_path_argument_error,
-    try_auto_sudo_retry_after_permission_denied, unresolved_runtime_template_argument_error,
-    validate_skill_output_contract, AgentLoopGuardPolicy, LoopState,
+    handle_skill_step_failure, handle_skill_step_success, merge_isolation_artifact_refs,
+    preflight_failure_metadata, preflight_permission_decision, record_subagent_step_execution,
+    skill_extra_requests_user_input, structured_extra_evidence_output,
+    structured_observation_path_argument_error, try_auto_sudo_retry_after_permission_denied,
+    unresolved_runtime_template_argument_error, validate_skill_output_contract,
+    AgentLoopGuardPolicy, LoopState,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,
@@ -718,144 +718,25 @@ fn evidence_policy_preflight_allows_virtual_find_entries_backing_action() {
 }
 
 #[test]
-fn evidence_policy_preflight_rejects_missing_bound_target_arg() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
-        requires_content_evidence: true,
-        locator_kind: crate::OutputLocatorKind::Path,
-        ..crate::IntentOutputContract::default()
-    });
-    let args = serde_json::json!({
-        "action": "read_text_range",
-        "start_line": 1,
-        "end_line": 20
-    });
-
-    assert!(
-        evidence_policy_arg_policy_error(&loop_state, "fs_basic", &args).is_none(),
-        "legacy output-contract marker alone must not reject planner-selected args"
-    );
-
-    let route = crate::RouteResult {
-        resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "capability_ref=filesystem.read_text_range".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
-            requires_content_evidence: true,
-            locator_kind: crate::OutputLocatorKind::Path,
-            ..crate::IntentOutputContract::default()
-        },
-    };
-    loop_state.route_policy_context = Some(route);
-
-    let err = evidence_policy_arg_policy_error(&loop_state, "fs_basic", &args)
-        .expect("capability-ref arg policy should reject missing path");
-    let parsed = crate::skills::parse_structured_skill_error(&err)
-        .expect("contract arg policy error should be structured");
-
-    assert_eq!(parsed.error_kind, "contract_arg_rejected");
-    assert!(parsed.error_text.contains("expected target arg(s): path"));
-    assert_eq!(
-        parsed
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("reason_code")),
-        Some(&serde_json::json!("contract_arg_rejected"))
-    );
-    assert_eq!(
-        parsed
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("decision")),
-        Some(&serde_json::json!("missing_target_binding"))
-    );
-    assert_eq!(
-        parsed
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("policy_decision")),
-        Some(&serde_json::json!("deny"))
-    );
-    assert_eq!(
-        parsed
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("failure_attribution")),
-        Some(&serde_json::json!("model_error"))
-    );
-    let metadata = preflight_failure_metadata(&err);
-    assert_eq!(metadata.reason, "contract_arg_rejected");
-    assert_eq!(metadata.error_kind, "contract_arg_rejected");
-    assert!(metadata
-        .retry_instruction
-        .contains("contract_policy_decision=missing_target_binding"));
-    assert!(metadata.retry_instruction.contains("policy_decision=deny"));
-    assert!(metadata.retry_instruction.contains("path"));
-}
-
-#[test]
-fn evidence_policy_preflight_allows_virtual_make_dir_for_filesystem_capability_ref() {
+fn evidence_policy_preflight_allows_virtual_make_dir_runtime_tool() {
     let state = test_state();
-    let mut loop_state = LoopState::new(2);
-    let route = crate::RouteResult {
-        resolved_intent: "capability_ref=filesystem.make_dir".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "capability_ref=filesystem.make_dir".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::High,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            semantic_kind: crate::OutputSemanticKind::None,
-            requires_content_evidence: true,
-            locator_kind: crate::OutputLocatorKind::Path,
-            locator_hint: "document/nl_skill_tmp".to_string(),
-            ..crate::IntentOutputContract::default()
-        },
-    };
-    loop_state.route_policy_context = Some(route);
+    let loop_state = LoopState::new(2);
     let args = serde_json::json!({"path": "document/nl_skill_tmp"});
 
     assert!(
         evidence_policy_action_policy_error(&state, &loop_state, "make_dir", &args, "call_skill")
             .is_none(),
-        "standalone make_dir runtime tool should classify as fs_basic.make_dir for capability-ref policy"
-    );
-    assert!(
-        evidence_policy_arg_policy_error(&loop_state, "make_dir", &args).is_none(),
-        "standalone make_dir runtime args should satisfy fs_basic.make_dir path binding"
+        "standalone runtime tools should pass preflight after planner verification"
     );
 }
 
 #[test]
 fn evidence_policy_preflight_defers_template_target_to_runtime_placeholder_check() {
-    let mut loop_state = LoopState::new(2);
-    loop_state.output_contract = Some(crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
-        requires_content_evidence: true,
-        locator_kind: crate::OutputLocatorKind::Path,
-        ..crate::IntentOutputContract::default()
-    });
     let args = serde_json::json!({
         "action": "read_text_range",
         "path": "{{s1.path}}"
     });
 
-    assert!(evidence_policy_arg_policy_error(&loop_state, "fs_basic", &args).is_none());
     assert!(unresolved_runtime_template_argument_error("fs_basic", &args, &args).is_some());
 }
 

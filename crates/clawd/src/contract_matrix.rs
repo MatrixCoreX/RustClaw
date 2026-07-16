@@ -1,6 +1,4 @@
-use crate::{
-    IntentOutputContract, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
-};
+use crate::{IntentOutputContract, OutputResponseShape, OutputSemanticKind, RouteResult};
 #[cfg(test)]
 use anyhow::{Context, Result};
 #[cfg(test)]
@@ -22,27 +20,23 @@ use runtime::{
     validate_contract_runtime_fields, validate_observation_extractors,
 };
 pub(crate) use runtime::{
-    action_matches_policy_tokens, action_trace_for_route, arg_policy_decision_for_route,
-    bundled_contract_matrix, capability_ref_action_policy_for_route,
-    capability_ref_action_refs_for_route, capability_ref_replacement_action_policy_for_route,
-    compact_prompt_line_for_route, contract_trace_action_key_for_route,
-    final_answer_shape_for_output_contract, final_answer_shape_for_route, fnv1a_hex,
-    required_evidence_for_output_contract, runtime_contract_snapshot_for_route,
-    trace_snapshot_for_route,
+    action_matches_policy_tokens, action_trace_for_route, bundled_contract_matrix,
+    capability_ref_action_policy_for_route, capability_ref_action_refs_for_route,
+    capability_ref_replacement_action_policy_for_route, compact_prompt_line_for_route,
+    contract_trace_action_key_for_route, final_answer_shape_for_output_contract,
+    final_answer_shape_for_route, fnv1a_hex, required_evidence_for_output_contract,
+    runtime_contract_snapshot_for_route, trace_snapshot_for_route,
 };
-// Keep policy return types nameable outside the private runtime module.
 #[cfg(test)]
 pub(crate) use runtime::{
     action_policy_for_output_contract, action_policy_for_route, action_trace_for_output_contract,
-    allowed_action_refs_for_route, arg_policy_decision, available_action_refs_from_registry,
+    allowed_action_refs_for_route, available_action_refs_from_registry,
     bundled_contract_matrix_result, compact_prompt_line_for_output_contract,
     parse_contract_matrix_source, preferred_action_refs_for_route,
     runtime_contract_snapshot_for_output_contract, trace_snapshot_for_output_contract,
 };
 #[cfg(test)]
 use runtime::{collect_action_tokens, collect_external_observation_admission_errors};
-#[allow(unused_imports)]
-pub(crate) use runtime::{ContractActionPolicy, ContractArgPolicy};
 #[cfg(test)]
 pub(crate) const CONTRACT_MATRIX_REL_PATH: &str = "configs/task_contract_matrix.toml";
 static BUNDLED_CONTRACT_MATRIX: OnceLock<Result<ContractMatrix, String>> = OnceLock::new();
@@ -857,23 +851,6 @@ impl ActionPolicyDecision {
             Self::RejectedForbidden => "rejected_forbidden",
             Self::RejectedNotAllowed => "rejected_not_allowed",
             Self::RejectedNoActionsAllowed => "rejected_no_actions_allowed",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ArgPolicyDecision {
-    Allowed,
-    DeferredTemplateArg,
-    MissingTargetBinding,
-}
-
-impl ArgPolicyDecision {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Allowed => "allowed",
-            Self::DeferredTemplateArg => "deferred_template_arg",
-            Self::MissingTargetBinding => "missing_target_binding",
         }
     }
 }
