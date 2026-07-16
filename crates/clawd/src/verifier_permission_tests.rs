@@ -1,8 +1,26 @@
+use std::sync::Arc;
+
+use claw_core::config::{ToolApprovalPolicy, ToolSandboxMode, ToolsConfig};
 use serde_json::json;
 
 use super::tests::{plan_result, route_result, test_state, test_task};
 use super::{verify_plan, VerifyInput, VerifyIssueKind, VerifyMode};
 use crate::PlanStep;
+
+fn state_with_tool_policy(
+    sandbox_mode: ToolSandboxMode,
+    approval_policy: ToolApprovalPolicy,
+) -> crate::AppState {
+    let mut state = test_state();
+    let config = ToolsConfig {
+        sandbox_mode,
+        approval_policy,
+        ..ToolsConfig::default()
+    };
+    state.skill_rt.tools_policy =
+        Arc::new(crate::ToolsPolicy::from_config(&config).expect("test tools policy"));
+    state
+}
 
 #[test]
 fn workspace_fs_basic_mutation_does_not_emit_route_ceiling_or_confirmation_noise() {
@@ -109,5 +127,177 @@ fn workspace_fs_basic_mutation_does_not_emit_route_ceiling_or_confirmation_noise
             .pointer("/steps/1/sandbox/filesystem_write")
             .and_then(serde_json::Value::as_bool),
         Some(true)
+    );
+}
+
+#[test]
+fn read_only_sandbox_blocks_workspace_write() {
+    let state = state_with_tool_policy(ToolSandboxMode::ReadOnly, ToolApprovalPolicy::Never);
+    let result = verify_plan(
+        &state,
+        &test_task(),
+        VerifyInput {
+            output_contract: Some(&route_result()),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({
+                    "action": "write_text",
+                    "path": "run/sandbox/read_only.txt",
+                    "content": "blocked"
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved, "issues: {:?}", result.issues);
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::SandboxPolicyDenied)));
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("deny")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/sandbox_denial_reason")
+            .and_then(serde_json::Value::as_str),
+        Some("sandbox_read_only_write_denied")
+    );
+}
+
+#[test]
+fn workspace_sandbox_blocks_package_install_contract() {
+    let state = state_with_tool_policy(ToolSandboxMode::WorkspaceWrite, ToolApprovalPolicy::OnRisk);
+    let result = verify_plan(
+        &state,
+        &test_task(),
+        VerifyInput {
+            output_contract: Some(&route_result()),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "package_manager".to_string(),
+                args: json!({ "action": "install", "package": "example-package" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation);
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/sandbox_denial_reason")
+            .and_then(serde_json::Value::as_str),
+        Some("sandbox_workspace_privilege_denied")
+    );
+}
+
+#[test]
+fn always_approval_requires_confirmation_for_workspace_write() {
+    let state = state_with_tool_policy(ToolSandboxMode::WorkspaceWrite, ToolApprovalPolicy::Always);
+    let result = verify_plan(
+        &state,
+        &test_task(),
+        VerifyInput {
+            output_contract: Some(&route_result()),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({
+                    "action": "write_text",
+                    "path": "run/sandbox/approval.txt",
+                    "content": "pending"
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(result.needs_confirmation);
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/approval_policy")
+            .and_then(serde_json::Value::as_str),
+        Some("always")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("require_confirmation")
+    );
+}
+
+#[test]
+fn never_approval_does_not_confirm_sandbox_allowed_workspace_write() {
+    let state = state_with_tool_policy(ToolSandboxMode::WorkspaceWrite, ToolApprovalPolicy::Never);
+    let result = verify_plan(
+        &state,
+        &test_task(),
+        VerifyInput {
+            output_contract: Some(&route_result()),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({
+                    "action": "write_text",
+                    "path": "run/sandbox/no_approval.txt",
+                    "content": "allowed"
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result.needs_confirmation);
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/approval_policy")
+            .and_then(serde_json::Value::as_str),
+        Some("never")
+    );
+    assert_eq!(
+        result
+            .permission_decision
+            .pointer("/steps/0/decision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
     );
 }

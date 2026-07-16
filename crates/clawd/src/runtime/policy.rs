@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
-use claw_core::config::ToolsConfig;
+use claw_core::config::{ToolApprovalPolicy, ToolSandboxMode, ToolsConfig};
 
 use super::state::LlmProviderRuntime;
 
@@ -12,7 +12,9 @@ pub(crate) struct RateLimiter {
 }
 
 pub(crate) struct ToolsPolicy {
-    pub(crate) profile: String,
+    pub(crate) access_profile: String,
+    pub(crate) sandbox_mode: ToolSandboxMode,
+    pub(crate) approval_policy: ToolApprovalPolicy,
     pub(crate) allow: Vec<String>,
     pub(crate) deny: Vec<String>,
     pub(crate) by_provider: HashMap<String, ProviderScopedPolicy>,
@@ -21,6 +23,19 @@ pub(crate) struct ToolsPolicy {
 pub(crate) struct ProviderScopedPolicy {
     pub(crate) allow: Vec<String>,
     pub(crate) deny: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct SandboxRequirements<'a> {
+    pub(crate) mutates: bool,
+    pub(crate) network_access: bool,
+    pub(crate) filesystem_write: bool,
+    pub(crate) external_publish: bool,
+    pub(crate) credential_access: bool,
+    pub(crate) subprocess: bool,
+    pub(crate) package_install: bool,
+    pub(crate) privilege_escalation: bool,
+    pub(crate) isolation_profile: Option<&'a str>,
 }
 
 impl RateLimiter {
@@ -74,14 +89,14 @@ impl RateLimiter {
 
 impl ToolsPolicy {
     pub(crate) fn from_config(cfg: &ToolsConfig) -> Result<Self, String> {
-        let profile = cfg.profile.trim().to_ascii_lowercase();
+        let access_profile = cfg.access_profile.trim().to_ascii_lowercase();
         if !matches!(
-            profile.as_str(),
+            access_profile.as_str(),
             "full" | "coding" | "minimal" | "messaging"
         ) {
             return Err(format!(
-                "invalid tools.profile={}, allowed: full|coding|minimal|messaging",
-                cfg.profile
+                "{}:{}",
+                "invalid_tools_access_profile", cfg.access_profile
             ));
         }
         let allow: Vec<String> = cfg
@@ -142,7 +157,9 @@ impl ToolsPolicy {
         }
 
         Ok(Self {
-            profile,
+            access_profile,
+            sandbox_mode: cfg.sandbox_mode,
+            approval_policy: cfg.approval_policy,
             allow,
             deny,
             by_provider,
@@ -185,8 +202,95 @@ impl ToolsPolicy {
         allowed
     }
 
+    pub(crate) fn sandbox_mode_token(&self) -> &'static str {
+        self.sandbox_mode.as_token()
+    }
+
+    pub(crate) fn approval_policy_token(&self) -> &'static str {
+        self.approval_policy.as_token()
+    }
+
+    pub(crate) fn sandbox_denial(
+        &self,
+        requirements: SandboxRequirements<'_>,
+    ) -> Option<&'static str> {
+        match self.sandbox_mode {
+            ToolSandboxMode::DangerFull => None,
+            ToolSandboxMode::ReadOnly => {
+                if requirements.mutates || requirements.filesystem_write {
+                    Some("sandbox_read_only_write_denied")
+                } else if requirements.subprocess
+                    && (requirements.network_access || requirements.external_publish)
+                {
+                    Some("sandbox_read_only_external_denied")
+                } else if requirements.subprocess && requirements.credential_access {
+                    Some("sandbox_read_only_credential_denied")
+                } else if requirements.package_install || requirements.privilege_escalation {
+                    Some("sandbox_read_only_privilege_denied")
+                } else if requirements.subprocess
+                    && requirements.isolation_profile != Some("read_only")
+                {
+                    Some("sandbox_read_only_subprocess_denied")
+                } else {
+                    None
+                }
+            }
+            ToolSandboxMode::WorkspaceWrite => {
+                if requirements.subprocess
+                    && (requirements.external_publish || requirements.network_access)
+                {
+                    Some("sandbox_workspace_external_denied")
+                } else if requirements.subprocess && requirements.credential_access {
+                    Some("sandbox_workspace_credential_denied")
+                } else if requirements.package_install || requirements.privilege_escalation {
+                    Some("sandbox_workspace_privilege_denied")
+                } else {
+                    None
+                }
+            }
+            ToolSandboxMode::IsolatedWorktree => {
+                if requirements.subprocess
+                    && (requirements.external_publish || requirements.network_access)
+                {
+                    Some("sandbox_worktree_external_denied")
+                } else if requirements.subprocess && requirements.credential_access {
+                    Some("sandbox_worktree_credential_denied")
+                } else if requirements.package_install || requirements.privilege_escalation {
+                    Some("sandbox_worktree_privilege_denied")
+                } else if requirements.subprocess
+                    && !matches!(
+                        requirements.isolation_profile,
+                        Some("read_only" | "local_worktree")
+                    )
+                {
+                    Some("sandbox_worktree_subprocess_isolation_required")
+                } else if requirements.mutates
+                    && requirements.isolation_profile != Some("local_worktree")
+                {
+                    Some("sandbox_worktree_isolation_required")
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    pub(crate) fn approval_required(
+        &self,
+        risk_requires_approval: bool,
+        planner_requested_approval: bool,
+        mutates_or_external: bool,
+    ) -> bool {
+        match self.approval_policy {
+            ToolApprovalPolicy::Never => false,
+            ToolApprovalPolicy::OnRisk => risk_requires_approval,
+            ToolApprovalPolicy::OnRequest => risk_requires_approval || planner_requested_approval,
+            ToolApprovalPolicy::Always => mutates_or_external || risk_requires_approval,
+        }
+    }
+
     fn default_allowed(&self, token: &str) -> bool {
-        let defaults = match self.profile.as_str() {
+        let defaults = match self.access_profile.as_str() {
             "full" => vec!["*"],
             "coding" => vec![
                 "skill:run_cmd",

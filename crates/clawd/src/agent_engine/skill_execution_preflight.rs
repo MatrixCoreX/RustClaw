@@ -431,6 +431,9 @@ fn action_scoped_capability_policy(
                     "filesystem_write": mapping.filesystem_write,
                     "external_publish": mapping.external_publish,
                     "credential_access": mapping.credential_access,
+                    "subprocess": mapping.subprocess,
+                    "package_install": mapping.package_install,
+                    "privilege_escalation": mapping.privilege_escalation,
                 })
             })
     })
@@ -559,6 +562,15 @@ fn sandbox_policy_summary(
             .and_then(Value::as_bool),
         "credential_access": capability_policy
             .get("credential_access")
+            .and_then(Value::as_bool),
+        "subprocess": capability_policy
+            .get("subprocess")
+            .and_then(Value::as_bool),
+        "package_install": capability_policy
+            .get("package_install")
+            .and_then(Value::as_bool),
+        "privilege_escalation": capability_policy
+            .get("privilege_escalation")
             .and_then(Value::as_bool),
     })
 }
@@ -707,13 +719,27 @@ pub(super) fn preflight_permission_decision(
                     "filesystem_write": null,
                     "external_publish": null,
                     "credential_access": null,
+                    "subprocess": null,
+                    "package_install": null,
+                    "privilege_escalation": null,
                 })
             },
         );
     let sandbox_profile = sandbox_profile_token(&capability_policy, effect);
     let workspace_scope = permission_workspace_scope_summary(state, &canonical_skill, args);
-    let needs_confirmation = !dry_run_observe_only
+    let risk_requires_confirmation = !dry_run_observe_only
         && state.skill_invocation_requires_confirmation_policy(&canonical_skill, Some(args));
+    let needs_confirmation = state.skill_rt.tools_policy.approval_required(
+        risk_requires_confirmation,
+        false,
+        effect.mutates
+            || capability_policy
+                .get("external_publish")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+    );
+    let sandbox_denial_reason =
+        crate::verifier::skill_sandbox_denial_reason(state, &canonical_skill, args);
     let decision = crate::policy_decision::PolicyDecision::from_permission_flags(
         false,
         needs_confirmation,
@@ -736,6 +762,9 @@ pub(super) fn preflight_permission_decision(
         "decision": decision.as_token(),
         "allowed": false,
         "needs_confirmation": needs_confirmation,
+        "approval_policy": state.skill_rt.tools_policy.approval_policy_token(),
+        "global_sandbox_mode": state.skill_rt.tools_policy.sandbox_mode_token(),
+        "sandbox_denial_reason": sandbox_denial_reason,
         "denied_by_policy": true,
         "dry_run_required": false,
         "external_provider_blocked": false,

@@ -483,6 +483,8 @@ note = "placeholder"
 # 账户访问、安装和服务控制需要管理员在部署配置中按 skill 显式放行.
 [tools]
 allow = []
+access_profile = "coding"
+approval_policy = "on_risk"
 # Global baseline switch. Runtime only honors this for admin-authenticated tasks;
 # ordinary users are always treated as false even when this is true.
 allow_path_outside_workspace = false
@@ -494,7 +496,7 @@ cmd_idle_timeout_seconds = 60
 cmd_max_output_bytes = 8000
 deny = []
 max_cmd_length = 2400
-profile = "coding"
+sandbox_mode = "workspace_write"
 
 # 用途/Purpose: 按模型提供商细化工具 allow/deny 覆盖.
 # 建议修改/Recommended change: 可改，建议用于高风险提供商最小权限化.

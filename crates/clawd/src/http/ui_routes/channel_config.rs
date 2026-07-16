@@ -1139,6 +1139,12 @@ struct PlannerCapabilityPolicyItem {
     external_publish: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     credential_access: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subprocess: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package_install: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    privilege_escalation: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]

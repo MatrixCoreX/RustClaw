@@ -141,7 +141,9 @@ url = "http://127.0.0.1:9000/events"
 #[test]
 fn tools_defaults_are_least_privilege_coding_defaults() {
     let tools = ToolsConfig::default();
-    assert_eq!(tools.profile, "coding");
+    assert_eq!(tools.access_profile, "coding");
+    assert_eq!(tools.sandbox_mode.as_token(), "workspace_write");
+    assert_eq!(tools.approval_policy.as_token(), "on_risk");
     assert!(tools.allow.is_empty());
     assert!(tools.deny.is_empty());
     assert!(!tools.allow_sudo);

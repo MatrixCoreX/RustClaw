@@ -162,6 +162,12 @@ pub struct PlannerCapabilityMapping {
     #[serde(default)]
     pub credential_access: Option<bool>,
     #[serde(default)]
+    pub subprocess: Option<bool>,
+    #[serde(default)]
+    pub package_install: Option<bool>,
+    #[serde(default)]
+    pub privilege_escalation: Option<bool>,
+    #[serde(default)]
     pub final_answer_shape: Option<String>,
 }
 
@@ -658,6 +664,9 @@ fn normalize_planner_capabilities(
             credential_access: mapping
                 .credential_access
                 .or_else(|| mapping.effect.map(|_| false)),
+            subprocess: mapping.subprocess,
+            package_install: mapping.package_install,
+            privilege_escalation: mapping.privilege_escalation,
             final_answer_shape: trim_optional_string(mapping.final_answer_shape.as_deref())
                 .map(|value| normalize_schema_token(&value)),
         });

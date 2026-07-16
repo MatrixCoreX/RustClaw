@@ -120,6 +120,9 @@ fn planner_capability_hint_includes_structured_contract() {
         filesystem_write: Some(false),
         external_publish: Some(false),
         credential_access: Some(false),
+        subprocess: None,
+        package_install: None,
+        privilege_escalation: None,
         final_answer_shape: Some("path_list".to_string()),
     });
     assert_eq!(

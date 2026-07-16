@@ -1527,6 +1527,25 @@ pub(crate) async fn run_skill_with_runner_outcome(
             ],
         ));
     }
+    if let Some(reason_code) =
+        crate::verifier::skill_sandbox_denial_reason(state, &skill_name, &args)
+    {
+        return Err(structured_skill_error_from_parts(
+            &skill_name,
+            "sandbox_policy_denied",
+            "sandbox_policy_denied",
+            Some(std::env::consts::OS),
+            Some(json!({
+                "reason_code": reason_code,
+                "message_key": "clawd.execution.sandbox_policy_denied",
+                "decision": crate::policy_decision::PolicyDecision::Deny.as_token(),
+                "sandbox_mode": state.skill_rt.tools_policy.sandbox_mode_token(),
+                "approval_policy": state.skill_rt.tools_policy.approval_policy_token(),
+                "skill": skill_name,
+                "action": skill_action_token(&args),
+            })),
+        ));
+    }
     ensure_config_mutation_allowed(state, task, &skill_name, &args)?;
 
     let kind = state.skill_kind_for_dispatch(&skill_name);

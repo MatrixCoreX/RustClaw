@@ -4,7 +4,11 @@ use serde_json::{json, Value};
 
 use super::*;
 
-fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
+fn step_permission_decision_json(
+    state: &AppState,
+    step: &PlanStep,
+    planner_requested_approval: bool,
+) -> Value {
     if !matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
         return json!({
             "step_id": step.step_id,
@@ -26,7 +30,7 @@ fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
         workspace_filesystem_mutation_can_run_autonomously(state, &normalized_skill, &step.args);
     let autonomous_validation_run_cmd =
         validation_run_cmd_can_run_autonomously(state, &normalized_skill, &step.args);
-    let requires_confirmation = !dry_run_observe_only
+    let risk_requires_confirmation = !dry_run_observe_only
         && !registry_non_mutating_action
         && !autonomous_workspace_fs_mutation
         && !autonomous_validation_run_cmd
@@ -58,6 +62,9 @@ fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
                             "filesystem_write": mapping.filesystem_write,
                             "external_publish": mapping.external_publish,
                             "credential_access": mapping.credential_access,
+                            "subprocess": mapping.subprocess,
+                            "package_install": mapping.package_install,
+                            "privilege_escalation": mapping.privilege_escalation,
                             "once_per_task": mapping.once_per_task,
                             "dedup_scope": mapping.dedup_scope.map(|scope| scope.as_token()),
                             "idempotent": mapping.idempotent,
@@ -65,7 +72,19 @@ fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
                     })
             })
     });
-    let decision = if requires_confirmation {
+    let requires_confirmation = state.skill_rt.tools_policy.approval_required(
+        risk_requires_confirmation,
+        planner_requested_approval,
+        effect.mutates
+            || registry_policy.as_ref().is_some_and(|policy| {
+                policy.get("external_publish").and_then(Value::as_bool) == Some(true)
+            }),
+    );
+    let sandbox_denial_reason =
+        sandbox_denial_reason(state, &normalized_skill, effect, registry_policy.as_ref());
+    let decision = if sandbox_denial_reason.is_some() {
+        crate::policy_decision::PolicyDecision::Deny
+    } else if requires_confirmation {
         crate::policy_decision::PolicyDecision::RequireConfirmation
     } else {
         crate::policy_decision::PolicyDecision::Allow
@@ -86,6 +105,9 @@ fn step_permission_decision_json(state: &AppState, step: &PlanStep) -> Value {
         },
         "risk_level": risk_level_token(risk_level),
         "requires_confirmation": requires_confirmation,
+        "approval_policy": state.skill_rt.tools_policy.approval_policy_token(),
+        "global_sandbox_mode": state.skill_rt.tools_policy.sandbox_mode_token(),
+        "sandbox_denial_reason": sandbox_denial_reason,
         "sandbox_profile": sandbox_profile.clone(),
         "sandbox": verifier_sandbox_summary(registry_policy.as_ref(), &sandbox_profile, effect),
         "workspace_scope": verifier_workspace_scope_summary(
@@ -151,9 +173,80 @@ pub(super) fn verify_permission_decision_json(
         "steps": plan_result
             .steps
             .iter()
-            .map(|step| step_permission_decision_json(state, step))
+            .map(|step| step_permission_decision_json(state, step, plan_result.needs_confirmation))
             .collect::<Vec<_>>(),
     })
+}
+
+pub(super) fn step_sandbox_denial_reason(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &Value,
+) -> Option<&'static str> {
+    let effect =
+        crate::execution_recipe::classify_skill_action_effect(state, normalized_skill, args);
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(normalize_schema_token);
+    let registry_policy = action.as_deref().and_then(|action| {
+        state
+            .skill_manifest(normalized_skill)
+            .and_then(|manifest| {
+                manifest
+                    .planner_capabilities
+                    .into_iter()
+                    .find(|mapping| mapping.action.as_deref() == Some(action))
+            })
+            .map(|mapping| {
+                json!({
+                    "isolation_profile": mapping.isolation_profile.map(|profile| profile.as_token()),
+                    "network_access": mapping.network_access,
+                    "filesystem_write": mapping.filesystem_write,
+                    "external_publish": mapping.external_publish,
+                    "credential_access": mapping.credential_access,
+                    "subprocess": mapping.subprocess,
+                    "package_install": mapping.package_install,
+                    "privilege_escalation": mapping.privilege_escalation,
+                })
+            })
+    });
+    sandbox_denial_reason(state, normalized_skill, effect, registry_policy.as_ref())
+}
+
+fn sandbox_denial_reason(
+    state: &AppState,
+    normalized_skill: &str,
+    effect: crate::execution_recipe::ActionEffect,
+    registry_policy: Option<&Value>,
+) -> Option<&'static str> {
+    let bool_field = |key: &str| {
+        registry_policy
+            .and_then(|policy| policy.get(key))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
+    let run_cmd = normalized_skill == "run_cmd";
+    state
+        .skill_rt
+        .tools_policy
+        .sandbox_denial(crate::runtime::policy::SandboxRequirements {
+            mutates: effect.mutates,
+            network_access: !run_cmd && bool_field("network_access"),
+            filesystem_write: if run_cmd {
+                effect.mutates
+            } else {
+                bool_field("filesystem_write")
+            },
+            external_publish: !run_cmd && bool_field("external_publish"),
+            credential_access: !run_cmd && bool_field("credential_access"),
+            subprocess: run_cmd || bool_field("subprocess"),
+            package_install: bool_field("package_install"),
+            privilege_escalation: bool_field("privilege_escalation"),
+            isolation_profile: registry_policy
+                .and_then(|policy| policy.get("isolation_profile"))
+                .and_then(Value::as_str),
+        })
 }
 
 pub(super) fn audit_permission_decision(

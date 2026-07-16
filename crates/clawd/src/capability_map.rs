@@ -242,6 +242,15 @@ fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
     if let Some(credential_access) = mapping.credential_access {
         parts.push(format!("credential_access={credential_access}"));
     }
+    if let Some(subprocess) = mapping.subprocess {
+        parts.push(format!("subprocess={subprocess}"));
+    }
+    if let Some(package_install) = mapping.package_install {
+        parts.push(format!("package_install={package_install}"));
+    }
+    if let Some(privilege_escalation) = mapping.privilege_escalation {
+        parts.push(format!("privilege_escalation={privilege_escalation}"));
+    }
     if let Some(final_answer_shape) = mapping.final_answer_shape.as_deref() {
         parts.push(format!("final_answer_shape={final_answer_shape}"));
     }
