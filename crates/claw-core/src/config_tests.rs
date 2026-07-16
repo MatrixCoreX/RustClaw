@@ -1,4 +1,4 @@
-use super::AppConfig;
+use super::{AppConfig, ToolsConfig};
 use std::fs;
 
 fn unique_temp_config_dir(name: &str) -> std::path::PathBuf {
@@ -136,4 +136,14 @@ url = "http://127.0.0.1:9000/events"
     );
 
     fs::remove_dir_all(dir).expect("remove temp config dir");
+}
+
+#[test]
+fn tools_defaults_are_least_privilege_coding_defaults() {
+    let tools = ToolsConfig::default();
+    assert_eq!(tools.profile, "coding");
+    assert!(tools.allow.is_empty());
+    assert!(tools.deny.is_empty());
+    assert!(!tools.allow_sudo);
+    assert!(!tools.allow_path_outside_workspace);
 }

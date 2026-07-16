@@ -6,6 +6,11 @@ use tokio::process::Command;
 
 use crate::{AppState, ClaimedTask};
 
+use super::{
+    apply_skill_runner_env_isolation, place_subprocess_in_own_process_group,
+    terminate_subprocess_group,
+};
+
 pub(crate) async fn execute_external_skill(
     state: &AppState,
     task: &ClaimedTask,
@@ -205,16 +210,29 @@ async fn verify_external_python_modules(
     }
     let imports = modules.join(",");
     let mut cmd = Command::new(runtime);
+    apply_skill_runner_env_isolation(&mut cmd);
+    place_subprocess_in_own_process_group(&mut cmd);
     cmd.arg("-c")
         .arg(format!("import {imports}"))
         .current_dir(bundle_dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let output = tokio::time::timeout(Duration::from_secs(10), cmd.output())
-        .await
-        .map_err(|_| "checking Python dependencies timed out".to_string())?
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    let child = cmd
+        .spawn()
         .map_err(|err| format!("checking Python dependencies failed: {err}"))?;
+    let child_pid = child.id();
+    let output = match tokio::time::timeout(Duration::from_secs(10), child.wait_with_output()).await
+    {
+        Ok(result) => {
+            result.map_err(|err| format!("checking Python dependencies failed: {err}"))?
+        }
+        Err(_) => {
+            let _ = terminate_subprocess_group(child_pid).await;
+            return Err("checking Python dependencies timed out".to_string());
+        }
+    };
     if output.status.success() {
         return Ok(());
     }
@@ -308,6 +326,8 @@ async fn execute_external_local_script(
         .to_string();
 
     let mut cmd = Command::new(&runtime);
+    apply_skill_runner_env_isolation(&mut cmd);
+    place_subprocess_in_own_process_group(&mut cmd);
     cmd.arg(&entry_arg);
     for arg in &cli_args {
         cmd.arg(arg);
@@ -321,12 +341,28 @@ async fn execute_external_local_script(
         .env("RUSTCLAW_TASK_ID", task.task_id.clone())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
 
-    let output = tokio::time::timeout(Duration::from_secs(timeout_secs), cmd.output())
-        .await
-        .map_err(|_| format!("imported external skill timed out after {}s", timeout_secs))?
+    let child = cmd
+        .spawn()
         .map_err(|err| format!("run imported external skill failed: {err}"))?;
+    let child_pid = child.id();
+    let output =
+        match tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
+            .await
+        {
+            Ok(result) => {
+                result.map_err(|err| format!("run imported external skill failed: {err}"))?
+            }
+            Err(_) => {
+                let _ = terminate_subprocess_group(child_pid).await;
+                return Err(format!(
+                    "imported external skill timed out after {}s",
+                    timeout_secs
+                ));
+            }
+        };
 
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();

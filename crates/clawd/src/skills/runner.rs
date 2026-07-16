@@ -7,8 +7,9 @@ use tokio::process::Command;
 use crate::{AppState, ClaimedTask};
 
 use super::{
-    apply_skill_runner_env_isolation, current_task_auth_role, run_skill_with_runner_outcome,
-    task_allows_path_outside_workspace, task_allows_sudo,
+    apply_skill_runner_env_isolation, current_task_auth_role,
+    place_subprocess_in_own_process_group, run_skill_with_runner_outcome,
+    task_allows_path_outside_workspace, task_allows_sudo, terminate_subprocess_group,
 };
 
 pub(super) fn extract_skill_provider_model(value: &Value) -> Option<(String, String, String)> {
@@ -263,6 +264,8 @@ pub(crate) async fn run_skill_with_runner_once(
             report.stripped_count
         );
     }
+    place_subprocess_in_own_process_group(&mut cmd);
+    cmd.kill_on_drop(true);
     cmd.env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
         .env(
             "RUSTCLAW_SECRET_TOKEN_DIR",
@@ -345,7 +348,9 @@ pub(crate) async fn run_skill_with_runner_once(
             Ok(Ok(_)) => {}
             Ok(Err(err)) => return Err(format!("read skill-runner stdout failed: {err}")),
             Err(_) => {
+                let _ = terminate_subprocess_group(child.id()).await;
                 let _ = child.kill().await;
+                let _ = child.wait().await;
                 return Err("skill-runner timeout".to_string());
             }
         }
@@ -369,6 +374,7 @@ pub(crate) async fn run_skill_with_runner_once(
             }
         }
         Err(_) => {
+            let _ = terminate_subprocess_group(child.id()).await;
             let _ = child.kill().await;
             let _ = tokio::time::timeout(Duration::from_millis(200), child.wait()).await;
             if out_line.trim().is_empty() {

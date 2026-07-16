@@ -4,6 +4,10 @@ pub(crate) mod provider_runtime;
 pub(crate) mod state;
 pub(crate) mod types;
 
+#[cfg(test)]
+#[path = "policy_tests.rs"]
+mod policy_tests;
+
 pub(crate) use ask_state::{log_ask_transition, AskState, AskTransition};
 pub(crate) use policy::{llm_model_kind, llm_vendor_name, RateLimiter, ToolsPolicy};
 pub(crate) use provider_runtime::{AgentRuntimeConfig, LlmProviderRuntime};

@@ -10,8 +10,8 @@ use tokio::process::Command;
 ///   PATH 之类），其它一切配置（API key、model、workspace 路径等）必须由 clawd 通过
 ///   `cmd.env(...)` 显式注入或经 `SecretsBroker` 走 `secrets.<usage>_<vendor>_api_key`
 ///   契约下来 —— 这才是 §3.4 "secrets 成为唯一渠道" 的真正落地。
-/// * 严格模式默认 OFF (`RUSTCLAW_SKILL_ENV_STRICT=1` 才打开)，避免兼容性突变；
-///   开启后 skill 若再依赖未声明的环境变量会立刻为空，运维可由此发现遗漏。
+/// * 严格模式默认开启；只有显式设置 `RUSTCLAW_SKILL_ENV_STRICT=0|false|off|no`
+///   才临时关闭。skill 若依赖未声明的环境变量会立即暴露配置缺口。
 /// * 列表保持小而稳：扩列前请先评估能否用 manifest capability 替代。
 pub(crate) const SKILL_RUNNER_ENV_WHITELIST: &[&str] = &[
     "PATH",
@@ -30,18 +30,19 @@ pub(crate) const SKILL_RUNNER_ENV_WHITELIST: &[&str] = &[
     "SSL_CERT_DIR",
 ];
 
-/// §E2 step1: 运行期判断是否启用 strict env 隔离。
+/// Runtime switch for strict child-process environment isolation.
 ///
-/// 接受 `1` / `true` / `on` / `yes`（大小写不敏感）作为打开信号，其余视为关闭。
+/// Isolation is enabled by default. Set `RUSTCLAW_SKILL_ENV_STRICT=0|false|off|no`
+/// only as an explicit compatibility escape hatch.
 pub(crate) fn skill_runner_env_strict_enabled() -> bool {
-    matches!(
+    !matches!(
         std::env::var("RUSTCLAW_SKILL_ENV_STRICT")
             .ok()
             .as_deref()
             .map(str::trim)
             .map(str::to_ascii_lowercase)
             .as_deref(),
-        Some("1") | Some("true") | Some("on") | Some("yes")
+        Some("0") | Some("false") | Some("off") | Some("no")
     )
 }
 
@@ -80,9 +81,9 @@ where
 /// 只做"清空 + 白名单注入"，不碰任何后续 `.env(K, V)` 调用 —— 那部分仍是 clawd 显式
 /// 配置 + broker secrets，是子进程的**唯一**真实 env 来源。
 ///
-/// §E2 step2 边界澄清：本函数只对 **spawn-path** 生效（即 `kind="runner"` 的外部
-/// skill），对 **builtin skill**（`read_file` / `write_file` / `run_cmd` 等
-/// 内嵌实现）完全无效——它们运行在 clawd 自身进程里，自然继承 clawd 的 env。
+/// This applies to every child-process spawn path that opts into this helper, including
+/// skill-runner, imported local scripts, Python dependency probes, and builtin `run_cmd`.
+/// Pure in-process builtins do not create a child environment.
 pub(crate) struct StrictEnvReport {
     pub(crate) preserved: Vec<String>,
     pub(crate) stripped_count: usize,
@@ -103,6 +104,36 @@ pub(crate) fn apply_skill_runner_env_isolation(cmd: &mut Command) -> Option<Stri
         preserved,
         stripped_count: total_env.saturating_sub(kept.len()),
     })
+}
+
+#[cfg(unix)]
+pub(crate) fn place_subprocess_in_own_process_group(cmd: &mut Command) {
+    cmd.process_group(0);
+}
+
+#[cfg(not(unix))]
+pub(crate) fn place_subprocess_in_own_process_group(_cmd: &mut Command) {}
+
+#[cfg(unix)]
+pub(crate) async fn terminate_subprocess_group(pid: Option<u32>) -> bool {
+    let Some(pid) = pid.filter(|pid| *pid > 0) else {
+        return false;
+    };
+    Command::new("kill")
+        .arg("-KILL")
+        .arg(format!("-{pid}"))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+pub(crate) async fn terminate_subprocess_group(_pid: Option<u32>) -> bool {
+    false
 }
 
 mod builtin;
