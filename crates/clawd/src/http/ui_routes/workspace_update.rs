@@ -1213,33 +1213,39 @@ fn fail_workspace_update_with_error(
 async fn detect_workspace_update_conflict_paths(
     workspace_root: &Path,
 ) -> Result<WorkspaceUpdateConflictPaths, String> {
-    let remote_changed = git_workspace_name_list(
-        &["diff", "--name-only", "HEAD", "@{upstream}"],
+    let remote_changed = git_workspace_name_list_raw(
+        &["diff", "--name-only", "-z", "HEAD", "@{upstream}"],
+        &[],
         workspace_root,
     )
     .await?;
-    let local_unstaged = git_workspace_name_list(&["diff", "--name-only"], workspace_root).await?;
-    let local_staged =
-        git_workspace_name_list(&["diff", "--cached", "--name-only"], workspace_root).await?;
-    let local_untracked = git_workspace_name_list(
-        &["ls-files", "--others", "--exclude-standard"],
-        workspace_root,
-    )
-    .await?;
-
-    let remote_changed = remote_changed.into_iter().collect::<BTreeSet<_>>();
-    let mut tracked_dirty = local_unstaged.into_iter().collect::<BTreeSet<_>>();
-    tracked_dirty.extend(local_staged);
+    if remote_changed.is_empty() {
+        return Ok(WorkspaceUpdateConflictPaths::default());
+    }
+    let mut tracked_dirty = BTreeSet::new();
+    let mut local_untracked = BTreeSet::new();
+    for batch in remote_changed.chunks(WORKSPACE_UPDATE_PATH_BATCH_SIZE) {
+        let (unstaged, staged, untracked) = tokio::try_join!(
+            git_workspace_name_list_raw(&["diff", "--name-only", "-z", "--"], batch, workspace_root),
+            git_workspace_name_list_raw(
+                &["diff", "--cached", "--name-only", "-z", "--"],
+                batch,
+                workspace_root,
+            ),
+            git_workspace_name_list_raw(
+                &["ls-files", "--others", "--exclude-standard", "-z", "--"],
+                batch,
+                workspace_root,
+            ),
+        )?;
+        tracked_dirty.extend(unstaged);
+        tracked_dirty.extend(staged);
+        local_untracked.extend(untracked);
+    }
 
     Ok(WorkspaceUpdateConflictPaths {
-        tracked: tracked_dirty
-            .into_iter()
-            .filter(|path| remote_changed.contains(path))
-            .collect(),
-        untracked: local_untracked
-            .into_iter()
-            .filter(|path| remote_changed.contains(path))
-            .collect(),
+        tracked: tracked_dirty.into_iter().collect(),
+        untracked: local_untracked.into_iter().collect(),
     })
 }
 
@@ -1247,7 +1253,7 @@ async fn overwrite_workspace_update_conflict_paths(
     workspace_root: &Path,
     paths: &WorkspaceUpdateConflictPaths,
 ) -> Result<(), String> {
-    if !paths.tracked.is_empty() {
+    for batch in paths.tracked.chunks(WORKSPACE_UPDATE_PATH_BATCH_SIZE) {
         let mut args = vec![
             "restore".to_string(),
             "--source".to_string(),
@@ -1256,7 +1262,7 @@ async fn overwrite_workspace_update_conflict_paths(
             "--worktree".to_string(),
             "--".to_string(),
         ];
-        args.extend(paths.tracked.iter().cloned());
+        args.extend(batch.iter().cloned());
         let out = run_workspace_update_command_args("git", &args, workspace_root, 600).await?;
         if out.exit_code != Some(0) {
             return Err(format!(
@@ -1266,9 +1272,9 @@ async fn overwrite_workspace_update_conflict_paths(
         }
     }
 
-    if !paths.untracked.is_empty() {
+    for batch in paths.untracked.chunks(WORKSPACE_UPDATE_PATH_BATCH_SIZE) {
         let mut args = vec!["clean".to_string(), "-fd".to_string(), "--".to_string()];
-        args.extend(paths.untracked.iter().cloned());
+        args.extend(batch.iter().cloned());
         let out = run_workspace_update_command_args("git", &args, workspace_root, 600).await?;
         if out.exit_code != Some(0) {
             return Err(format!(
@@ -1281,31 +1287,60 @@ async fn overwrite_workspace_update_conflict_paths(
     Ok(())
 }
 
-async fn git_workspace_name_list(
+async fn git_workspace_name_list_raw(
     args: &[&str],
+    scoped_paths: &[String],
     workspace_root: &Path,
 ) -> Result<Vec<String>, String> {
-    let out = run_workspace_update_command("git", args, workspace_root, 60).await?;
-    if out.exit_code != Some(0) {
+    let mut command = Command::new("git");
+    command
+        .args(args)
+        .args(scoped_paths)
+        .current_dir(workspace_root)
+        .stdin(StdProcessStdio::null())
+        .stdout(StdProcessStdio::piped())
+        .stderr(StdProcessStdio::piped());
+    let output = tokio::time::timeout(std::time::Duration::from_secs(60), command.output())
+        .await
+        .map_err(|_| "git path query timed out after 60s".to_string())?
+        .map_err(|error| format!("failed to run git path query: {error}"))?;
+    if !output.status.success() {
         return Err(format!(
             "git {} failed: {}",
             args.join(" "),
-            workspace_update_output_detail(&out)
+            truncate_tail(&String::from_utf8_lossy(&output.stderr))
         ));
     }
-    parse_git_name_list_output(&out.stdout_tail)
+    parse_git_name_list_bytes(&output.stdout)
 }
 
-fn parse_git_name_list_output(raw: &str) -> Result<Vec<String>, String> {
-    if raw.starts_with("... output truncated ...") {
-        return Err("git path list output is too large to process safely".to_string());
+fn parse_git_name_list_bytes(raw: &[u8]) -> Result<Vec<String>, String> {
+    if raw.len() > WORKSPACE_UPDATE_PATH_LIST_MAX_BYTES {
+        return Err("git path list exceeds updater byte limit".to_string());
     }
-    Ok(raw
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect())
+    let mut paths = Vec::new();
+    for item in raw.split(|byte| *byte == 0).filter(|item| !item.is_empty()) {
+        if paths.len() >= WORKSPACE_UPDATE_PATH_LIST_MAX_ITEMS {
+            return Err("git path list exceeds updater item limit".to_string());
+        }
+        let path = std::str::from_utf8(item)
+            .map_err(|_| "git path list contains non-UTF-8 path".to_string())?;
+        if !safe_workspace_relative_git_path(path) {
+            return Err("git path list contains unsafe relative path".to_string());
+        }
+        paths.push(path.to_string());
+    }
+    Ok(paths)
+}
+
+fn safe_workspace_relative_git_path(path: &str) -> bool {
+    !path.is_empty()
+        && Path::new(path).components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
 }
 
 fn workspace_update_output_detail(out: &WorkspaceUpdateCommandOutput) -> String {

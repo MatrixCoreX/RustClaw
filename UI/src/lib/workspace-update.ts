@@ -292,16 +292,6 @@ function workspaceUpdateErrorNotice(
   lang: UiLanguage,
 ): { title: string; detail: string } {
   const error = status.error?.trim() || "";
-  if (error === "git path list output is too large to process safely") {
-    return {
-      title: copy(lang, "Git 文件列表过大，无法安全处理", "Git path list is too large to process safely"),
-      detail: copy(
-        lang,
-        "本地变更或未跟踪文件太多，自动更新无法安全判断哪些路径可以覆盖。请先清理无关构建产物、临时文件或手动处理 Git 状态，然后再重试。",
-        "There are too many local changes or untracked files for the updater to safely decide which paths can be overwritten. Clean unrelated build artifacts or temporary files, or resolve the Git state manually, then retry.",
-      ),
-    };
-  }
   return {
     title: error || copy(lang, "更新失败", "Update failed"),
     detail: copy(
