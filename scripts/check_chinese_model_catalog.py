@@ -54,6 +54,8 @@ TEXT_PROVIDER_FIELDS = [
     "timeout_seconds",
 ]
 
+MIMO_PRIMARY_OPENAI_BASE_URL = "https://token-plan-cn.xiaomimimo.com/v1"
+
 CHINESE_TEXT_PROVIDERS = {
     "deepseek": {
         "base_url": "https://api.deepseek.com/v1",
@@ -78,6 +80,7 @@ CHINESE_TEXT_PROVIDERS = {
         "context_window_min": 1_000_000,
     },
     "mimo": {
+        "base_url": MIMO_PRIMARY_OPENAI_BASE_URL,
         "required_models": {"mimo-v2.5-pro", "mimo-v2.5"},
         "required_input_modalities": {"text"},
         "required_output_modalities": {"text"},
@@ -169,6 +172,19 @@ STALE_MINIMAX_ENDPOINT_SCAN_ROOTS = (
     ROOT / "scripts",
 )
 STALE_MINIMAX_ENDPOINT_SCAN_SUFFIXES = (".toml", ".ts", ".tsx", ".rs", ".py", ".sh")
+
+PRIMARY_MODEL_ENDPOINT_SOURCE_FILES = (
+    ROOT / "crates/telegramd/src/commands.rs",
+    ROOT / "crates/telegramd/src/main_model_config_tests.rs",
+    ROOT / "crates/clawd/src/http/ui_routes_tests.rs",
+    ROOT / "crates/claw-core/src/model_catalog_tests.rs",
+    ROOT / "UI/src/lib/llm-config.test.ts",
+)
+
+STALE_MIMO_PRIMARY_OPENAI_ENDPOINT_TOKENS = (
+    "https://token-plan-sgp.xiaomimimo.com/v1",
+    "https://api.xiaomimimo.com/v1",
+)
 
 
 def relative_path_label(path: Path) -> str:
@@ -532,6 +548,39 @@ def check_main_docker_text_parity(findings: list[str], main: dict[str, Any], doc
             )
 
 
+def check_primary_model_endpoint_source_text(findings: list[str], label: str, text: str) -> None:
+    require(
+        MIMO_PRIMARY_OPENAI_BASE_URL in text,
+        findings,
+        f"{label} must use MiMo primary endpoint {MIMO_PRIMARY_OPENAI_BASE_URL}",
+    )
+    for stale in STALE_MIMO_PRIMARY_OPENAI_ENDPOINT_TOKENS:
+        require(
+            stale not in text,
+            findings,
+            f"stale MiMo primary endpoint token {stale!r} in {label}",
+        )
+
+
+def check_primary_model_endpoint_source_alignment(findings: list[str]) -> None:
+    for path in PRIMARY_MODEL_ENDPOINT_SOURCE_FILES:
+        require(path.exists(), findings, f"missing primary model endpoint source: {path.relative_to(ROOT)}")
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            fail(findings, f"primary_model_endpoint_source_decode_failed:{path.relative_to(ROOT)}")
+            continue
+        except OSError as exc:
+            fail(
+                findings,
+                f"primary_model_endpoint_source_read_failed:{path.relative_to(ROOT)}:{exc.__class__.__name__}",
+            )
+            continue
+        check_primary_model_endpoint_source_text(findings, str(path.relative_to(ROOT)), text)
+
+
 def check_media_config(findings: list[str], main: dict[str, Any]) -> None:
     image = load_toml(IMAGE_CONFIG, findings)
     audio = load_toml(AUDIO_CONFIG, findings)
@@ -824,6 +873,34 @@ def run_self_test() -> int:
             )
             return 1
 
+        endpoint_missing_findings: list[str] = []
+        check_primary_model_endpoint_source_text(
+            endpoint_missing_findings,
+            "self_test_missing_endpoint.rs",
+            'base_url = "https://example.invalid/v1"',
+        )
+        if not any("must use MiMo primary endpoint" in item for item in endpoint_missing_findings):
+            print(
+                "SELF_TEST_FAIL endpoint_missing:"
+                f"findings={endpoint_missing_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
+        endpoint_stale_findings: list[str] = []
+        check_primary_model_endpoint_source_text(
+            endpoint_stale_findings,
+            "self_test_stale_endpoint.rs",
+            f'{MIMO_PRIMARY_OPENAI_BASE_URL}\nhttps://token-plan-sgp.xiaomimimo.com/v1',
+        )
+        if not any("stale MiMo primary endpoint token" in item for item in endpoint_stale_findings):
+            print(
+                "SELF_TEST_FAIL endpoint_stale:"
+                f"findings={endpoint_stale_findings}",
+                file=sys.stderr,
+            )
+            return 1
+
     print("CHINESE_MODEL_CATALOG_SELF_TEST ok")
     return 0
 
@@ -836,6 +913,7 @@ def build_report(env_file: Path | None = None) -> dict[str, Any]:
     check_text_provider_config(findings, "configs/config.toml", main)
     check_text_provider_config(findings, "docker/config/config.toml", docker)
     check_main_docker_text_parity(findings, main, docker)
+    check_primary_model_endpoint_source_alignment(findings)
     check_media_config(findings, main)
     check_vendor_patches(findings)
     check_chinese_case_gate(findings)
