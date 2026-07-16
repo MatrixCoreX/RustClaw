@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Guard legacy first-layer route state stays inside compatibility boundaries.
-
-The Codex/Claude-style target is that ordinary semantic decisions live in the
-agent loop. Legacy normalizer route tokens may still exist while release gates
-are open, but they must not spread back into agent-loop control code.
-"""
+"""Guard the planner-owned semantic frontdoor from legacy route reintroduction."""
 from __future__ import annotations
 
 import argparse
@@ -34,22 +29,6 @@ LEGACY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 
-ALLOWED_FIRST_LAYER_TYPE_FILES = {
-    "crates/clawd/src/main.rs",
-    "crates/clawd/src/pipeline_types.rs",
-    "crates/clawd/src/runtime/ask_mode.rs",
-    "crates/clawd/src/runtime/mod.rs",
-    "crates/clawd/src/runtime/types.rs",
-    "crates/clawd/src/task_journal.rs",
-    "crates/clawd/src/task_journal_decision_envelope.rs",
-}
-
-ALLOWED_FIRST_LAYER_TOKEN_FILES = {
-    *ALLOWED_FIRST_LAYER_TYPE_FILES,
-    "crates/clawd/src/worker/ask_prepare.rs",
-}
-
-
 @dataclasses.dataclass(frozen=True)
 class Finding:
     path: str
@@ -76,11 +55,6 @@ def production_rust_files() -> list[Path]:
         for path in SOURCE_ROOT.rglob("*.rs")
         if path.is_file() and not is_test_path(path)
     )
-
-
-def is_intent_router_compat_file(rel_path: str) -> bool:
-    name = Path(rel_path).name
-    return name == "intent_router.rs" or name.startswith("intent_router_")
 
 
 def is_allowed(rel_path: str, kind: str, line_text: str) -> bool:
@@ -112,13 +86,9 @@ def is_allowed(rel_path: str, kind: str, line_text: str) -> bool:
         # the planner loop.
         return False
     if kind == "FirstLayerDecision":
-        return rel_path in ALLOWED_FIRST_LAYER_TYPE_FILES or is_intent_router_compat_file(rel_path)
+        return False
     if kind == "first_layer_decision":
-        if rel_path in ALLOWED_FIRST_LAYER_TOKEN_FILES or is_intent_router_compat_file(rel_path):
-            return True
-        # Allow exact JSON/log compatibility fields only where they are emitted
-        # through trace helpers.
-        return "legacy_first_layer_decision" in line_text
+        return False
     return False
 
 
@@ -141,7 +111,7 @@ def line_number_for_offset(text: str, offset: int) -> int:
 def scan_boundary_envelope_type_contract_text(rel_path: str, text: str) -> list[Finding]:
     findings: list[Finding] = []
     match = re.search(
-        r"struct\s+BoundaryEnvelope\s*\{(?P<body>.*?)\n\}",
+        r"struct\s+TurnBoundaryEnvelope\s*\{(?P<body>.*?)\n\}",
         text,
         flags=re.DOTALL,
     )
@@ -151,7 +121,7 @@ def scan_boundary_envelope_type_contract_text(rel_path: str, text: str) -> list[
                 rel_path,
                 1,
                 "boundary_envelope_struct_missing",
-                "BoundaryEnvelope struct not found",
+                "TurnBoundaryEnvelope struct not found",
             )
         )
         return findings
@@ -165,7 +135,7 @@ def scan_boundary_envelope_type_contract_text(rel_path: str, text: str) -> list[
                 rel_path,
                 line_number_for_offset(text, body_start + raw_offset),
                 "boundary_envelope_raw_user_request_field",
-                "BoundaryEnvelope must not carry raw_user_request",
+                "TurnBoundaryEnvelope must not carry raw_user_request",
             )
         )
     if not re.search(r"\braw_chars\s*:\s*usize\b", body):
@@ -174,7 +144,7 @@ def scan_boundary_envelope_type_contract_text(rel_path: str, text: str) -> list[
                 rel_path,
                 line_number_for_offset(text, match.start()),
                 "boundary_envelope_raw_chars_missing",
-                "BoundaryEnvelope must expose raw_chars: usize",
+                "TurnBoundaryEnvelope must expose raw_chars: usize",
             )
         )
     return findings
@@ -183,8 +153,13 @@ def scan_boundary_envelope_type_contract_text(rel_path: str, text: str) -> list[
 def scan_repo() -> list[Finding]:
     findings: list[Finding] = []
     for path in production_rust_files():
-        findings.extend(scan_text(rel(path), path.read_text(encoding="utf-8")))
-    output_types = SOURCE_ROOT / "intent_router_output_types.rs"
+        rel_path = rel(path)
+        if path.name == "intent_router.rs" or path.name.startswith("intent_router_"):
+            findings.append(
+                Finding(rel_path, 1, "legacy_intent_router_file", "legacy intent router file returned")
+            )
+        findings.extend(scan_text(rel_path, path.read_text(encoding="utf-8")))
+    output_types = SOURCE_ROOT / "turn_boundary_envelope.rs"
     findings.extend(
         scan_boundary_envelope_type_contract_text(
             rel(output_types),
@@ -206,8 +181,8 @@ def run_self_test() -> int:
         "crates/clawd/src/agent_engine/planning.rs",
         "let x = FirstLayerDecision::PlannerExecute;",
     )
-    assert not scan_text(
-        "crates/clawd/src/intent_router_route_output.rs",
+    assert scan_text(
+        "crates/clawd/src/runtime/types.rs",
         "let x = FirstLayerDecision::PlannerExecute;",
     )
     assert scan_text(
@@ -219,7 +194,7 @@ def run_self_test() -> int:
         "let derived_route_decision = route_trace_decision_from_state(...);",
     )
     assert not scan_text(
-        "crates/clawd/src/intent_router_normalizer_run.rs",
+        "crates/clawd/src/task_journal.rs",
         "let derived_route_trace_decision = route_trace_decision_from_state(...);",
     )
     assert scan_text(
@@ -239,28 +214,28 @@ def run_self_test() -> int:
         '"{} intent_normalizer task_id={} route_trace_decision={:?}"',
     )
     assert scan_text(
-        "crates/clawd/src/intent_router_output_types.rs",
+        "crates/clawd/src/turn_boundary_envelope.rs",
         "raw_user_request: self.raw_user_request.clone(),",
     )
     assert scan_text(
-        "crates/clawd/src/intent_router_output_types.rs",
+        "crates/clawd/src/turn_boundary_envelope.rs",
         'raw_user_request: format!("raw_chars:{}", self.raw_user_request.chars().count()),',
     )
     assert not scan_text(
-        "crates/clawd/src/intent_router_output_types.rs",
+        "crates/clawd/src/turn_boundary_envelope.rs",
         "raw_chars: self.raw_user_request.chars().count(),",
     )
     assert scan_boundary_envelope_type_contract_text(
-        "crates/clawd/src/intent_router_output_types.rs",
-        "pub(crate) struct BoundaryEnvelope {\n    pub(crate) raw_user_request: String,\n}",
+        "crates/clawd/src/turn_boundary_envelope.rs",
+        "pub(crate) struct TurnBoundaryEnvelope {\n    pub(crate) raw_user_request: String,\n}",
     )
     assert scan_boundary_envelope_type_contract_text(
-        "crates/clawd/src/intent_router_output_types.rs",
-        "pub(crate) struct BoundaryEnvelope {\n    pub(crate) session_binding: Option<String>,\n}",
+        "crates/clawd/src/turn_boundary_envelope.rs",
+        "pub(crate) struct TurnBoundaryEnvelope {\n    pub(crate) session_binding: Option<String>,\n}",
     )
     assert not scan_boundary_envelope_type_contract_text(
-        "crates/clawd/src/intent_router_output_types.rs",
-        "pub(crate) struct BoundaryEnvelope {\n    pub(crate) raw_chars: usize,\n}",
+        "crates/clawd/src/turn_boundary_envelope.rs",
+        "pub(crate) struct TurnBoundaryEnvelope {\n    pub(crate) raw_chars: usize,\n}",
     )
     print("SELF_TEST_OK")
     return 0

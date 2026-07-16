@@ -533,9 +533,7 @@ pub(in crate::agent_engine) fn explicit_command_segment(
         .or_else(|| shellish_literal_command_segment(request))
 }
 
-pub(in crate::agent_engine) fn explicit_machine_syntax_command_segment(
-    request: &str,
-) -> Option<String> {
+pub(crate) fn explicit_machine_syntax_command_segment(request: &str) -> Option<String> {
     leading_shellish_command_sequence_segment(request)
         .or_else(|| shellish_literal_command_segment(request))
 }

@@ -186,9 +186,9 @@ fn verifier_pass_does_not_promote_terminal_text_when_machine_summary_is_required
     let mut route = route_result(crate::AskMode::act_plain());
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     let mut journal = verifier_pass_journal("task-verified-terminal-machine-summary", prompt);
-    journal.record_turn_analysis(&crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    journal.record_turn_analysis(&crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: Some(serde_json::json!({
             "output_format": "machine_summary",

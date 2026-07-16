@@ -49,7 +49,6 @@ pub(crate) struct StructuredMemoryContext {
 pub(crate) enum MemoryContextMode {
     Chat,
     Planner,
-    Route,
     Skill,
     Schedule,
 }
@@ -387,26 +386,6 @@ Default reference priority inside this memory block: RECENT_UNFINISHED_GOALS/REC
                 ));
             }
             push_items_section(&mut sections, "STABLE_FACTS", &ctx.relevant_facts);
-            push_items_section(&mut sections, "KNOWLEDGE_BASE_CONTEXT", &ctx.knowledge_docs);
-        }
-        MemoryContextMode::Route => {
-            push_items_section(
-                &mut sections,
-                "RECENT_UNFINISHED_GOALS",
-                &ctx.unfinished_goals,
-            );
-            push_items_section(
-                &mut sections,
-                "RECENT_RELATED_EVENTS",
-                &ctx.recent_related_events,
-            );
-            push_items_section(
-                &mut sections,
-                "RECENT_ASSISTANT_RESULTS",
-                &ctx.assistant_results,
-            );
-            push_items_section(&mut sections, "SIMILAR_TRIGGERS", &ctx.similar_triggers);
-            push_items_section(&mut sections, "RELEVANT_FACTS", &ctx.relevant_facts);
             push_items_section(&mut sections, "KNOWLEDGE_BASE_CONTEXT", &ctx.knowledge_docs);
         }
         MemoryContextMode::Chat => {

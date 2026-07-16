@@ -568,7 +568,7 @@ fn compatibility_alias_target(value: &Value) -> Option<&str> {
 
 pub(super) fn merge_alias_bindings(
     prior_state: Option<&ConversationState>,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> Vec<SessionAliasBinding> {
     let mut alias_bindings = prior_state
         .map(|state| state.alias_bindings.clone())
@@ -592,7 +592,7 @@ pub(super) fn merge_alias_bindings(
 
 pub(super) fn merge_alias_bindings_for_turn(
     prior_state: Option<&ConversationState>,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     prompt: &str,
     route_result: &crate::RouteResult,
     resolved_prompt_for_execution: &str,
@@ -619,7 +619,7 @@ pub(super) fn merge_alias_bindings_for_turn(
 }
 
 fn turn_analysis_has_structured_alias_bindings(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     !session_alias_bindings_from_state_patch(
         turn_analysis.and_then(|analysis| analysis.state_patch.as_ref()),
@@ -628,7 +628,7 @@ fn turn_analysis_has_structured_alias_bindings(
 }
 
 pub(super) fn turn_analysis_has_alias_only_state_patch(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     turn_analysis
         .and_then(|analysis| analysis.state_patch.as_ref())
@@ -637,7 +637,7 @@ pub(super) fn turn_analysis_has_alias_only_state_patch(
 
 fn structural_alias_bindings_from_prompt(
     prior_state: Option<&ConversationState>,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     prompt: &str,
     route_result: &crate::RouteResult,
     resolved_prompt_for_execution: &str,
@@ -656,10 +656,7 @@ fn structural_alias_bindings_from_prompt(
     } else if turn_analysis
         .and_then(|analysis| analysis.turn_type)
         .is_some_and(|turn_type| {
-            matches!(
-                turn_type,
-                crate::intent_router::TurnType::PreferenceOrMemory
-            )
+            matches!(turn_type, crate::turn_context::TurnType::PreferenceOrMemory)
         })
         || (route_result.is_resume_discussion_mode()
             && !route_result.output_contract.requires_content_evidence

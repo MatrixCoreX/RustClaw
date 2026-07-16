@@ -626,9 +626,9 @@ async fn runtime_status_query_reaches_planner_without_literal_command_fast_path(
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.resolved_intent = "return current hostname".to_string();
-    let analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::StatusQuery),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: Some(json!({
             "runtime_status_query": {"kind": "host_name", "scope": "system"}

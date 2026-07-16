@@ -194,17 +194,6 @@ pub(super) fn action_is_structured_count_plan_action(
         || (skill == "system_basic" && action_name.eq_ignore_ascii_case("count_inventory"))
 }
 
-pub(super) fn route_qualifies_for_lightweight_repair_skip(
-    route_result: Option<&RouteResult>,
-) -> bool {
-    route_result.is_some_and(|route| {
-        crate::task_context_builder::uses_light_execution_context_budget(
-            route,
-            &route.resolved_intent,
-        )
-    })
-}
-
 pub(super) async fn repair_plan_actions(
     state: &AppState,
     task: &ClaimedTask,
@@ -698,11 +687,7 @@ pub(super) fn plain_act_filesystem_text_read_only_plan_requires_repair(
     {
         return false;
     }
-    if crate::task_context_builder::uses_light_execution_context_budget(
-        route,
-        &route.resolved_intent,
-    ) && observation_only_plan_can_finalize_from_direct_output(state, Some(route), actions)
-    {
+    if observation_only_plan_can_finalize_from_direct_output(state, Some(route), actions) {
         return false;
     }
     let executable_actions = actions.iter().filter(|action| {

@@ -1,12 +1,11 @@
 use super::{
     decide_chat_memory_use_policy, decide_planner_memory_use_policy,
-    decide_route_memory_use_policy, decide_skill_memory_use_policy,
-    filter_structured_memory_context, ChatMemoryContextHint, MemoryUseDecision, MemoryUseProfile,
-    PlannerMemoryContextHint,
+    decide_skill_memory_use_policy, filter_structured_memory_context, ChatMemoryContextHint,
+    MemoryUseDecision, MemoryUseProfile, PlannerMemoryContextHint,
 };
 use crate::memory::retrieval::{MemoryContextMode, RetrievedMemoryItem, StructuredMemoryContext};
 use crate::runtime::AppState;
-use crate::task_context_builder::{ExecutionContextBudgetTier, RouteContextBudgetTier};
+use crate::task_context_builder::ExecutionContextBudgetTier;
 
 fn item(text: &str) -> RetrievedMemoryItem {
     RetrievedMemoryItem {
@@ -29,59 +28,6 @@ fn full_context() -> StructuredMemoryContext {
         unfinished_goals: vec![item("unfinished goal")],
         recalled_recent: vec![("assistant".to_string(), "recent snippet".to_string())],
     }
-}
-
-fn empty_snapshot() -> crate::conversation_state::ActiveSessionSnapshot {
-    crate::conversation_state::ActiveSessionSnapshot {
-        conversation_state: None,
-        active_followup_frame: None,
-        active_clarify_state: None,
-        active_observed_facts: None,
-    }
-}
-
-#[test]
-fn route_memory_new_task_omits_assistant_results() {
-    let state = AppState::test_default_with_fixture_provider();
-    let surface = crate::intent::surface_signals::PromptSurfaceSignals::default();
-    let decision = decide_route_memory_use_policy(
-        &state,
-        RouteContextBudgetTier::Full,
-        &surface,
-        &empty_snapshot(),
-    );
-    assert_eq!(decision.profile, MemoryUseProfile::RouteMinimal);
-
-    let filtered = filter_structured_memory_context(full_context(), &decision);
-    assert!(filtered.assistant_results.is_empty());
-    assert!(filtered.similar_triggers.is_empty());
-    assert!(filtered.recent_related_events.is_empty());
-    assert!(filtered.unfinished_goals.is_empty());
-    assert!(filtered.recalled_recent.is_empty());
-    assert!(filtered.long_term_summary.is_none());
-    assert_eq!(filtered.preferences.len(), 1);
-    assert!(filtered.relevant_facts.is_empty());
-    assert!(filtered.knowledge_docs.is_empty());
-}
-
-#[test]
-fn route_memory_followup_includes_recent_results() {
-    let state = AppState::test_default_with_fixture_provider();
-    let surface = crate::intent::surface_signals::PromptSurfaceSignals::default();
-    let mut snapshot = empty_snapshot();
-    snapshot.active_followup_frame = Some(crate::followup_frame::FollowupFrame::default());
-
-    let decision =
-        decide_route_memory_use_policy(&state, RouteContextBudgetTier::Full, &surface, &snapshot);
-    assert_eq!(decision.profile, MemoryUseProfile::RouteFollowup);
-
-    let filtered = filter_structured_memory_context(full_context(), &decision);
-    assert_eq!(filtered.assistant_results.len(), 1);
-    assert_eq!(filtered.similar_triggers.len(), 1);
-    assert_eq!(filtered.recent_related_events.len(), 1);
-    assert_eq!(filtered.unfinished_goals.len(), 1);
-    assert_eq!(filtered.recalled_recent.len(), 1);
-    assert!(filtered.long_term_summary.is_none());
 }
 
 #[test]

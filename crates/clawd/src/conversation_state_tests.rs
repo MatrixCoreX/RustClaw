@@ -100,7 +100,7 @@ fn journal_with_final_status(
 fn next_last_primary_task_prompt(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     prompt: &str,
     resolved_prompt_for_execution: &str,
 ) -> Option<String> {
@@ -117,7 +117,7 @@ fn next_last_primary_task_prompt(
 fn next_last_primary_task_output(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     resolved_prompt_for_execution: &str,
     answer_text: &str,
     answer_messages: &[String],
@@ -162,9 +162,9 @@ fn plain_chat_without_task_turn_does_not_promote_primary_task() {
 #[test]
 fn standalone_task_request_preserves_existing_primary_task() {
     let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: None,
         attachment_processing_required: false,
@@ -210,9 +210,9 @@ fn pure_chat_agent_loop_side_answer_preserves_existing_primary_task() {
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
     route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: None,
         attachment_processing_required: false,
@@ -266,9 +266,9 @@ fn direct_answer_pure_chat_side_answer_preserves_existing_primary_task() {
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
     route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: None,
         attachment_processing_required: false,
@@ -310,9 +310,9 @@ fn direct_answer_pure_chat_side_answer_preserves_existing_primary_task() {
 #[test]
 fn standalone_new_deliverable_replaces_existing_primary_task() {
     let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: Some(json!({
             "primary_task_update": "replace",
@@ -355,9 +355,9 @@ fn standalone_new_deliverable_replaces_existing_primary_task() {
 #[test]
 fn standalone_task_request_without_prior_can_start_primary_task() {
     let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: None,
         attachment_processing_required: false,
@@ -386,9 +386,9 @@ fn standalone_task_request_without_prior_can_start_primary_task() {
 #[test]
 fn standalone_freeform_answer_candidate_without_prior_starts_primary_task() {
     let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: None,
         attachment_processing_required: false,
@@ -532,9 +532,9 @@ fn unannotated_compact_question_chat_does_not_start_primary_task() {
 #[test]
 fn standalone_freeform_answer_candidate_with_prior_preserves_primary_task() {
     let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: None,
         attachment_processing_required: false,
@@ -569,9 +569,9 @@ fn standalone_freeform_answer_candidate_with_prior_preserves_primary_task() {
 #[test]
 fn standalone_replacement_answer_candidate_replaces_prior_primary_task() {
     let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: Some(json!({
             "primary_task_update": "replace",
@@ -613,9 +613,9 @@ fn standalone_replacement_answer_candidate_replaces_prior_primary_task() {
 #[test]
 fn active_task_non_success_preserves_prior_primary_output() {
     let route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskCorrect),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskCorrect),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::ReuseActive),
         should_interrupt_active_run: false,
         state_patch: Some(json!({"target": "Python 3.10 -> Python 3.11"})),
         attachment_processing_required: false,
@@ -673,9 +673,9 @@ fn standalone_preference_or_memory_turn_clears_prior_primary_task() {
     let mut route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     route_result.should_refresh_long_term_memory = true;
     route_result.agent_display_name_hint = "巡检爪".to_string();
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: None,
         attachment_processing_required: false,
@@ -724,9 +724,9 @@ fn memory_grounded_comparison_chat_becomes_latest_primary_task() {
     let prompt = next_last_primary_task_prompt(
         Some(&prior_state),
         &route_result,
-        Some(&crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        Some(&crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
             should_interrupt_active_run: false,
             state_patch: None,
             attachment_processing_required: false,
@@ -737,9 +737,9 @@ fn memory_grounded_comparison_chat_becomes_latest_primary_task() {
     let output = next_last_primary_task_output(
         Some(&prior_state),
         &route_result,
-        Some(&crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        Some(&crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
             should_interrupt_active_run: false,
             state_patch: None,
             attachment_processing_required: false,
@@ -763,9 +763,9 @@ fn memory_grounded_comparison_chat_becomes_latest_primary_task() {
 fn standalone_answer_candidate_request_without_prior_does_not_start_primary_task() {
     let mut route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: None,
         attachment_processing_required: false,
@@ -796,9 +796,9 @@ fn standalone_answer_candidate_request_without_prior_does_not_start_primary_task
 fn standalone_scalar_chat_request_without_answer_marker_does_not_start_primary_task() {
     let mut route_result = route_result_for_test(crate::AskMode::respond_trace(), false);
     route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: None,
         attachment_processing_required: false,
@@ -830,9 +830,9 @@ fn evidence_backed_standalone_task_replaces_prior_scalar_primary_task() {
     let mut route_result = route_result_for_test(crate::AskMode::act_with_chat_finalizer(), false);
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-        target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+        target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
         should_interrupt_active_run: false,
         state_patch: None,
         attachment_processing_required: false,
@@ -990,9 +990,9 @@ fn task_append_persists_compact_primary_without_runtime_envelope() {
     let persisted = next_last_primary_task_prompt(
         Some(&prior_state),
         &route_result,
-        Some(&crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskAppend),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+        Some(&crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskAppend),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::ReuseActive),
             should_interrupt_active_run: false,
             state_patch: Some(json!({"audience":"boss"})),
             attachment_processing_required: false,
@@ -1013,7 +1013,7 @@ fn repeated_task_append_keeps_single_task_so_far_header() {
     let persisted = super::merge_primary_task_prompt(
         Some("Task so far:\n帮我写个方案\n\nAdditional instruction: 面向老板"),
         "不要太技术",
-        crate::intent_router::TurnType::TaskAppend,
+        crate::turn_context::TurnType::TaskAppend,
         None,
     );
     assert_eq!(persisted.matches("Task so far:").count(), 1);
@@ -1149,8 +1149,8 @@ fn alias_only_state_patch_clears_stale_active_pointers() {
         },
     );
     let route = route_result_for_test(crate::AskMode::respond_trace(), false);
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
         target_task_policy: None,
         should_interrupt_active_run: false,
         state_patch: Some(json!({
@@ -1219,7 +1219,7 @@ fn alias_only_state_patch_does_not_clear_current_code_workspace_anchor() {
     route.route_reason =
         "executable_contract_preserved_for_agent_loop; alias_state_patch_ack".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    let turn_analysis = crate::intent_router::TurnAnalysis {
+    let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: None,
         target_task_policy: None,
         should_interrupt_active_run: false,
@@ -1309,8 +1309,8 @@ fn merge_alias_bindings_prefers_structured_state_patch() {
         }],
         ..ConversationState::default()
     };
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
         target_task_policy: None,
         should_interrupt_active_run: false,
         state_patch: Some(json!({
@@ -1337,7 +1337,7 @@ fn merge_alias_bindings_prefers_structured_state_patch() {
 #[test]
 fn structured_alias_state_patch_suppresses_prompt_alias_heuristics() {
     let route = route_result_for_test(crate::AskMode::respond_trace(), false);
-    let turn_analysis = crate::intent_router::TurnAnalysis {
+    let turn_analysis = crate::turn_context::TurnAnalysis {
         turn_type: None,
         target_task_policy: None,
         should_interrupt_active_run: false,
@@ -1368,8 +1368,8 @@ fn structured_alias_state_patch_suppresses_prompt_alias_heuristics() {
 
 #[test]
 fn merge_alias_bindings_accepts_alias_key_compatibility_patch() {
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
         target_task_policy: None,
         should_interrupt_active_run: false,
         state_patch: Some(json!({
@@ -1428,8 +1428,8 @@ fn memory_turn_with_single_locator_derives_short_alias_suffixes() {
 #[test]
 fn preference_memory_turn_with_single_locator_derives_alias_without_refresh_flag() {
     let route = route_result_for_test(crate::AskMode::respond_trace(), false);
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
         target_task_policy: None,
         should_interrupt_active_run: false,
         state_patch: None,
@@ -1453,8 +1453,8 @@ fn preference_memory_turn_with_single_locator_derives_alias_without_refresh_flag
 #[test]
 fn preference_memory_turn_with_machine_alias_derives_exact_token() {
     let route = route_result_for_test(crate::AskMode::respond_trace(), false);
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
         target_task_policy: None,
         should_interrupt_active_run: false,
         state_patch: None,
@@ -1481,8 +1481,8 @@ fn preference_memory_turn_with_machine_alias_derives_exact_token() {
 #[test]
 fn compact_alias_memory_turn_with_single_locator_derives_structured_binding() {
     let route = route_result_for_test(crate::AskMode::respond_trace(), false);
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
         target_task_policy: None,
         should_interrupt_active_run: false,
         state_patch: None,
@@ -1659,8 +1659,8 @@ fn merge_alias_bindings_ignores_prompt_text_without_structured_patch() {
         }],
         ..ConversationState::default()
     };
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::PreferenceOrMemory),
         target_task_policy: None,
         should_interrupt_active_run: false,
         state_patch: None,
@@ -1673,14 +1673,14 @@ fn merge_alias_bindings_ignores_prompt_text_without_structured_patch() {
 #[test]
 fn meta_turn_types_preserve_active_session_pointers() {
     for turn_type in [
-        crate::intent_router::TurnType::RunControl,
-        crate::intent_router::TurnType::ApprovalDecision,
-        crate::intent_router::TurnType::StatusQuery,
-        crate::intent_router::TurnType::FeedbackOrError,
-        crate::intent_router::TurnType::PreferenceOrMemory,
+        crate::turn_context::TurnType::RunControl,
+        crate::turn_context::TurnType::ApprovalDecision,
+        crate::turn_context::TurnType::StatusQuery,
+        crate::turn_context::TurnType::FeedbackOrError,
+        crate::turn_context::TurnType::PreferenceOrMemory,
     ] {
         assert!(super::should_preserve_active_session_pointers(Some(
-            &crate::intent_router::TurnAnalysis {
+            &crate::turn_context::TurnAnalysis {
                 turn_type: Some(turn_type),
                 target_task_policy: None,
                 should_interrupt_active_run: false,
@@ -1690,9 +1690,9 @@ fn meta_turn_types_preserve_active_session_pointers() {
         )));
     }
     assert!(!super::should_preserve_active_session_pointers(Some(
-        &crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskAppend),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+        &crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskAppend),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::ReuseActive),
             should_interrupt_active_run: false,
             state_patch: None,
             attachment_processing_required: false,
@@ -1719,8 +1719,8 @@ fn ordered_listing_outcome_refreshes_active_session_pointers_for_status_query() 
             ),
             ..Default::default()
         });
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::StatusQuery),
         target_task_policy: None,
         should_interrupt_active_run: false,
         state_patch: None,
@@ -1743,9 +1743,9 @@ fn clarify_task_request_persists_primary_prompt_for_followups() {
     let persisted = next_last_primary_task_prompt(
         None,
         &route_result,
-        Some(&crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+        Some(&crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::ReuseActive),
             should_interrupt_active_run: false,
             state_patch: None,
             attachment_processing_required: false,

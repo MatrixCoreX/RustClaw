@@ -1217,11 +1217,9 @@ pub(super) fn should_force_actionable_plan_repair(
     ) {
         return true;
     }
-    let lightweight_route_has_executable_plan =
-        route_qualifies_for_lightweight_repair_skip(Some(route_result))
-            && !loop_state.has_tool_or_skill_output
-            && has_executable_observation_or_action(actions);
-    if lightweight_route_has_executable_plan
+    let planner_has_executable_plan =
+        !loop_state.has_tool_or_skill_output && has_executable_observation_or_action(actions);
+    if planner_has_executable_plan
         && !observation_only_plan_missing_user_answer(state, route_result, loop_state, actions)
     {
         return false;

@@ -613,18 +613,32 @@ fn turn_analysis_prompt_block_includes_contract_matrix_for_structured_route() {
         },
     };
 
-    let boundary_envelope = crate::intent_router::BoundaryEnvelope {
-        raw_chars: "list private project notes".chars().count(),
-        explicit_locators: vec!["notes.md".to_string()],
-        session_binding: Some("resume_execute".to_string()),
-        ..Default::default()
+    let task = crate::ClaimedTask {
+        task_id: "task-turn-envelope".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
     };
+    let boundary_envelope = crate::turn_boundary_envelope::TurnBoundaryEnvelope::from_claimed_task(
+        &task,
+        &json!({"path": "notes.md", "session_id": "resume_execute"}),
+        "list private project notes",
+        crate::turn_boundary_envelope::TurnInputMaterialization::RawText,
+        None,
+        false,
+        false,
+    );
     let block = build_turn_analysis_prompt_block(None, Some(&boundary_envelope), Some(&route));
 
-    assert!(block.contains("- boundary_envelope"));
-    assert!(block.contains("raw_chars=26"));
-    assert!(block.contains("explicit_locators=1"));
-    assert!(block.contains("session_binding=resume_execute"));
+    assert!(block.contains("- turn_boundary_envelope="));
+    assert!(block.contains("\"raw_chars\":26"));
+    assert!(block.contains("\"structured_locator_facts\":[\"notes.md\"]"));
+    assert!(block.contains("\"session_id\":\"resume_execute\""));
     assert!(!block.contains("private project notes"));
     assert!(block.contains("- evidence_policy_context"));
     assert!(block.contains("- evidence_policy"));

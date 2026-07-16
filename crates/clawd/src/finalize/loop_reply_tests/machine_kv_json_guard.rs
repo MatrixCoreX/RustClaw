@@ -9,9 +9,9 @@ fn requested_machine_kv_summary_preserves_exact_required_field_json() {
     loop_state.last_user_visible_respond = Some(current.to_string());
     let mut finalizer_summary = None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        turn_analysis: Some(crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        turn_analysis: Some(crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
             should_interrupt_active_run: false,
             state_patch: Some(serde_json::json!({
                 "required_machine_fields": ["created_files", "test_command", "test_status"]

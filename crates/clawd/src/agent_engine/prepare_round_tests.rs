@@ -1,6 +1,21 @@
 use super::{
-    verifier_gate_missing_slots, verifier_gate_needs_clarification, verifier_gate_should_stop_round,
+    planner_user_text, verifier_gate_missing_slots, verifier_gate_needs_clarification,
+    verifier_gate_should_stop_round,
 };
+
+#[test]
+fn planner_prefers_raw_current_request_over_pre_route_rewrite() {
+    let context = crate::agent_engine::AgentRunContext {
+        original_user_request: Some("raw current request".to_string()),
+        user_request: Some("pre-route semantic rewrite".to_string()),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        planner_user_text(Some(&context), "fallback request"),
+        "raw current request"
+    );
+}
 
 fn verify_result_with_issue(
     mode: crate::verifier::VerifyMode,

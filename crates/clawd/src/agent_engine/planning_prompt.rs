@@ -204,17 +204,11 @@ impl PlanningPromptClass {
 }
 
 pub(super) fn classify_planning_prompt_class(
-    route_result: Option<&RouteResult>,
-    user_text: &str,
+    _route_result: Option<&RouteResult>,
+    _user_text: &str,
     _loop_state: &LoopState,
 ) -> PlanningPromptClass {
-    if route_result.is_some_and(|route| {
-        crate::task_context_builder::uses_light_execution_context_budget(route, user_text)
-    }) {
-        PlanningPromptClass::LightweightExecution
-    } else {
-        PlanningPromptClass::OpenPlanning
-    }
+    PlanningPromptClass::OpenPlanning
 }
 
 pub(super) fn build_lightweight_tool_spec(
@@ -677,161 +671,6 @@ pub(super) fn incremental_prompt_spec_for_class(
     }
 }
 
-pub(super) fn contract_scoped_planner_skill_scope(
-    route_result: Option<&RouteResult>,
-) -> Option<BTreeSet<String>> {
-    let route = route_result?;
-    if route.needs_clarify {
-        return None;
-    }
-    let skills = crate::evidence_policy::capability_ref_action_refs_for_route(route, false)
-        .into_iter()
-        .map(|action| action.skill)
-        .filter(|skill| !skill.trim().is_empty())
-        .collect::<BTreeSet<_>>();
-    if !skills.is_empty() {
-        if skills.len() > 10 {
-            return None;
-        }
-        Some(skills)
-    } else if route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
-    {
-        None
-    } else {
-        generic_local_content_contract_skill_scope(route)
-    }
-}
-
-pub(super) fn contract_scoped_lightweight_planner_skill_scope(
-    route_result: Option<&RouteResult>,
-) -> Option<BTreeSet<String>> {
-    let route = route_result?;
-    if route.needs_clarify
-        || route.has_route_reason_machine_marker("standalone_freeform_clarify_loop_context")
-        || route.has_route_reason_machine_marker("alias_state_patch_ack")
-    {
-        return Some(BTreeSet::new());
-    }
-    if let Some(scope) = contract_scoped_planner_skill_scope(Some(route)) {
-        return Some(scope);
-    }
-    if let Some(scope) = bounded_local_machine_boundary_skill_scope(route) {
-        return Some(scope);
-    }
-    if route.output_contract_is_unclassified() {
-        return None;
-    }
-    let skills = skills_from_action_refs_capped(
-        crate::evidence_policy::capability_ref_action_refs_for_route(route, true),
-        8,
-    );
-    if skills.is_empty() {
-        None
-    } else {
-        Some(skills)
-    }
-}
-
-fn bounded_local_machine_boundary_skill_scope(route: &RouteResult) -> Option<BTreeSet<String>> {
-    let executable_agent_loop_boundary =
-        route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop");
-    if route.needs_clarify || !matches!(route.schedule_kind, crate::ScheduleKind::None) {
-        return None;
-    }
-    if !executable_agent_loop_boundary
-        && (route.output_contract.delivery_required || route.wants_file_delivery)
-    {
-        return None;
-    }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
-        || route.has_route_reason_machine_marker("explicit_command_requires_fresh_execution")
-        || route.has_route_reason_machine_marker("command_payload_requires_raw_output_execution")
-    {
-        return Some(BTreeSet::from(["run_cmd".to_string()]));
-    }
-    if executable_agent_loop_boundary {
-        return None;
-    }
-    if route.has_route_reason_machine_marker("inline_structured_payload_context_execute")
-        || route.has_route_reason_machine_marker("executionless_finalize_trace_plain")
-    {
-        return None;
-    }
-    if route.has_route_reason_machine_marker("auto_locator_suppressed_multiple_explicit_paths")
-        && !executable_agent_loop_boundary
-    {
-        return Some(BTreeSet::from([
-            "archive_basic".to_string(),
-            "config_basic".to_string(),
-            "db_basic".to_string(),
-            "fs_basic".to_string(),
-        ]));
-    }
-    None
-}
-
-fn generic_local_content_contract_skill_scope(route: &RouteResult) -> Option<BTreeSet<String>> {
-    let contract = route.effective_output_contract();
-    if route.needs_clarify
-        || !contract.requires_content_evidence
-        || contract.delivery_required
-        || contract.delivery_intent != crate::OutputDeliveryIntent::None
-        || !matches!(
-            contract.semantic_kind,
-            crate::OutputSemanticKind::None
-                | crate::OutputSemanticKind::ContentExcerptSummary
-                | crate::OutputSemanticKind::ContentExcerptWithSummary
-        )
-        || !matches!(
-            contract.response_shape,
-            crate::OutputResponseShape::Free
-                | crate::OutputResponseShape::Strict
-                | crate::OutputResponseShape::OneSentence
-                | crate::OutputResponseShape::Scalar
-        )
-        || !matches!(
-            contract.locator_kind,
-            crate::OutputLocatorKind::Path
-                | crate::OutputLocatorKind::Filename
-                | crate::OutputLocatorKind::CurrentWorkspace
-        )
-    {
-        return None;
-    }
-    if locator_hint_targets_sqlite_database(&contract.locator_hint) {
-        return Some(BTreeSet::from(["db_basic".to_string()]));
-    }
-    let skills = skills_from_action_refs_capped(
-        crate::evidence_policy::allowed_action_refs_for_output_contract(&contract),
-        8,
-    );
-    (!skills.is_empty()).then_some(skills)
-}
-
-fn locator_hint_targets_sqlite_database(locator_hint: &str) -> bool {
-    let trimmed = locator_hint.trim().to_ascii_lowercase();
-    trimmed.ends_with(".sqlite") || trimmed.ends_with(".db")
-}
-
 #[cfg(test)]
 #[path = "planning_prompt_tests.rs"]
 mod tests;
-
-fn skills_from_action_refs_capped(
-    action_refs: Vec<crate::evidence_policy::ActionRef>,
-    max_skills: usize,
-) -> BTreeSet<String> {
-    let mut ordered = Vec::new();
-    let mut seen = BTreeSet::new();
-    for action in action_refs {
-        let skill = action.skill.trim();
-        if skill.is_empty() || !seen.insert(skill.to_string()) {
-            continue;
-        }
-        ordered.push(skill.to_string());
-        if ordered.len() >= max_skills {
-            break;
-        }
-    }
-    ordered.into_iter().collect()
-}

@@ -118,14 +118,6 @@ pub(crate) enum AskRouteTraceDecision {
     Act,
 }
 
-#[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FirstLayerDecision {
-    Clarify,
-    DirectAnswer,
-    PlannerExecute,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RouteGateKind {
     Chat,

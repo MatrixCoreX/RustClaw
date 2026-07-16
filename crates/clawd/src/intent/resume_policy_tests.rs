@@ -6,10 +6,10 @@ use super::{
 };
 
 fn turn_analysis(
-    target_task_policy: Option<crate::intent_router::TargetTaskPolicy>,
-) -> crate::intent_router::TurnAnalysis {
-    crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+    target_task_policy: Option<crate::turn_context::TargetTaskPolicy>,
+) -> crate::turn_context::TurnAnalysis {
+    crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy,
         should_interrupt_active_run: false,
         state_patch: None,
@@ -142,7 +142,7 @@ fn ambient_resume_binding_is_blocked_for_standalone_turns() {
         failed_ts: None,
         has_newer_successful_ask_after_failed_task: false,
     };
-    let analysis = turn_analysis(Some(crate::intent_router::TargetTaskPolicy::Standalone));
+    let analysis = turn_analysis(Some(crate::turn_context::TargetTaskPolicy::Standalone));
 
     assert!(select_resume_runtime_binding(&route, Some(&binding), Some(&analysis)).is_none());
 }
@@ -156,7 +156,7 @@ fn explicit_continue_binding_is_not_blocked_by_standalone_turn_policy() {
         failed_ts: None,
         has_newer_successful_ask_after_failed_task: false,
     };
-    let analysis = turn_analysis(Some(crate::intent_router::TargetTaskPolicy::Standalone));
+    let analysis = turn_analysis(Some(crate::turn_context::TargetTaskPolicy::Standalone));
 
     assert!(select_resume_runtime_binding(&route, Some(&binding), Some(&analysis)).is_some());
 }
@@ -170,7 +170,7 @@ fn ambient_resume_binding_is_allowed_for_reuse_active_turns() {
         failed_ts: Some(7),
         has_newer_successful_ask_after_failed_task: false,
     };
-    let analysis = turn_analysis(Some(crate::intent_router::TargetTaskPolicy::ReuseActive));
+    let analysis = turn_analysis(Some(crate::turn_context::TargetTaskPolicy::ReuseActive));
 
     assert!(select_resume_runtime_binding(&route, Some(&binding), Some(&analysis)).is_some());
 }

@@ -32,9 +32,9 @@ fn task() -> crate::ClaimedTask {
 
 fn context_with_required_machine_fields(fields: serde_json::Value) -> AgentRunContext {
     AgentRunContext {
-        turn_analysis: Some(crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        turn_analysis: Some(crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
             should_interrupt_active_run: false,
             state_patch: Some(json!({ "required_machine_fields": fields })),
             attachment_processing_required: false,

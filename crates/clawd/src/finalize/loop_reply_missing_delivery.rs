@@ -484,7 +484,7 @@ pub(super) async fn observed_execution_without_publishable_delivery_reply(
                 resolver_reason: clarify_reason,
                 candidate_context: structured_clarify_context.as_deref(),
                 preferred_question: preferred_route_clarify_question(agent_run_context),
-                policy: crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
+                policy: crate::finalize::ClarifyQuestionPolicy::SafeFallback,
                 fallback_source: crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
             },
         )

@@ -204,8 +204,8 @@ fn conditional_step_update_limits_current_explicit_command_plan_to_pre_update_st
     route.output_contract.requires_content_evidence = true;
     let loop_state = LoopState::new(1);
     let request = "Run `echo BEFORE_CHANGE_EN`, then `definitely_missing_command_rustclaw_change_24683`, then `echo AFTER_CHANGE_OLD_EN`; if I later say continue with a change, replace the last step with `echo AFTER_CHANGE_NEW_EN`.";
-    let turn_analysis = crate::intent_router::TurnAnalysis {
-        turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+    let turn_analysis = crate::turn_context::TurnAnalysis {
+        turn_type: Some(crate::turn_context::TurnType::TaskRequest),
         target_task_policy: None,
         should_interrupt_active_run: false,
         state_patch: Some(json!({

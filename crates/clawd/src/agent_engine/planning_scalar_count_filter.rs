@@ -11,7 +11,7 @@ pub(super) struct ScalarCountFilterHint {
 
 #[cfg(test)]
 pub(super) fn scalar_count_filter_hint_from_turn_analysis(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> Option<ScalarCountFilterHint> {
     let filter = turn_analysis?
         .state_patch
@@ -100,7 +100,7 @@ pub(super) fn scalar_count_filter_hint_from_route(
 #[cfg(test)]
 pub(super) fn scalar_count_filter_hint_for_route_or_turn(
     route: &RouteResult,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> Option<ScalarCountFilterHint> {
     scalar_count_filter_hint_from_route(route)
         .or_else(|| scalar_count_filter_hint_from_turn_analysis(turn_analysis))

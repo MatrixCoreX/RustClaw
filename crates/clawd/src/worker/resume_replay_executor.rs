@@ -17,15 +17,10 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
     let prompt = prepared_input.prompt;
     let source = prepared_input.source;
     let prepared_flow =
-        super::ask_pipeline::prepare_ask_flow(state, &claimed.task, &payload, &prompt, &source)
+        super::ask_runtime::prepare_ask_flow(state, &claimed.task, &payload, &prompt, &source)
             .await?;
-    let agent_run_context = Some(
-        super::ask_pipeline::build_agent_run_context_from_prepared_flow(&prompt, &prepared_flow),
-    );
-    let execution_user_request = super::ask_pipeline::execution_user_request(
-        &prompt,
-        &prepared_flow.resolved_prompt_for_execution,
-    );
+    let agent_run_context =
+        Some(super::ask_runtime::build_agent_run_context_from_prepared_flow(&prepared_flow));
 
     info!(
         "resume replay seeded agent loop starting: task_id={} checkpoint_id={} resume_trigger={} completed_side_effect_count={}",
@@ -38,7 +33,7 @@ pub(super) async fn execute_seeded_agent_loop_dispatch_result(
         state,
         &claimed.task,
         &prepared_flow.prompt_with_memory_for_execution,
-        execution_user_request,
+        &prepared_flow.planner_user_request,
         agent_run_context,
         &claimed.task_checkpoint,
     )

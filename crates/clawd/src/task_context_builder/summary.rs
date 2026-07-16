@@ -1,21 +1,8 @@
 use serde_json::{json, Value};
 
-use super::{
-    ExecutionContextBudgetTier, ExecutionContextView, RouteContextView, TaskContextBundle,
-};
+use super::{ExecutionContextBudgetTier, ExecutionContextView, TaskContextBundle};
 
 pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String {
-    let route_attached = bundle.route_view.is_some();
-    let route_budget = bundle
-        .route_view
-        .as_ref()
-        .map(|view| view.budget_tier.as_str())
-        .unwrap_or("n/a");
-    let route_profile = bundle
-        .route_view
-        .as_ref()
-        .map(route_context_profile)
-        .unwrap_or("n/a");
     let execution_attached = bundle.execution_view.is_some();
     let execution_budget = bundle
         .execution_view
@@ -31,7 +18,6 @@ pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String 
         .execution_view
         .as_ref()
         .map(execution_context_profile)
-        .or_else(|| bundle.route_view.as_ref().map(route_context_profile))
         .unwrap_or("planner_only");
     let visible_skills = bundle.planner_view.visible_skills.len();
     let has_resume_context = value_present(&bundle.raw_sources.resume_context);
@@ -48,10 +34,7 @@ pub(super) fn task_context_bundle_summary(bundle: &TaskContextBundle) -> String 
         .unwrap_or_else(|| "{}".to_string());
     let transcript_compaction_records = transcript_compaction_records_json(bundle).to_string();
     format!(
-        "route_view={} route_budget={} route_profile={} execution_view={} execution_budget={} execution_profile={} context_profile={} visible_skills={} resume_context={} binding_context={} goal_context={} context_budget_report={} transcript_compaction_records={}",
-        route_attached,
-        route_budget,
-        route_profile,
+        "execution_view={} execution_budget={} execution_profile={} context_profile={} visible_skills={} resume_context={} binding_context={} goal_context={} context_budget_report={} transcript_compaction_records={}",
         execution_attached,
         execution_budget,
         execution_profile,
@@ -124,23 +107,6 @@ fn stable_context_hash(text: &str) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("fnv64:{hash:016x}")
-}
-
-fn route_context_profile(view: &RouteContextView) -> &'static str {
-    match view.budget_tier {
-        super::RouteContextBudgetTier::None => "route_none_boundary",
-        super::RouteContextBudgetTier::AnchorOnly => "route_anchor_only",
-        super::RouteContextBudgetTier::Full => {
-            if value_present(&view.recent_turns_full)
-                || value_present(&view.recent_execution_context)
-                || value_present(&view.memory_context)
-            {
-                "route_full_history"
-            } else {
-                "route_full_minimal"
-            }
-        }
-    }
 }
 
 fn execution_context_profile(view: &ExecutionContextView) -> &'static str {

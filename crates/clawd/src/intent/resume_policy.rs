@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use tracing::warn;
 
-use crate::{intent_router::TargetTaskPolicy, AppState, ClaimedTask, RouteResult};
+use crate::{turn_context::TargetTaskPolicy, AppState, ClaimedTask, RouteResult};
 
 #[derive(Clone)]
 pub(crate) enum ResumeContextSource {
@@ -113,7 +113,7 @@ pub(crate) fn binding_context_json(
 pub(crate) fn select_resume_runtime_binding<'a>(
     route_result: &RouteResult,
     resume_binding: Option<&'a ResumeContextBinding>,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> Option<&'a ResumeContextBinding> {
     if matches!(route_result.resume_behavior, crate::ResumeBehavior::None) {
         return None;
@@ -127,7 +127,7 @@ pub(crate) fn select_resume_runtime_binding<'a>(
 
 fn ambient_resume_binding_blocked_by_turn_policy(
     binding: &ResumeContextBinding,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
 ) -> bool {
     if matches!(binding.source, ResumeContextSource::ExplicitContinue) {
         return false;

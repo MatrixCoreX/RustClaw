@@ -153,6 +153,18 @@ fn verifier_gate_should_stop_round(verify_result: &crate::verifier::VerifyResult
     verifier_gate_needs_clarification(verify_result)
 }
 
+fn planner_user_text<'a>(
+    agent_run_context: Option<&'a AgentRunContext>,
+    fallback: &'a str,
+) -> &'a str {
+    agent_run_context
+        .and_then(|ctx| ctx.original_user_request.as_deref())
+        .filter(|text| !text.trim().is_empty())
+        .or_else(|| agent_run_context.and_then(|ctx| ctx.user_request.as_deref()))
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or(fallback)
+}
+
 pub(super) async fn prepare_round_actions(
     state: &AppState,
     task: &ClaimedTask,
@@ -162,10 +174,7 @@ pub(super) async fn prepare_round_actions(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<PreparedRoundActions, String> {
-    let planner_user_text = agent_run_context
-        .and_then(|ctx| ctx.user_request.as_deref())
-        .filter(|text| !text.trim().is_empty())
-        .unwrap_or(user_text);
+    let planner_user_text = planner_user_text(agent_run_context, user_text);
     let effective_goal = loop_state
         .execution_recipe
         .goal_overlay()

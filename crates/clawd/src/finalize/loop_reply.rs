@@ -1311,7 +1311,7 @@ pub(crate) async fn finalize_loop_reply(
                 resolver_reason: &clarify_reason,
                 candidate_context: structured_clarify_context.as_deref(),
                 preferred_question: preferred_route_clarify_question(agent_run_context),
-                policy: crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
+                policy: crate::finalize::ClarifyQuestionPolicy::SafeFallback,
                 // §7.2: finalize 触发 requires_clarify（无 evidence 可合成）→ SynthesisEmpty。
                 fallback_source: crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
             },
@@ -1406,7 +1406,7 @@ pub(crate) async fn finalize_loop_reply(
                 resolver_reason: &clarify_reason,
                 candidate_context: structured_clarify_context.as_deref(),
                 preferred_question: preferred_route_clarify_question(agent_run_context),
-                policy: crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
+                policy: crate::finalize::ClarifyQuestionPolicy::SafeFallback,
                 // §7.2: 执行结束但 delivery 全空（最常见的"我需要确认一下..."触发点之一）→ SynthesisEmpty。
                 fallback_source: crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
             },

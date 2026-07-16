@@ -641,9 +641,9 @@ fn scalar_count_answer_detects_non_numeric_diagnostic_line() {
 
 fn reuse_active_context(user_request: &str) -> AgentRunContext {
     AgentRunContext {
-        turn_analysis: Some(crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskAppend),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+        turn_analysis: Some(crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskAppend),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::ReuseActive),
             should_interrupt_active_run: false,
             state_patch: None,
             attachment_processing_required: false,
@@ -676,9 +676,9 @@ fn cross_turn_observed_entries_require_reuse_active_context() {
     assert!(!entries[0].contains("Continuity rules"));
 
     let standalone = AgentRunContext {
-        turn_analysis: Some(crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        turn_analysis: Some(crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
             should_interrupt_active_run: false,
             state_patch: None,
             attachment_processing_required: false,

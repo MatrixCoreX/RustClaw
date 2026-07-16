@@ -19,6 +19,7 @@ pub(crate) mod migration_class;
 pub(crate) mod observed_output;
 mod planner_skill_context;
 mod planning;
+pub(crate) use planning::explicit_machine_syntax_command_segment;
 mod planning_actions;
 mod planning_followup;
 mod planning_parse;
@@ -195,8 +196,8 @@ fn build_single_plan_prompt(
 }
 
 fn build_turn_analysis_prompt_block(
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-    boundary_envelope: Option<&crate::intent_router::BoundaryEnvelope>,
+    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
+    boundary_envelope: Option<&crate::turn_boundary_envelope::TurnBoundaryEnvelope>,
     route_result: Option<&crate::RouteResult>,
 ) -> String {
     let mut lines = Vec::new();
@@ -206,11 +207,11 @@ fn build_turn_analysis_prompt_block(
     if let Some(analysis) = turn_analysis {
         let turn_type = analysis
             .turn_type
-            .map(crate::intent_router::TurnType::as_str)
+            .map(crate::turn_context::TurnType::as_str)
             .unwrap_or("none");
         let target_task_policy = analysis
             .target_task_policy
-            .map(crate::intent_router::TargetTaskPolicy::as_str)
+            .map(crate::turn_context::TargetTaskPolicy::as_str)
             .unwrap_or("none");
         let state_patch = analysis
             .state_patch
@@ -349,9 +350,9 @@ struct RoundOutcome {
 pub(crate) struct AgentRunContext {
     pub(crate) route_result: Option<crate::RouteResult>,
     pub(crate) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
-    pub(crate) execution_recipe_plan_hint: Option<crate::intent_router::ExecutionRecipePlanHint>,
-    pub(crate) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
-    pub(crate) boundary_envelope: Option<crate::intent_router::BoundaryEnvelope>,
+    pub(crate) execution_recipe_plan_hint: Option<crate::execution_recipe::ExecutionRecipePlanHint>,
+    pub(crate) turn_analysis: Option<crate::turn_context::TurnAnalysis>,
+    pub(crate) boundary_envelope: Option<crate::turn_boundary_envelope::TurnBoundaryEnvelope>,
     pub(crate) context_bundle_summary: Option<String>,
     pub(crate) session_alias_bindings: Vec<crate::conversation_state::SessionAliasBinding>,
     pub(crate) auto_locator_path: Option<String>,

@@ -1,3 +1,13 @@
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ExecutionRecipePlanHint {
+    pub(crate) kind: String,
+    pub(crate) command: Option<String>,
+    pub(crate) execution_mode: Option<String>,
+    pub(crate) async_adapter_kind: Option<String>,
+    pub(crate) requires_content_evidence: bool,
+    pub(crate) attachment_processing_required: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ExecutionRecipeKind {
     #[default]

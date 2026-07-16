@@ -745,9 +745,9 @@ fn requested_machine_kv_summary_uses_state_patch_required_field() {
     let mut delivery_messages = Vec::new();
     let mut finalizer_summary = None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        turn_analysis: Some(crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        turn_analysis: Some(crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
             should_interrupt_active_run: false,
             state_patch: Some(serde_json::json!({
                 "output_format": "machine_summary",
@@ -791,9 +791,9 @@ fn requested_machine_kv_summary_replaces_prose_when_state_patch_requires_machine
     loop_state.last_user_visible_respond = Some(current.to_string());
     let mut finalizer_summary = None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        turn_analysis: Some(crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        turn_analysis: Some(crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
             should_interrupt_active_run: false,
             state_patch: Some(serde_json::json!({
                 "output_format": "machine_summary",
@@ -832,9 +832,9 @@ fn requested_machine_kv_summary_replaces_partial_machine_delivery_for_required_f
     loop_state.last_user_visible_respond = delivery_messages.last().cloned();
     let mut finalizer_summary = None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        turn_analysis: Some(crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        turn_analysis: Some(crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
             should_interrupt_active_run: false,
             state_patch: Some(serde_json::json!({
                 "output_format": "machine_summary",
@@ -960,9 +960,9 @@ fn requested_machine_kv_summary_replaces_conflicting_machine_values_for_required
     loop_state.last_user_visible_respond = delivery_messages.last().cloned();
     let mut finalizer_summary = None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        turn_analysis: Some(crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        turn_analysis: Some(crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
             should_interrupt_active_run: false,
             state_patch: Some(serde_json::json!({
                 "output_format": "machine_summary",

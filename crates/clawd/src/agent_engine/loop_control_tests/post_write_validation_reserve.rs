@@ -276,9 +276,9 @@ fn readback_only_code_validation_reserve_runs_planned_validation_when_requested(
             verify_result: None,
         });
     let context = AgentRunContext {
-        turn_analysis: Some(crate::intent_router::TurnAnalysis {
-            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
-            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+        turn_analysis: Some(crate::turn_context::TurnAnalysis {
+            turn_type: Some(crate::turn_context::TurnType::TaskRequest),
+            target_task_policy: Some(crate::turn_context::TargetTaskPolicy::Standalone),
             should_interrupt_active_run: false,
             state_patch: Some(json!({
                 "required_machine_fields": ["changed_files", "test_command", "test_status"]

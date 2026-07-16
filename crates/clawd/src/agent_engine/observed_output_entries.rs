@@ -541,7 +541,7 @@ pub(super) fn cross_turn_synthesis_allowed(agent_run_context: Option<&AgentRunCo
         agent_run_context
             .and_then(|ctx| ctx.turn_analysis.as_ref())
             .and_then(|analysis| analysis.target_task_policy),
-        Some(crate::intent_router::TargetTaskPolicy::ReuseActive)
+        Some(crate::turn_context::TargetTaskPolicy::ReuseActive)
     )
 }
 
