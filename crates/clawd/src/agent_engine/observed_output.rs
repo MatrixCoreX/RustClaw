@@ -501,10 +501,14 @@ fn latest_observation_lacks_required_content_evidence(
         .as_deref()
         .and_then(|body| serde_json::from_str::<serde_json::Value>(body.trim()).ok())
         .unwrap_or_else(|| serde_json::json!({}));
-    crate::evidence_policy::capability_ref_action_policy_for_route(Some(route), &step.skill, &args)
-        .is_some_and(|policy| {
-            policy.decision == crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
-        })
+    crate::evidence_policy::action_policy_for_output_contract(
+        Some(&route.output_contract),
+        &step.skill,
+        &args,
+    )
+    .is_some_and(|policy| {
+        policy.decision == crate::evidence_policy::ActionPolicyDecision::RejectedForbidden
+    })
 }
 
 fn step_provides_path_content_evidence(step: &crate::executor::StepExecutionResult) -> bool {
@@ -840,15 +844,13 @@ fn observed_answer_fallback_shape_can_use_compact_prompt(
 fn observed_answer_fallback_capability_ref_can_use_compact_prompt(
     route: &crate::RouteResult,
 ) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["docker"],
-        &["images", "inspect", "list", "logs", "ps", "version"],
-    ) || crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["package"],
-        &["detect"],
-    )
+    route.output_contract.semantic_kind_is_any(&[
+        crate::OutputSemanticKind::DockerPs,
+        crate::OutputSemanticKind::DockerImages,
+        crate::OutputSemanticKind::DockerLogs,
+        crate::OutputSemanticKind::DockerContainerLifecycle,
+        crate::OutputSemanticKind::PackageManagerDetection,
+    ])
 }
 
 fn resolved_user_intent(agent_run_context: Option<&AgentRunContext>, user_text: &str) -> String {

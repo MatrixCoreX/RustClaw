@@ -347,7 +347,7 @@ fn archive_pack_exact_contract_prefers_observed_archive_path_over_exit_code_resp
 }
 
 #[test]
-fn archive_pack_capability_ref_prefers_observed_archive_path_without_semantic_kind() {
+fn archive_pack_contract_prefers_observed_archive_path() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     loop_state.has_tool_or_skill_output = true;
@@ -365,7 +365,7 @@ fn archive_pack_capability_ref_prefers_observed_archive_path_without_semantic_ki
     route.route_reason = "capability_ref=archive.pack".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint =
         "scripts/skill_calls | tmp/nl_archive_case.zip".to_string();

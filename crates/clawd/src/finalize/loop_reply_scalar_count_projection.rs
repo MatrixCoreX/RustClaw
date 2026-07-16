@@ -55,11 +55,6 @@ fn route_prefers_observed_count(route: &crate::RouteResult, loop_state: &LoopSta
     if contract.delivery_required {
         return false;
     }
-    if crate::RouteReasonMarkers::new(&route.route_reason)
-        .has_machine_marker("scalar_locator_requires_evidence")
-    {
-        return true;
-    }
     route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
         && !plan_requests_count_inventory_file_dir_breakdown(loop_state)
 }

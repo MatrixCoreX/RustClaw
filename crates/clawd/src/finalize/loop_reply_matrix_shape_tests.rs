@@ -765,12 +765,12 @@ fn matrix_strict_list_shape_builds_directory_names_from_inventory_dirs() {
 }
 
 #[test]
-fn name_list_renderer_uses_file_capability_without_semantic_kind() {
+fn name_list_renderer_uses_file_names_contract() {
     let mut route = free_route_result();
     route.route_reason = "capability_ref=filesystem.list_file_names".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -787,12 +787,12 @@ fn name_list_renderer_uses_file_capability_without_semantic_kind() {
 }
 
 #[test]
-fn name_list_renderer_uses_directory_capability_without_semantic_kind() {
+fn name_list_renderer_uses_directory_names_contract() {
     let mut route = free_route_result();
     route.route_reason = "capability_ref=filesystem.list_directory_names".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -809,10 +809,10 @@ fn name_list_renderer_uses_directory_capability_without_semantic_kind() {
 }
 
 #[test]
-fn name_list_capability_requires_observed_projection_without_semantic_kind() {
+fn name_list_contract_requires_observed_projection() {
     let mut route = free_route_result();
     route.route_reason = "capability_ref=filesystem.list_directory_names".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
 
     assert!(super::super::route_requires_observed_output_projection(
@@ -821,10 +821,10 @@ fn name_list_capability_requires_observed_projection_without_semantic_kind() {
 }
 
 #[test]
-fn path_list_capability_requires_observed_projection_without_semantic_kind() {
+fn path_list_contract_requires_observed_projection() {
     let mut route = free_route_result();
     route.route_reason = "capability_ref=filesystem.find_entries".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
 
     assert!(super::super::route_requires_observed_output_projection(
@@ -833,10 +833,10 @@ fn path_list_capability_requires_observed_projection_without_semantic_kind() {
 }
 
 #[test]
-fn table_listing_capability_requires_observed_projection_without_semantic_kind() {
+fn table_listing_contract_requires_observed_projection() {
     let mut route = free_route_result();
     route.route_reason = "capability_ref=database.list_tables".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
 
     assert!(super::super::route_requires_observed_output_projection(
@@ -845,10 +845,10 @@ fn table_listing_capability_requires_observed_projection_without_semantic_kind()
 }
 
 #[test]
-fn created_archive_path_capability_requires_observed_projection_without_semantic_kind() {
+fn created_archive_path_contract_requires_observed_projection() {
     let mut route = free_route_result();
     route.route_reason = "capability_ref=archive.pack".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
 
     assert!(super::super::route_requires_observed_output_projection(
@@ -952,13 +952,13 @@ fn matrix_archive_member_list_defaults_untyped_selector_to_file_entries() {
 }
 
 #[test]
-fn matrix_archive_member_list_accepts_capability_ref_without_semantic_kind() {
+fn matrix_archive_member_list_accepts_archive_list_contract() {
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "tmp/test_bundle.zip".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveList;
     route.route_reason = "capability_ref=archive.list".to_string();
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
@@ -1150,7 +1150,7 @@ fn matrix_grouped_name_list_shape_reads_wrapped_inventory_extra() {
 }
 
 #[test]
-fn grouped_name_list_renderer_uses_capability_shape_without_semantic_kind() {
+fn grouped_name_list_renderer_uses_directory_entry_contract() {
     let mut route = free_route_result();
     route.route_reason = "capability_ref=filesystem.list_entries".to_string();
     route.resolved_intent = "capability_ref=filesystem.list_entries".to_string();
@@ -1158,7 +1158,7 @@ fn grouped_name_list_renderer_uses_capability_shape_without_semantic_kind() {
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "workspace".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let mut loop_state = crate::agent_engine::LoopState::new(2);
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
@@ -1244,14 +1244,14 @@ fn mixed_listing_contract_prefers_grounded_synthesis_after_file_read() {
 }
 
 #[test]
-fn mixed_listing_synthesis_uses_capability_shape_without_semantic_kind() {
+fn mixed_listing_synthesis_uses_directory_entry_contract() {
     let mut route = free_route_result();
     route.route_reason = "capability_ref=filesystem.list_entries".to_string();
     route.resolved_intent = "capability_ref=filesystem.list_entries".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
     let answer = "UI/package.json 显示这个前端包名是 react-example。";
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     loop_state.executed_step_results.push(ok_step_result(

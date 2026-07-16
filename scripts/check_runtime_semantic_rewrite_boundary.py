@@ -20,7 +20,6 @@ from runtime_semantic_rewrite_core_guards import (
     scan_text,
 )
 from runtime_semantic_rewrite_registry_bridge_guards import (
-    scan_finalizer_observed_output_registry_bridge_markers,
     scan_removed_lightweight_preclassification,
     scan_task_context_builder_registry_bridge_budget,
     scan_task_contract_registry_bridge_semantic_defaults,
@@ -254,7 +253,6 @@ def scan_repo() -> list[Finding]:
     findings.extend(scan_web_search_user_text_query_selection())
     findings.extend(scan_runtime_surface_user_text_token_selection())
     findings.extend(scan_config_change_preview_user_text_selection())
-    findings.extend(scan_finalizer_observed_output_registry_bridge_markers())
     return findings
 
 

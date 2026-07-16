@@ -6,8 +6,8 @@
 //! prompt context, not ordinary semantic routing authority.
 
 pub(crate) use crate::contract_matrix::{
-    action_matches_policy_tokens, action_trace_for_output_contract,
-    capability_ref_action_policy_for_route, compact_prompt_line_for_output_contract,
+    action_matches_policy_tokens, action_policy_for_output_contract,
+    action_trace_for_output_contract, compact_prompt_line_for_output_contract,
     final_answer_shape_for_output_contract, final_answer_shape_for_route, fnv1a_hex,
     required_evidence_for_output_contract, runtime_contract_snapshot_for_output_contract,
     trace_snapshot_for_output_contract, ActionPolicyDecision, ActionRef, EvidenceExpression,
@@ -50,11 +50,6 @@ pub(crate) fn required_evidence_fields_for_output_contract(
 
 pub(crate) fn required_evidence_fields_for_route(route: &crate::RouteResult) -> Vec<String> {
     crate::task_contract::required_evidence_fields_for_route(route)
-}
-
-#[allow(dead_code)]
-pub(crate) fn target_object_for_route(route: &crate::RouteResult) -> EvidenceTargetObject {
-    crate::task_contract::target_object_for_route(route)
 }
 
 pub(crate) fn target_object_for_output_contract(

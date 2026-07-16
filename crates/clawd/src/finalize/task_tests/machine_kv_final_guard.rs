@@ -10,7 +10,7 @@ fn requested_machine_kv_summary_final_guard_preserves_terminal_scalar_respond() 
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-machine-kv-scalar", "ask", prompt);
     journal
@@ -405,7 +405,7 @@ fn requested_machine_kv_summary_final_guard_preserves_weather_query_fields() {
     let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::WeatherQuery;
     route.resolved_intent = "capability_ref=weather.current location=Beijing".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-weather-machine-kv", "ask", prompt);

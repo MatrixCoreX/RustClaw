@@ -812,15 +812,9 @@ pub(super) fn route_requires_http_body_synthesis(route: Option<&crate::RouteResu
 }
 
 fn route_requests_browser_page_body(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["browser", "http"],
-        &["open", "get", "read", "extract"],
-    ) && !crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["browser", "web"],
-        &["search"],
-    )
+    route
+        .output_contract
+        .semantic_kind_is(crate::OutputSemanticKind::WebPageSummary)
 }
 
 fn inventory_dir_can_use_direct_names(

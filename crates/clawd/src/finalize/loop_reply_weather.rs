@@ -60,7 +60,9 @@ pub(super) fn replace_delivery_with_weather_query_fields(
 }
 
 fn route_is_weather_query(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_namespace(route, &["weather"])
+    route
+        .output_contract
+        .semantic_kind_is(crate::OutputSemanticKind::WeatherQuery)
 }
 
 fn latest_weather_query_field_projection(loop_state: &LoopState) -> Option<String> {

@@ -78,38 +78,6 @@ pub(super) fn observed_request_prefers_english_template(
     true
 }
 
-pub(crate) const QUANTITY_COMPARISON_MODEL_LANGUAGE_SYNTHESIS_MARKER: &str =
-    "quantity_comparison_requires_model_language_synthesis";
-
-fn route_reason_has_marker(route: &crate::RouteResult, marker: &str) -> bool {
-    crate::RouteReasonMarkers::new(&route.route_reason).any_part(|part| {
-        part == marker
-            || part.starts_with(&format!("{marker}:"))
-            || machine_marker_token_present(part, marker)
-    })
-}
-
-fn machine_marker_token_present(text: &str, marker: &str) -> bool {
-    let mut start = 0;
-    while let Some(offset) = text[start..].find(marker) {
-        let marker_start = start + offset;
-        let marker_end = marker_start + marker.len();
-        let before_ok = text[..marker_start]
-            .chars()
-            .next_back()
-            .is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_');
-        let after_ok = text[marker_end..]
-            .chars()
-            .next()
-            .is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_');
-        if before_ok && after_ok {
-            return true;
-        }
-        start = marker_end;
-    }
-    false
-}
-
 pub(crate) fn route_quantity_comparison_requires_model_language_synthesis(
     route: &crate::RouteResult,
 ) -> bool {
@@ -117,8 +85,7 @@ pub(crate) fn route_quantity_comparison_requires_model_language_synthesis(
         && route_contract_marker_is(route, crate::OutputSemanticKind::QuantityComparison)
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
-        && (route.output_contract.response_shape == crate::OutputResponseShape::Free
-            || route_reason_has_marker(route, QUANTITY_COMPARISON_MODEL_LANGUAGE_SYNTHESIS_MARKER))
+        && route.output_contract.response_shape == crate::OutputResponseShape::Free
 }
 
 pub(super) fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> String {

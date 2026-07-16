@@ -34,7 +34,7 @@ fn deterministic_observed_execution_status_answer_reports_mixed_results() {
 fn status_shape_does_not_precede_with_generic_content_answer() {
     let mut route = free_route_result();
     route.route_reason = "capability_ref=service.status".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {

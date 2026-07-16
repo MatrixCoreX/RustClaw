@@ -583,8 +583,7 @@ fn requested_machine_kv_summary_restores_service_status_terminal_delivery() {
 }
 
 #[test]
-fn requested_machine_kv_summary_restores_service_capability_terminal_delivery_without_semantic_kind(
-) {
+fn requested_machine_kv_summary_restores_service_contract_terminal_delivery() {
     let task = claimed_task("task-machine-kv-summary-service-capability-terminal");
     let mut loop_state = crate::agent_engine::LoopState::new(1);
     loop_state.executed_step_results.push(ok_step_result(
@@ -600,7 +599,7 @@ fn requested_machine_kv_summary_restores_service_capability_terminal_delivery_wi
     loop_state.last_user_visible_respond = Some("service.status".to_string());
     let mut route = free_route_result();
     route.route_reason = "capability_ref=service.status".to_string();
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
     route

@@ -63,18 +63,10 @@ pub(crate) fn route_matches_service_status_output_contract(route: &crate::RouteR
     route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
         || crate::evidence_policy::final_answer_shape_for_route(route)
             == Some(crate::evidence_policy::FinalAnswerShape::StatusWithSource)
-        || crate::machine_capability_ref::route_has_capability_namespace(
-            route,
-            &["service", "service_control", "health"],
-        )
 }
 
 pub(crate) fn route_matches_service_control_machine_summary(route: &crate::RouteResult) -> bool {
     route.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
-        || crate::machine_capability_ref::route_has_capability_namespace(
-            route,
-            &["service", "service_control"],
-        )
 }
 
 pub(crate) fn route_prefers_grouped_name_list_output(route: &crate::RouteResult) -> bool {
@@ -649,7 +641,9 @@ mod tests {
 
     #[test]
     fn service_status_output_contract_uses_status_shape_for_system_health_check() {
-        let route = route_with_capability_ref("system.health_check");
+        let mut contract = crate::IntentOutputContract::default();
+        contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+        let route = crate::RouteResult::from_planner_output_contract(contract);
 
         assert!(super::route_matches_service_status_output_contract(&route));
     }
@@ -663,7 +657,9 @@ mod tests {
 
     #[test]
     fn single_path_output_contract_matches_capability_owned_single_path_shape() {
-        let route = route_with_capability_ref("archive.pack");
+        let mut contract = crate::IntentOutputContract::default();
+        contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
+        let route = crate::RouteResult::from_planner_output_contract(contract);
 
         assert_eq!(
             crate::evidence_policy::final_answer_shape_for_route(&route),

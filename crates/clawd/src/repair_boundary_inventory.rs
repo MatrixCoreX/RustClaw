@@ -164,7 +164,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
         entrypoints: &[
             "preflight_permission_decision",
             "handle_preflight_argument_failure",
-            "action_policy_for_route",
+            "action_policy_for_output_contract",
         ],
         allowed_input_fields: &[
             "permission_decision",

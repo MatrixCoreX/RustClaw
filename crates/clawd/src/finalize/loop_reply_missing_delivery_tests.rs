@@ -394,7 +394,7 @@ async fn observed_execution_without_delivery_preserves_structured_config_payload
     ));
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         ..Default::default()
@@ -569,7 +569,7 @@ async fn observed_execution_without_delivery_uses_docker_image_observation() {
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DockerImages;
     route.resolved_intent = "capability_ref=docker.list_images".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),

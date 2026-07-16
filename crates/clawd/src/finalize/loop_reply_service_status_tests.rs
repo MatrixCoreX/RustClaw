@@ -719,12 +719,12 @@ async fn finalize_loop_reply_uses_wrapped_system_basic_info_for_service_status()
 }
 
 #[test]
-fn direct_structured_service_status_uses_capability_shape_without_semantic_kind() {
+fn direct_structured_service_status_uses_output_contract() {
     let mut route = free_route_result();
     route.route_reason = "capability_ref=service.status".to_string();
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
     route.output_contract.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
@@ -754,14 +754,14 @@ fn direct_structured_service_status_uses_capability_shape_without_semantic_kind(
 }
 
 #[test]
-fn replace_delivery_with_structured_service_status_uses_capability_shape() {
+fn replace_delivery_with_structured_service_status_uses_output_contract() {
     let state = test_state();
     let task = claimed_task("task-service-status-capability-shape-replace");
     let mut route = free_route_result();
     route.route_reason = "capability_ref=service.status".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
     route.output_contract.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         route_result: Some(route),

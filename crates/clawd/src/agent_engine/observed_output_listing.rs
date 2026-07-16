@@ -225,12 +225,7 @@ pub(super) fn route_requests_file_basename(route: &crate::RouteResult) -> bool {
 pub(super) fn route_allows_path_batch_scalar_path_observed_answer(
     route: &crate::RouteResult,
 ) -> bool {
-    route_requests_scalar_path_only(route)
-        && !route.output_contract.requires_content_evidence
-        && !route.has_route_reason_machine_marker("execution_required_read_file_extract_scalar")
-        && !route.has_route_reason_machine_marker(
-            "request_requires_fresh_file_observation_to_extract_title",
-        )
+    route_requests_scalar_path_only(route) && !route.output_contract.requires_content_evidence
 }
 
 pub(super) fn route_allows_path_batch_file_basename_observed_answer(

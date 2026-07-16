@@ -1,30 +1,18 @@
 use super::*;
 
 #[test]
-fn runtime_contract_snapshot_for_route_uses_route_trace_evidence() {
-    let route = RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "quantity_comparison".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Low,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Filename,
-            locator_hint: "README.md | AGENTS.md".to_string(),
-            ..IntentOutputContract::default()
-        },
+fn runtime_contract_snapshot_uses_planner_output_contract_evidence() {
+    let output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::QuantityComparison,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Filename,
+        locator_hint: "README.md | AGENTS.md".to_string(),
+        ..IntentOutputContract::default()
     };
 
-    let snapshot = runtime_contract_snapshot_for_route(&route).expect("runtime route snapshot");
+    let snapshot = runtime_contract_snapshot_for_output_contract(&output_contract)
+        .expect("runtime output-contract snapshot");
     let required = snapshot
         .get("contract")
         .and_then(|value| value.get("required_evidence"))
@@ -40,30 +28,18 @@ fn runtime_contract_snapshot_for_route_uses_route_trace_evidence() {
 
 #[test]
 fn unclassified_inline_contract_uses_generic_inline_transform() {
-    let route = RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "inline_structured_payload_context_execute".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Low,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::None,
-            delivery_intent: OutputDeliveryIntent::None,
-            ..IntentOutputContract::default()
-        },
+    let output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::None,
+        delivery_intent: OutputDeliveryIntent::None,
+        ..IntentOutputContract::default()
     };
 
-    let snapshot = runtime_contract_snapshot_for_route(&route).expect("runtime route snapshot");
+    let snapshot = runtime_contract_snapshot_for_output_contract(&output_contract)
+        .expect("runtime output-contract snapshot");
     assert_eq!(
         snapshot
             .pointer("/contract/contract_match")
@@ -78,45 +54,32 @@ fn unclassified_inline_contract_uses_generic_inline_transform() {
         Some(1)
     );
     assert_eq!(
-        final_answer_shape_for_route(&route),
+        final_answer_shape_for_output_contract(&output_contract),
         Some(FinalAnswerShape::SummaryWithEvidence)
     );
-    assert!(compact_prompt_line_for_route(&route)
+    assert!(compact_prompt_line_for_output_contract(&output_contract)
         .expect("compact prompt line")
         .contains("match=generic_inline_transform"));
     assert_eq!(
-        crate::evidence_policy::required_evidence_fields_for_route(&route),
+        crate::evidence_policy::required_evidence_fields_for_output_contract(&output_contract),
         vec!["field_value"]
     );
 }
 
 #[test]
 fn unclassified_path_contract_rejects_action_outside_generic_profile() {
-    let route = RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "inline_structured_payload_context_execute".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Low,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            ..IntentOutputContract::default()
-        },
+    let output_contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: OutputDeliveryIntent::None,
+        ..IntentOutputContract::default()
     };
 
-    let trace =
-        action_trace_for_route(&route, "db_basic.schema_version").expect("route action trace");
+    let trace = action_trace_for_output_contract(&output_contract, "db_basic.schema_version")
+        .expect("output-contract action trace");
 
     assert_eq!(
         trace.get("contract_match").and_then(Value::as_str),
@@ -389,155 +352,6 @@ fn route_specific_evidence_augments_matrix_base_contract() {
         required,
         vec!["exists", "field_value", "kind", "size_bytes"]
     );
-}
-
-#[test]
-fn route_marker_quantity_comparison_augments_trace_evidence_without_semantic_enum() {
-    let route = RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "quantity_comparison".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Low,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Filename,
-            locator_hint: "README.md | AGENTS.md".to_string(),
-            ..IntentOutputContract::default()
-        },
-    };
-
-    let snapshot = trace_snapshot_for_route(&route).expect("route snapshot");
-    let required = snapshot
-        .get("required_evidence")
-        .and_then(Value::as_array)
-        .expect("required evidence")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>();
-
-    assert!(required.contains(&"exists"));
-    assert!(required.contains(&"kind"));
-}
-
-#[test]
-fn action_trace_for_route_uses_route_trace_evidence() {
-    let route = RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "quantity_comparison".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Low,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            semantic_kind: OutputSemanticKind::None,
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::Filename,
-            locator_hint: "README.md | AGENTS.md".to_string(),
-            ..IntentOutputContract::default()
-        },
-    };
-
-    let trace = action_trace_for_route(&route, "fs_basic.stat_paths").expect("route action trace");
-    let required = trace
-        .get("required_evidence")
-        .and_then(Value::as_array)
-        .expect("required evidence")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>();
-
-    assert!(required.contains(&"exists"));
-    assert!(required.contains(&"kind"));
-}
-
-#[test]
-fn action_trace_for_archive_capability_ref_supplies_structured_extractor() {
-    let route = route_with_machine_capability_ref("capability_ref=archive.list");
-
-    let trace =
-        action_trace_for_route(&route, "archive_basic.list").expect("archive route action trace");
-
-    assert_eq!(
-        trace.get("contract_match").and_then(Value::as_str),
-        Some("capability_ref")
-    );
-    assert_eq!(
-        trace
-            .get("observation_extractor")
-            .and_then(|value| value.get("source"))
-            .and_then(Value::as_str),
-        Some("archive_basic.list")
-    );
-    assert_eq!(
-        trace
-            .get("observation_extractor")
-            .and_then(|value| value.get("extractor_kind"))
-            .and_then(Value::as_str),
-        Some("structured_json")
-    );
-    let required = trace
-        .get("required_evidence")
-        .and_then(Value::as_array)
-        .expect("required evidence")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>();
-    assert_eq!(required, vec!["candidates"]);
-}
-
-#[test]
-fn route_effective_contract_marker_prevents_stale_raw_semantic_action_lock() {
-    let route = RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "contract:workspace_project_summary".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Low,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            semantic_kind: OutputSemanticKind::FilePaths,
-            response_shape: OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            ..IntentOutputContract::default()
-        },
-    };
-
-    let policy = action_policy_for_route(
-        Some(&route),
-        "git_basic",
-        &serde_json::json!({"action": "status"}),
-    );
-
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        OutputSemanticKind::FilePaths
-    );
-    assert_eq!(
-        route.effective_output_contract_semantic_kind(),
-        OutputSemanticKind::WorkspaceProjectSummary
-    );
-    assert!(policy.is_none());
 }
 
 #[test]

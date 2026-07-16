@@ -1109,11 +1109,6 @@ fn route_requests_file_name_list(route: &crate::RouteResult) -> bool {
             .list_selector
             .target_kind
             == crate::OutputScalarCountTargetKind::File
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["filesystem"],
-            &["list_file_names"],
-        )
 }
 
 fn route_requests_directory_name_list(route: &crate::RouteResult) -> bool {
@@ -1124,11 +1119,6 @@ fn route_requests_directory_name_list(route: &crate::RouteResult) -> bool {
             .list_selector
             .target_kind
             == crate::OutputScalarCountTargetKind::Dir
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["filesystem"],
-            &["list_directory_names"],
-        )
 }
 
 fn collect_matrix_file_name_items(
