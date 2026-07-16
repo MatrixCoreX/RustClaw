@@ -74,6 +74,8 @@ fn applies_multi_file_patch_and_rewinds_checkpoint() {
         .expect("rewind");
     assert_eq!(rewind["action"], "rewind");
     assert_eq!(rewind["reversible"], false);
+    assert_eq!(rewind["compensates_checkpoint_id"], checkpoint_id);
+    assert_eq!(rewind["compensates_patch_id"], applied["patch_id"]);
     assert_eq!(
         fs::read_to_string(workspace.root.join("src/a.txt")).unwrap(),
         "alpha\n"
@@ -234,4 +236,73 @@ fn checkpoint_diff_returns_the_original_patch() {
         .expect("checkpoint diff");
     assert_eq!(diff["patch"], patch);
     assert_eq!(diff["patch_id"], applied["patch_id"]);
+}
+
+#[test]
+fn two_file_failure_repair_review_and_rewind_preserves_user_file() {
+    let workspace = TestWorkspace::new();
+    write(&workspace.root.join("src/left.txt"), "left=1\n");
+    write(&workspace.root.join("src/right.txt"), "right=1\n");
+    write(
+        &workspace.root.join("user-notes.txt"),
+        "pre-existing user change\n",
+    );
+    let first_patch = "diff --git a/src/left.txt b/src/left.txt\n--- a/src/left.txt\n+++ b/src/left.txt\n@@ -1 +1 @@\n-left=1\n+left=2\ndiff --git a/src/right.txt b/src/right.txt\n--- a/src/right.txt\n+++ b/src/right.txt\n@@ -1 +1 @@\n-right=1\n+right=broken\n";
+    let first = workspace
+        .run(json!({"action": "apply_patch", "patch": first_patch}))
+        .expect("apply initial two-file edit");
+    let failed_verification = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("test \"$(cat src/left.txt)\" = 'left=2' && test \"$(cat src/right.txt)\" = 'right=2'")
+        .current_dir(&workspace.root)
+        .status()
+        .expect("run failing verification");
+    assert!(!failed_verification.success());
+
+    let repair_patch = "diff --git a/src/right.txt b/src/right.txt\n--- a/src/right.txt\n+++ b/src/right.txt\n@@ -1 +1 @@\n-right=broken\n+right=2\n";
+    let repair = workspace
+        .run(json!({"action": "apply_patch", "patch": repair_patch}))
+        .expect("apply repair patch");
+    let passing_verification = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("test \"$(cat src/left.txt)\" = 'left=2' && test \"$(cat src/right.txt)\" = 'right=2'")
+        .current_dir(&workspace.root)
+        .status()
+        .expect("run passing verification");
+    assert!(passing_verification.success());
+
+    for (checkpoint, expected_patch) in [
+        (first["checkpoint_id"].as_str().unwrap(), first_patch),
+        (repair["checkpoint_id"].as_str().unwrap(), repair_patch),
+    ] {
+        let reviewed = workspace
+            .run(json!({"action": "diff", "checkpoint_id": checkpoint}))
+            .expect("review checkpoint diff");
+        assert_eq!(reviewed["patch"], expected_patch);
+    }
+
+    workspace
+        .run(json!({
+            "action": "rewind",
+            "checkpoint_id": repair["checkpoint_id"],
+        }))
+        .expect("rewind repair");
+    workspace
+        .run(json!({
+            "action": "rewind",
+            "checkpoint_id": first["checkpoint_id"],
+        }))
+        .expect("rewind initial edit from persisted checkpoint");
+    assert_eq!(
+        fs::read_to_string(workspace.root.join("src/left.txt")).unwrap(),
+        "left=1\n"
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.root.join("src/right.txt")).unwrap(),
+        "right=1\n"
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.root.join("user-notes.txt")).unwrap(),
+        "pre-existing user change\n"
+    );
 }

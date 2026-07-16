@@ -122,9 +122,16 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
                 "artifact_refs": step_trace.get("artifact_refs").cloned().unwrap_or_else(|| json!([])),
                 "structured_workspace_mutation": step_trace.get("structured_workspace_mutation"),
                 "patch_id": step_trace.pointer("/structured_workspace_mutation/patch_id"),
+                "mutation_id": step_trace.pointer("/structured_workspace_mutation/mutation_id"),
                 "checkpoint_id": step_trace.pointer("/structured_workspace_mutation/checkpoint_id"),
+                "compensates_checkpoint_id": step_trace.pointer("/structured_workspace_mutation/compensates_checkpoint_id"),
+                "compensates_patch_id": step_trace.pointer("/structured_workspace_mutation/compensates_patch_id"),
+                "compensates_mutation_id": step_trace.pointer("/structured_workspace_mutation/compensates_mutation_id"),
                 "isolation_root": step_trace.pointer("/structured_workspace_mutation/isolation_root"),
-                "reversible": step_trace.pointer("/structured_workspace_mutation/reversible"),
+                "reversible": step_trace.pointer("/structured_workspace_mutation/reversible")
+                    .or_else(|| step_trace.pointer("/mutation_reversibility/reversible")),
+                "reversibility_status": step_trace.pointer("/mutation_reversibility/status"),
+                "reversibility_reason_code": step_trace.pointer("/mutation_reversibility/reason_code"),
                 "additions": step_trace.pointer("/structured_workspace_mutation/additions"),
                 "deletions": step_trace.pointer("/structured_workspace_mutation/deletions"),
                 "changed_hunks": step_trace.pointer("/structured_workspace_mutation/changed_hunks"),
@@ -327,9 +334,16 @@ fn tool_lifecycle_event_payload(
         "artifact_ref_count": step_trace.get("artifact_ref_count"),
         "structured_workspace_mutation": step_trace.get("structured_workspace_mutation"),
         "patch_id": step_trace.pointer("/structured_workspace_mutation/patch_id"),
+        "mutation_id": step_trace.pointer("/structured_workspace_mutation/mutation_id"),
         "checkpoint_id": step_trace.pointer("/structured_workspace_mutation/checkpoint_id"),
+        "compensates_checkpoint_id": step_trace.pointer("/structured_workspace_mutation/compensates_checkpoint_id"),
+        "compensates_patch_id": step_trace.pointer("/structured_workspace_mutation/compensates_patch_id"),
+        "compensates_mutation_id": step_trace.pointer("/structured_workspace_mutation/compensates_mutation_id"),
         "isolation_root": step_trace.pointer("/structured_workspace_mutation/isolation_root"),
-        "reversible": step_trace.pointer("/structured_workspace_mutation/reversible"),
+        "reversible": step_trace.pointer("/structured_workspace_mutation/reversible")
+            .or_else(|| step_trace.pointer("/mutation_reversibility/reversible")),
+        "reversibility_status": step_trace.pointer("/mutation_reversibility/status"),
+        "reversibility_reason_code": step_trace.pointer("/mutation_reversibility/reason_code"),
         "additions": step_trace.pointer("/structured_workspace_mutation/additions"),
         "deletions": step_trace.pointer("/structured_workspace_mutation/deletions"),
         "changed_hunks": step_trace.pointer("/structured_workspace_mutation/changed_hunks"),
@@ -348,6 +362,7 @@ struct CodingEvidenceSignals {
     evidence_refs: BTreeSet<String>,
     workspace_checkpoint_ids: BTreeSet<String>,
     patch_ids: BTreeSet<String>,
+    mutation_ids: BTreeSet<String>,
     diff_summaries: Vec<Value>,
     failures: Vec<Value>,
     verification_failure_kinds: BTreeSet<String>,
@@ -391,6 +406,7 @@ impl CodingEvidenceSignals {
             "diff_summaries": self.diff_summaries.clone(),
             "workspace_checkpoint_ids": self.workspace_checkpoint_ids.iter().cloned().collect::<Vec<_>>(),
             "patch_ids": self.patch_ids.iter().cloned().collect::<Vec<_>>(),
+            "mutation_ids": self.mutation_ids.iter().cloned().collect::<Vec<_>>(),
             "failure_count": self.failures.len(),
             "failures": self.failures.clone(),
             "verification_status": verification_status,
@@ -437,6 +453,7 @@ impl CodingEvidenceSignals {
             "diff_summaries": self.diff_summaries.clone(),
             "workspace_checkpoint_ids": self.workspace_checkpoint_ids.iter().cloned().collect::<Vec<_>>(),
             "patch_ids": self.patch_ids.iter().cloned().collect::<Vec<_>>(),
+            "mutation_ids": self.mutation_ids.iter().cloned().collect::<Vec<_>>(),
             "verification_status": coding_verification_status(self),
             "verification_failure_kind_count": self.verification_failure_kinds.len(),
             "verification_failure_kinds": self.verification_failure_kinds.iter().cloned().collect::<Vec<_>>(),
@@ -477,6 +494,7 @@ fn append_coding_checkpoint_events(
                 "changed_files": signals.changed_files.iter().cloned().collect::<Vec<_>>(),
                 "workspace_checkpoint_ids": signals.workspace_checkpoint_ids.iter().cloned().collect::<Vec<_>>(),
                 "patch_ids": signals.patch_ids.iter().cloned().collect::<Vec<_>>(),
+                "mutation_ids": signals.mutation_ids.iter().cloned().collect::<Vec<_>>(),
                 "verification_status": coding_verification_status(signals),
             }),
         ));
@@ -493,10 +511,12 @@ fn append_coding_checkpoint_events(
                 "checkpoint_ref": "coding_checkpoint:verified_workspace_checkpoint",
                 "checkpoint_id": signals.workspace_checkpoint_ids.iter().next(),
                 "patch_id": signals.patch_ids.iter().next(),
+                "mutation_id": signals.mutation_ids.iter().next(),
                 "evidence_ref": "coding_checkpoint:verified_workspace_checkpoint",
                 "evidence_refs": signals.evidence_refs.iter().cloned().collect::<Vec<_>>(),
                 "workspace_checkpoint_ids": signals.workspace_checkpoint_ids.iter().cloned().collect::<Vec<_>>(),
                 "patch_ids": signals.patch_ids.iter().cloned().collect::<Vec<_>>(),
+                "mutation_ids": signals.mutation_ids.iter().cloned().collect::<Vec<_>>(),
                 "verification_status": "verified",
             }),
         ));
@@ -590,10 +610,15 @@ fn collect_workspace_patch_fields(
     signals: &mut CodingEvidenceSignals,
     evidence_ref: Option<&str>,
 ) {
-    if map.get("source").and_then(Value::as_str) != Some("workspace_patch") {
+    if !matches!(
+        map.get("source").and_then(Value::as_str),
+        Some("workspace_patch" | "workspace_mutation")
+    ) {
         return;
     }
-    let before = signals.workspace_checkpoint_ids.len() + signals.patch_ids.len();
+    let before = signals.workspace_checkpoint_ids.len()
+        + signals.patch_ids.len()
+        + signals.mutation_ids.len();
     if let Some(value) = map
         .get("checkpoint_id")
         .and_then(Value::as_str)
@@ -610,7 +635,17 @@ fn collect_workspace_patch_fields(
     {
         signals.patch_ids.insert(value.to_string());
     }
-    if signals.workspace_checkpoint_ids.len() + signals.patch_ids.len() > before {
+    if let Some(value) = map
+        .get("mutation_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| is_bounded_single_line_token(value))
+    {
+        signals.mutation_ids.insert(value.to_string());
+    }
+    if signals.workspace_checkpoint_ids.len() + signals.patch_ids.len() + signals.mutation_ids.len()
+        > before
+    {
         record_evidence_ref(signals, evidence_ref);
     }
 }

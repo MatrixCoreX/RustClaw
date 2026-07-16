@@ -218,6 +218,12 @@ fn diff(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, Stri
     if let Some(checkpoint_id) = optional_string(args, "checkpoint_id") {
         validate_checkpoint_id(checkpoint_id)?;
         let checkpoint_dir = resolve_checkpoint_dir(&root, checkpoint_id)?;
+        if super::builtin_workspace_mutation::checkpoint_is_structured_mutation(&checkpoint_dir)? {
+            return super::builtin_workspace_mutation::structured_mutation_diff(
+                workspace_root,
+                checkpoint_id,
+            );
+        }
         let manifest = read_manifest(&checkpoint_dir)?;
         let patch = fs::read_to_string(checkpoint_dir.join("change.patch")).map_err(|err| {
             patch_io_error(
@@ -297,6 +303,12 @@ fn rewind(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, St
     let checkpoint_id = required_string(args, "checkpoint_id")?;
     validate_checkpoint_id(checkpoint_id)?;
     let checkpoint_dir = resolve_checkpoint_dir(&root, checkpoint_id)?;
+    if super::builtin_workspace_mutation::checkpoint_is_structured_mutation(&checkpoint_dir)? {
+        return super::builtin_workspace_mutation::rewind_structured_mutation(
+            workspace_root,
+            checkpoint_id,
+        );
+    }
     let mut manifest = read_manifest(&checkpoint_dir)?;
     if manifest.state != "applied" {
         return Err(patch_error(
@@ -336,6 +348,9 @@ fn rewind(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, St
         "message_key": "workspace.patch.rewound",
         "checkpoint_id": checkpoint_id,
         "patch_id": manifest.patch_id,
+        "compensates_checkpoint_id": checkpoint_id,
+        "compensates_patch_id": manifest.patch_id,
+        "state": "rewound",
         "isolation_root": "workspace://current",
         "reversible": false,
         "restored_files": manifest.files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(),
@@ -677,7 +692,7 @@ fn git_apply(root: &Path, patch_file: &Path, check: bool) -> std::io::Result<Out
     command.arg(patch_file).output()
 }
 
-fn canonical_workspace_root(root: &Path) -> Result<PathBuf, String> {
+pub(super) fn canonical_workspace_root(root: &Path) -> Result<PathBuf, String> {
     root.canonicalize().map_err(|err| {
         patch_io_error(
             "workspace_unavailable",
@@ -691,7 +706,7 @@ fn checkpoint_root(root: &Path) -> PathBuf {
     root.join(".rustclaw").join("checkpoints")
 }
 
-fn create_checkpoint_dir(root: &Path, checkpoint_id: &str) -> Result<PathBuf, String> {
+pub(super) fn create_checkpoint_dir(root: &Path, checkpoint_id: &str) -> Result<PathBuf, String> {
     let state_dir = root.join(".rustclaw");
     reject_symlink_if_present(&state_dir)?;
     fs::create_dir_all(&state_dir).map_err(|err| {
@@ -735,7 +750,7 @@ fn create_checkpoint_dir(root: &Path, checkpoint_id: &str) -> Result<PathBuf, St
     Ok(checkpoint_dir)
 }
 
-fn resolve_checkpoint_dir(root: &Path, checkpoint_id: &str) -> Result<PathBuf, String> {
+pub(super) fn resolve_checkpoint_dir(root: &Path, checkpoint_id: &str) -> Result<PathBuf, String> {
     let checkpoints = checkpoint_root(root).canonicalize().map_err(|err| {
         patch_io_error(
             "checkpoint_read_failed",
@@ -904,7 +919,7 @@ fn read_manifest(checkpoint_dir: &Path) -> Result<PatchCheckpoint, String> {
     Ok(manifest)
 }
 
-fn validate_checkpoint_id(value: &str) -> Result<(), String> {
+pub(super) fn validate_checkpoint_id(value: &str) -> Result<(), String> {
     if value.len() < 8
         || value.len() > 80
         || !value
@@ -1046,20 +1061,20 @@ fn bounded_text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]).to_string()
 }
 
-fn remove_checkpoint_dir(path: &Path) {
+pub(super) fn remove_checkpoint_dir(path: &Path) {
     if let Err(err) = fs::remove_dir_all(path) {
         tracing::warn!(error = %err, path = %path.display(), "workspace_patch_checkpoint_cleanup_failed");
     }
 }
 
 #[cfg(unix)]
-fn restrict_directory_permissions(path: &Path) {
+pub(super) fn restrict_directory_permissions(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
     let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
 }
 
 #[cfg(not(unix))]
-fn restrict_directory_permissions(_path: &Path) {}
+pub(super) fn restrict_directory_permissions(_path: &Path) {}
 
 #[cfg(test)]
 #[path = "builtin_workspace_patch_tests.rs"]

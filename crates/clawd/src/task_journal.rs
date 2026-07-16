@@ -250,7 +250,10 @@ fn compact_workspace_patch_output_for_journal(output: &str) -> Option<String> {
         .get("extra")
         .filter(|extra| extra.is_object())
         .unwrap_or(&value);
-    if source.get("source").and_then(Value::as_str) != Some("workspace_patch") {
+    if !matches!(
+        source.get("source").and_then(Value::as_str),
+        Some("workspace_patch" | "workspace_mutation")
+    ) {
         return None;
     }
     let mut compact = serde_json::Map::new();
@@ -261,8 +264,13 @@ fn compact_workspace_patch_output_for_journal(output: &str) -> Option<String> {
         "action",
         "message_key",
         "patch_id",
+        "mutation_id",
         "checkpoint_id",
+        "compensates_patch_id",
+        "compensates_mutation_id",
+        "compensates_checkpoint_id",
         "state",
+        "target_path",
         "isolation_root",
         "reversible",
         "additions",
@@ -272,6 +280,7 @@ fn compact_workspace_patch_output_for_journal(output: &str) -> Option<String> {
         "changed_files",
         "restored_files",
         "artifact_refs",
+        "diff_available",
     ] {
         copy_listing_field(source, &mut compact, field);
     }
@@ -286,6 +295,20 @@ fn compact_workspace_patch_output_for_journal(output: &str) -> Option<String> {
                     .collect(),
             ),
         );
+    }
+    for field in ["before", "after"] {
+        if let Some(entries) = source.get(field).and_then(Value::as_array) {
+            compact.insert(
+                field.to_string(),
+                Value::Array(
+                    entries
+                        .iter()
+                        .take(128)
+                        .filter_map(compact_workspace_snapshot_entry)
+                        .collect(),
+                ),
+            );
+        }
     }
     serde_json::to_string(&json!({ "extra": Value::Object(compact) })).ok()
 }
@@ -305,6 +328,19 @@ fn compact_workspace_patch_file(file: &Value) -> Option<Value> {
         "deletions",
     ] {
         copy_listing_field(file, &mut compact, field);
+    }
+    Some(Value::Object(compact))
+}
+
+fn compact_workspace_snapshot_entry(entry: &Value) -> Option<Value> {
+    let path = entry.get("path").and_then(Value::as_str)?.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let mut compact = serde_json::Map::new();
+    compact.insert("path".to_string(), json!(path));
+    for field in ["kind", "sha256", "size_bytes"] {
+        copy_listing_field(entry, &mut compact, field);
     }
     Some(Value::Object(compact))
 }

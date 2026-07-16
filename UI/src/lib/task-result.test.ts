@@ -71,6 +71,10 @@ test("projects workspace patch evidence from task events", () => {
       status: "ok",
       checkpoint_id: "patch_checkpoint_1",
       patch_id: "sha256:patch-1",
+      mutation_id: "sha256:mutation-1",
+      compensates_checkpoint_id: "mutation_checkpoint_1",
+      compensates_mutation_id: "sha256:mutation-0",
+      target_path: "src/lib.rs",
       isolation_root: "workspace://current",
       reversible: true,
       additions: 4,
@@ -83,9 +87,30 @@ test("projects workspace patch evidence from task events", () => {
 
   assert.ok(meta.includes("checkpoint_id=patch_checkpoint_1"));
   assert.ok(meta.includes("patch_id=sha256:patch-1"));
+  assert.ok(meta.includes("mutation_id=sha256:mutation-1"));
+  assert.ok(meta.includes("compensates_mutation_id=sha256:mutation-0"));
+  assert.ok(meta.includes("target_path=src/lib.rs"));
   assert.ok(meta.includes("isolation_root=workspace://current"));
   assert.ok(meta.includes("reversible=true"));
   assert.ok(meta.includes("changed_hunks=2"));
+});
+
+test("projects untracked shell reversibility from task events", () => {
+  const meta = traceEventMeta({
+    seq: 9,
+    event_type: "tool_finished",
+    payload: {
+      skill: "run_cmd",
+      status: "ok",
+      reversible: false,
+      reversibility_status: "not_rewindable",
+      reversibility_reason_code: "shell_side_effects_not_tracked",
+    },
+  });
+
+  assert.ok(meta.includes("reversible=false"));
+  assert.ok(meta.includes("reversibility_status=not_rewindable"));
+  assert.ok(meta.includes("reversibility_reason_code=shell_side_effects_not_tracked"));
 });
 
 test("builds completed task outcome from machine task_outcome fields", () => {
