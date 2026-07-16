@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 
 struct FrontdoorFixture {
     name: &'static str,
@@ -49,13 +50,29 @@ fn fixtures() -> Vec<FrontdoorFixture> {
     ]
 }
 
+fn baseline_category(name: &str) -> Option<&'static str> {
+    match name {
+        "fr_direct_answer" => Some("simple_chat"),
+        "zh_read" => Some("file_read"),
+        "en_write" => Some("file_write"),
+        "ko_multi_step" => Some("multi_step_coding"),
+        "es_clarify_candidate" => Some("missing_required_argument"),
+        "budget_profile" => Some("background_async_job"),
+        _ => None,
+    }
+}
+
 #[tokio::test]
 async fn migration_fixtures_keep_semantics_inside_planner_and_make_zero_frontdoor_llm_calls() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let fixtures = fixtures();
     assert_eq!(fixtures.len(), 24);
+    let mut observed_baseline_categories = BTreeSet::new();
 
     for fixture in fixtures {
+        if let Some(category) = baseline_category(fixture.name) {
+            observed_baseline_categories.insert(category);
+        }
         let task = claimed_task(fixture.name, &fixture.payload);
         let prepared = super::super::prepare_planner_owned_ask_routing(
             &state,
@@ -85,4 +102,15 @@ async fn migration_fixtures_keep_semantics_inside_planner_and_make_zero_frontdoo
             fixture.name
         );
     }
+    assert_eq!(
+        observed_baseline_categories,
+        BTreeSet::from([
+            "background_async_job",
+            "file_read",
+            "file_write",
+            "missing_required_argument",
+            "multi_step_coding",
+            "simple_chat",
+        ])
+    );
 }

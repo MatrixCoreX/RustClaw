@@ -20,6 +20,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "crates/clawd/src"
 DECISION_INVENTORY_PATH = ROOT / "scripts/inventories/pre_planner_decisions.toml"
+BASELINE_METRICS_PATH = ROOT / "scripts/inventories/frontdoor_baseline_metrics.toml"
+REQUIRED_BASELINE_WORKLOADS = {
+    "simple_chat",
+    "file_read",
+    "file_write",
+    "multi_step_coding",
+    "missing_required_argument",
+    "background_async_job",
+}
 
 OWNER_CATEGORIES = {
     "attachment_boundary",
@@ -123,6 +132,54 @@ def load_decision_inventory() -> dict:
     return tomllib.loads(DECISION_INVENTORY_PATH.read_text(encoding="utf-8"))
 
 
+def load_baseline_metrics() -> dict:
+    return tomllib.loads(BASELINE_METRICS_PATH.read_text(encoding="utf-8"))
+
+
+def validate_baseline_metrics(data: dict) -> list[str]:
+    findings: list[str] = []
+    if data.get("schema_version") != 1:
+        findings.append("frontdoor_baseline: schema_version_must_be_1")
+    if data.get("baseline_kind") != "deterministic_frontdoor_contract":
+        findings.append("frontdoor_baseline: invalid_baseline_kind")
+    if data.get("first_semantic_owner") != "agent_loop":
+        findings.append("frontdoor_baseline: first_semantic_owner_must_be_agent_loop")
+    if data.get("required_first_prompt_label") != "plan":
+        findings.append("frontdoor_baseline: first_prompt_must_be_plan")
+    if data.get("max_pre_planner_llm_calls") != 0:
+        findings.append("frontdoor_baseline: max_pre_planner_llm_calls_must_be_0")
+    if data.get("max_pre_planner_prompt_bytes") != 0:
+        findings.append("frontdoor_baseline: max_pre_planner_prompt_bytes_must_be_0")
+    workloads = data.get("workloads")
+    if not isinstance(workloads, list):
+        return findings + ["frontdoor_baseline: workloads_must_be_array"]
+    seen: set[str] = set()
+    for index, workload in enumerate(workloads):
+        prefix = f"frontdoor_baseline[{index}]"
+        if not isinstance(workload, dict):
+            findings.append(f"{prefix}: entry_must_be_table")
+            continue
+        workload_id = workload.get("id")
+        if not isinstance(workload_id, str) or not workload_id:
+            findings.append(f"{prefix}: missing_id")
+            continue
+        if workload_id in seen:
+            findings.append(f"frontdoor_baseline:{workload_id}: duplicate_id")
+        seen.add(workload_id)
+        if not isinstance(workload.get("fixture_kind"), str):
+            findings.append(f"frontdoor_baseline:{workload_id}: missing_fixture_kind")
+        prompt_bytes = workload.get("planner_prompt_bytes_fixture")
+        if not isinstance(prompt_bytes, int) or isinstance(prompt_bytes, bool) or prompt_bytes <= 0:
+            findings.append(
+                f"frontdoor_baseline:{workload_id}: invalid_planner_prompt_bytes_fixture"
+            )
+    for missing in sorted(REQUIRED_BASELINE_WORKLOADS - seen):
+        findings.append(f"frontdoor_baseline: missing_required_workload:{missing}")
+    for unexpected in sorted(seen - REQUIRED_BASELINE_WORKLOADS):
+        findings.append(f"frontdoor_baseline: unexpected_workload:{unexpected}")
+    return findings
+
+
 def validate_decision_inventory(data: dict) -> list[str]:
     findings: list[str] = []
     if data.get("schema_version") != 1:
@@ -207,6 +264,13 @@ def scan_repo() -> list[str]:
             findings.extend(validate_decision_inventory(load_decision_inventory()))
         except (OSError, tomllib.TOMLDecodeError) as exc:
             findings.append(f"decision_inventory: load_failed:{exc.__class__.__name__}")
+    if not BASELINE_METRICS_PATH.is_file():
+        findings.append("scripts/inventories/frontdoor_baseline_metrics.toml: missing_baseline")
+    else:
+        try:
+            findings.extend(validate_baseline_metrics(load_baseline_metrics()))
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            findings.append(f"frontdoor_baseline: load_failed:{exc.__class__.__name__}")
     for removed in REMOVED_FILES:
         path = ROOT / removed
         if path.exists():
@@ -244,6 +308,14 @@ def run_self_test() -> int:
     ]
     data = load_decision_inventory()
     assert not validate_decision_inventory(data)
+    baseline = load_baseline_metrics()
+    assert not validate_baseline_metrics(baseline)
+    invalid_baseline = dict(baseline)
+    invalid_baseline["max_pre_planner_llm_calls"] = 1
+    invalid_baseline["workloads"] = baseline["workloads"][:-1]
+    baseline_findings = validate_baseline_metrics(invalid_baseline)
+    assert any("max_pre_planner_llm_calls_must_be_0" in item for item in baseline_findings)
+    assert any("missing_required_workload:background_async_job" in item for item in baseline_findings)
     invalid = {
         "schema_version": 1,
         "target_semantic_owner": "agent_loop",
@@ -278,7 +350,14 @@ def main(argv: list[str]) -> int:
     findings = scan_repo()
     if args.json:
         inventory = load_decision_inventory() if DECISION_INVENTORY_PATH.is_file() else {}
-        print(json.dumps({"findings": findings, "inventory": inventory}, ensure_ascii=True, sort_keys=True))
+        baseline = load_baseline_metrics() if BASELINE_METRICS_PATH.is_file() else {}
+        print(
+            json.dumps(
+                {"baseline": baseline, "findings": findings, "inventory": inventory},
+                ensure_ascii=True,
+                sort_keys=True,
+            )
+        )
         return 1 if findings else 0
     print(f"PRE_PLANNER_EXIT_REMOVAL_CHECK findings={len(findings)}")
     for finding in findings:
