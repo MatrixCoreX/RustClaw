@@ -1,52 +1,20 @@
-use super::planning_actions::{
-    build_plan_result_with_notes, contains_unavailable_skill_action,
-    has_executable_observation_or_action, has_tool_or_skill_observation, planned_action_skill_name,
-};
-use super::planning_followup::{
-    has_authoritative_delivery, has_discussion_followup_action, is_delivery_failure_terminal_reply,
-    is_discussion_followup_action, is_plain_respond_only_plan, last_executable_action,
-    loop_state_has_pre_loop_locator_clarify_candidate, route_expects_terminal_user_answer,
-    route_explicitly_requests_raw_command_output,
-    should_preserve_terminal_followup_for_observed_finalize,
-    terminal_reply_mentions_observed_missing_target,
-};
-#[cfg(test)]
-use super::planning_parse::extract_xml_tool_call_steps;
+use super::planning_action_normalization::normalize_planned_actions;
+use super::planning_actions::build_plan_result_with_notes;
 use super::planning_parse::parse_single_plan_actions;
 use super::planning_prompt::{
-    build_incremental_plan_prompt, ensure_required_contract_block_present, incremental_prompt_spec,
-    round1_prompt_spec, runtime_os_label, runtime_shell_label,
+    build_incremental_plan_prompt, incremental_prompt_spec, round1_prompt_spec, runtime_os_label,
+    runtime_shell_label,
 };
-#[cfg(test)]
-use super::planning_registry_preference::registry_preferred_skill_matches_route;
-#[cfg(test)]
-use super::planning_registry_preference::registry_preferred_skill_names_for_route;
-use super::planning_registry_preference::{
-    actions_use_ad_hoc_command_without_route_preferred_skill,
-    path_has_structured_document_extension,
-};
-use regex::Regex;
-use serde_json::Value;
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use super::planning_repair::repair_plan_actions;
 use tracing::{info, warn};
 
 use super::{
-    attempt_ledger::build_attempt_ledger_compact,
-    build_loop_history_compact, build_single_plan_prompt, build_skill_playbooks_text_scoped,
-    build_skill_quick_index_text_scoped, build_turn_analysis_prompt_block,
-    planning_route_markers::{
-        route_allows_structured_candidate_read_target_repair,
-        route_has_unresolved_clarify_or_locator_marker, route_reason_has_structural_marker,
-    },
-    AgentLoopGuardPolicy, LoopState, AGENT_TOOL_SPEC_PATH, PLAN_REPAIR_PROMPT_LOGICAL_PATH,
+    attempt_ledger::build_attempt_ledger_compact, build_loop_history_compact,
+    build_single_plan_prompt, build_skill_playbooks_text_scoped,
+    build_skill_quick_index_text_scoped, build_turn_analysis_prompt_block, AgentLoopGuardPolicy,
+    LoopState, AGENT_TOOL_SPEC_PATH,
 };
-// Legacy planning helpers are included as child modules and still import this
-// machine contract through `super::*`. The planner entry point itself no longer
-// receives or consults a pre-planner route result.
-use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResult, RouteResult};
+use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResult};
 
 /// Planner-visible tool and skill inventory for one loop round.
 ///
@@ -88,90 +56,9 @@ impl<'a> PlannerToolLibrary<'a> {
     }
 }
 
-#[path = "planning_scalar_count_filter.rs"]
-mod scalar_count_filter;
-#[cfg(test)]
-use scalar_count_filter::scalar_count_filter_hint_for_route_or_turn;
-use scalar_count_filter::{apply_scalar_count_filter_hint, scalar_count_filter_hint_from_route};
-
-#[path = "action_route_locator_artifact.rs"]
-mod action_route_locator_artifact;
-#[path = "concrete_respond_structural_observation.rs"]
-mod concrete_respond_structural_observation;
-#[path = "config_guard_capability_repair.rs"]
-mod config_guard_capability_repair;
-#[path = "configured_command_prefix.rs"]
-mod configured_command_prefix;
-#[path = "direct_observed_finalize_support.rs"]
-mod direct_observed_finalize_support;
-#[path = "directory_entry_group_locator.rs"]
-mod directory_entry_group_locator;
-#[path = "directory_unique_entry.rs"]
-mod directory_unique_entry;
-#[path = "explicit_observed_paths.rs"]
-mod explicit_observed_paths;
-#[path = "inline_transform_contract.rs"]
-mod inline_transform_contract;
-#[path = "legacy_file_config_capabilities.rs"]
-mod legacy_file_config_capabilities;
-#[path = "media_artifact_plan.rs"]
-mod media_artifact_plan;
 #[path = "planner_abort_recovery.rs"]
 mod planner_abort_recovery;
-#[path = "preferred_structured_action.rs"]
-mod preferred_structured_action;
-#[path = "read_range_action.rs"]
-mod read_range_action;
-#[path = "runtime_status_scalar_plan.rs"]
-mod runtime_status_scalar_plan;
-#[path = "scalar_compare_observation.rs"]
-mod scalar_compare_observation;
-#[path = "scalar_count_deterministic_plan.rs"]
-mod scalar_count_deterministic_plan;
-#[path = "scalar_count_explicit_path.rs"]
-mod scalar_count_explicit_path;
-#[path = "session_alias_target_coverage.rs"]
-mod session_alias_target_coverage;
-#[path = "shell_sequence_part.rs"]
-mod shell_sequence_part;
-#[path = "single_target_structured_field_rewrite.rs"]
-mod single_target_structured_field_rewrite;
-#[path = "sqlite_table_listing_rewrite.rs"]
-mod sqlite_table_listing_rewrite;
-#[path = "structured_multi_field_read_rewrite.rs"]
-mod structured_multi_field_read_rewrite;
-#[path = "system_basic_action_path.rs"]
-mod system_basic_action_path;
-#[path = "value_string_list.rs"]
-mod value_string_list;
-use action_route_locator_artifact::*;
-use concrete_respond_structural_observation::*;
-use config_guard_capability_repair::*;
-pub(crate) use configured_command_prefix::explicit_machine_syntax_command_segment;
-use configured_command_prefix::*;
-use direct_observed_finalize_support::*;
-use directory_entry_group_locator::executed_step_is_successful_text_read;
-#[cfg(test)]
-use directory_entry_group_locator::*;
-use directory_unique_entry::*;
-use explicit_observed_paths::*;
-use inline_transform_contract::*;
-use legacy_file_config_capabilities::*;
-use media_artifact_plan::*;
 use planner_abort_recovery::*;
-use preferred_structured_action::*;
-use read_range_action::*;
-use runtime_status_scalar_plan::*;
-use scalar_compare_observation::*;
-use scalar_count_deterministic_plan::*;
-use scalar_count_explicit_path::*;
-use session_alias_target_coverage::*;
-use shell_sequence_part::*;
-use single_target_structured_field_rewrite::*;
-use sqlite_table_listing_rewrite::*;
-use structured_multi_field_read_rewrite::*;
-use system_basic_action_path::*;
-use value_string_list::*;
 
 pub(super) async fn plan_round_actions(
     state: &AppState,
@@ -182,14 +69,12 @@ pub(super) async fn plan_round_actions(
     loop_state: &LoopState,
     turn_analysis_for_prompt: Option<&crate::turn_context::TurnAnalysis>,
     boundary_envelope_for_prompt: Option<&crate::turn_boundary_envelope::TurnBoundaryEnvelope>,
-    auto_locator_path: Option<&str>,
+    _auto_locator_path: Option<&str>,
 ) -> Result<PlanResult, String> {
     let runtime_os = runtime_os_label();
     let runtime_shell = runtime_shell_label();
     let workspace_root = state.skill_rt.workspace_root.display().to_string();
     let agent_runtime_identity = state.agent_runtime_identity_label().to_string();
-    let original_user_text_for_policy = crate::language_policy::task_original_user_text(task)
-        .unwrap_or_else(|| user_text.to_string());
     let recent_assistant_replies = crate::memory::build_recent_assistant_replies_context(
         state,
         task.user_key.as_deref(),
@@ -316,7 +201,6 @@ pub(super) async fn plan_round_actions(
         recent_assistant_replies.chars().count(),
         crate::truncate_for_log(user_text)
     );
-    ensure_required_contract_block_present(None, &prompt_text)?;
     let plan_raw = llm_gateway::run_with_fallback_with_prompt_source(
         state,
         task,
@@ -332,32 +216,14 @@ pub(super) async fn plan_round_actions(
     );
     let initial_actions = parse_single_plan_actions(&plan_raw, state, task)
         .await
-        .map(|actions| {
-            normalize_planned_actions_with_original_and_context(
-                state,
-                None,
-                loop_state,
-                user_text,
-                Some(&original_user_text_for_policy),
-                Some(goal),
-                auto_locator_path,
-                actions,
-            )
-        });
-    let needs_repair = match initial_actions.as_ref() {
-        Some(actions) => should_force_actionable_plan_repair(state, None, loop_state, actions),
-        None => true,
-    };
-    let (plan_actions, plan_kind, raw_plan_text, planner_notes) = if needs_repair {
-        let repair_reason = plan_repair_reason(state, None, loop_state, initial_actions.as_deref());
+        .map(|actions| normalize_planned_actions(state, actions));
+    let (plan_actions, plan_kind, raw_plan_text, planner_notes) = if initial_actions.is_none() {
+        let repair_reason = "plan_parse_failed";
         warn!(
             "plan_repair_required task_id={} round={} reason={}",
             task.task_id, loop_state.round_no, repair_reason
         );
-        // Planner-first: do not synthesize semantic repair plans from local keyword rules.
-        // Repair either comes from the LLM repair prompt or, if safe, from the original
-        // executable plan that the model already produced.
-        match repair_plan_actions(
+        let repaired = repair_plan_actions(
             state,
             task,
             goal,
@@ -370,268 +236,43 @@ pub(super) async fn plan_round_actions(
             &plan_raw,
             loop_state.round_no,
         )
-        .await
+        .await?;
+        let repaired_actions = parse_single_plan_actions(&repaired, state, task)
+            .await
+            .map(|actions| normalize_planned_actions(state, actions));
+        if let Some(actions) = repaired_actions {
+            (
+                actions,
+                PlanKind::Repair,
+                repaired,
+                planner_notes_for_repair_success(repair_reason, None),
+            )
+        } else if let Some((actions, raw)) = try_compact_abort_recovery_plan(
+            state,
+            task,
+            goal,
+            &turn_analysis,
+            user_text,
+            loop_state,
+            &tool_spec_template,
+            &skill_playbooks,
+            &attempt_ledger,
+            &plan_raw,
+            Some(&repaired),
+        )
+        .await?
         {
-            Ok(repaired) => {
-                let repaired_actions =
-                    parse_single_plan_actions(&repaired, state, task)
-                        .await
-                        .map(|actions| {
-                            normalize_planned_actions_with_original_and_context(
-                                state,
-                                None,
-                                loop_state,
-                                user_text,
-                                Some(&original_user_text_for_policy),
-                                Some(goal),
-                                auto_locator_path,
-                                actions,
-                            )
-                        });
-                match repaired_actions {
-                    Some(actions)
-                        if !should_force_actionable_plan_repair(
-                            state, None, loop_state, &actions,
-                        ) =>
-                    {
-                        (
-                            actions,
-                            PlanKind::Repair,
-                            repaired,
-                            planner_notes_for_repair_success(repair_reason, None),
-                        )
-                    }
-                    Some(actions) => {
-                        let second_repair_reason =
-                            plan_repair_reason(state, None, loop_state, Some(&actions));
-                        warn!(
-                            "plan_repair_still_invalid task_id={} round={} reason={}",
-                            task.task_id, loop_state.round_no, second_repair_reason
-                        );
-                        let second_repaired = repair_plan_actions(
-                            state,
-                            task,
-                            goal,
-                            &turn_analysis,
-                            user_text,
-                            second_repair_reason,
-                            &tool_spec_template,
-                            &skill_playbooks,
-                            &attempt_ledger,
-                            &repaired,
-                            loop_state.round_no,
-                        )
-                        .await?;
-                        let second_repaired_actions =
-                            parse_single_plan_actions(&second_repaired, state, task)
-                                .await
-                                .map(|actions| {
-                                    normalize_planned_actions_with_original_and_context(
-                                        state,
-                                        None,
-                                        loop_state,
-                                        user_text,
-                                        Some(&original_user_text_for_policy),
-                                        Some(goal),
-                                        auto_locator_path,
-                                        actions,
-                                    )
-                                });
-                        match second_repaired_actions {
-                            Some(second_actions)
-                                if !should_force_actionable_plan_repair(
-                                    state,
-                                    None,
-                                    loop_state,
-                                    &second_actions,
-                                ) =>
-                            {
-                                (
-                                    second_actions,
-                                    PlanKind::Repair,
-                                    second_repaired,
-                                    planner_notes_for_repair_success(
-                                        repair_reason,
-                                        Some(second_repair_reason),
-                                    ),
-                                )
-                            }
-                            Some(_) => {
-                                let fallback_actions = initial_actions.as_ref().filter(|actions| {
-                                    can_fallback_to_initial_plan_after_repair_failure(
-                                        state, None, loop_state, actions,
-                                    )
-                                });
-                                if let Some(actions) = fallback_actions {
-                                    warn!(
-                                        "plan_second_repair_invalid_fallback_to_initial task_id={} round={}",
-                                        task.task_id, loop_state.round_no
-                                    );
-                                    (
-                                        actions.clone(),
-                                        if loop_state.round_no <= 1 {
-                                            PlanKind::Single
-                                        } else {
-                                            PlanKind::Incremental
-                                        },
-                                        plan_raw.clone(),
-                                        planner_notes_for_repair_fallback(
-                                            "plan_second_repair_invalid_fallback_to_initial",
-                                        ),
-                                    )
-                                } else {
-                                    return Err(
-                                        "repair plan still non-actionable after second repair"
-                                            .to_string(),
-                                    );
-                                }
-                            }
-                            None => {
-                                let fallback_actions = initial_actions.as_ref().filter(|actions| {
-                                    can_fallback_to_initial_plan_after_repair_failure(
-                                        state, None, loop_state, actions,
-                                    )
-                                });
-                                if let Some(actions) = fallback_actions {
-                                    warn!(
-                                        "plan_second_repair_parse_failed_fallback_to_initial task_id={} round={}",
-                                        task.task_id, loop_state.round_no
-                                    );
-                                    (
-                                        actions.clone(),
-                                        if loop_state.round_no <= 1 {
-                                            PlanKind::Single
-                                        } else {
-                                            PlanKind::Incremental
-                                        },
-                                        plan_raw.clone(),
-                                        planner_notes_for_repair_fallback(
-                                            "plan_second_repair_parse_failed_fallback_to_initial",
-                                        ),
-                                    )
-                                } else {
-                                    if let Some((actions, raw)) = try_compact_abort_recovery_plan(
-                                        state,
-                                        task,
-                                        goal,
-                                        &turn_analysis,
-                                        user_text,
-                                        loop_state,
-                                        auto_locator_path,
-                                        Some(&original_user_text_for_policy),
-                                        &tool_spec_template,
-                                        &skill_playbooks,
-                                        &attempt_ledger,
-                                        &plan_raw,
-                                        Some(&second_repaired),
-                                    )
-                                    .await?
-                                    {
-                                        (
-                                            actions,
-                                            PlanKind::Repair,
-                                            raw,
-                                            planner_notes_for_repair_success(
-                                                repair_reason,
-                                                Some("planner_abort_compact_retry"),
-                                            ),
-                                        )
-                                    } else {
-                                        return Err(
-                                            "plan_second_repair_parse_failed_no_executable_steps"
-                                                .to_string(),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    None => {
-                        let fallback_actions = initial_actions.as_ref().filter(|actions| {
-                            can_fallback_to_initial_plan_after_repair_failure(
-                                state, None, loop_state, actions,
-                            )
-                        });
-                        if let Some(actions) = fallback_actions {
-                            warn!(
-                                "plan_repair_parse_failed_fallback_to_initial task_id={} round={}",
-                                task.task_id, loop_state.round_no
-                            );
-                            (
-                                actions.clone(),
-                                if loop_state.round_no <= 1 {
-                                    PlanKind::Single
-                                } else {
-                                    PlanKind::Incremental
-                                },
-                                plan_raw.clone(),
-                                planner_notes_for_repair_fallback(
-                                    "plan_repair_parse_failed_fallback_to_initial",
-                                ),
-                            )
-                        } else {
-                            if let Some((actions, raw)) = try_compact_abort_recovery_plan(
-                                state,
-                                task,
-                                goal,
-                                &turn_analysis,
-                                user_text,
-                                loop_state,
-                                auto_locator_path,
-                                Some(&original_user_text_for_policy),
-                                &tool_spec_template,
-                                &skill_playbooks,
-                                &attempt_ledger,
-                                &plan_raw,
-                                Some(&repaired),
-                            )
-                            .await?
-                            {
-                                (
-                                    actions,
-                                    PlanKind::Repair,
-                                    raw,
-                                    planner_notes_for_repair_success(
-                                        repair_reason,
-                                        Some("planner_abort_compact_retry"),
-                                    ),
-                                )
-                            } else {
-                                return Err("plan_parse_failed_no_executable_steps".to_string());
-                            }
-                        }
-                    }
-                }
-            }
-            Err(err) => {
-                let fallback_actions = initial_actions.as_ref().filter(|actions| {
-                    can_fallback_to_initial_plan_after_repair_failure(
-                        state, None, loop_state, actions,
-                    )
-                });
-                if let Some(actions) = fallback_actions {
-                    warn!(
-                        "plan_repair_llm_failed_fallback_to_initial task_id={} round={} error={}",
-                        task.task_id,
-                        loop_state.round_no,
-                        crate::truncate_for_log(&err)
-                    );
-                    (
-                        actions.clone(),
-                        if loop_state.round_no <= 1 {
-                            PlanKind::Single
-                        } else {
-                            PlanKind::Incremental
-                        },
-                        plan_raw.clone(),
-                        planner_notes_for_repair_fallback(
-                            "plan_repair_llm_failed_fallback_to_initial",
-                        ),
-                    )
-                } else {
-                    return Err(err);
-                }
-            }
+            (
+                actions,
+                PlanKind::Repair,
+                raw,
+                planner_notes_for_repair_success(
+                    repair_reason,
+                    Some("planner_abort_compact_retry"),
+                ),
+            )
+        } else {
+            return Err("plan_parse_failed_no_executable_steps".to_string());
         }
     } else {
         (
@@ -670,8 +311,6 @@ async fn try_compact_abort_recovery_plan(
     turn_analysis: &str,
     user_text: &str,
     loop_state: &LoopState,
-    auto_locator_path: Option<&str>,
-    original_user_text_for_policy: Option<&str>,
     tool_spec_template: &str,
     skill_playbooks: &str,
     attempt_ledger: &str,
@@ -698,39 +337,8 @@ async fn try_compact_abort_recovery_plan(
     else {
         return Ok(None);
     };
-    let actions = normalize_planned_actions_with_original_and_context(
-        state,
-        None,
-        loop_state,
-        user_text,
-        original_user_text_for_policy,
-        Some(goal),
-        auto_locator_path,
-        actions,
-    );
-    if should_force_actionable_plan_repair(state, None, loop_state, &actions) {
-        warn!(
-            "planner_abort_compact_retry_non_actionable task_id={} round={}",
-            task.task_id, loop_state.round_no
-        );
-        return Ok(None);
-    }
+    let actions = normalize_planned_actions(state, actions);
     Ok(Some((actions, raw)))
-}
-
-#[cfg(test)]
-fn plan_result_with_fallback_reason(
-    mut plan_result: PlanResult,
-    reason_code: &'static str,
-) -> PlanResult {
-    let note = format!("fallback_reason_code={reason_code}");
-    let notes = plan_result.planner_notes.trim();
-    if notes.is_empty() {
-        plan_result.planner_notes = note;
-    } else if !notes.split_whitespace().any(|item| item == note) {
-        plan_result.planner_notes = format!("{notes} {note}");
-    }
-    plan_result
 }
 
 fn planner_notes_for_repair_success(first_reason: &str, second_reason: Option<&str>) -> String {
@@ -740,19 +348,3 @@ fn planner_notes_for_repair_success(first_reason: &str, second_reason: Option<&s
     }
     notes.join(" ")
 }
-
-fn planner_notes_for_repair_fallback(reason_code: &str) -> String {
-    format!("fallback_reason_code={reason_code}")
-}
-
-#[cfg(test)]
-#[path = "planning_tests.rs"]
-mod tests;
-
-#[cfg(test)]
-#[path = "planning_recent_artifacts_tests.rs"]
-mod recent_artifacts_tests;
-
-#[cfg(test)]
-#[path = "planning_scalar_count_tests.rs"]
-mod scalar_count_tests;

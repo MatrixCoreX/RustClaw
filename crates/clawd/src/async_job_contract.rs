@@ -98,51 +98,6 @@ pub(crate) fn async_job_protocol_hint_line() -> String {
     )
 }
 
-pub(crate) fn route_requests_runtime_async_job_contract(route: &crate::RouteResult) -> bool {
-    if route_requests_async_dry_run_contract(route) {
-        return false;
-    }
-    async_route_surfaces(route)
-        .into_iter()
-        .any(surface_has_runtime_async_contract_marker)
-}
-
-pub(crate) fn route_requests_async_dry_run_contract(route: &crate::RouteResult) -> bool {
-    async_route_surfaces(route)
-        .into_iter()
-        .any(surface_has_async_dry_run_marker)
-}
-
-fn async_route_surfaces(route: &crate::RouteResult) -> [&str; 3] {
-    [
-        route.route_reason.as_str(),
-        route.resolved_intent.as_str(),
-        route.output_contract.locator_hint.as_str(),
-    ]
-}
-
-fn surface_has_runtime_async_contract_marker(surface: &str) -> bool {
-    let text = surface.to_ascii_lowercase();
-    [
-        "async_job_protocol",
-        "pending_async_job",
-        "poll_async_job",
-        "required_job_fields=",
-        "checkpoint_states=",
-    ]
-    .iter()
-    .any(|token| text.contains(token))
-}
-
-fn surface_has_async_dry_run_marker(surface: &str) -> bool {
-    surface
-        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | ',' | '(' | ')' | '[' | ']'))
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .map(str::to_ascii_lowercase)
-        .any(|part| part == "dry_run" || part == "dry_run=true" || part == "mode=dry_run")
-}
-
 pub(crate) fn async_poll_adapter_result_matches_job(value: &Value, job_id: &str) -> bool {
     value.is_object()
         && value.get("text").is_none()

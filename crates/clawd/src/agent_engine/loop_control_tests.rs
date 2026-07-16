@@ -13,7 +13,6 @@ use super::{
     promote_publishable_strict_json_projection_for_verifier_candidate,
     record_agent_loop_decision_envelope_output_vars, retry_verifier_accepts_rewritten_answer,
     should_stop_for_observed_finalize, structured_respond_terminal_intent_from_plan,
-    structured_respond_terminal_intent_from_pre_loop_clarify_candidate,
     suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
     suppress_answer_verifier_retry_if_structurally_satisfied,
     suppress_answer_verifier_retry_if_user_locator_disambiguation,

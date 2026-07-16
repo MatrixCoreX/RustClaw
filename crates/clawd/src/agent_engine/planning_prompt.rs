@@ -1,5 +1,4 @@
 use super::{LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH, SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH};
-use crate::RouteResult;
 
 pub(super) fn build_incremental_plan_prompt(
     prompt_template: &str,
@@ -41,26 +40,6 @@ pub(super) fn build_incremental_plan_prompt(
             ("__WORKSPACE_ROOT__", workspace_root),
         ],
     )
-}
-
-pub(super) fn ensure_required_contract_block_present(
-    route_result: Option<&RouteResult>,
-    prompt_text: &str,
-) -> Result<(), String> {
-    let Some(route) = route_result else {
-        return Ok(());
-    };
-    let Some(contract_line) = crate::evidence_policy::compact_prompt_line_for_route(route) else {
-        return Ok(());
-    };
-    if prompt_text.contains(&contract_line) {
-        Ok(())
-    } else {
-        Err(format!(
-            "prompt_budget_error: compact contract block missing from planner prompt; contract_line_hash={}",
-            crate::evidence_policy::fnv1a_hex(&contract_line)
-        ))
-    }
 }
 
 pub(super) fn runtime_os_label() -> String {

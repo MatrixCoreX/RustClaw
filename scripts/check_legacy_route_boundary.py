@@ -121,6 +121,24 @@ def scan_verifier_contract_boundary_text(rel_path: str, text: str) -> list[Findi
     return findings
 
 
+def scan_planner_contract_boundary_text(rel_path: str, text: str) -> list[Finding]:
+    name = Path(rel_path).name
+    if not (name == "planning.rs" or name.startswith(("planning_", "planner_abort_"))):
+        return []
+    findings: list[Finding] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if re.search(r"\bRouteResult\b|\broute_result\b", line):
+            findings.append(
+                Finding(
+                    rel_path,
+                    line_no,
+                    "planner_route_result_dependency",
+                    line.strip(),
+                )
+            )
+    return findings
+
+
 def line_number_for_offset(text: str, offset: int) -> int:
     return text.count("\n", 0, max(offset, 0)) + 1
 
@@ -178,6 +196,12 @@ def scan_repo() -> list[Finding]:
         findings.extend(scan_text(rel_path, path.read_text(encoding="utf-8")))
         findings.extend(
             scan_verifier_contract_boundary_text(
+                rel_path,
+                path.read_text(encoding="utf-8"),
+            )
+        )
+        findings.extend(
+            scan_planner_contract_boundary_text(
                 rel_path,
                 path.read_text(encoding="utf-8"),
             )
@@ -255,6 +279,14 @@ def run_self_test() -> int:
     assert not scan_verifier_contract_boundary_text(
         "crates/clawd/src/verifier.rs",
         "fn verify(output_contract: Option<&IntentOutputContract>) {}",
+    )
+    assert scan_planner_contract_boundary_text(
+        "crates/clawd/src/agent_engine/planning.rs",
+        "fn plan(route_result: Option<&RouteResult>) {}",
+    )
+    assert not scan_planner_contract_boundary_text(
+        "crates/clawd/src/agent_engine/planning.rs",
+        "fn plan(output_contract: Option<&IntentOutputContract>) {}",
     )
     assert scan_boundary_envelope_type_contract_text(
         "crates/clawd/src/turn_boundary_envelope.rs",
