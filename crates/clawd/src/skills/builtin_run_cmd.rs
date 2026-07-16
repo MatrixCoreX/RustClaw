@@ -373,6 +373,7 @@ async fn kill_process_group(_pid: u32, _signal: &str) -> bool {
     false
 }
 
+#[cfg(test)]
 pub(crate) async fn run_safe_command(
     cwd: &Path,
     command: &str,
@@ -390,6 +391,34 @@ pub(crate) async fn run_safe_command(
         cmd_idle_timeout_seconds,
         cmd_max_output_bytes,
         allow_sudo,
+        claw_core::config::ToolSandboxMode::DangerFull,
+        cwd,
+    )
+    .await
+    .map_err(RunSafeCommandError::into_text)
+}
+
+pub(crate) async fn run_safe_command_with_sandbox(
+    cwd: &Path,
+    command: &str,
+    max_cmd_length: usize,
+    cmd_timeout_seconds: u64,
+    cmd_idle_timeout_seconds: u64,
+    cmd_max_output_bytes: usize,
+    allow_sudo: bool,
+    sandbox_mode: claw_core::config::ToolSandboxMode,
+    workspace_root: &Path,
+) -> Result<String, String> {
+    run_safe_command_detailed(
+        cwd,
+        command,
+        max_cmd_length,
+        cmd_timeout_seconds,
+        cmd_idle_timeout_seconds,
+        cmd_max_output_bytes,
+        allow_sudo,
+        sandbox_mode,
+        workspace_root,
     )
     .await
     .map_err(RunSafeCommandError::into_text)
@@ -403,6 +432,8 @@ pub(super) async fn run_safe_command_detailed(
     cmd_idle_timeout_seconds: u64,
     cmd_max_output_bytes: usize,
     allow_sudo: bool,
+    sandbox_mode: claw_core::config::ToolSandboxMode,
+    workspace_root: &Path,
 ) -> Result<String, RunSafeCommandError> {
     if command.len() > max_cmd_length {
         return Err(RunSafeCommandError::Command(CommandRunFailure::new(
@@ -433,7 +464,7 @@ pub(super) async fn run_safe_command_detailed(
         ));
     }
 
-    let mut cmd = Command::new("bash");
+    let mut cmd = prepare_run_cmd_process(cwd, sandbox_mode, workspace_root)?;
     crate::skills::apply_skill_runner_env_isolation(&mut cmd);
     cmd.arg("-lc").arg(command);
     cmd.current_dir(cwd)
@@ -665,6 +696,8 @@ pub(super) async fn start_async_command(
     allow_sudo: bool,
     job_id: &str,
     job_dir: &Path,
+    sandbox_mode: claw_core::config::ToolSandboxMode,
+    workspace_root: &Path,
 ) -> Result<String, RunSafeCommandError> {
     if command.len() > max_cmd_length {
         return Err(RunSafeCommandError::Command(CommandRunFailure::new(
@@ -717,7 +750,7 @@ pub(super) async fn start_async_command(
             format!("{}:{err}", "async_job_script_write_failed"),
         ))
     })?;
-    let mut cmd = Command::new("bash");
+    let mut cmd = prepare_run_cmd_process(cwd, sandbox_mode, workspace_root)?;
     crate::skills::apply_skill_runner_env_isolation(&mut cmd);
     cmd.arg(&run_script_path)
         .current_dir(cwd)
@@ -742,6 +775,39 @@ pub(super) async fn start_async_command(
         "message_key": "clawd.task.async_job_started",
     })
     .to_string())
+}
+
+fn prepare_run_cmd_process(
+    cwd: &Path,
+    sandbox_mode: claw_core::config::ToolSandboxMode,
+    workspace_root: &Path,
+) -> Result<Command, RunSafeCommandError> {
+    let prepared = crate::process_sandbox::prepare_process_command(
+        "bash",
+        crate::process_sandbox::ProcessSandboxRequest {
+            mode: sandbox_mode,
+            workspace_root,
+            execution_root: cwd,
+            network: crate::process_sandbox::ProcessNetworkPolicy::Deny,
+            additional_writable_paths: &[],
+        },
+    )
+    .map_err(|reason_code| {
+        RunSafeCommandError::Policy(crate::skills::policy_block_error(
+            reason_code,
+            vec![format!("sandbox_mode={}", sandbox_mode.as_token())],
+            vec![
+                "action=run_command".to_string(),
+                format!("sandbox_backend_required={}", sandbox_mode.as_token()),
+            ],
+        ))
+    })?;
+    tracing::debug!(
+        sandbox_backend = prepared.backend,
+        sandbox_mode = sandbox_mode.as_token(),
+        "run_cmd_process_sandbox_prepared"
+    );
+    Ok(prepared.command)
 }
 
 #[derive(Debug, Deserialize)]

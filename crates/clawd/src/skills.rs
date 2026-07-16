@@ -142,7 +142,9 @@ mod memory_context;
 mod output_dirs;
 mod runner;
 
-pub(crate) use builtin::{execute_builtin_skill_for_task, run_safe_command};
+#[cfg(test)]
+pub(crate) use builtin::run_safe_command;
+pub(crate) use builtin::{execute_builtin_skill_for_task, run_safe_command_with_sandbox};
 // `execute_builtin_skill`（无 task 版本）只在 `builtin.rs` 内部测试用，
 // 不再向 crate 外暴露，避免再产生绕过 LLM 预算/日志的调用点。
 // 详见 `builtin.rs` 上对 `execute_builtin_skill` 的注释。

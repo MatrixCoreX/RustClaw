@@ -64,6 +64,7 @@ mod output_paths;
 mod package_commands;
 mod pipeline_types;
 mod policy_decision;
+mod process_sandbox;
 mod prompt_utils;
 mod providers;
 mod repair_boundary_inventory;

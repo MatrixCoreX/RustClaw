@@ -17,7 +17,9 @@ struct TempDirGuard {
 
 impl TempDirGuard {
     fn new(prefix: &str) -> Self {
-        let mut path = std::env::temp_dir();
+        let mut path = std::env::current_dir()
+            .expect("current test directory")
+            .join("target/clawd-builtin-tests");
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time before unix epoch")

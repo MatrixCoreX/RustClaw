@@ -10,7 +10,9 @@ mod builtin_run_cmd;
 mod builtin_schedule;
 #[path = "builtin_workspace_patch.rs"]
 mod builtin_workspace_patch;
+#[cfg(test)]
 pub(crate) use builtin_run_cmd::run_safe_command;
+pub(crate) use builtin_run_cmd::run_safe_command_with_sandbox;
 use builtin_run_cmd::{
     command_has_shell_background_operator, run_cmd_checkpoint_claim_markers,
     run_cmd_claims_runtime_checkpoint_without_async_start, run_safe_command_detailed,
@@ -537,6 +539,8 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     crate::skills::task_allows_sudo(state, task),
                     &job_id,
                     Path::new(&job_dir),
+                    state.skill_rt.tools_policy.sandbox_mode,
+                    &state.skill_rt.workspace_root,
                 )
                 .await
                 .map_err(|err| match err {
@@ -561,6 +565,8 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 idle_timeout_seconds,
                 max_output_bytes,
                 crate::skills::task_allows_sudo(state, task),
+                state.skill_rt.tools_policy.sandbox_mode,
+                &state.skill_rt.workspace_root,
             )
             .await
             .map_err(|err| match err {
