@@ -3,7 +3,7 @@ use crate::{
     runtime::state::AppState, AgentRuntimeConfig, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
 };
 use claw_core::config::{AgentConfig, ToolsConfig};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::net::TcpListener;
@@ -78,6 +78,21 @@ fn test_state(workspace_root: PathBuf) -> AppState {
     }
 }
 
+fn assert_workspace_mutation(output: &str, action: &str, target_path: &str) -> Value {
+    let value: Value = serde_json::from_str(output).expect("structured workspace mutation");
+    assert_eq!(
+        value.get("source").and_then(Value::as_str),
+        Some("workspace_mutation")
+    );
+    assert_eq!(value.get("action").and_then(Value::as_str), Some(action));
+    assert_eq!(
+        value.get("target_path").and_then(Value::as_str),
+        Some(target_path)
+    );
+    assert!(value.get("checkpoint_id").and_then(Value::as_str).is_some());
+    value
+}
+
 #[tokio::test]
 async fn list_dir_accepts_names_only_arg() {
     let root = TempDirGuard::new("list_dir_names_only");
@@ -131,7 +146,7 @@ async fn write_file_append_preserves_existing_content() {
     .await
     .expect("append write should succeed");
 
-    assert!(output.starts_with("appended "));
+    assert_workspace_mutation(&output, "append_text", "notes/memo.txt");
     assert_eq!(
         fs::read_to_string(path).expect("read file"),
         "alpha\nbeta\n"
@@ -184,7 +199,7 @@ async fn write_file_accepts_overwrite_mode_token() {
     .await
     .expect("overwrite mode should succeed");
 
-    assert!(output.starts_with("written "));
+    assert_workspace_mutation(&output, "write_text", "notes/memo.txt");
     assert_eq!(
         fs::read_to_string(path).expect("read file"),
         "new content\n"
@@ -211,7 +226,7 @@ async fn write_file_accepts_append_mode_token() {
     .await
     .expect("append mode should succeed");
 
-    assert!(output.starts_with("appended "));
+    assert_workspace_mutation(&output, "append_text", "notes/memo.txt");
     assert_eq!(
         fs::read_to_string(path).expect("read file"),
         "alpha\nbeta\n"
@@ -260,8 +275,50 @@ async fn write_file_accepts_create_parents_token() {
     .await
     .expect("create_parents write should succeed");
 
-    assert!(output.starts_with("written "));
+    assert_workspace_mutation(&output, "write_text", "notes/deep/memo.txt");
     assert_eq!(fs::read_to_string(path).expect("read file"), "created\n");
+}
+
+#[tokio::test]
+async fn workspace_rewind_restores_a_checkpointed_whole_file_write() {
+    let root = TempDirGuard::new("write_file_rewind");
+    let path = root.path.join("notes/memo.txt");
+    fs::create_dir_all(path.parent().expect("parent")).expect("create notes");
+    fs::write(&path, "before\n").expect("seed file");
+    let state = test_state(root.path.clone());
+
+    let output = execute_builtin_skill(
+        &state,
+        "write_file",
+        &json!({"path": "notes/memo.txt", "content": "after\n"}),
+    )
+    .await
+    .expect("checkpointed write");
+    let mutation = assert_workspace_mutation(&output, "write_text", "notes/memo.txt");
+    let checkpoint_id = mutation
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .expect("checkpoint id");
+    let rewind = execute_builtin_skill(
+        &state,
+        "workspace_patch",
+        &json!({"action": "rewind", "checkpoint_id": checkpoint_id}),
+    )
+    .await
+    .expect("workspace rewind");
+    let rewind: Value = serde_json::from_str(&rewind).expect("rewind result");
+
+    assert_eq!(
+        rewind.get("source").and_then(Value::as_str),
+        Some("workspace_mutation")
+    );
+    assert_eq!(
+        rewind
+            .get("compensates_checkpoint_id")
+            .and_then(Value::as_str),
+        Some(checkpoint_id)
+    );
+    assert_eq!(fs::read_to_string(path).expect("restored file"), "before\n");
 }
 
 #[tokio::test]
@@ -377,7 +434,7 @@ async fn remove_file_keeps_directory_delete_explicit() {
     .await
     .expect("explicit recursive directory delete");
 
-    assert!(output.contains(root.path.join("scratch").to_string_lossy().as_ref()));
+    assert_workspace_mutation(&output, "remove_path", "scratch");
     assert!(!root.path.join("scratch").exists());
 }
 
@@ -394,7 +451,7 @@ async fn make_dir_accepts_parents_machine_arg() {
     .await
     .expect("parents=true should create missing parents");
 
-    assert!(output.starts_with("created directory "));
+    assert_workspace_mutation(&output, "make_dir", "nested/child");
     assert!(root.path.join("nested/child").is_dir());
 }
 

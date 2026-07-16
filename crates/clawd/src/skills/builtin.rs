@@ -8,6 +8,8 @@ use crate::{AppState, ClaimedTask};
 mod builtin_run_cmd;
 #[path = "builtin_schedule.rs"]
 mod builtin_schedule;
+#[path = "builtin_workspace_mutation.rs"]
+mod builtin_workspace_mutation;
 #[path = "builtin_workspace_patch.rs"]
 mod builtin_workspace_patch;
 #[cfg(test)]
@@ -22,6 +24,7 @@ use builtin_run_cmd::{
 #[cfg(test)]
 use builtin_run_cmd::{looks_detached_background_command, parse_run_cmd_suggestion_payload};
 use builtin_schedule::execute_schedule_workflow_for_task;
+use builtin_workspace_mutation::run_checkpointed_workspace_mutation;
 use builtin_workspace_patch::execute_workspace_patch;
 
 fn builtin_error(
@@ -237,78 +240,84 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 &effective_path,
                 builtin_allows_path_outside_workspace(state, task),
             )?;
-            if create_parents {
-                if let Some(parent) = real_path.parent() {
-                    std::fs::create_dir_all(parent).map_err(|err| {
-                        io_builtin_error("write_file", "mkdir", &err, Some(path), Some(parent))
-                    })?;
-                }
-            }
-            if append {
-                let prepend_line_separator = append_needs_line_separator(&real_path, content)
-                    .map_err(|err| {
-                        io_builtin_error(
-                            "write_file",
-                            "inspect file before append",
-                            &err,
-                            Some(path),
-                            Some(&real_path),
-                        )
-                    })?;
-                let mut file = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&real_path)
-                    .map_err(|err| {
-                        io_builtin_error(
-                            "write_file",
-                            "open file for append",
-                            &err,
-                            Some(path),
-                            Some(&real_path),
-                        )
-                    })?;
-                if prepend_line_separator {
-                    file.write_all(b"\n").map_err(|err| {
-                        io_builtin_error(
-                            "write_file",
-                            "append line separator",
-                            &err,
-                            Some(path),
-                            Some(&real_path),
-                        )
-                    })?;
-                }
-                file.write_all(content.as_bytes()).map_err(|err| {
-                    io_builtin_error(
-                        "write_file",
-                        "append file",
-                        &err,
-                        Some(path),
-                        Some(&real_path),
-                    )
-                })?;
-                Ok(format!(
-                    "appended {} bytes to {}",
-                    content.len() + usize::from(prepend_line_separator),
-                    real_path.display()
-                ))
-            } else {
-                std::fs::write(&real_path, content).map_err(|err| {
-                    io_builtin_error(
-                        "write_file",
-                        "write file",
-                        &err,
-                        Some(path),
-                        Some(&real_path),
-                    )
-                })?;
-                Ok(format!(
-                    "written {} bytes to {}",
-                    content.len(),
-                    real_path.display()
-                ))
-            }
+            let action = if append { "append_text" } else { "write_text" };
+            run_checkpointed_workspace_mutation(
+                &state.skill_rt.workspace_root,
+                builtin_task_id(task),
+                action,
+                &real_path,
+                || {
+                    if create_parents {
+                        if let Some(parent) = real_path.parent() {
+                            std::fs::create_dir_all(parent).map_err(|err| {
+                                io_builtin_error(
+                                    "write_file",
+                                    "create_parent",
+                                    &err,
+                                    Some(path),
+                                    Some(parent),
+                                )
+                            })?;
+                        }
+                    }
+                    if append {
+                        let prepend_line_separator =
+                            append_needs_line_separator(&real_path, content).map_err(|err| {
+                                io_builtin_error(
+                                    "write_file",
+                                    "inspect_before_append",
+                                    &err,
+                                    Some(path),
+                                    Some(&real_path),
+                                )
+                            })?;
+                        let mut file = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&real_path)
+                            .map_err(|err| {
+                                io_builtin_error(
+                                    "write_file",
+                                    "open_for_append",
+                                    &err,
+                                    Some(path),
+                                    Some(&real_path),
+                                )
+                            })?;
+                        if prepend_line_separator {
+                            file.write_all(b"\n").map_err(|err| {
+                                io_builtin_error(
+                                    "write_file",
+                                    "append_line_separator",
+                                    &err,
+                                    Some(path),
+                                    Some(&real_path),
+                                )
+                            })?;
+                        }
+                        file.write_all(content.as_bytes()).map_err(|err| {
+                            io_builtin_error(
+                                "write_file",
+                                "append_file",
+                                &err,
+                                Some(path),
+                                Some(&real_path),
+                            )
+                        })?;
+                    } else {
+                        std::fs::write(&real_path, content).map_err(|err| {
+                            io_builtin_error(
+                                "write_file",
+                                "write_file",
+                                &err,
+                                Some(path),
+                                Some(&real_path),
+                            )
+                        })?;
+                    }
+                    Ok(())
+                },
+            )
         }
         "list_dir" => {
             ensure_only_keys(map, &["path", "names_only", "limit", "max_entries"])?;
@@ -594,15 +603,28 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let create_parents = optional_bool(map, "parents")
                 .or_else(|| optional_bool(map, "recursive"))
                 .unwrap_or(true);
-            let create_result = if create_parents {
-                std::fs::create_dir_all(&real_path)
-            } else {
-                std::fs::create_dir(&real_path)
-            };
-            create_result.map_err(|err| {
-                io_builtin_error("make_dir", "create_dir", &err, Some(path), Some(&real_path))
-            })?;
-            Ok(format!("created directory {}", real_path.display()))
+            run_checkpointed_workspace_mutation(
+                &state.skill_rt.workspace_root,
+                builtin_task_id(task),
+                "make_dir",
+                &real_path,
+                || {
+                    let create_result = if create_parents {
+                        std::fs::create_dir_all(&real_path)
+                    } else {
+                        std::fs::create_dir(&real_path)
+                    };
+                    create_result.map_err(|err| {
+                        io_builtin_error(
+                            "make_dir",
+                            "create_dir",
+                            &err,
+                            Some(path),
+                            Some(&real_path),
+                        )
+                    })
+                },
+            )
         }
         "remove_file" => {
             ensure_only_keys(map, &["path", "target_kind", "recursive"])?;
@@ -616,19 +638,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 path,
                 builtin_allows_path_outside_workspace(state, task),
             )?;
-            if real_path.is_dir() {
-                if target_kind.eq_ignore_ascii_case("directory") && recursive {
-                    std::fs::remove_dir_all(&real_path).map_err(|err| {
-                        io_builtin_error(
-                            "remove_file",
-                            "remove_dir_all",
-                            &err,
-                            Some(path),
-                            Some(&real_path),
-                        )
-                    })?;
-                    return Ok(format!("removed {}", real_path.display()));
-                }
+            if real_path.is_dir() && !(target_kind.eq_ignore_ascii_case("directory") && recursive) {
                 return Err(builtin_error(
                     "remove_file",
                     "is_directory",
@@ -641,16 +651,35 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     None,
                 ));
             }
-            std::fs::remove_file(&real_path).map_err(|err| {
-                io_builtin_error(
-                    "remove_file",
-                    "remove_file",
-                    &err,
-                    Some(path),
-                    Some(&real_path),
-                )
-            })?;
-            Ok(format!("removed {}", real_path.display()))
+            run_checkpointed_workspace_mutation(
+                &state.skill_rt.workspace_root,
+                builtin_task_id(task),
+                "remove_path",
+                &real_path,
+                || {
+                    if real_path.is_dir() {
+                        std::fs::remove_dir_all(&real_path).map_err(|err| {
+                            io_builtin_error(
+                                "remove_file",
+                                "remove_dir_all",
+                                &err,
+                                Some(path),
+                                Some(&real_path),
+                            )
+                        })
+                    } else {
+                        std::fs::remove_file(&real_path).map_err(|err| {
+                            io_builtin_error(
+                                "remove_file",
+                                "remove_file",
+                                &err,
+                                Some(path),
+                                Some(&real_path),
+                            )
+                        })
+                    }
+                },
+            )
         }
         "workspace_patch" => execute_workspace_patch(state, task, map),
         _ => Err(format!("unknown skill: {skill_name}")),
@@ -845,6 +874,11 @@ fn builtin_allows_path_outside_workspace(state: &AppState, task: Option<&Claimed
         return false;
     }
     crate::skills::task_allows_path_outside_workspace(state, task)
+}
+
+fn builtin_task_id(task: Option<&ClaimedTask>) -> &str {
+    task.map(|task| task.task_id.as_str())
+        .unwrap_or("test-task")
 }
 
 #[cfg(test)]

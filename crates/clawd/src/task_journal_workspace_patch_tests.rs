@@ -132,4 +132,118 @@ fn patch_and_verification_events_reference_the_workspace_checkpoint() {
         milestone.pointer("/payload/verification_status"),
         Some(&json!("verified"))
     );
+    let shell_event = events
+        .iter()
+        .find(|event| {
+            event.get("event_type").and_then(Value::as_str) == Some("tool_finished")
+                && event.pointer("/payload/step_id").and_then(Value::as_str) == Some("step_verify")
+        })
+        .expect("shell tool event");
+    assert_eq!(
+        shell_event.pointer("/payload/reversible"),
+        Some(&json!(false))
+    );
+    assert_eq!(
+        shell_event.pointer("/payload/reversibility_reason_code"),
+        Some(&json!("shell_side_effects_not_tracked"))
+    );
+}
+
+#[test]
+fn structured_write_and_rewind_preserve_mutation_compensation_fields() {
+    let write_output = json!({
+        "schema_version": 1,
+        "source": "workspace_mutation",
+        "status": "ok",
+        "action": "write_text",
+        "message_key": "workspace.mutation.applied",
+        "checkpoint_id": "mutation_checkpoint_1",
+        "mutation_id": "sha256:mutation-1",
+        "state": "applied",
+        "target_path": "src/lib.rs",
+        "isolation_root": "workspace://current",
+        "reversible": true,
+        "changed_files": ["src/lib.rs"],
+        "before": [{
+            "path": "src/lib.rs",
+            "kind": "file",
+            "sha256": "sha256:before",
+            "size_bytes": 6,
+            "backup_file": "before/0000.bin"
+        }],
+        "after": [{
+            "path": "src/lib.rs",
+            "kind": "file",
+            "sha256": "sha256:after",
+            "size_bytes": 5
+        }],
+        "artifact_refs": [
+            {"kind": "workspace_mutation", "ref": "workspace_mutation:sha256:mutation-1"},
+            {"kind": "workspace_checkpoint", "ref": "workspace_checkpoint:mutation_checkpoint_1"}
+        ]
+    })
+    .to_string();
+    let rewind_output = json!({
+        "schema_version": 1,
+        "source": "workspace_mutation",
+        "status": "ok",
+        "action": "rewind",
+        "message_key": "workspace.mutation.rewound",
+        "checkpoint_id": "mutation_checkpoint_1",
+        "mutation_id": "sha256:mutation-1",
+        "compensates_checkpoint_id": "mutation_checkpoint_1",
+        "compensates_mutation_id": "sha256:mutation-1",
+        "state": "rewound",
+        "target_path": "src/lib.rs",
+        "isolation_root": "workspace://current",
+        "reversible": false
+    })
+    .to_string();
+
+    let compact = step_output_excerpt_for_journal(&write_output);
+    let compact: Value = serde_json::from_str(&compact).expect("compact mutation");
+    assert_eq!(
+        compact.pointer("/extra/mutation_id"),
+        Some(&json!("sha256:mutation-1"))
+    );
+    assert_eq!(
+        compact.pointer("/extra/before/0/sha256"),
+        Some(&json!("sha256:before"))
+    );
+    assert!(compact.pointer("/extra/before/0/backup_file").is_none());
+
+    let mut journal = TaskJournal::for_task("task-structured-write", "ask", "write and rewind");
+    for (step_id, skill, output, started_at) in [
+        ("step_write", "write_file", write_output, 1),
+        ("step_rewind", "workspace_patch", rewind_output, 3),
+    ] {
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: step_id.to_string(),
+            skill: skill.to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(output),
+            error: None,
+            started_at,
+            finished_at: started_at + 1,
+        });
+    }
+    let trace = journal.to_trace_json();
+    assert_eq!(
+        trace.pointer("/step_results/0/structured_workspace_mutation/mutation_id"),
+        Some(&json!("sha256:mutation-1"))
+    );
+    assert_eq!(
+        trace.pointer("/step_results/1/structured_workspace_mutation/compensates_checkpoint_id"),
+        Some(&json!("mutation_checkpoint_1"))
+    );
+    let events = trace
+        .get("event_stream")
+        .and_then(Value::as_array)
+        .expect("event stream");
+    assert!(events.iter().any(|event| {
+        event
+            .pointer("/payload/compensates_mutation_id")
+            .and_then(Value::as_str)
+            == Some("sha256:mutation-1")
+    }));
 }

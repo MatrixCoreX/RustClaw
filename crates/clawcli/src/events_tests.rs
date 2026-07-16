@@ -420,6 +420,10 @@ fn event_lines_include_workspace_patch_and_rewind_fields() {
                             "status": "ok",
                             "checkpoint_id": "patch_checkpoint_1",
                             "patch_id": "sha256:patch-1",
+                            "mutation_id": "sha256:mutation-1",
+                            "compensates_checkpoint_id": "mutation_checkpoint_1",
+                            "compensates_mutation_id": "sha256:mutation-0",
+                            "target_path": "src/lib.rs",
                             "isolation_root": "workspace://current",
                             "reversible": true,
                             "additions": 4,
@@ -443,10 +447,52 @@ fn event_lines_include_workspace_patch_and_rewind_fields() {
         events[0].fields.get("reversible").map(String::as_str),
         Some("true")
     );
+    assert_eq!(
+        events[0].fields.get("mutation_id").map(String::as_str),
+        Some("sha256:mutation-1")
+    );
+    assert_eq!(
+        events[0]
+            .fields
+            .get("compensates_mutation_id")
+            .map(String::as_str),
+        Some("sha256:mutation-0")
+    );
     assert!(events[0].line.contains("checkpoint_id=patch_checkpoint_1"));
     assert!(events[0].line.contains("changed_hunks=2"));
     let filters = EventFilters::from_parts(&[], Some("patch_checkpoint_1"), None, None, None);
     assert!(filters.matches(&events[0]));
+}
+
+#[test]
+fn event_lines_expose_untracked_shell_reversibility() {
+    let data = json!({
+        "result_json": {"task_journal": {"trace": {"event_stream": [{
+            "seq": 9,
+            "event_type": "tool_finished",
+            "payload": {
+                "skill": "run_cmd",
+                "status": "ok",
+                "reversible": false,
+                "reversibility_status": "not_rewindable",
+                "reversibility_reason_code": "shell_side_effects_not_tracked"
+            }
+        }]}}}
+    });
+
+    let events = task_event_lines(&data);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].fields.get("reversible").map(String::as_str),
+        Some("false")
+    );
+    assert_eq!(
+        events[0]
+            .fields
+            .get("reversibility_reason_code")
+            .map(String::as_str),
+        Some("shell_side_effects_not_tracked")
+    );
 }
 
 #[test]

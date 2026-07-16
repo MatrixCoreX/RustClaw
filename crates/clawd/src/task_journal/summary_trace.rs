@@ -530,11 +530,14 @@ fn structured_workspace_mutation_from_step_output(output: Option<&str>) -> Optio
         .get("extra")
         .filter(|extra| extra.is_object())
         .unwrap_or(&value);
-    if source.get("source").and_then(Value::as_str) != Some("workspace_patch") {
+    if !matches!(
+        source.get("source").and_then(Value::as_str),
+        Some("workspace_patch" | "workspace_mutation")
+    ) {
         return None;
     }
     let action = source.get("action").and_then(Value::as_str)?;
-    if !matches!(action, "apply_patch" | "rewind") {
+    if action == "diff" {
         return None;
     }
     let mut mutation = serde_json::Map::new();
@@ -544,8 +547,13 @@ fn structured_workspace_mutation_from_step_output(output: Option<&str>) -> Optio
         "status",
         "action",
         "patch_id",
+        "mutation_id",
         "checkpoint_id",
+        "compensates_patch_id",
+        "compensates_mutation_id",
+        "compensates_checkpoint_id",
         "state",
+        "target_path",
         "isolation_root",
         "reversible",
         "additions",
@@ -555,6 +563,8 @@ fn structured_workspace_mutation_from_step_output(output: Option<&str>) -> Optio
         "changed_files",
         "restored_files",
         "files",
+        "before",
+        "after",
         "artifact_refs",
     ] {
         if let Some(value) = source.get(field) {
@@ -720,6 +730,14 @@ pub(super) fn step_trace_json(
     let artifact_ref_count = artifact_refs.len();
     let structured_workspace_mutation =
         structured_workspace_mutation_from_step_output(step.output_excerpt.as_deref());
+    let mutation_reversibility = (step.skill == "run_cmd").then(|| {
+        json!({
+            "source": "shell_command",
+            "reversible": false,
+            "status": "not_rewindable",
+            "reason_code": "shell_side_effects_not_tracked",
+        })
+    });
     json!({
         "step_id": &step.step_id,
         "action_kind": action_kind,
@@ -752,6 +770,7 @@ pub(super) fn step_trace_json(
         "artifact_refs": artifact_refs,
         "artifact_ref_count": artifact_ref_count,
         "structured_workspace_mutation": structured_workspace_mutation,
+        "mutation_reversibility": mutation_reversibility,
         "retry_fingerprint": null,
         "retry_fingerprint_status": "not_recorded_in_step_trace",
         "error_excerpt": step.error_excerpt.as_deref(),
