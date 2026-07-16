@@ -9,7 +9,6 @@
   * `intent_normalizer_prompt.md`
   * `chat_response_prompt.md`
   * `single_plan_execution_prompt.md`
-  * `lightweight_execution_prompt.md`
   * `loop_incremental_plan_prompt.md`
   * `plan_repair_prompt.md`
   * `planner_abort_compact_retry_prompt.md`

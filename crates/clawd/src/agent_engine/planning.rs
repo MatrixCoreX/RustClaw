@@ -13,14 +13,9 @@ use super::planning_followup::{
 #[cfg(test)]
 use super::planning_parse::extract_xml_tool_call_steps;
 use super::planning_parse::parse_single_plan_actions;
-#[cfg(test)]
-use super::planning_prompt::compact_skill_playbook_from_prompt;
 use super::planning_prompt::{
-    build_incremental_plan_prompt, build_lightweight_skill_playbooks_text,
-    build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
-    classify_planning_prompt_class, compact_lightweight_incremental_goal_context,
-    ensure_required_contract_block_present, incremental_prompt_spec_for_class,
-    round1_prompt_spec_for_class, runtime_os_label, runtime_shell_label, PlanningPromptClass,
+    build_incremental_plan_prompt, ensure_required_contract_block_present, incremental_prompt_spec,
+    round1_prompt_spec, runtime_os_label, runtime_shell_label,
 };
 #[cfg(test)]
 use super::planning_registry_preference::registry_preferred_skill_matches_route;
@@ -32,7 +27,7 @@ use super::planning_registry_preference::{
 };
 use regex::Regex;
 use serde_json::Value;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -57,70 +52,23 @@ use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResul
 struct PlannerToolLibrary<'a> {
     state: &'a AppState,
     task: &'a ClaimedTask,
-    planning_class: PlanningPromptClass,
-    route_result: Option<&'a RouteResult>,
-    auto_locator_path: Option<&'a str>,
-    skill_scope: Option<BTreeSet<String>>,
 }
 
 impl<'a> PlannerToolLibrary<'a> {
-    fn new(
-        state: &'a AppState,
-        task: &'a ClaimedTask,
-        planning_class: PlanningPromptClass,
-        route_result: Option<&'a RouteResult>,
-        auto_locator_path: Option<&'a str>,
-    ) -> Self {
-        let skill_scope = planner_visible_skill_scope(planning_class, route_result);
-        Self {
-            state,
-            task,
-            planning_class,
-            route_result,
-            auto_locator_path,
-            skill_scope,
-        }
-    }
-
-    fn is_open_planning(&self) -> bool {
-        matches!(self.planning_class, PlanningPromptClass::OpenPlanning)
-    }
-
-    fn uses_compact_tool_library(&self) -> bool {
-        !self.is_open_planning() || self.skill_scope.is_some()
+    fn new(state: &'a AppState, task: &'a ClaimedTask) -> Self {
+        Self { state, task }
     }
 
     fn skill_playbooks(&self) -> String {
-        if self.uses_compact_tool_library() {
-            build_lightweight_skill_playbooks_text(self.state, self.task, self.skill_scope.as_ref())
-        } else {
-            build_skill_playbooks_text_scoped(self.state, self.task, self.skill_scope.as_ref())
-        }
+        build_skill_playbooks_text_scoped(self.state, self.task, None)
     }
 
     fn skill_quick_index(&self) -> String {
-        if self.uses_compact_tool_library() {
-            build_lightweight_skill_quick_index_text(
-                self.state,
-                self.task,
-                self.skill_scope.as_ref(),
-            )
-        } else {
-            build_skill_quick_index_text_scoped(self.state, self.task, self.skill_scope.as_ref())
-        }
+        build_skill_quick_index_text_scoped(self.state, self.task, None)
     }
 
     fn tool_spec(&self) -> Result<String, String> {
-        if self.uses_compact_tool_library() {
-            Ok(build_lightweight_tool_spec(
-                self.route_result,
-                self.auto_locator_path,
-            ))
-        } else {
-            crate::bootstrap::load_required_prompt_template_for_state(
-                self.state,
-                AGENT_TOOL_SPEC_PATH,
-            )
+        crate::bootstrap::load_required_prompt_template_for_state(self.state, AGENT_TOOL_SPEC_PATH)
             .map(|resolved| {
                 let capability_map =
                     crate::capability_map::build_capability_map_for_task(self.state, self.task);
@@ -134,17 +82,7 @@ impl<'a> PlannerToolLibrary<'a> {
                 spec
             })
             .map_err(|err| err.to_string())
-        }
     }
-}
-
-fn planner_visible_skill_scope(
-    _planning_class: PlanningPromptClass,
-    _route_result: Option<&RouteResult>,
-) -> Option<BTreeSet<String>> {
-    // The planner owns ordinary capability selection. Boundary hints may
-    // influence context, but they must never hide otherwise available skills.
-    None
 }
 
 #[path = "planning_scalar_count_filter.rs"]
@@ -250,23 +188,17 @@ pub(super) async fn plan_round_actions(
     let runtime_shell = runtime_shell_label();
     let workspace_root = state.skill_rt.workspace_root.display().to_string();
     let agent_runtime_identity = state.agent_runtime_identity_label().to_string();
-    let planning_class = classify_planning_prompt_class(route_result, user_text, loop_state);
     let original_user_text_for_policy = crate::language_policy::task_original_user_text(task)
         .unwrap_or_else(|| user_text.to_string());
-    let recent_assistant_replies = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
-        crate::memory::build_recent_assistant_replies_context(
-            state,
-            task.user_key.as_deref(),
-            task.user_id,
-            task.chat_id,
-            3,
-            220,
-        )
-    } else {
-        "<omitted: lightweight_execution>".to_string()
-    };
-    let planner_tool_library =
-        PlannerToolLibrary::new(state, task, planning_class, route_result, auto_locator_path);
+    let recent_assistant_replies = crate::memory::build_recent_assistant_replies_context(
+        state,
+        task.user_key.as_deref(),
+        task.user_id,
+        task.chat_id,
+        3,
+        220,
+    );
+    let planner_tool_library = PlannerToolLibrary::new(state, task);
     let skill_playbooks = planner_tool_library.skill_playbooks();
     let skill_quick_index = planner_tool_library.skill_quick_index();
     let tool_spec_template = planner_tool_library.tool_spec()?;
@@ -281,7 +213,7 @@ pub(super) async fn plan_round_actions(
         crate::language_policy::task_user_request_for_prompt(task, user_text);
     let attempt_ledger = build_attempt_ledger_compact(loop_state);
     let (prompt_name, prompt_source, prompt_version, prompt_text) = if loop_state.round_no <= 1 {
-        let (prompt_name, prompt_logical_path) = round1_prompt_spec_for_class(planning_class);
+        let (prompt_name, prompt_logical_path) = round1_prompt_spec();
         let resolved = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
             state,
             prompt_logical_path,
@@ -303,13 +235,11 @@ pub(super) async fn plan_round_actions(
                 &runtime_shell,
                 &workspace_root,
             );
-            if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
-                prompt.push_str(
+            prompt.push_str(
                         "\n\n## Skill Quick Index (first-round routing hint)\nGoal: reduce misclassification while minimizing avoidable extra rounds.\n- Do NOT end round-1 with a generic chat-style final answer when a skill might be relevant.\n- In round-1, prioritize intent classification + missing-slot check, but finish immediately when one bounded resolution/current-runtime step can already complete the request safely.\n- Ask one concise clarification only when safe completion is truly blocked after current-turn text, immediate context, and bounded resolution/default inference have been used.\n- Use immediate `call_skill` in round-1 whenever intent is clear or can be completed by one bounded resolution/current-runtime step.\n",
                     );
-                prompt.push_str(&skill_quick_index);
-                prompt.push('\n');
-            }
+            prompt.push_str(&skill_quick_index);
+            prompt.push('\n');
             prompt
         })
     } else {
@@ -331,18 +261,12 @@ pub(super) async fn plan_round_actions(
             .map(|s| crate::truncate_for_log(s))
             .or_else(|| loop_state.delivery_messages.last().cloned())
             .unwrap_or_else(|| "(none)".to_string());
-        let (prompt_name, prompt_logical_path) = incremental_prompt_spec_for_class(planning_class);
+        let (prompt_name, prompt_logical_path) = incremental_prompt_spec();
         let resolved = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
             state,
             prompt_logical_path,
         )
         .map_err(|e| e.to_string())?;
-        let effective_goal = if matches!(planning_class, PlanningPromptClass::LightweightExecution)
-        {
-            compact_lightweight_incremental_goal_context(goal)
-        } else {
-            goal.to_string()
-        };
         (
             prompt_name,
             resolved.source,
@@ -350,7 +274,7 @@ pub(super) async fn plan_round_actions(
             build_incremental_plan_prompt(
                 &resolved.template,
                 &user_request_for_prompt,
-                &effective_goal,
+                goal,
                 &turn_analysis,
                 &tool_spec_template,
                 &skill_playbooks,
@@ -386,10 +310,9 @@ pub(super) async fn plan_round_actions(
         policy.multi_round_enabled
     );
     info!(
-        "plan_llm_request task_id={} round={} planning_class={} prompt_chars={} tool_spec_chars={} playbooks_chars={} recent_replies_chars={} user_request={}",
+        "plan_llm_request task_id={} round={} planner_mode=agent_loop prompt_chars={} tool_spec_chars={} playbooks_chars={} recent_replies_chars={} user_request={}",
         task.task_id,
         loop_state.round_no,
-        planning_class.as_str(),
         prompt_text.chars().count(),
         tool_spec_template.chars().count(),
         skill_playbooks.chars().count(),

@@ -111,8 +111,7 @@ fn open_planning_tool_spec_includes_runtime_protocols() {
     let mut state = test_state_with_enabled_skills(&["fs_basic"]);
     state.skill_rt.workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let task = test_task();
-    let library =
-        PlannerToolLibrary::new(&state, &task, PlanningPromptClass::OpenPlanning, None, None);
+    let library = PlannerToolLibrary::new(&state, &task);
 
     let spec = library.tool_spec().expect("open planning tool spec");
 
@@ -120,53 +119,6 @@ fn open_planning_tool_spec_includes_runtime_protocols() {
     assert!(spec.contains("agent_runtime_protocols=subagent_roles:"));
     assert!(spec.contains("subagent_write_enabled:false"));
     assert!(spec.contains("### Agent runtime protocols"));
-}
-
-#[test]
-fn open_planning_with_contract_scope_uses_compact_tool_library() {
-    let mut state = test_state_with_enabled_skills(&["db_basic", "fs_basic"]);
-    state.skill_rt.workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let task = test_task();
-    let mut route = base_route_result();
-    route.resolved_intent = "capability_ref=database.list_tables".to_string();
-    route.route_reason = "capability_ref=database.list_tables".to_string();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
-    let library = PlannerToolLibrary::new(
-        &state,
-        &task,
-        PlanningPromptClass::OpenPlanning,
-        Some(&route),
-        None,
-    );
-
-    let spec = library.tool_spec().expect("scoped open planning tool spec");
-    let playbooks = library.skill_playbooks();
-    let quick_index = library.skill_quick_index();
-
-    assert!(library
-        .skill_scope
-        .as_ref()
-        .is_some_and(|scope| { scope.len() == 1 && scope.contains("db_basic") }));
-    assert!(spec.contains("### LIGHT_EXECUTION_RULES"));
-    assert!(!spec.starts_with("runtime_capability_map_v1"));
-    assert!(!spec.contains("### Agent runtime protocols"));
-    assert!(playbooks.contains("db_basic"));
-    assert!(!playbooks.contains("fs_basic"));
-    assert!(quick_index.contains("db_basic"));
-    assert!(!quick_index.contains("fs_basic"));
-}
-
-#[test]
-fn lightweight_tool_spec_includes_runtime_protocols() {
-    let spec = build_lightweight_tool_spec(None, None);
-
-    assert!(spec.contains("agent_runtime_protocols=subagent_roles:"));
-    assert!(spec.contains("subagent_write_enabled:false"));
-    assert!(spec.contains("async_job_protocol="));
 }
 
 #[test]

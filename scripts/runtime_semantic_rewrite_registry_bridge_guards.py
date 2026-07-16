@@ -356,49 +356,34 @@ def scan_current_workspace_scope_boundary_marker() -> list[Finding]:
     return findings
 
 
-def scan_lightweight_tool_spec_contract_marker() -> list[Finding]:
-    rel_path = rel(PLANNING_PROMPT_FILE)
-    text = PLANNING_PROMPT_FILE.read_text(encoding="utf-8")
-    fn_start = text.find("pub(super) fn build_lightweight_tool_spec(")
-    if fn_start < 0:
-        return [
-            Finding(
-                rel_path,
-                1,
-                "lightweight_tool_spec_missing",
-                "missing build_lightweight_tool_spec",
-            )
-        ]
-    fn_end = text.find("\nconst LIGHTWEIGHT_SKILL_PLAYBOOK_MAX_CHARS", fn_start)
-    body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
+def scan_removed_lightweight_preclassification() -> list[Finding]:
+    targets = (
+        PLANNING_PROMPT_FILE,
+        SRC_ROOT / "agent_engine/planning.rs",
+        AGENT_ENGINE_FILE,
+        ROOT / "prompts/layers/manifest.toml",
+        ROOT / "crates/clawd/src/bootstrap/prompts.rs",
+    )
+    forbidden_tokens = (
+        "PlanningPromptClass",
+        "build_lightweight_tool_spec",
+        "lightweight_execution_prompt",
+        "lightweight_incremental_plan_prompt",
+    )
     findings: list[Finding] = []
-    if "final_answer_shape={}" not in body or "final_answer_shape_class={}" not in body:
-        findings.append(
-            Finding(
-                rel_path,
-                1,
-                "lightweight_tool_spec_answer_shape_missing",
-                "lightweight tool spec should expose final_answer_shape/final_answer_shape_class",
+    for path in targets:
+        text = path.read_text(encoding="utf-8")
+        for token in forbidden_tokens:
+            if token not in text:
+                continue
+            findings.append(
+                Finding(
+                    rel(path),
+                    1,
+                    "removed_lightweight_preclassification_present",
+                    f"obsolete pre-planner classification token remains: {token}",
+                )
             )
-        )
-    if "contract_marker={}" in body:
-        findings.append(
-            Finding(
-                rel_path,
-                1,
-                "lightweight_tool_spec_contract_marker_returned",
-                "lightweight tool spec must not expose legacy contract_marker",
-            )
-        )
-    if "semantic_kind={}" in body:
-        findings.append(
-            Finding(
-                rel_path,
-                1,
-                "lightweight_tool_spec_semantic_kind_emission",
-                "lightweight tool spec must not expose legacy semantic_kind",
-            )
-        )
     return findings
 
 

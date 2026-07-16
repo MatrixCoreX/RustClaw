@@ -66,16 +66,8 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "single_plan_execution (agent_engine.planning)",
     ),
     (
-        "prompts/lightweight_execution_prompt.md",
-        "lightweight_execution (agent_engine.planning)",
-    ),
-    (
         "prompts/loop_incremental_plan_prompt.md",
         "loop_incremental_plan (agent_engine.planning)",
-    ),
-    (
-        "prompts/lightweight_incremental_plan_prompt.md",
-        "lightweight_incremental_plan_agent_engine_planning",
     ),
     (
         "prompts/plan_repair_prompt.md",
