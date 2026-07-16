@@ -218,6 +218,24 @@ pub(crate) fn submit_goal_ask(
     submit_ask_with_payload(base_url, key, payload)
 }
 
+pub(crate) fn submit_capability(
+    base_url: &str,
+    key: &str,
+    capability: &str,
+    args: Value,
+) -> Result<String> {
+    submit_ask_with_payload(base_url, key, capability_task_payload(capability, args))
+}
+
+pub(super) fn capability_task_payload(capability: &str, args: Value) -> Value {
+    json!({
+        "entrypoint": "run_capability",
+        "capability": capability,
+        "args": args,
+        "source": "clawcli_machine",
+    })
+}
+
 pub(crate) fn submit_run_skill(
     base_url: &str,
     key: &str,

@@ -1,6 +1,6 @@
 use super::{
-    async_final_result_value, result_text_from_result_json, resume_task_payload,
-    threaded_ask_payload, TaskResumeRequest, TaskStatusView,
+    async_final_result_value, capability_task_payload, result_text_from_result_json,
+    resume_task_payload, threaded_ask_payload, TaskResumeRequest, TaskStatusView,
 };
 
 #[test]
@@ -169,4 +169,19 @@ fn threaded_ask_payload_binds_thread_and_only_adds_resume_for_followups() {
     let followup = threaded_ask_payload("continue", "thread-1", "session-1", Some("task-previous"));
     assert_eq!(followup["resume_task_id"], "task-previous");
     assert_eq!(followup["resume_trigger"], "user_followup");
+}
+
+#[test]
+fn capability_task_payload_uses_the_verified_machine_entrypoint() {
+    let payload = capability_task_payload(
+        "workspace.diff",
+        serde_json::json!({"checkpoint_id": "checkpoint-1", "paths": ["src/lib.rs"]}),
+    );
+
+    assert_eq!(payload["entrypoint"], "run_capability");
+    assert_eq!(payload["capability"], "workspace.diff");
+    assert_eq!(payload["source"], "clawcli_machine");
+    assert_eq!(payload["args"]["checkpoint_id"], "checkpoint-1");
+    assert_eq!(payload["args"]["paths"][0], "src/lib.rs");
+    assert!(payload.get("text").is_none());
 }

@@ -554,6 +554,38 @@ enum CodeCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect the current workspace or a reversible checkpoint diff.
+    Diff {
+        #[arg(long = "checkpoint-id")]
+        checkpoint_id: Option<String>,
+        #[arg(long = "path")]
+        paths: Vec<String>,
+        #[arg(long)]
+        detach: bool,
+        #[arg(long, conflicts_with = "jsonl")]
+        json: bool,
+        #[arg(long)]
+        jsonl: bool,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
+        #[arg(long, default_value_t = 1000)]
+        poll_interval_ms: u64,
+    },
+    /// Rewind a reversible workspace checkpoint after one-shot approval.
+    Rewind {
+        #[arg(long = "checkpoint-id")]
+        checkpoint_id: String,
+        #[arg(long)]
+        detach: bool,
+        #[arg(long, conflicts_with = "jsonl")]
+        json: bool,
+        #[arg(long)]
+        jsonl: bool,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
+        #[arg(long, default_value_t = 1000)]
+        poll_interval_ms: u64,
+    },
     /// Compatibility fallback for `clawcli code <prompt...>`.
     #[command(external_subcommand)]
     Prompt(Vec<String>),
@@ -810,6 +842,49 @@ fn main() -> Result<()> {
                 let k = key.as_deref().ok_or_else(auth::key_required_error)?;
                 let message = (!message.is_empty()).then(|| message.join(" "));
                 commands::run_continue_task(base_url, k, task_id, message.as_deref(), *json)
+            }
+            CodeCommand::Diff {
+                checkpoint_id,
+                paths,
+                detach,
+                json,
+                jsonl,
+                timeout_seconds,
+                poll_interval_ms,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                run_code_capability_command(
+                    base_url,
+                    k,
+                    "workspace.diff",
+                    commands::workspace_diff_args(checkpoint_id.as_deref(), paths),
+                    *detach,
+                    *json,
+                    *jsonl,
+                    *timeout_seconds,
+                    *poll_interval_ms,
+                )
+            }
+            CodeCommand::Rewind {
+                checkpoint_id,
+                detach,
+                json,
+                jsonl,
+                timeout_seconds,
+                poll_interval_ms,
+            } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                run_code_capability_command(
+                    base_url,
+                    k,
+                    "workspace.revert_checkpoint",
+                    commands::workspace_rewind_args(checkpoint_id),
+                    *detach,
+                    *json,
+                    *jsonl,
+                    *timeout_seconds,
+                    *poll_interval_ms,
+                )
             }
             CodeCommand::Prompt(prompt) => {
                 let k = key.as_deref().ok_or_else(auth::key_required_error)?;
@@ -1364,6 +1439,38 @@ fn run_exec_command(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_code_capability_command(
+    base_url: &str,
+    key: &str,
+    capability: &str,
+    args: serde_json::Value,
+    detach: bool,
+    json_output: bool,
+    jsonl_output: bool,
+    timeout_seconds: Option<u64>,
+    interval_ms: u64,
+) -> Result<()> {
+    let exit_code = commands::run_code_capability(
+        base_url,
+        key,
+        capability,
+        args,
+        commands::CodeCapabilityOptions {
+            detach,
+            json_output,
+            jsonl_output,
+            timeout_seconds: timeout_seconds.or(Some(900)),
+            interval_ms,
+        },
+    )?;
+    if exit_code == 0 {
+        Ok(())
+    } else {
+        std::process::exit(i32::from(exit_code));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1424,7 +1531,7 @@ mod tests {
             .get_subcommands()
             .map(|subcommand| subcommand.get_name().to_string())
             .collect::<std::collections::BTreeSet<_>>();
-        for required in ["run", "status", "review", "continue"] {
+        for required in ["run", "status", "review", "continue", "diff", "rewind"] {
             assert!(code_names.contains(required), "missing {required}");
         }
 
@@ -1540,6 +1647,60 @@ mod tests {
                 vec!["fix".to_string(), "the".to_string(), "test".to_string()]
             ),
             _ => panic!("expected code run"),
+        }
+
+        match Cli::try_parse_from([
+            "clawcli",
+            "code",
+            "diff",
+            "--checkpoint-id",
+            "checkpoint-1",
+            "--path",
+            "src/lib.rs",
+            "--jsonl",
+        ])
+        .expect("parse workspace diff")
+        .cmd
+        {
+            Some(Command::Code {
+                command:
+                    CodeCommand::Diff {
+                        checkpoint_id,
+                        paths,
+                        jsonl,
+                        ..
+                    },
+            }) => {
+                assert_eq!(checkpoint_id.as_deref(), Some("checkpoint-1"));
+                assert_eq!(paths, vec!["src/lib.rs".to_string()]);
+                assert!(jsonl);
+            }
+            _ => panic!("expected code diff"),
+        }
+
+        match Cli::try_parse_from([
+            "clawcli",
+            "code",
+            "rewind",
+            "--checkpoint-id",
+            "checkpoint-2",
+            "--json",
+        ])
+        .expect("parse workspace rewind")
+        .cmd
+        {
+            Some(Command::Code {
+                command:
+                    CodeCommand::Rewind {
+                        checkpoint_id,
+                        json,
+                        ..
+                    },
+            }) => {
+                assert_eq!(checkpoint_id, "checkpoint-2");
+                assert!(json);
+            }
+            _ => panic!("expected code rewind"),
         }
 
         match Cli::try_parse_from(["clawcli", "code", "fix", "the", "test"])

@@ -1,5 +1,6 @@
 //! Command handlers for `clawcli`.
 
+mod code_control;
 mod common;
 mod exec;
 mod goal;
@@ -18,6 +19,9 @@ mod task_control;
 mod task_query;
 mod tui;
 
+pub(crate) use code_control::{
+    run_code_capability, workspace_diff_args, workspace_rewind_args, CodeCapabilityOptions,
+};
 pub(crate) use exec::run_exec;
 pub(crate) use goal::{
     run_goal_clear, run_goal_edit, run_goal_pause, run_goal_resume, run_goal_start, run_goal_status,
