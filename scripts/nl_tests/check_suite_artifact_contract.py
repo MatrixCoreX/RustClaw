@@ -206,7 +206,6 @@ AGENT_PARITY_GATE_TEXT_CONTENT_TOKENS = {
     "agent_parity_gate/agent_architecture_boundary_contracts.txt": {
         "SELF_TEST_OK",
         "BOUNDARY_ENVELOPE_SCHEMA_CHECK findings=0",
-        "INTENT_NORMALIZER_BOUNDARY_SCHEMA_CHECK findings=0",
         "PLANNER_PRE_LLM_DETERMINISTIC_FAST_PATH_CHECK strict_tests=false findings=0",
         "CAPABILITY_RESOLVER_REGISTRY_ONLY_CHECK findings=0",
         "FINALIZER_BOUNDARY_CHECK ok",

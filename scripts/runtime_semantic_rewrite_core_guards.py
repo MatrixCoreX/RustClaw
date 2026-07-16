@@ -91,7 +91,6 @@ def scan_text(rel_path: str, text: str) -> list[Finding]:
             findings.append(Finding(rel_path, line_no, kind, line.strip()))
     return findings
 
-
 def scan_repo_text(rel_path: str, text: str) -> list[Finding]:
     return scan_text(rel_path, text)
 
@@ -216,60 +215,3 @@ def scan_static_capability_compat_boundary() -> list[Finding]:
                     )
                 )
     return findings
-
-
-def scan_contract_repair_judge_boundary() -> list[Finding]:
-    path = SRC_ROOT / "intent_router_normalizer_answer_repair.rs"
-    if not path.exists():
-        return []
-    return scan_contract_repair_judge_boundary_text(rel(path), path.read_text(encoding="utf-8"))
-
-
-def scan_contract_repair_judge_boundary_text(rel_path: str, text: str) -> list[Finding]:
-    required_tokens = [
-        "#[cfg(test)]\nasync fn apply_contract_judge_repair(",
-        "#[cfg(not(test))]\nasync fn apply_contract_judge_repair(",
-        "contract_repair_report.needs_llm_contract_integrity_repair()",
-    ]
-    findings: list[Finding] = []
-    for token in required_tokens:
-        if token in text:
-            continue
-        findings.append(
-            Finding(
-                rel_path,
-                1,
-                "contract_repair_judge_boundary_missing",
-                f"missing required boundary token: {token}",
-            )
-        )
-    if "contract_repair_judge_runtime_enabled" in text or "cfg!(test)" in text:
-        findings.append(
-            Finding(
-                rel_path,
-                1,
-                "contract_repair_judge_runtime_switch",
-                "pre-agent LLM repair must be compile-time test-only, not a runtime switch",
-            )
-        )
-    findings.extend(scan_semantic_suspect_report_boundary(rel_path, text))
-    return findings
-
-
-def scan_semantic_suspect_report_boundary(rel_path: str, text: str) -> list[Finding]:
-    semantic_report_pos = text.find('contract_repair_report.add("semantic_suspect"')
-    if semantic_report_pos < 0:
-        return []
-    test_only_repair_pos = text.find(
-        "#[cfg(test)]\nasync fn apply_contract_judge_repair("
-    )
-    if 0 <= test_only_repair_pos < semantic_report_pos:
-        return []
-    return [
-        Finding(
-            rel_path,
-            1,
-            "semantic_suspect_report_not_test_gated",
-            "semantic_suspect report collection must stay behind contract_repair_judge_runtime_enabled()",
-        )
-    ]

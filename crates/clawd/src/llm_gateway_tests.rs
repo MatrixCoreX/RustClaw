@@ -2,10 +2,7 @@ use std::path::PathBuf;
 
 use claw_core::config::AppConfig;
 
-use super::{
-    classify_prompt_source, matches_provider_override,
-    recover_normalizer_text_from_openai_tool_calls, synthesize_llm_providers,
-};
+use super::{classify_prompt_source, matches_provider_override, synthesize_llm_providers};
 
 fn repo_config_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -42,70 +39,6 @@ fn classify_prompt_source_uses_specific_classifier_labels() {
         ),
         "user_response_validator"
     );
-}
-
-#[test]
-fn normalizer_recovers_openai_tool_call_as_execution_contract() {
-    let raw_response = r#"{
-      "choices":[{
-        "finish_reason":"tool_calls",
-        "message":{
-          "content":"<think>need file evidence</think>",
-          "tool_calls":[{
-            "type":"function",
-            "function":{
-              "name":"read_file",
-              "arguments":"{\"file_path\":\"/home/guagua/rustclaw/README.md\"}"
-            }
-          }]
-        }
-      }]
-    }"#;
-    let recovered = recover_normalizer_text_from_openai_tool_calls(
-        "layered:prompts/intent_normalizer_prompt.md#vendor=minimax",
-        "REQUEST: 读取 README 开头内容，再用一句话总结\n",
-        raw_response,
-    )
-    .expect("recover tool call");
-    let value = serde_json::from_str::<serde_json::Value>(&recovered).expect("json");
-
-    assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
-    assert_eq!(
-        value
-            .pointer("/output_contract/requires_content_evidence")
-            .and_then(|v| v.as_bool()),
-        Some(true)
-    );
-    assert_eq!(
-        value
-            .pointer("/output_contract/locator_hint")
-            .and_then(|v| v.as_str()),
-        Some("/home/guagua/rustclaw/README.md")
-    );
-    assert_eq!(
-        value.get("resolved_user_intent").and_then(|v| v.as_str()),
-        Some("读取 README 开头内容，再用一句话总结")
-    );
-}
-
-#[test]
-fn tool_call_recovery_ignores_non_normalizer_prompts() {
-    let raw_response = r#"{
-      "choices":[{
-        "message":{
-          "tool_calls":[{
-            "function":{"arguments":"{\"path\":\"/tmp/a.txt\"}"}
-          }]
-        }
-      }]
-    }"#;
-
-    assert!(recover_normalizer_text_from_openai_tool_calls(
-        "layered:prompts/chat_response_prompt.md#vendor=minimax",
-        "REQUEST: read a file",
-        raw_response,
-    )
-    .is_none());
 }
 
 #[test]

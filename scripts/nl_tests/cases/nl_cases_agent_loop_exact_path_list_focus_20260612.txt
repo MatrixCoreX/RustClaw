@@ -47,10 +47,10 @@ act|epl_tmp_dir_names_en_036|act,exact_path_list,directory_names,listing,en,clie
 act|epl_tmp_groups_zh_037|act,exact_path_list,directory_entry_groups,listing,zh,client_like|把 scripts/nl_tests/fixtures/device_local/tmp 顶层内容按文件和目录分组列出来。|expect=test_bundle.zip
 act|epl_tmp_groups_en_038|act,exact_path_list,directory_entry_groups,listing,en,client_like|Group top-level entries under scripts/nl_tests/fixtures/device_local/tmp by file and directory.|expect=bundle_src
 
-act|epl_prompts_schema_paths_zh_039|act,exact_path_list,file_paths,listing,zh,client_like|找出 prompts/schemas 目录下的 json 文件路径，只输出路径列表。|expect=intent_normalizer.schema.json
-act|epl_prompts_schema_paths_en_040|act,exact_path_list,file_paths,listing,en,client_like|Find JSON file paths under prompts/schemas and output only paths.|expect=contract_repair_judge.schema.json
+act|epl_prompts_schema_paths_zh_039|act,exact_path_list,file_paths,listing,zh,client_like|找出 prompts/schemas 目录下的 json 文件路径，只输出路径列表。|expect=plan_result.schema.json
+act|epl_prompts_schema_paths_en_040|act,exact_path_list,file_paths,listing,en,client_like|Find JSON file paths under prompts/schemas and output only paths.|expect=answer_verifier.schema.json
 act|epl_prompts_schema_names_zh_041|act,exact_path_list,file_names,listing,zh,client_like|列出 prompts/schemas 里的 json 文件名，只输出文件名。|expect=agent_loop_decision_envelope.schema.json
-act|epl_prompts_schema_names_en_042|act,exact_path_list,file_names,listing,en,client_like|List only JSON file names in prompts/schemas.|expect=intent_normalizer.schema.json
+act|epl_prompts_schema_names_en_042|act,exact_path_list,file_names,listing,en,client_like|List only JSON file names in prompts/schemas.|expect=boundary_envelope.schema.json
 
 act|epl_crates_dir_names_zh_043|act,exact_path_list,directory_names,listing,zh,client_like|列出 crates 目录下的一级目录名，只输出目录名。|expect=clawd
 act|epl_crates_dir_names_en_044|act,exact_path_list,directory_names,listing,en,client_like|List direct directory names under crates only.|expect=skill-runner

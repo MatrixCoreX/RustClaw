@@ -475,11 +475,9 @@ fn parse_json_with_repair<T: DeserializeOwned>(raw: &str) -> Option<T> {
                 })?;
             serde_json::from_str::<T>(&deduped).ok()
         })
-        // §F3-a：补齐截断 JSON 末尾未闭合的 `{`/`[`。
-        // adv12 复现：MiniMax 偶发把 envelope 末尾 `}` 漏掉 + 把废弃字段误嵌入
-        // `execution_recipe` 内部，导致 normalizer 解析失败 → 走 clarify 兜底，
-        // 永远到不了 planner。补齐括号后 serde 用 `#[serde(default)]` 拿到字段的
-        // 默认值，路由路径恢复。
+        // 补齐截断 JSON 末尾未闭合的 `{`/`[`。部分 providers 会在 planner
+        // action envelope 的最后漏掉闭合括号；恢复语法后仍由当前 schema 做
+        // 字段和动作合同校验。
         .or_else(|| {
             let balanced = balance_unclosed_brackets(raw)?;
             serde_json::from_str::<T>(&balanced).ok()

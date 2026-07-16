@@ -1,75 +1,6 @@
 use serde_json::{json, Value};
 
 #[test]
-fn validate_against_schema_drops_legacy_intent_decision_extra() {
-    let raw = r#"{
-        "resolved_user_intent":"check logs",
-        "decision":"oops_status",
-        "needs_clarify":false,
-        "reason":"r",
-        "confidence":0.9,
-        "output_contract":{
-            "response_shape":"free",
-            "requires_content_evidence":false,
-            "delivery_required":false,
-            "locator_kind":"none",
-            "delivery_intent":"none",
-            "contract_marker":"none",
-            "locator_hint":"",
-            "self_extension":{"mode":"none","trigger":"none","execute_now":false}
-        }
-    }"#;
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
-            .expect("legacy decision field should be dropped during boundary canonicalization");
-    assert!(validated.schema_normalized);
-    assert!(validated.value.get("decision").is_none());
-    assert_eq!(
-        validated
-            .value
-            .pointer("/boundary_envelope/schema_version")
-            .and_then(|value| value.as_u64()),
-        Some(crate::turn_boundary_envelope::TURN_BOUNDARY_ENVELOPE_SCHEMA_VERSION as u64)
-    );
-    assert_eq!(
-        validated
-            .value
-            .pointer("/boundary_envelope/raw_chars")
-            .and_then(|value| value.as_u64()),
-        Some(0)
-    );
-}
-
-#[test]
-fn validate_against_schema_inserts_neutral_boundary_envelope_for_compat_output() {
-    let raw = r#"{
-        "resolved_user_intent":"check workspace",
-        "needs_clarify":false,
-        "reason":"r",
-        "confidence":0.9
-    }"#;
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
-            .expect("compat normalizer output should get neutral boundary envelope");
-    assert!(validated.schema_normalized);
-    assert_eq!(
-        validated
-            .value
-            .pointer("/boundary_envelope/schema_version")
-            .and_then(|value| value.as_u64()),
-        Some(crate::turn_boundary_envelope::TURN_BOUNDARY_ENVELOPE_SCHEMA_VERSION as u64)
-    );
-    assert_eq!(
-        validated
-            .value
-            .pointer("/boundary_envelope/raw_chars")
-            .and_then(|value| value.as_u64()),
-        Some(0)
-    );
-    assert!(validated.value.get("output_contract").is_none());
-}
-
-#[test]
 fn validate_against_schema_rejects_out_of_range_finalizer_confidence() {
     let raw = r#"{
         "answer":"done",
@@ -203,95 +134,6 @@ fn validate_against_schema_preserves_structured_respond_intent_fields() {
 }
 
 #[test]
-fn validate_against_schema_normalizes_contract_repair_confidence_label() {
-    let raw = r#"{
-        "apply": true,
-        "reason": "content_excerpt_summary_contract_repair",
-        "confidence": "high",
-        "decision": "planner_execute",
-        "needs_clarify": false,
-        "clarify_question": "",
-        "resolved_user_intent": "Read a bounded excerpt from configs/config.toml.",
-        "output_contract": {
-            "response_shape": "one_sentence",
-            "exact_sentence_count": 1,
-            "requires_content_evidence": true,
-            "delivery_required": false,
-            "locator_kind": "path",
-            "delivery_intent": "none",
-            "contract_marker": "content_excerpt_summary",
-            "locator_hint": "/home/guagua/rustclaw/configs/config.toml",
-            "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
-        },
-        "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "none"},
-        "turn_type": "task_request",
-        "target_task_policy": "standalone",
-        "state_patch": null
-    }"#;
-
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::ContractRepairJudge)
-            .expect("confidence labels from repair judge should be canonicalized");
-
-    assert!(validated.schema_normalized);
-    assert_eq!(
-        validated.value.get("confidence").and_then(|v| v.as_f64()),
-        Some(0.9)
-    );
-    assert_eq!(
-        validated
-            .value
-            .pointer("/output_contract/contract_marker")
-            .and_then(|v| v.as_str()),
-        Some("content_excerpt_summary")
-    );
-}
-
-#[test]
-fn validate_against_schema_accepts_contract_repair_contract_marker() {
-    let raw = r#"{
-        "apply": true,
-        "reason": "execution_failed_step_contract_preserves_ordered_command_sequence",
-        "confidence": 0.9,
-        "decision": "planner_execute",
-        "needs_clarify": false,
-        "clarify_question": "",
-        "resolved_user_intent": "Preserve ordered command failure evidence.",
-        "output_contract": {
-            "response_shape": "strict",
-            "exact_sentence_count": null,
-            "requires_content_evidence": true,
-            "delivery_required": false,
-            "locator_kind": "none",
-            "delivery_intent": "none",
-            "contract_marker": "execution_failed_step",
-            "locator_hint": "",
-            "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
-        },
-        "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "unknown"},
-        "turn_type": "task_request",
-        "target_task_policy": "standalone",
-        "state_patch": null
-    }"#;
-
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::ContractRepairJudge)
-            .expect("contract_marker repair judge output should validate");
-
-    assert_eq!(
-        validated
-            .value
-            .pointer("/output_contract/contract_marker")
-            .and_then(Value::as_str),
-        Some("execution_failed_step")
-    );
-    assert!(validated
-        .value
-        .pointer("/output_contract/semantic_kind")
-        .is_none());
-}
-
-#[test]
 fn validate_against_schema_canonicalizes_single_plan_step_object() {
     let raw = r#"{"steps":{"type":"respond","content":"done"}}"#;
     let validated = super::validate_against_schema::<Value>(raw, super::PromptSchemaId::PlanResult)
@@ -320,405 +162,13 @@ fn fenced_plan_parser_keeps_inner_markdown_fence_in_respond_content() {
 }
 
 #[test]
-fn validate_against_schema_drops_execution_recipe_stray_fields() {
-    let raw = r#"{
-        "resolved_user_intent":"列出 document 目录下前 5 个文件名",
-        "decision":"planner_execute",
-        "output_contract":{
-            "response_shape":"free",
-            "requires_content_evidence":true,
-            "delivery_required":false,
-            "locator_kind":"filename",
-            "delivery_intent":"none",
-            "contract_marker":"none"
-        },
-        "needs_clarify":false,
-        "reason":"r",
-        "confidence":0.92,
-        "execution_recipe":{
-            "kind":"none",
-            "profile":"none",
-            "target_scope":"current_repo",
-            "unknown_extra_text":"wrong place",
-            "unknown_extra_score":0.61
-        }
-    }"#;
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
-            .expect("model-noise execution_recipe stray fields should be dropped");
-    assert!(validated.schema_normalized);
-    assert!(validated
-        .value
-        .get("execution_recipe")
-        .and_then(|v| v.get("unknown_extra_text"))
-        .is_none());
-}
-
-#[test]
-fn validate_against_schema_normalizes_contract_repair_judge_payload_noise() {
-    let raw = r#"{
-        "apply": true,
-        "reason": "semantic repair",
-        "repair_target": "directory_purpose_summary",
-        "confidence": 0.92,
-        "decision":"planner_execute",
-        "needs_clarify": false,
-        "clarify_question": "",
-        "resolved_user_intent": "find README candidates",
-        "agent_display_name_hint": "extra field from model",
-        "output_contract": {
-            "response_shape": "list",
-            "requires_content_evidence": true,
-            "delivery_required": false,
-            "locator_kind": "file",
-            "delivery_intent": "none",
-            "contract_marker": "path_list",
-            "locator_hint": "README",
-            "unused": "drop me",
-            "self_extension": {
-                "mode": "none",
-                "trigger": "none",
-                "execute_now": false
-            }
-        },
-        "execution_recipe": {
-            "kind": "none",
-            "profile": "none",
-            "target_scope": "none",
-            "unexpected": "drop me"
-        }
-    }"#;
-
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::ContractRepairJudge)
-            .expect("contract repair judge output should tolerate harmless model noise");
-
-    assert!(validated.schema_normalized);
-    assert_eq!(
-        validated.value.get("decision").and_then(Value::as_str),
-        Some("")
-    );
-    assert!(validated.value.get("agent_display_name_hint").is_none());
-    assert_eq!(
-        validated.value.get("repair_target").and_then(Value::as_str),
-        Some("directory_purpose_summary")
-    );
-    assert_eq!(
-        validated
-            .value
-            .pointer("/output_contract/response_shape")
-            .and_then(Value::as_str),
-        Some("strict")
-    );
-    assert_eq!(
-        validated
-            .value
-            .pointer("/output_contract/contract_marker")
-            .and_then(Value::as_str),
-        Some("file_paths")
-    );
-    assert_eq!(
-        validated
-            .value
-            .pointer("/execution_recipe/target_scope")
-            .and_then(Value::as_str),
-        Some("unknown")
-    );
-    assert!(validated
-        .value
-        .pointer("/execution_recipe/unexpected")
-        .is_none());
-}
-
-#[test]
-fn validate_against_schema_infers_missing_contract_repair_apply_for_executable_repair() {
-    let raw = r#"{
-        "resolved_user_intent": "List top-level TOML files and summarize their purpose.",
-        "reason": "file_names is too strict for a purpose summary",
-        "confidence": 0.92,
-        "decision": "planner_execute",
-        "needs_clarify": false,
-        "clarify_question": "",
-        "output_contract": {
-            "response_shape": "one_sentence",
-            "exact_sentence_count": null,
-            "requires_content_evidence": true,
-            "delivery_required": false,
-            "locator_kind": "current_workspace",
-            "delivery_intent": "none",
-            "contract_marker": "directory_purpose_summary",
-            "locator_hint": "",
-            "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
-        },
-        "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "none"},
-        "turn_type": "task_request",
-        "target_task_policy": "standalone"
-    }"#;
-
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::ContractRepairJudge)
-            .expect("missing apply should be inferred for complete executable repair");
-
-    assert!(validated.schema_normalized);
-    assert_eq!(
-        validated.value.get("apply").and_then(Value::as_bool),
-        Some(true)
-    );
-    assert_eq!(
-        validated
-            .value
-            .pointer("/output_contract/contract_marker")
-            .and_then(Value::as_str),
-        Some("directory_purpose_summary")
-    );
-}
-
-#[test]
-fn validate_against_schema_infers_missing_contract_repair_apply_false_for_conservative_chat() {
-    let raw = r#"{
-        "resolved_user_intent": "Acknowledge the user.",
-        "reason": "pure chat",
-        "confidence": 0.92,
-        "decision": "direct_answer",
-        "needs_clarify": false,
-        "clarify_question": "",
-        "output_contract": {
-            "response_shape": "free",
-            "requires_content_evidence": false,
-            "delivery_required": false,
-            "locator_kind": "none",
-            "delivery_intent": "none",
-            "contract_marker": "none",
-            "locator_hint": "",
-            "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
-        },
-        "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "none"},
-        "turn_type": "",
-        "target_task_policy": ""
-    }"#;
-
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::ContractRepairJudge)
-            .expect("missing apply should stay false for conservative no-execution repair");
-
-    assert!(validated.schema_normalized);
-    assert_eq!(
-        validated.value.get("apply").and_then(Value::as_bool),
-        Some(false)
-    );
-}
-
-#[test]
-fn validate_against_schema_repairs_execution_recipe_locator_hint() {
-    let raw = r#"{
-        "resolved_user_intent":"列出 document 目录下前 5 个文件名",
-        "decision":"planner_execute",
-        "needs_clarify":false,
-        "reason":"r",
-        "confidence":0.95,
-        "output_contract":{
-            "response_shape":"free",
-            "requires_content_evidence":false,
-            "delivery_required":false,
-            "locator_kind":"current_workspace",
-            "delivery_intent":"none",
-            "contract_marker":"none"
-        },
-        "execution_recipe":{
-            "kind":"none",
-            "profile":"none",
-            "target_scope":"current_repo",
-            "locator_hint":"document"
-        }
-    }"#;
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
-            .expect("execution_recipe.locator_hint should be canonicalized");
-    assert!(validated.schema_normalized);
-    assert_eq!(
-        validated
-            .value
-            .pointer("/output_contract/locator_hint")
-            .and_then(|v| v.as_str()),
-        Some("document")
-    );
-    assert!(validated
-        .value
-        .pointer("/execution_recipe/locator_hint")
-        .is_none());
-}
-
-#[test]
-fn validate_against_schema_repairs_execution_recipe_self_extension() {
-    let raw = r#"{
-        "resolved_user_intent":"检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径",
-        "decision":"planner_execute",
-        "needs_clarify":false,
-        "reason":"r",
-        "confidence":0.95,
-        "output_contract":{
-            "response_shape":"scalar",
-            "requires_content_evidence":false,
-            "delivery_required":false,
-            "locator_kind":"current_workspace",
-            "delivery_intent":"none",
-            "contract_marker":"existence_with_path",
-            "locator_hint":"rustclaw.service"
-        },
-        "execution_recipe":{
-            "kind":"none",
-            "profile":"none",
-            "target_scope":"current_repo",
-            "self_extension":{"mode":"none","trigger":"none","execute_now":false}
-        }
-    }"#;
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
-            .expect("execution_recipe.self_extension should be canonicalized");
-    assert!(validated.schema_normalized);
-    assert_eq!(
-        validated
-            .value
-            .pointer("/output_contract/self_extension/mode")
-            .and_then(|v| v.as_str()),
-        Some("none")
-    );
-    assert!(validated
-        .value
-        .pointer("/execution_recipe/self_extension")
-        .is_none());
-}
-
-#[test]
-fn validate_against_schema_repairs_execution_recipe_reason() {
-    let raw = r#"{
-        "resolved_user_intent":"列出 logs 目录下前 5 个文件名（按顺序编号）",
-        "decision":"planner_execute",
-        "needs_clarify":false,
-        "reason":"r",
-        "confidence":0.92,
-        "output_contract":{
-            "response_shape":"free",
-            "requires_content_evidence":true,
-            "delivery_required":false,
-            "locator_kind":"current_workspace",
-            "delivery_intent":"none",
-            "contract_marker":"none",
-            "locator_hint":"logs"
-        },
-        "execution_recipe":{
-            "kind":"none",
-            "profile":"none",
-            "target_scope":"current_repo",
-            "reason":"scope is clear"
-        }
-    }"#;
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
-            .expect("execution_recipe.reason should be canonicalized away");
-    assert!(validated.schema_normalized);
-    assert_eq!(
-        validated
-            .value
-            .pointer("/execution_recipe/kind")
-            .and_then(|v| v.as_str()),
-        Some("none")
-    );
-    assert!(validated
-        .value
-        .pointer("/execution_recipe/reason")
-        .is_none());
-}
-
-#[test]
-fn validate_against_schema_repairs_execution_recipe_qualifier() {
-    let raw = r#"{
-        "resolved_user_intent":"执行基础健康检查，只列最重要的结论",
-        "decision":"planner_execute",
-        "needs_clarify":false,
-        "reason":"r",
-        "confidence":0.92,
-        "output_contract":{
-            "response_shape":"one_sentence",
-            "requires_content_evidence":true,
-            "delivery_required":false,
-            "locator_kind":"none",
-            "delivery_intent":"none",
-            "contract_marker":"service_status"
-        },
-        "execution_recipe":{
-            "kind":"none",
-            "profile":"ops_service",
-            "target_scope":"system",
-            "qualifier":""
-        }
-    }"#;
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
-            .expect("execution_recipe.qualifier should be dropped");
-    assert!(validated.schema_normalized);
-    assert_eq!(
-        validated
-            .value
-            .pointer("/execution_recipe/profile")
-            .and_then(|v| v.as_str()),
-        Some("ops_service")
-    );
-    assert!(validated
-        .value
-        .pointer("/execution_recipe/qualifier")
-        .is_none());
-}
-
-#[test]
-fn validate_against_schema_repairs_malformed_execution_recipe_boundary_field() {
-    let raw = r#"{
-        "resolved_user_intent":"查看当前 git 分支名称，只输出分支名",
-        "decision":"planner_execute",
-        "needs_clarify":false,
-        "reason":"r",
-        "confidence":0.95,
-        "output_contract":{
-            "response_shape":"scalar",
-            "requires_content_evidence":false,
-            "delivery_required":false,
-            "locator_kind":"current_workspace",
-            "delivery_intent":"none",
-            "contract_marker":"scalar_path_only"
-        },
-        "execution_recipe":{
-            "kind":"none",
-            "profile":"none",
-            "target_scope":"current_repo",
-            "},\"unknown_extra_text":""
-        },
-        "unknown_extra_score":0.0
-    }"#;
-    let validated =
-        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
-            .expect("malformed execution_recipe boundary field should be dropped");
-    assert!(validated.schema_normalized);
-    assert_eq!(
-        validated
-            .value
-            .pointer("/execution_recipe/target_scope")
-            .and_then(|v| v.as_str()),
-        Some("current_repo")
-    );
-    assert!(validated
-        .value
-        .pointer("/execution_recipe/},\\\"unknown_extra_text")
-        .is_none());
-}
-
-#[test]
 fn parse_llm_json_raw_or_any_with_repair_handles_unescaped_quotes() {
-    let raw = r#"{"resolved_user_intent":"记住："那玩意README"指向 /home/guagua/test/README.md","reason":"用户定义了"那玩意README"映射","confidence":1.0}"#;
+    let raw = r#"{"steps":[{"type":"respond","content":"记住："那玩意README"指向 /home/guagua/test/README.md"}]}"#;
     let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
         .expect("should parse repaired json");
     assert_eq!(
         parsed
-            .get("resolved_user_intent")
+            .pointer("/steps/0/content")
             .and_then(|v| v.as_str())
             .unwrap_or_default(),
         "记住：\"那玩意README\"指向 /home/guagua/test/README.md"
@@ -749,18 +199,18 @@ fn parse_llm_json_raw_or_any_with_repair_dedupes_object_keys_for_struct() {
 
 #[test]
 fn parse_llm_json_raw_or_any_with_repair_dedupes_nested_duplicate_keys() {
-    let raw = r#"{"decision":"planner_execute","execution_recipe":{"kind":"none","profile":"ops_service","target_scope":"system","target_scope":"system"}}"#;
+    let raw = r#"{"steps":[{"type":"call_capability","capability":"run_cmd.execute","args":{"command":"true","timeout_seconds":30,"timeout_seconds":30}}]}"#;
     let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
         .expect("nested duplicate keys should be repaired");
     assert_eq!(
         parsed
-            .pointer("/execution_recipe/target_scope")
-            .and_then(|v| v.as_str()),
-        Some("system")
+            .pointer("/steps/0/args/timeout_seconds")
+            .and_then(|v| v.as_u64()),
+        Some(30)
     );
     assert_eq!(
-        parsed.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
+        parsed.pointer("/steps/0/type").and_then(|v| v.as_str()),
+        Some("call_capability")
     );
 }
 
@@ -793,47 +243,43 @@ fn balance_unclosed_brackets_recovers_truncated_object() {
     );
 }
 
-/// §F3-a：adv12 复现的 MiniMax 输出模式（结尾少一个 `}` +
-/// 废弃/未知字段误嵌入 `execution_recipe`）必须能被 repair 成可解析。
+/// §F3-a：复现 MiniMax 输出结尾缺少括号的模式，确保 planner action
+/// envelope 能由通用 JSON repair 恢复。
 #[test]
 fn parse_llm_json_raw_or_any_with_repair_recovers_adv12_minimax_envelope() {
-    // 注意：原始 JSON 末尾少了 envelope 自己的最后一个 `}`，
-    // 且废弃字段错误地嵌入 `execution_recipe`。repair 后应能解析并保留
-    // envelope 顶层字段。
-    let raw = r#"{"resolved_user_intent":"x","resume_behavior":"none","schedule_kind":"none","schedule_intent":null,"wants_file_delivery":false,"should_refresh_long_term_memory":false,"agent_display_name_hint":"","needs_clarify":false,"clarify_question":"","reason":"r","confidence":0.95,"decision":"planner_execute","output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":false,"locator_kind":"filename","delivery_intent":"none","contract_marker":"existence_with_path","locator_hint":"AGENTS.md","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"current_repo","unknown_extra_text":"","unknown_extra_score":0.0}"#;
+    let raw = r#"{"steps":[{"type":"call_capability","capability":"fs_basic.read_text","args":{"path":"AGENTS.md"}}]"#;
     // 直接 from_str 必失败：少最后一个 `}`。
     assert!(serde_json::from_str::<serde_json::Value>(raw).is_err());
     let parsed = super::parse_llm_json_raw_or_any_with_repair::<serde_json::Value>(raw)
-        .expect("balance pass should recover truncated MiniMax envelope");
+        .expect("balance pass should recover truncated planner envelope");
     assert_eq!(
-        parsed.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute"),
-        "envelope decision field must survive repair"
-    );
-    assert_eq!(
-        parsed.get("needs_clarify").and_then(|v| v.as_bool()),
-        Some(false),
-        "envelope needs_clarify must survive repair"
+        parsed.pointer("/steps/0/type").and_then(|v| v.as_str()),
+        Some("call_capability"),
+        "planner action type must survive repair"
     );
     assert_eq!(
         parsed
-            .pointer("/output_contract/locator_kind")
+            .pointer("/steps/0/capability")
             .and_then(|v| v.as_str()),
-        Some("filename")
+        Some("fs_basic.read_text"),
+        "planner capability must survive repair"
+    );
+    assert_eq!(
+        parsed
+            .pointer("/steps/0/args/path")
+            .and_then(|v| v.as_str()),
+        Some("AGENTS.md")
     );
 }
 
 #[test]
-fn schedule_intent_schema_canonicalizes_normalizer_envelope() {
+fn schedule_intent_schema_canonicalizes_direct_payload() {
     let raw = r#"{
-      "resolved_user_intent":"Create a daily reminder in the current conversation.",
-      "resume_behavior":"none",
-      "schedule_kind":"create",
-      "schedule_intent":{
-        "timezone":"Asia/Shanghai",
-        "schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},
-        "message":"daily reminder message"
-      },
+      "kind":"create",
+      "timezone":"Asia/Shanghai",
+      "raw":"Create a daily reminder in the current conversation.",
+      "schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},
+      "message":"daily reminder message",
       "needs_clarify":false,
       "clarify_question":"",
       "reason":"schedule fields are complete",
@@ -865,32 +311,26 @@ fn schedule_intent_schema_canonicalizes_normalizer_envelope() {
 
 #[test]
 fn parse_llm_json_raw_or_any_with_repair_keeps_valid_json() {
-    let raw = r#"{"decision":"direct_answer","confidence":0.9}"#;
+    let raw = r#"{"steps":[{"type":"respond","content":"done"}]}"#;
     let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
         .expect("valid json should parse");
     assert_eq!(
         parsed
-            .get("decision")
+            .pointer("/steps/0/type")
             .and_then(|v| v.as_str())
             .unwrap_or_default(),
-        "direct_answer"
+        "respond"
     );
 }
 
 #[test]
 fn parse_llm_json_raw_or_any_with_repair_removes_stray_quote_after_bool() {
-    let raw = r#"{"decision":"planner_execute","needs_clarify":false","confidence":0.9}"#;
+    let raw = r#"{"type":"respond","done":false","content":"ok"}"#;
     assert!(serde_json::from_str::<Value>(raw).is_err());
     let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
         .expect("stray quote after primitive should repair");
-    assert_eq!(
-        parsed.get("decision").and_then(|v| v.as_str()),
-        Some("planner_execute")
-    );
-    assert_eq!(
-        parsed.get("needs_clarify").and_then(|v| v.as_bool()),
-        Some(false)
-    );
+    assert_eq!(parsed.get("type").and_then(|v| v.as_str()), Some("respond"));
+    assert_eq!(parsed.get("done").and_then(|v| v.as_bool()), Some(false));
 }
 
 /// §D1：dedupe_json_object_keys 幂等性。任意 JSON dedup 一次和二次结果必须一致。
@@ -903,7 +343,7 @@ fn dedupe_json_object_keys_is_idempotent() {
         r#"{"a":1,"a":2,"a":3,"a":4}"#,
         r#"{"a":{"b":1,"b":2},"a":{"b":3,"b":4}}"#,
         r#"[{"x":1,"x":2},{"x":3,"x":4}]"#,
-        r#"{"decision":"planner_execute","execution_recipe":{"kind":"none","profile":"ops_service","target_scope":"system","target_scope":"system"}}"#,
+        r#"{"steps":[{"type":"call_capability","capability":"run_cmd.execute","args":{"timeout_seconds":30,"timeout_seconds":30}}]}"#,
         r#"{"a":[1,2,3],"a":[4,5,6]}"#,
         r#"{}"#,
         r#"[]"#,
@@ -971,9 +411,8 @@ fn parse_llm_json_raw_or_any_with_repair_survives_minimax_pathological_corpus() 
         r#"{"flag":true,"flag":false,"missing":null,"missing":"present"}"#,
         // duplicate keys with mixed value types (str -> obj)
         r#"{"contract":"loose","contract":{"shape":"strict"}}"#,
-        // realistic minimax normalizer payload: duplicate target_scope inside
-        // execution_recipe nested in IntentNormalizerOut-style envelope.
-        r#"{"resolved_user_intent":"check service","decision":"planner_execute","needs_clarify":false,"reason":"r","confidence":0.8,"execution_recipe":{"kind":"ops_closed_loop","profile":"ops_service","target_scope":"system","target_scope":"system"}}"#,
+        // Realistic planner payload with a duplicate machine argument.
+        r#"{"steps":[{"type":"call_capability","capability":"run_cmd.execute","args":{"timeout_seconds":30,"timeout_seconds":30}}]}"#,
     ];
     for raw in corpus {
         let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)

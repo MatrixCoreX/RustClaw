@@ -630,7 +630,7 @@ fn step4b2_1b_real_runtime_policy_aligns_prompt_vendor_and_runtime_payloads() {
 /// §7.5 Step 4.b.2.2：验证 [`crate::AppState::with_prompt_layers_installed`]
 /// 把 `workspace_root` 指到真仓库根后，**通过生产路径**
 /// [`crate::bootstrap::prompts::load_prompt_template_for_state_with_meta`]
-/// 加载 `prompts/intent_normalizer_prompt.md` 拿到的是磁盘 layered manifest
+/// 加载 `prompts/loop_incremental_plan_prompt.md` 拿到的是磁盘 layered manifest
 /// 的拼接结果，而不是各 callsite 的 `include_str!` 兜底常量。
 ///
 /// 同时确认 `default_locator_search_dir` 没被这个 helper 改写 —— 这是 helper
@@ -657,7 +657,7 @@ async fn step4b2_2_self_check_prompt_layers_installed_loads_real_disk_prompt() {
     const SENTINEL_FALLBACK: &str = "<EMBEDDED_FALLBACK_FOR_STEP4B22_SELF_CHECK>";
     let resolved = crate::bootstrap::prompts::load_prompt_template_for_state_with_meta(
         &state,
-        "prompts/intent_normalizer_prompt.md",
+        "prompts/loop_incremental_plan_prompt.md",
         SENTINEL_FALLBACK,
     );
     assert_ne!(
@@ -672,7 +672,8 @@ async fn step4b2_2_self_check_prompt_layers_installed_loads_real_disk_prompt() {
         resolved.source,
     );
     assert!(
-        resolved.source.starts_with("layered:") || resolved.source.contains("intent_normalizer"),
+        resolved.source.starts_with("layered:")
+            || resolved.source.contains("loop_incremental_plan"),
         "source should reflect the layered manifest or the disk path, got {:?}",
         resolved.source,
     );
