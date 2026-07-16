@@ -1,0 +1,36 @@
+schema_version = 1
+baseline_kind = "deterministic_frontdoor_contract"
+first_semantic_owner = "agent_loop"
+required_first_prompt_label = "plan"
+max_pre_planner_llm_calls = 0
+max_pre_planner_prompt_bytes = 0
+
+[[workloads]]
+id = "simple_chat"
+fixture_kind = "respond"
+planner_prompt_bytes_fixture = 1024
+
+[[workloads]]
+id = "file_read"
+fixture_kind = "read_only_capability"
+planner_prompt_bytes_fixture = 2048
+
+[[workloads]]
+id = "file_write"
+fixture_kind = "mutating_capability"
+planner_prompt_bytes_fixture = 3072
+
+[[workloads]]
+id = "multi_step_coding"
+fixture_kind = "multi_step_capability"
+planner_prompt_bytes_fixture = 6144
+
+[[workloads]]
+id = "missing_required_argument"
+fixture_kind = "clarification_or_repair"
+planner_prompt_bytes_fixture = 2560
+
+[[workloads]]
+id = "background_async_job"
+fixture_kind = "background_capability"
+planner_prompt_bytes_fixture = 4096
