@@ -1,10 +1,9 @@
 use super::*;
 
-fn all_states() -> [AskState; 7] {
+fn all_states() -> [AskState; 6] {
     [
         AskState::Received,
         AskState::Routing,
-        AskState::ScheduleDirect,
         AskState::Executing,
         AskState::Finalizing,
         AskState::Completed,
@@ -70,13 +69,6 @@ fn happy_path_act_is_legal() {
             w[1]
         );
     }
-}
-
-#[test]
-fn schedule_direct_path_is_legal() {
-    assert!(AskState::Routing.can_transition_to(AskState::ScheduleDirect));
-    assert!(AskState::ScheduleDirect.can_transition_to(AskState::Completed));
-    assert!(!AskState::ScheduleDirect.can_transition_to(AskState::Finalizing));
 }
 
 #[test]

@@ -7,10 +7,10 @@ use crate::providers::fixture_replay::{
 
 /// Step 2.a 必须验证：
 ///   1. `fixture_workspace_root()` 解出来的路径形如 `.../crates/clawd/tests/fixtures/llm_io`；
-///   2. `FixtureEnvGuard` 构造后三条 env 都 set 了；
+///   2. `FixtureEnvGuard` 构造后两条 env 都 set 了；
 ///   3. `PROVIDER_IMPLS` 这张生产分发表里能找到 `fixture_replay`，并且对一条
 ///      录制好的 prompt 命中后返回 `clean_response`；
-///   4. guard drop 后三条 env 都被清干净，下一条测试不会幽灵命中。
+///   4. guard drop 后两条 env 都被清干净，下一条测试不会幽灵命中。
 ///
 /// 这是 Step 2.b 真接 `process_ask_task` 之前的"管线 self-check"——任何一环
 /// 寄了，下面就不必再调 process_ask_task。
@@ -40,17 +40,13 @@ async fn step2a_self_check_e2e_wiring_through_provider_impls() {
     )
     .expect("write self_check fixture");
 
-    let env = FixtureEnvGuard::install(&root, case, "2026-04-19T12:00:00+08:00");
+    let env = FixtureEnvGuard::install(&root, case);
 
     assert_eq!(
         std::env::var(FIXTURE_LLM_ROOT_ENV).unwrap(),
         root.display().to_string()
     );
     assert_eq!(std::env::var(FIXTURE_LLM_CASE_ENV).unwrap(), case);
-    assert_eq!(
-        std::env::var(TEST_FREEZE_NOW_ENV).unwrap(),
-        "2026-04-19T12:00:00+08:00"
-    );
 
     let provider = PROVIDER_IMPLS
         .iter()
@@ -74,10 +70,6 @@ async fn step2a_self_check_e2e_wiring_through_provider_impls() {
     assert!(
         std::env::var(FIXTURE_LLM_CASE_ENV).is_err(),
         "guard drop must clear FIXTURE_LLM_CASE_ENV"
-    );
-    assert!(
-        std::env::var(TEST_FREEZE_NOW_ENV).is_err(),
-        "guard drop must clear TEST_FREEZE_NOW_ENV"
     );
 
     let _ = std::fs::remove_dir_all(&root);
@@ -109,7 +101,7 @@ async fn step2b_self_check_full_loop_log_to_convert_to_replay() {
     let _guard = fixture_env_lock();
     clear_cache_for_test();
 
-    let prompt_a = "normalizer prompt for ping";
+    let prompt_a = "planner prompt for ping";
     let prompt_b = "chat response prompt for ping";
     let hash_a = fnv1a_64_hex(prompt_a);
     let hash_b = fnv1a_64_hex(prompt_b);
@@ -189,7 +181,7 @@ async fn step2b_self_check_full_loop_log_to_convert_to_replay() {
     std::fs::write(case_dir.join(FIXTURE_CALLS_FILENAME), body).expect("write loop calls.jsonl");
 
     // 4) 通过生产 dispatch table + env guard 把两条 prompt 都"重放"出来。
-    let env = FixtureEnvGuard::install(&root, case, "2026-04-19T12:00:00+08:00");
+    let env = FixtureEnvGuard::install(&root, case);
     let provider = PROVIDER_IMPLS
         .iter()
         .find(|p| p.name() == FIXTURE_REPLAY_PROVIDER_TYPE)
@@ -374,8 +366,7 @@ async fn batch_replay_smoke_all_recorded_cases() {
 
         // 3) Best-effort 命中：env 切到本 case，逐条用 preview 喂回去。
         let case_start = std::time::Instant::now();
-        let env =
-            FixtureEnvGuard::install(&fixture_workspace_root(), case, "2026-04-19T12:00:00+08:00");
+        let env = FixtureEnvGuard::install(&fixture_workspace_root(), case);
         let runtime = build_fixture_replay_runtime(&format!("vendor-fixture-{case}"));
         let mut hit = 0usize;
         let mut drift = 0usize;
@@ -493,7 +484,7 @@ async fn step4b1_self_check_appstate_with_fixture_provider_routes_through_task()
     )
     .expect("write appstate wiring fixture");
 
-    let env = FixtureEnvGuard::install(&root, case, "2026-04-19T12:00:00+08:00");
+    let env = FixtureEnvGuard::install(&root, case);
 
     let state = crate::AppState::test_default_with_fixture_provider();
     assert_eq!(
@@ -765,7 +756,6 @@ async fn step4b2_3_self_check_default_channels_short_circuit_without_http() {
 ///   * `_example/expected.json` 能 deserialize + cross-check 通过；
 ///   * 字段缺省 (`user_id` / `chat_id` 默认 1 / 1) 在 ExpectedCase 上正确；
 ///   * `case` 字段与目录名不符 → 报错；
-///   * `freeze_now` 空 → 报错；
 ///   * `expected_llm_call_count` 与区间约束矛盾 → 报错；
 ///   * `deny_unknown_fields`：unknown key → 报错。
 ///
@@ -803,7 +793,7 @@ fn step4b2_5_self_check_expected_json_schema_and_loader() {
     std::fs::create_dir_all(&tmp).unwrap();
     std::fs::write(
         tmp.join(FIXTURE_EXPECTED_FILENAME),
-        r#"{"case":"WRONG","user_text":"u","freeze_now":"2026-04-19T12:00:00+08:00"}"#,
+        r#"{"case":"WRONG","user_text":"u"}"#,
     )
     .unwrap();
     let err = ExpectedCase::load_for_case(&tmp).expect_err("case-name mismatch must Err, not Ok");
@@ -813,26 +803,7 @@ fn step4b2_5_self_check_expected_json_schema_and_loader() {
     );
     let _ = std::fs::remove_dir_all(&tmp);
 
-    // 反例 2：freeze_now 空 → 报错。
-    let tmp = std::env::temp_dir().join(format!(
-        "rustclaw_test_expected_freeze_now_empty_{}",
-        uuid::Uuid::new_v4()
-    ));
-    std::fs::create_dir_all(&tmp).unwrap();
-    let dir_name = tmp.file_name().unwrap().to_string_lossy().into_owned();
-    std::fs::write(
-        tmp.join(FIXTURE_EXPECTED_FILENAME),
-        format!(r#"{{"case":"{dir_name}","user_text":"u","freeze_now":""}}"#),
-    )
-    .unwrap();
-    let err = ExpectedCase::load_for_case(&tmp).expect_err("empty freeze_now must Err");
-    assert!(
-        err.contains("freeze_now"),
-        "err must name the offending field. Got: {err}"
-    );
-    let _ = std::fs::remove_dir_all(&tmp);
-
-    // 反例 3：prior_turns.updated_at 空 → 报错。
+    // 反例 2：prior_turns.updated_at 空 → 报错。
     let tmp = std::env::temp_dir().join(format!(
         "rustclaw_test_expected_prior_turn_updated_at_empty_{}",
         uuid::Uuid::new_v4()
@@ -845,7 +816,6 @@ fn step4b2_5_self_check_expected_json_schema_and_loader() {
             r#"{{
                 "case":"{dir_name}",
                 "user_text":"u",
-                "freeze_now":"2026-04-19T12:00:00+08:00",
                 "prior_turns":[{{"user_text":"p1","assistant_text":"a1","updated_at":""}}]
             }}"#
         ),
@@ -858,7 +828,7 @@ fn step4b2_5_self_check_expected_json_schema_and_loader() {
     );
     let _ = std::fs::remove_dir_all(&tmp);
 
-    // 反例 4：expected_llm_call_count 与 max 矛盾 → 报错。
+    // 反例 3：expected_llm_call_count 与 max 矛盾 → 报错。
     let tmp = std::env::temp_dir().join(format!(
         "rustclaw_test_expected_count_conflict_{}",
         uuid::Uuid::new_v4()
@@ -868,7 +838,7 @@ fn step4b2_5_self_check_expected_json_schema_and_loader() {
     std::fs::write(
         tmp.join(FIXTURE_EXPECTED_FILENAME),
         format!(
-            r#"{{"case":"{dir_name}","user_text":"u","freeze_now":"2026-04-19T12:00:00+08:00","expected_llm_call_count":10,"expected_max_llm_call_count":5}}"#
+            r#"{{"case":"{dir_name}","user_text":"u","expected_llm_call_count":10,"expected_max_llm_call_count":5}}"#
         ),
     )
     .unwrap();
@@ -879,7 +849,7 @@ fn step4b2_5_self_check_expected_json_schema_and_loader() {
     );
     let _ = std::fs::remove_dir_all(&tmp);
 
-    // 反例 5：unknown field → deny_unknown_fields trip → parse 失败。
+    // 反例 4：unknown field → deny_unknown_fields trip → parse 失败。
     let tmp = std::env::temp_dir().join(format!(
         "rustclaw_test_expected_unknown_field_{}",
         uuid::Uuid::new_v4()
@@ -888,9 +858,7 @@ fn step4b2_5_self_check_expected_json_schema_and_loader() {
     let dir_name = tmp.file_name().unwrap().to_string_lossy().into_owned();
     std::fs::write(
         tmp.join(FIXTURE_EXPECTED_FILENAME),
-        format!(
-            r#"{{"case":"{dir_name}","user_text":"u","freeze_now":"2026-04-19T12:00:00+08:00","totally_unrelated_typo":42}}"#
-        ),
+        format!(r#"{{"case":"{dir_name}","user_text":"u","totally_unrelated_typo":42}}"#),
     )
     .unwrap();
     let err = ExpectedCase::load_for_case(&tmp)
@@ -961,7 +929,7 @@ fn step4b2_5_self_check_expected_json_schema_and_loader() {
 ///     [`ExpectedCase`] schema + [`ExpectedCase::load_for_case`] loader +
 ///     fixture root 下 `README.md` / `_example/{calls.jsonl,expected.json}`
 ///     一份可机器校验的样例。`deny_unknown_fields` + 目录名 cross-check
-///     + LLM count 区间一致性 + freeze_now 非空都已落入自检。
+///     + LLM count 区间一致性都已落入自检。
 ///   * 4.b.2.6.a（本测试 body + 本文件三条
 ///     `step4b2_6_self_check_*` 同步测试）：harness 真调
 ///     `process_ask_task` 跑通整条 wiring，并通过
@@ -1115,7 +1083,6 @@ fn step4b2_6_self_check_diff_outcome_passes_when_all_expected_match() {
         case: "_test".to_string(),
         description: None,
         user_text: "hi".to_string(),
-        freeze_now: "2026-04-19T12:00:00+08:00".to_string(),
         user_id: 1,
         chat_id: 1,
         prior_turns: vec![],
@@ -1157,7 +1124,6 @@ fn step4b2_6_self_check_diff_outcome_reports_all_violations_at_once() {
         case: "_test".to_string(),
         description: None,
         user_text: "hi".to_string(),
-        freeze_now: "2026-04-19T12:00:00+08:00".to_string(),
         user_id: 1,
         chat_id: 1,
         prior_turns: vec![],
@@ -1216,7 +1182,6 @@ fn step4b2_6_self_check_diff_outcome_panics_on_unsupported_verifier_verdict() {
         case: "_test".to_string(),
         description: None,
         user_text: "hi".to_string(),
-        freeze_now: "2026-04-19T12:00:00+08:00".to_string(),
         user_id: 1,
         chat_id: 1,
         prior_turns: vec![],

@@ -33,7 +33,6 @@ mod capability_map;
 mod capability_resolver;
 mod channel_send;
 mod child_task_contract;
-mod clarify_followup;
 mod clarify_state;
 mod contract_matrix;
 mod contract_test_hints;
@@ -97,12 +96,9 @@ pub(crate) use app_helpers::{
     i18n_t_for_language_hint_with_default_vars, i18n_t_with_default, i18n_t_with_default_vars,
     is_affirmation_click_text, main_flow_rules, mask_secret, normalize_affirmation_text,
     normalize_exchange_name, normalize_external_id_opt, now_ts, now_ts_u64,
-    parse_resume_context_error, parse_task_status, RESUME_CONTINUE_SOURCES, TASK_STATUS_QUEUED,
+    parse_resume_context_error, parse_task_status, TASK_STATUS_QUEUED,
 };
-pub(crate) use ask_flow::{
-    analyze_attached_images_for_ask, build_resume_continue_execute_prompt,
-    build_resume_followup_discussion_prompt, transcribe_attached_audio_for_ask,
-};
+pub(crate) use ask_flow::{analyze_attached_images_for_ask, transcribe_attached_audio_for_ask};
 #[cfg(test)]
 pub(crate) use bootstrap::active_prompt_vendor_name;
 use bootstrap::{
@@ -148,11 +144,11 @@ pub(crate) use repo::{
     check_submit_task_limits, check_task_view_access, create_auth_key,
     create_pending_channel_bind_session, delete_auth_key_by_id,
     exchange_credential_status_for_user_key, factory_reset_auth_state,
-    finalize_pending_channel_bind_session, find_recent_failed_resume_context,
-    get_auth_key_value_by_id, get_pending_channel_bind_session_by_id,
-    get_pending_channel_bind_session_by_token, get_task_admin_target, get_task_query_record,
-    has_channel_binding_for_user_key, insert_audit_log, insert_submitted_task, is_user_allowed,
-    list_active_tasks_internal, list_auth_keys, mark_pending_channel_bind_session_detected,
+    finalize_pending_channel_bind_session, get_auth_key_value_by_id,
+    get_pending_channel_bind_session_by_id, get_pending_channel_bind_session_by_token,
+    get_task_admin_target, get_task_query_record, has_channel_binding_for_user_key,
+    insert_audit_log, insert_submitted_task, is_user_allowed, list_active_tasks_internal,
+    list_auth_keys, mark_pending_channel_bind_session_detected,
     mark_pending_channel_bind_session_expired, mark_pending_channel_bind_session_failed,
     maybe_find_submit_task_dedup, normalize_user_key, reset_channel_binding_state_for_user_key,
     resolve_auth_identity_by_key, resolve_channel_binding_identity, resolve_submit_task_context,
@@ -229,9 +225,6 @@ const AGENT_TRACE_LOG_MAX_CHARS: usize = 4000;
 const LOG_CALL_WRAP: &str = "---- task-call ----";
 const ISOLATION_STARTUP_CLEANUP_MIN_SECONDS: u64 = 6 * 60 * 60;
 const DEFAULT_AGENT_ID: &str = "main";
-
-pub(crate) const RESUME_FOLLOWUP_DISCUSSION_PROMPT_LOGICAL_PATH: &str =
-    "prompts/resume_followup_discussion_prompt.md";
 
 /// 统一错误响应，避免重复手写 (StatusCode, Json(ApiResponse)).
 fn api_err<T: Serialize>(

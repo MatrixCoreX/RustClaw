@@ -35,7 +35,6 @@ pub(crate) use helpers::*;
 pub(crate) use task::{
     answer_verifier_retry_answer_has_required_machine_evidence, finalize_ask_direct_success,
     finalize_ask_result, retry_loop_answer_after_verifier, run_direct_classifier_reply,
-    try_finalize_schedule_direct_success,
 };
 
 // === LOOP REPLY 层（已物理位于 finalize/loop_reply.rs，Stage 2.3）===

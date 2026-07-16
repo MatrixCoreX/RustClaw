@@ -422,39 +422,6 @@ pub(crate) async fn run_direct_classifier_reply(
     .map_err(|e| e.to_string())
 }
 
-pub(crate) async fn try_finalize_schedule_direct_success(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    payload: &Value,
-    prompt: &str,
-    _resolved_prompt_for_execution: &str,
-    route_result: &crate::RouteResult,
-) -> Result<bool> {
-    if let Ok(Some(schedule_reply)) = crate::schedule_service::try_handle_schedule_request(
-        state,
-        task,
-        prompt,
-        route_result.schedule_intent.as_ref(),
-    )
-    .await
-    {
-        let schedule_reply = crate::intercept_response_text_for_delivery(&schedule_reply);
-        finalize_ask_direct_success(
-            state,
-            task,
-            payload,
-            prompt,
-            &schedule_reply,
-            "schedule_direct",
-            route_result.should_refresh_long_term_memory,
-            &route_result.agent_display_name_hint,
-        )
-        .await?;
-        return Ok(true);
-    }
-    Ok(false)
-}
-
 fn should_use_answer_route_result(
     initial: &crate::RouteResult,
     answer_route: &crate::RouteResult,

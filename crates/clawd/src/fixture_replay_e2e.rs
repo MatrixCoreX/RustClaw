@@ -5,13 +5,11 @@
 //!     `convert_model_io_log_to_fixture` 转换器逻辑。
 //!   * 本模块覆盖 **整条 wiring 链**：
 //!       1. `FIXTURE_LLM_ROOT` / `FIXTURE_LLM_CASE` env 切换；
-//!       2. `RUSTCLAW_TEST_FREEZE_NOW` 让 [`crate::schedule_service`] 注入的
-//!          normalizer prompt `__NOW__` 字段稳定；
-//!       3. 通过 [`crate::providers::client::PROVIDER_IMPLS`] 这条生产分发表
+//!       2. 通过 [`crate::providers::client::PROVIDER_IMPLS`] 这条生产分发表
 //!          找到 `fixture_replay` provider 并真的调起来；
-//!       4. RAII guard 保证：测试 panic / 提前 return 都能把上面三条 env 还原，
+//!       3. RAII guard 保证：测试 panic / 提前 return 都能把两条 env 还原，
 //!          下一条测试不会"幽灵命中"上一条 case；
-//!       5. **"日志 → fixture → 回放"** 闭环：把一条合成的 `model_io.log` 喂给
+//!       4. **日志到 fixture 再到回放**闭环：把一条合成的 `model_io.log` 喂给
 //!          `convert_model_io_log_to_fixture`，写出 `calls.jsonl`，再通过生产
 //!          dispatch table 调起来命中。这是整层除了"真 LLM 录制"以外的全部环节
 //!          的 self-check —— 任何一环坏了，下面的真 case e2e 都没必要跑。
@@ -34,10 +32,6 @@
 //! 5. **unignore harness**：把对应 case 的 `#[ignore]` 标记去掉，跑
 //!    `cargo test fixture_replay_e2e::tests::e2e_<case>` 验证回放命中。
 //!
-//! ⚠️ **录制时必须 `RUSTCLAW_TEST_FREEZE_NOW` 已 set 且 `freeze_now` 实际值与
-//! 回放时完全一致**，否则 normalizer prompt 里的 `__NOW__` 会让 hash 漂；具体
-//! 见 [`crate::schedule_service::TEST_FREEZE_NOW_ENV`] doc。
-
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -45,7 +39,6 @@ use serde::{Deserialize, Serialize};
 use crate::providers::fixture_replay::{
     FIXTURE_LLM_CASE_ENV, FIXTURE_LLM_ROOT_ENV, FIXTURE_REPLAY_PROVIDER_TYPE,
 };
-use crate::schedule_service::TEST_FREEZE_NOW_ENV;
 
 /// §7.5 Step 4.b.2.5：每个 case 目录下 `expected.json` 的文件名常量。
 ///
@@ -65,7 +58,7 @@ pub(crate) fn fixture_workspace_root() -> PathBuf {
         .join("llm_io")
 }
 
-/// 进程级 env guard：构造时 set 三条 env，drop 时清掉。
+/// 进程级 env guard：构造时 set 两条 env，drop 时清掉。
 ///
 /// `Drop` impl 即使被 panic unwind 触发也会执行（panic = stack unwind 路径），
 /// 所以 self-check / e2e 测试不会因为一个失败 case 把 env 残留给下一条。
@@ -74,13 +67,9 @@ pub(crate) fn fixture_workspace_root() -> PathBuf {
 pub(crate) struct FixtureEnvGuard;
 
 impl FixtureEnvGuard {
-    /// `freeze_now` 接受 [`TEST_FREEZE_NOW_ENV`] 已支持的两种格式（RFC-3339
-    /// 或 `%Y-%m-%d %H:%M:%S %:z`）。每个 case 录制时记录的"now"必须与 replay
-    /// 时这里 set 的值完全一致，否则 normalizer prompt hash 会漂。
-    pub(crate) fn install(root: &std::path::Path, case: &str, freeze_now: &str) -> Self {
+    pub(crate) fn install(root: &std::path::Path, case: &str) -> Self {
         std::env::set_var(FIXTURE_LLM_ROOT_ENV, root);
         std::env::set_var(FIXTURE_LLM_CASE_ENV, case);
-        std::env::set_var(TEST_FREEZE_NOW_ENV, freeze_now);
         Self
     }
 }
@@ -89,11 +78,10 @@ impl Drop for FixtureEnvGuard {
     fn drop(&mut self) {
         std::env::remove_var(FIXTURE_LLM_ROOT_ENV);
         std::env::remove_var(FIXTURE_LLM_CASE_ENV);
-        std::env::remove_var(TEST_FREEZE_NOW_ENV);
     }
 }
 
-/// 全局串行锁：所有 fixture e2e 测试共享，保证三条 env 不会在并行测试间撕裂。
+/// 全局串行锁：所有 fixture e2e 测试共享，保证两条 env 不会在并行测试间撕裂。
 ///
 /// 锁中毒（上一条测试 panic）时返回 inner —— 我们只关心 env 互斥，不关心数据。
 pub(crate) fn fixture_env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -135,9 +123,6 @@ pub(crate) struct LoadedCase {
 ///   * `user_text`：用户输入原文，作为 ask payload 的 `text` 字段；harness
 ///     会把它和 [`crate::repo::submit::insert_submitted_task`] 一致地包成
 ///     `{"text": user_text}` 写进 `tasks.payload_json`。
-///   * `freeze_now`：`RUSTCLAW_TEST_FREEZE_NOW` 应当注入的 wallclock；必须
-///     与录制 `calls.jsonl` 时一致，否则 normalizer prompt 里的 `__NOW__`
-///     字段会让 fnv1a hash 漂、fixture miss。
 ///   * `user_id` / `chat_id`：seed 进 `tasks` 行，缺省 1 / 1 —— 与 telegram
 ///     allowlist 里的"自家人"约定俗成保持一致；`user_id < 0` 留给 webd 用户
 ///     体系（与 [`crate::repo::auth`] 的 `negative-id-for-webd` 约定一致）。
@@ -205,8 +190,6 @@ pub(crate) struct ExpectedCase {
     pub description: Option<String>,
 
     pub user_text: String,
-
-    pub freeze_now: String,
 
     #[serde(
         default = "default_user_id",
@@ -288,7 +271,6 @@ impl ExpectedCase {
 
     /// 一致性 cross-check：
     ///   * `case` 字段必须等于目录名；
-    ///   * `freeze_now` 非空；
     ///   * `user_text` 非空；
     ///   * 三条 LLM call count 约束相互不冲突（`exact` 与 `min/max` 不能同时给
     ///     而又互相违背）。
@@ -305,13 +287,6 @@ impl ExpectedCase {
         }
         if self.user_text.is_empty() {
             return Err("user_text must not be empty".to_string());
-        }
-        if self.freeze_now.is_empty() {
-            return Err(
-                "freeze_now must not be empty (must match the wallclock used during recording, \
-                 e.g. \"2026-04-19T12:00:00+08:00\")"
-                    .to_string(),
-            );
         }
         for (idx, prior_turn) in self.prior_turns.iter().enumerate() {
             if prior_turn.user_text.is_empty() {
@@ -760,7 +735,7 @@ pub(crate) async fn run_replay_case(case_name: &str) -> Result<Vec<String>, Stri
         )
         .map_err(|e| format!("mark task running failed: {e}"))?;
 
-    let _env = FixtureEnvGuard::install(&root, case_name, &expected.freeze_now);
+    let _env = FixtureEnvGuard::install(&root, case_name);
 
     let mut payload_for_process = serde_json::from_str::<serde_json::Value>(&task.payload_json)
         .map_err(|e| format!("payload_json reparse: {e}"))?;

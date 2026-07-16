@@ -16,8 +16,6 @@ pub(crate) const TASK_STATUS_FAILED: &str = "failed";
 pub(crate) const TASK_STATUS_CANCELED: &str = "canceled";
 pub(crate) const TASK_STATUS_TIMEOUT: &str = "timeout";
 
-pub(crate) const RESUME_CONTINUE_SOURCES: &[&str] = &["resume_continue_execute"];
-
 pub(crate) fn parse_task_status(raw: &str) -> TaskStatus {
     let s = raw.trim().to_ascii_lowercase();
     if s == TASK_STATUS_QUEUED {

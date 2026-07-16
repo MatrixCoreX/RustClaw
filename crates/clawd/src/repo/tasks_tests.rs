@@ -1272,51 +1272,6 @@ fn pause_task_by_id_rejects_running_task_without_checkpoint() {
 }
 
 #[test]
-fn active_checkpoint_resume_context_uses_lifecycle_machine_fields() {
-    let state = state_with_tasks_table();
-    let now = 2_000;
-    let checkpoint = json!({
-        "task_lifecycle": {
-            "schema_version": 1,
-            "state": "needs_user",
-            "resume_reason": "await_user_input",
-            "checkpoint_id": "ckpt-active",
-            "resume_executor": {
-                "executor_state": "awaiting_user",
-                "checkpoint_id": "ckpt-active",
-                "resume_directive": "await_user_input"
-            }
-        },
-        "task_checkpoint": checkpoint_json("ckpt-active", vec![])
-    });
-    insert_task(&state, "active-resume", "running", Some(&checkpoint), now);
-
-    let candidate = crate::repo::find_active_checkpoint_resume_context(&state, 42, 7)
-        .expect("active checkpoint context");
-
-    assert_eq!(candidate.resume_context["updated_ts"], now);
-    assert_eq!(
-        candidate.resume_context["source"],
-        "active_checkpoint_resume"
-    );
-    assert_eq!(candidate.resume_context["task_id"], "active-resume");
-    assert_eq!(
-        candidate.resume_context["task_lifecycle"]["state"],
-        "needs_user"
-    );
-    assert_eq!(
-        candidate.resume_context["task_lifecycle"]["resume_executor"]["executor_state"],
-        "awaiting_user"
-    );
-    assert_eq!(
-        candidate.resume_context["task_checkpoint"]["checkpoint_id"],
-        "ckpt-active"
-    );
-    assert!(candidate.resume_context.get("text").is_none());
-    assert!(candidate.resume_context.get("error_text").is_none());
-}
-
-#[test]
 fn list_due_paused_checkpoint_tasks_filters_and_orders_machine_checkpoints() {
     let state = state_with_tasks_table();
     let now = 1_000;

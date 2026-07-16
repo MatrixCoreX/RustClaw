@@ -76,24 +76,6 @@ overlay = ["prompts/layers/overlays/answer_verifier_prompt.md"]
 vendor_patch = "recovery/common.md"
 
 [[prompts]]
-logical_path = "prompts/resume_followup_discussion_prompt.md"
-base = [
-  "prompts/layers/base/system_truth.md",
-  "prompts/layers/base/recovery/common_rules.md",
-]
-overlay = ["prompts/layers/overlays/resume_followup_discussion_prompt.md"]
-vendor_patch = "recovery/common.md"
-
-[[prompts]]
-logical_path = "prompts/resume_continue_execute_prompt.md"
-base = [
-  "prompts/layers/base/system_truth.md",
-  "prompts/layers/base/recovery/common_rules.md",
-]
-overlay = ["prompts/layers/overlays/resume_continue_execute_prompt.md"]
-vendor_patch = "recovery/common.md"
-
-[[prompts]]
 logical_path = "prompts/chat_response_prompt.md"
 base = ["prompts/layers/base/system_truth.md"]
 overlay = ["prompts/layers/overlays/chat_response_prompt.md"]

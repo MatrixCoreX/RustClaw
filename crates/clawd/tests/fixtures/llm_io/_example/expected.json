@@ -2,7 +2,6 @@
   "case": "_example",
   "description": "Step 4.b.2.5 sample: the smallest meaningful expected.json for a one-LLM-call ask. Real cases live in sibling directories without the leading underscore.",
   "user_text": "ping",
-  "freeze_now": "2026-04-19T12:00:00+08:00",
   "expected_final_answer_contains": ["pong"],
   "expected_min_llm_call_count": 1,
   "expected_max_llm_call_count": 4,

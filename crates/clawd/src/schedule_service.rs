@@ -483,53 +483,6 @@ pub(crate) fn clean_schedule_kind(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
 }
 
-/// §7.5: env 名 —— `cargo test` / nl-replay 通过它把 normalizer prompt 里的
-/// `__NOW__` 字段冻结到固定值，让 fixture FNV hash 在 `Utc::now()` 漂移下仍稳定。
-/// 生产路径 unset 时走 `Utc::now()`，行为与历史版本完全一致。
-pub(crate) const TEST_FREEZE_NOW_ENV: &str = "RUSTCLAW_TEST_FREEZE_NOW";
-
-/// §7.5: 解析 [`TEST_FREEZE_NOW_ENV`] 字符串。
-///
-/// 接受两种格式（`%:z` = `+08:00` 这类带冒号的 offset）：
-///   * RFC-3339-ish：`2026-04-19T12:00:00+08:00`
-///   * normalizer 形态：`2026-04-19 12:00:00 +08:00`
-///
-/// 解析成功 → 转换到 `tz`；失败 → **panic**（这是 test-only env，写错就该立刻
-/// 炸出来，避免静默 fallback 到 `Utc::now()` 让 fixture 跑出"看似稳定其实漂移"
-/// 的诡异行为）。
-fn parse_freeze_now_or_panic(raw: &str, tz: &Tz) -> chrono::DateTime<Tz> {
-    let trimmed = raw.trim();
-    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(trimmed) {
-        return dt.with_timezone(tz);
-    }
-    if let Ok(dt) = chrono::DateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S %:z") {
-        return dt.with_timezone(tz);
-    }
-    panic!(
-        "{TEST_FREEZE_NOW_ENV}={trimmed:?} failed to parse; accepted formats: \
-         RFC-3339 (`2026-04-19T12:00:00+08:00`) or `%Y-%m-%d %H:%M:%S %:z` \
-         (`2026-04-19 12:00:00 +08:00`)"
-    );
-}
-
-/// §7.5: 计算 normalizer prompt 用的"现在"，可被 [`TEST_FREEZE_NOW_ENV`] 冻结。
-fn effective_now_for_normalizer(tz: &Tz) -> chrono::DateTime<Tz> {
-    match std::env::var(TEST_FREEZE_NOW_ENV) {
-        Ok(v) if !v.trim().is_empty() => parse_freeze_now_or_panic(&v, tz),
-        _ => Utc::now().with_timezone(tz),
-    }
-}
-
-/// Returns (now_iso, timezone, schedule_rules) for intent normalizer prompt.
-pub(crate) fn schedule_context_for_normalizer(state: &AppState) -> (String, String, String) {
-    let tz = parse_timezone(&state.policy.schedule.timezone);
-    let now_local = effective_now_for_normalizer(&tz);
-    let now_iso = now_local.format("%Y-%m-%d %H:%M:%S %:z").to_string();
-    let timezone = state.policy.schedule.timezone.clone();
-    let rules = state.policy.schedule.intent_rules_template_string();
-    (now_iso, timezone, rules)
-}
-
 pub(crate) fn schedule_timezone_from_intent(state: &AppState, intent_tz: &str) -> String {
     let chosen = if intent_tz.trim().is_empty() {
         state.policy.schedule.timezone.clone()

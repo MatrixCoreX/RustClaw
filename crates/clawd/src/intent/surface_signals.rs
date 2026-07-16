@@ -138,8 +138,7 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
     };
     let has_explicit_path_or_url = has_explicit_path_or_url_shape(trimmed);
     let has_concrete_locator_hint = crate::worker::has_concrete_locator_hint(trimmed);
-    let structural_locator_only_reply =
-        crate::clarify_followup::prompt_is_structural_locator_only(trimmed);
+    let structural_locator_only_reply = prompt_is_structural_locator_only(trimmed);
     let locator_hint_prompt_shape =
         classify_locator_hint_prompt_shape(has_explicit_path_or_url, has_concrete_locator_hint);
     let locator_reply_prompt_shape =
@@ -758,6 +757,96 @@ fn filename_candidate_should_survive_field_selector_filter(candidate: &str) -> b
             | "zip"
             | "zsh"
     )
+}
+
+pub(crate) fn prompt_is_structural_locator_only(prompt: &str) -> bool {
+    let trimmed = prompt.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if prompt_is_inline_json_value(trimmed) {
+        return true;
+    }
+    let tokens: Vec<&str> = trimmed
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ';' | '，' | '；' | '、'))
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .collect();
+    if tokens.is_empty() || tokens.len() > 4 {
+        return false;
+    }
+    tokens.iter().all(|token| {
+        let cleaned = trim_locator_punctuation(token);
+        !cleaned.is_empty()
+            && (cleaned.contains('/')
+                || cleaned.contains('\\')
+                || is_url_like(cleaned)
+                || looks_like_filename_token(cleaned)
+                || looks_like_bare_uppercase_stem(cleaned))
+    })
+}
+
+fn prompt_is_inline_json_value(prompt: &str) -> bool {
+    crate::extract_first_json_value_any(prompt).is_some_and(|value| value.trim() == prompt)
+}
+
+fn trim_locator_punctuation(token: &str) -> &str {
+    token.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '`' | '"'
+                | '\''
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | '“'
+                | '”'
+                | '‘'
+                | '’'
+                | '《'
+                | '》'
+                | '【'
+                | '】'
+                | '。'
+                | '！'
+                | '？'
+                | '!'
+                | '?'
+                | ':'
+                | '：'
+                | '.'
+        )
+    })
+}
+
+fn is_url_like(token: &str) -> bool {
+    ["http://", "https://", "file://", "ftp://"]
+        .iter()
+        .any(|prefix| token.starts_with(prefix))
+}
+
+fn looks_like_filename_token(token: &str) -> bool {
+    let Some((base, extension)) = token.rsplit_once('.') else {
+        return false;
+    };
+    !base.is_empty()
+        && !extension.is_empty()
+        && extension.len() <= 12
+        && extension.chars().all(|ch| ch.is_ascii_alphanumeric())
+}
+
+fn looks_like_bare_uppercase_stem(token: &str) -> bool {
+    token.chars().count() >= 2
+        && !token.contains(['/', '\\', '.'])
+        && token
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+        && token.chars().any(|ch| ch.is_ascii_uppercase())
 }
 
 #[cfg(test)]
