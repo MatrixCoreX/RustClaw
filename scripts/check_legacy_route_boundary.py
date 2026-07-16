@@ -139,6 +139,41 @@ def scan_planner_contract_boundary_text(rel_path: str, text: str) -> list[Findin
     return findings
 
 
+def scan_agent_loop_machine_guard_boundary_text(rel_path: str, text: str) -> list[Finding]:
+    name = Path(rel_path).name
+    if name not in {"agent_engine.rs", "support.rs", "execution_loop.rs"}:
+        return []
+    findings: list[Finding] = []
+    guarded_symbols = (
+        "answer_verifier_enforce_required",
+        "answer_verifier_required_evidence_enabled",
+        "registry_idempotency_guard_enabled",
+        "action_fingerprint_for_policy",
+        "registry_idempotency_guard_attribution",
+        "check_repeat_action_guard",
+    )
+    for symbol in guarded_symbols:
+        for match in re.finditer(
+            rf"fn\s+{re.escape(symbol)}\b(?P<body>.*?)(?:\n\}}|\n\n)",
+            text,
+            flags=re.DOTALL,
+        ):
+            body = match.group("body")
+            route_match = re.search(r"\bRouteResult\b|\broute_result\b", body)
+            if route_match is None:
+                continue
+            offset = match.start("body") + route_match.start()
+            findings.append(
+                Finding(
+                    rel_path,
+                    line_number_for_offset(text, offset),
+                    "agent_loop_machine_guard_route_dependency",
+                    symbol,
+                )
+            )
+    return findings
+
+
 def line_number_for_offset(text: str, offset: int) -> int:
     return text.count("\n", 0, max(offset, 0)) + 1
 
@@ -202,6 +237,12 @@ def scan_repo() -> list[Finding]:
         )
         findings.extend(
             scan_planner_contract_boundary_text(
+                rel_path,
+                path.read_text(encoding="utf-8"),
+            )
+        )
+        findings.extend(
+            scan_agent_loop_machine_guard_boundary_text(
                 rel_path,
                 path.read_text(encoding="utf-8"),
             )
@@ -287,6 +328,14 @@ def run_self_test() -> int:
     assert not scan_planner_contract_boundary_text(
         "crates/clawd/src/agent_engine/planning.rs",
         "fn plan(output_contract: Option<&IntentOutputContract>) {}",
+    )
+    assert scan_agent_loop_machine_guard_boundary_text(
+        "crates/clawd/src/agent_engine/support.rs",
+        "fn action_fingerprint_for_policy(route_result: Option<&RouteResult>) -> String {\n    String::new()\n}\n",
+    )
+    assert not scan_agent_loop_machine_guard_boundary_text(
+        "crates/clawd/src/agent_engine/support.rs",
+        "fn action_fingerprint_for_policy(action: &AgentAction) -> String {\n    action_fingerprint(action)\n}\n",
     )
     assert scan_boundary_envelope_type_contract_text(
         "crates/clawd/src/turn_boundary_envelope.rs",

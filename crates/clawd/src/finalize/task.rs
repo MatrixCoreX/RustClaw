@@ -994,10 +994,7 @@ pub(crate) async fn finalize_ask_result(
                     insert_unfinished_goal_memory(state, task, prompt, &err_text);
                 }
             } else if answer_verifier_should_force_task_failure(
-                crate::agent_engine::answer_verifier_enforce_required_enabled_for_route(
-                    state,
-                    Some(route_result),
-                ),
+                crate::agent_engine::answer_verifier_enforce_required_enabled(state),
                 semantic_clarify,
                 &journal,
             ) {

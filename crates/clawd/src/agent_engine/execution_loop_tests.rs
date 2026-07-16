@@ -272,7 +272,6 @@ fn repeat_guard_allows_repeated_respond_delivery() {
             &mut loop_state,
             &policy,
             &action,
-            None,
             &fingerprint,
             1,
         ),
@@ -299,7 +298,6 @@ fn repeat_guard_blocks_identical_non_respond_after_limit() {
             &mut loop_state,
             &policy,
             &action,
-            None,
             &fingerprint,
             1,
         ),
@@ -312,7 +310,6 @@ fn repeat_guard_blocks_identical_non_respond_after_limit() {
             &mut loop_state,
             &policy,
             &action,
-            None,
             &fingerprint,
             2,
         )
@@ -332,7 +329,7 @@ fn repeat_guard_allows_successful_observe_repeat_until_limit() {
     };
     let mut policy = test_policy(false);
     policy.repeat_action_limit = 2;
-    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action, None);
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
     loop_state
         .successful_action_fingerprints
         .insert(fingerprint.clone(), 1);
@@ -344,7 +341,6 @@ fn repeat_guard_allows_successful_observe_repeat_until_limit() {
             &mut loop_state,
             &policy,
             &action,
-            None,
             &fingerprint,
             1,
         ),
@@ -357,7 +353,6 @@ fn repeat_guard_allows_successful_observe_repeat_until_limit() {
             &mut loop_state,
             &policy,
             &action,
-            None,
             &fingerprint,
             2,
         ),
@@ -370,7 +365,6 @@ fn repeat_guard_allows_successful_observe_repeat_until_limit() {
             &mut loop_state,
             &policy,
             &action,
-            None,
             &fingerprint,
             3,
         )
@@ -405,7 +399,6 @@ fn registry_idempotency_guard_records_repeat_block_attribution() {
             &mut loop_state,
             &policy,
             &action,
-            None,
             &fingerprint,
             1,
         )
@@ -463,8 +456,8 @@ fn registry_args_dedup_allows_multiple_distinct_filesystem_writes() {
         }),
     };
     let policy = test_policy(true);
-    let first_fingerprint = action_fingerprint_for_policy(&state, &policy, &first, None);
-    let second_fingerprint = action_fingerprint_for_policy(&state, &policy, &second, None);
+    let first_fingerprint = action_fingerprint_for_policy(&state, &policy, &first);
+    let second_fingerprint = action_fingerprint_for_policy(&state, &policy, &second);
 
     assert_ne!(first_fingerprint, second_fingerprint);
     assert!(first_fingerprint.contains("run/nl_eval_tmp/a.py"));
@@ -481,7 +474,6 @@ fn registry_args_dedup_allows_multiple_distinct_filesystem_writes() {
             &mut loop_state,
             &policy,
             &second,
-            None,
             &second_fingerprint,
             2,
         ),
