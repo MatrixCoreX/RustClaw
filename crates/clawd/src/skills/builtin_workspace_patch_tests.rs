@@ -55,6 +55,9 @@ fn applies_multi_file_patch_and_rewinds_checkpoint() {
         .run(json!({"action":"apply_patch", "patch":patch}))
         .expect("apply patch");
     assert_eq!(applied["action"], "apply_patch");
+    assert_eq!(applied["isolation_root"], "workspace://current");
+    assert_eq!(applied["reversible"], true);
+    assert_eq!(applied["changed_hunks"], 2);
     assert_eq!(applied["changed_files"].as_array().unwrap().len(), 2);
     assert_eq!(
         fs::read_to_string(workspace.root.join("src/a.txt")).unwrap(),
@@ -70,6 +73,7 @@ fn applies_multi_file_patch_and_rewinds_checkpoint() {
         .run(json!({"action":"rewind", "checkpoint_id":checkpoint_id}))
         .expect("rewind");
     assert_eq!(rewind["action"], "rewind");
+    assert_eq!(rewind["reversible"], false);
     assert_eq!(
         fs::read_to_string(workspace.root.join("src/a.txt")).unwrap(),
         "alpha\n"

@@ -120,6 +120,14 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
                 "output_evidence_count": step_trace.get("output_evidence_count"),
                 "artifact_ref_count": step_trace.get("artifact_ref_count"),
                 "artifact_refs": step_trace.get("artifact_refs").cloned().unwrap_or_else(|| json!([])),
+                "structured_workspace_mutation": step_trace.get("structured_workspace_mutation"),
+                "patch_id": step_trace.pointer("/structured_workspace_mutation/patch_id"),
+                "checkpoint_id": step_trace.pointer("/structured_workspace_mutation/checkpoint_id"),
+                "isolation_root": step_trace.pointer("/structured_workspace_mutation/isolation_root"),
+                "reversible": step_trace.pointer("/structured_workspace_mutation/reversible"),
+                "additions": step_trace.pointer("/structured_workspace_mutation/additions"),
+                "deletions": step_trace.pointer("/structured_workspace_mutation/deletions"),
+                "changed_hunks": step_trace.pointer("/structured_workspace_mutation/changed_hunks"),
                 "started_at": step.started_at,
                 "finished_at": step.finished_at,
             }),
@@ -317,6 +325,14 @@ fn tool_lifecycle_event_payload(
         "failure_attribution": step_trace.get("failure_attribution"),
         "output_evidence_count": step_trace.get("output_evidence_count"),
         "artifact_ref_count": step_trace.get("artifact_ref_count"),
+        "structured_workspace_mutation": step_trace.get("structured_workspace_mutation"),
+        "patch_id": step_trace.pointer("/structured_workspace_mutation/patch_id"),
+        "checkpoint_id": step_trace.pointer("/structured_workspace_mutation/checkpoint_id"),
+        "isolation_root": step_trace.pointer("/structured_workspace_mutation/isolation_root"),
+        "reversible": step_trace.pointer("/structured_workspace_mutation/reversible"),
+        "additions": step_trace.pointer("/structured_workspace_mutation/additions"),
+        "deletions": step_trace.pointer("/structured_workspace_mutation/deletions"),
+        "changed_hunks": step_trace.pointer("/structured_workspace_mutation/changed_hunks"),
         "started_at": step.started_at,
         "finished_at": step.finished_at,
     })
@@ -330,6 +346,8 @@ struct CodingEvidenceSignals {
     verification_commands: BTreeSet<String>,
     tests: BTreeSet<String>,
     evidence_refs: BTreeSet<String>,
+    workspace_checkpoint_ids: BTreeSet<String>,
+    patch_ids: BTreeSet<String>,
     diff_summaries: Vec<Value>,
     failures: Vec<Value>,
     verification_failure_kinds: BTreeSet<String>,
@@ -343,6 +361,7 @@ impl CodingEvidenceSignals {
             || !self.commands.is_empty()
             || !self.tests.is_empty()
             || !self.diff_summaries.is_empty()
+            || !self.workspace_checkpoint_ids.is_empty()
             || !self.failures.is_empty()
             || self.retry_count > 0
     }
@@ -370,6 +389,8 @@ impl CodingEvidenceSignals {
             "tests": self.tests.iter().cloned().collect::<Vec<_>>(),
             "diff_summary_count": self.diff_summaries.len(),
             "diff_summaries": self.diff_summaries.clone(),
+            "workspace_checkpoint_ids": self.workspace_checkpoint_ids.iter().cloned().collect::<Vec<_>>(),
+            "patch_ids": self.patch_ids.iter().cloned().collect::<Vec<_>>(),
             "failure_count": self.failures.len(),
             "failures": self.failures.clone(),
             "verification_status": verification_status,
@@ -414,6 +435,8 @@ impl CodingEvidenceSignals {
             "final_diff_summary": final_diff_summary,
             "diff_summary_count": self.diff_summaries.len(),
             "diff_summaries": self.diff_summaries.clone(),
+            "workspace_checkpoint_ids": self.workspace_checkpoint_ids.iter().cloned().collect::<Vec<_>>(),
+            "patch_ids": self.patch_ids.iter().cloned().collect::<Vec<_>>(),
             "verification_status": coding_verification_status(self),
             "verification_failure_kind_count": self.verification_failure_kinds.len(),
             "verification_failure_kinds": self.verification_failure_kinds.iter().cloned().collect::<Vec<_>>(),
@@ -452,7 +475,29 @@ fn append_coding_checkpoint_events(
                 "evidence_refs": signals.evidence_refs.iter().cloned().collect::<Vec<_>>(),
                 "changed_file_count": signals.changed_files.len(),
                 "changed_files": signals.changed_files.iter().cloned().collect::<Vec<_>>(),
+                "workspace_checkpoint_ids": signals.workspace_checkpoint_ids.iter().cloned().collect::<Vec<_>>(),
+                "patch_ids": signals.patch_ids.iter().cloned().collect::<Vec<_>>(),
                 "verification_status": coding_verification_status(signals),
+            }),
+        ));
+    }
+    if coding_verification_status(signals) == "verified"
+        && !signals.workspace_checkpoint_ids.is_empty()
+    {
+        events.push(task_event_json(
+            seq,
+            "coding_checkpoint",
+            json!({
+                "schema_version": 1,
+                "checkpoint_kind": "verified_workspace_checkpoint",
+                "checkpoint_ref": "coding_checkpoint:verified_workspace_checkpoint",
+                "checkpoint_id": signals.workspace_checkpoint_ids.iter().next(),
+                "patch_id": signals.patch_ids.iter().next(),
+                "evidence_ref": "coding_checkpoint:verified_workspace_checkpoint",
+                "evidence_refs": signals.evidence_refs.iter().cloned().collect::<Vec<_>>(),
+                "workspace_checkpoint_ids": signals.workspace_checkpoint_ids.iter().cloned().collect::<Vec<_>>(),
+                "patch_ids": signals.patch_ids.iter().cloned().collect::<Vec<_>>(),
+                "verification_status": "verified",
             }),
         ));
     }
@@ -513,6 +558,7 @@ fn collect_coding_evidence_value(
     }
     match value {
         Value::Object(map) => {
+            collect_workspace_patch_fields(map, signals, evidence_ref);
             collect_read_file_fields(map, signals, evidence_ref);
             collect_changed_file_fields(map, signals, evidence_ref);
             collect_command_fields(map, signals, evidence_ref);
@@ -536,6 +582,36 @@ fn collect_coding_evidence_value(
             }
         }
         Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+fn collect_workspace_patch_fields(
+    map: &serde_json::Map<String, Value>,
+    signals: &mut CodingEvidenceSignals,
+    evidence_ref: Option<&str>,
+) {
+    if map.get("source").and_then(Value::as_str) != Some("workspace_patch") {
+        return;
+    }
+    let before = signals.workspace_checkpoint_ids.len() + signals.patch_ids.len();
+    if let Some(value) = map
+        .get("checkpoint_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| is_bounded_single_line_token(value))
+    {
+        signals.workspace_checkpoint_ids.insert(value.to_string());
+    }
+    if let Some(value) = map
+        .get("patch_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| is_bounded_single_line_token(value))
+    {
+        signals.patch_ids.insert(value.to_string());
+    }
+    if signals.workspace_checkpoint_ids.len() + signals.patch_ids.len() > before {
+        record_evidence_ref(signals, evidence_ref);
     }
 }
 

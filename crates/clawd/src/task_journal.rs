@@ -238,9 +238,75 @@ impl TaskJournalStepTrace {
 }
 
 fn step_output_excerpt_for_journal(output: &str) -> String {
-    compact_structured_action_output_for_journal(output)
+    compact_workspace_patch_output_for_journal(output)
+        .or_else(|| compact_structured_action_output_for_journal(output))
         .or_else(|| compact_structured_listing_output_for_journal(output))
         .unwrap_or_else(|| crate::truncate_for_log(output))
+}
+
+fn compact_workspace_patch_output_for_journal(output: &str) -> Option<String> {
+    let value = serde_json::from_str::<Value>(output.trim()).ok()?;
+    let source = value
+        .get("extra")
+        .filter(|extra| extra.is_object())
+        .unwrap_or(&value);
+    if source.get("source").and_then(Value::as_str) != Some("workspace_patch") {
+        return None;
+    }
+    let mut compact = serde_json::Map::new();
+    for field in [
+        "schema_version",
+        "source",
+        "status",
+        "action",
+        "message_key",
+        "patch_id",
+        "checkpoint_id",
+        "state",
+        "isolation_root",
+        "reversible",
+        "additions",
+        "deletions",
+        "hunk_count",
+        "changed_hunks",
+        "changed_files",
+        "restored_files",
+        "artifact_refs",
+    ] {
+        copy_listing_field(source, &mut compact, field);
+    }
+    if let Some(files) = source.get("files").and_then(Value::as_array) {
+        compact.insert(
+            "files".to_string(),
+            Value::Array(
+                files
+                    .iter()
+                    .take(128)
+                    .filter_map(compact_workspace_patch_file)
+                    .collect(),
+            ),
+        );
+    }
+    serde_json::to_string(&json!({ "extra": Value::Object(compact) })).ok()
+}
+
+fn compact_workspace_patch_file(file: &Value) -> Option<Value> {
+    let path = file.get("path").and_then(Value::as_str)?.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let mut compact = serde_json::Map::new();
+    compact.insert("path".to_string(), json!(path));
+    for field in [
+        "existed",
+        "before_sha256",
+        "after_sha256",
+        "additions",
+        "deletions",
+    ] {
+        copy_listing_field(file, &mut compact, field);
+    }
+    Some(Value::Object(compact))
 }
 
 fn compact_structured_action_output_for_journal(output: &str) -> Option<String> {
@@ -1085,6 +1151,10 @@ mod goal_tests;
 #[cfg(test)]
 #[path = "task_journal_service_capability_evidence_tests.rs"]
 mod service_capability_evidence_tests;
+
+#[cfg(test)]
+#[path = "task_journal_workspace_patch_tests.rs"]
+mod workspace_patch_tests;
 
 #[cfg(test)]
 #[path = "task_journal_tests.rs"]
