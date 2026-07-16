@@ -88,7 +88,7 @@ pub(crate) fn filtered_event_lines(
 ) -> Vec<String> {
     filtered_events(task, event_filters)
         .into_iter()
-        .map(|event| format!("event: {}", event.line))
+        .map(crate::events::compact_task_event_line)
         .collect()
 }
 

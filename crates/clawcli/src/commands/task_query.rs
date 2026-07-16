@@ -270,14 +270,15 @@ pub(crate) fn run_events(
                 .or_else(|| raw_event.get("event_type"))
                 .and_then(serde_json::Value::as_str)
                 == Some("task_final");
-            if let Some(event) = crate::events::task_event_line_from_value(raw_event) {
-                if event_filters.matches(&event) {
-                    if jsonl_output {
-                        println!("{}", serde_json::to_string(raw_event)?);
-                    } else {
-                        println!("event: {}", event.line);
-                    }
-                }
+            let output_mode = if jsonl_output {
+                crate::events::LiveEventOutputMode::Jsonl
+            } else {
+                crate::events::LiveEventOutputMode::Compact
+            };
+            if let Some(line) =
+                crate::events::live_task_event_output_line(raw_event, output_mode, &event_filters)?
+            {
+                println!("{line}");
             }
             Ok(!terminal)
         });
@@ -305,7 +306,7 @@ pub(super) fn task_event_output_lines(
                 "fields": &event.fields,
             }))?);
         } else {
-            lines.push(format!("event: {}", event.line));
+            lines.push(crate::events::compact_task_event_line(event));
         }
     }
     Ok(lines)

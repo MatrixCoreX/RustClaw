@@ -382,12 +382,17 @@ fn stream_read_window(deadline: Option<Instant>, now: Instant) -> Option<Duratio
 }
 
 fn render_exec_stream_event(event: &Value, options: &ExecWaitOptions) -> Result<()> {
-    if options.jsonl_output {
-        println!("{}", serde_json::to_string(event)?);
-    } else if !options.json_output {
-        if let Some(event) = events::task_event_line_from_value(event) {
-            println!("event: {}", event.line);
-        }
+    let mode = if options.jsonl_output {
+        events::LiveEventOutputMode::Jsonl
+    } else if options.json_output {
+        events::LiveEventOutputMode::Quiet
+    } else {
+        events::LiveEventOutputMode::Compact
+    };
+    if let Some(line) =
+        events::live_task_event_output_line(event, mode, &events::EventFilters::default())?
+    {
+        println!("{line}");
     }
     Ok(())
 }

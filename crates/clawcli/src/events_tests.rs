@@ -40,6 +40,48 @@ fn event_follow_state_uses_machine_fields() {
 }
 
 #[test]
+fn live_event_renderer_is_shared_across_compact_jsonl_and_quiet_modes() {
+    let raw = serde_json::json!({
+        "seq": 9,
+        "event_type": "tool_finished",
+        "payload": {
+            "step_id": "step_2",
+            "skill": "fs_basic",
+            "status": "ok",
+            "checkpoint_id": "checkpoint-9"
+        }
+    });
+    let filters = EventFilters::default();
+
+    let compact = live_task_event_output_line(&raw, LiveEventOutputMode::Compact, &filters)
+        .expect("compact render")
+        .expect("compact line");
+    assert!(compact.starts_with("event: "));
+    assert!(compact.contains("type=tool_finished"));
+    assert!(compact.contains("checkpoint_id=checkpoint-9"));
+
+    let jsonl = live_task_event_output_line(&raw, LiveEventOutputMode::Jsonl, &filters)
+        .expect("jsonl render")
+        .expect("jsonl line");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&jsonl).expect("jsonl object"),
+        raw
+    );
+    assert!(
+        live_task_event_output_line(&raw, LiveEventOutputMode::Quiet, &filters)
+            .expect("quiet render")
+            .is_none()
+    );
+
+    let filtered = EventFilters::from_parts(&["task_final".to_string()], None, None, None, None);
+    assert!(
+        live_task_event_output_line(&raw, LiveEventOutputMode::Jsonl, &filtered)
+            .expect("filtered render")
+            .is_none()
+    );
+}
+
+#[test]
 fn event_stream_status_classifies_only_unsupported_endpoints_as_fallback() {
     for status in [
         StatusCode::NOT_FOUND,
