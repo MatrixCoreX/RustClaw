@@ -2,7 +2,6 @@ use serde_json::{json, Value};
 use std::path::Path;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
 
 use crate::{AppState, ClaimedTask};
 
@@ -255,7 +254,54 @@ pub(crate) async fn run_skill_with_runner_once(
     } else {
         None
     };
-    let mut cmd = Command::new(&state.skill_rt.skill_runner_path);
+    let token_store_dir = claw_core::secrets::secret_token_store_dir();
+    let additional_writable_paths = if internal_llm_token.is_some()
+        || openai_api_key_token.is_some()
+        || !tokenized_secret_envs.is_empty()
+    {
+        vec![token_store_dir.clone()]
+    } else {
+        Vec::new()
+    };
+    let network = if caps.iter().any(|cap| {
+        matches!(
+            cap,
+            claw_core::skill_registry::Capability::Net | claw_core::skill_registry::Capability::Llm
+        )
+    }) {
+        crate::process_sandbox::ProcessNetworkPolicy::Inherit
+    } else {
+        crate::process_sandbox::ProcessNetworkPolicy::Deny
+    };
+    let prepared = crate::process_sandbox::prepare_process_command(
+        &state.skill_rt.skill_runner_path,
+        crate::process_sandbox::ProcessSandboxRequest {
+            mode: state.skill_rt.tools_policy.sandbox_mode,
+            workspace_root: &state.skill_rt.workspace_root,
+            execution_root: &state.skill_rt.workspace_root,
+            network,
+            additional_writable_paths: &additional_writable_paths,
+        },
+    )
+    .map_err(|reason_code| {
+        format!(
+            "skill-runner sandbox unavailable: reason_code={reason_code} sandbox_mode={}",
+            state.skill_rt.tools_policy.sandbox_mode.as_token()
+        )
+    })?;
+    tracing::debug!(
+        skill = canonical_skill_name,
+        sandbox_backend = prepared.backend,
+        sandbox_mode = state.skill_rt.tools_policy.sandbox_mode.as_token(),
+        network_policy = ?network,
+        "skill_runner_process_sandbox_prepared"
+    );
+    let sandbox_token_store_dir = prepared
+        .additional_writable_targets
+        .first()
+        .cloned()
+        .unwrap_or_else(|| token_store_dir.clone());
+    let mut cmd = prepared.command;
     if let Some(report) = apply_skill_runner_env_isolation(&mut cmd) {
         tracing::info!(
             "skill_dispatch skill={} env_strict=on preserved={:?} stripped_parent_env={}",
@@ -269,9 +315,7 @@ pub(crate) async fn run_skill_with_runner_once(
     cmd.env("SKILL_TIMEOUT_SECONDS", skill_timeout_secs.to_string())
         .env(
             "RUSTCLAW_SECRET_TOKEN_DIR",
-            claw_core::secrets::secret_token_store_dir()
-                .display()
-                .to_string(),
+            sandbox_token_store_dir.display().to_string(),
         )
         .env(
             "WORKSPACE_ROOT",

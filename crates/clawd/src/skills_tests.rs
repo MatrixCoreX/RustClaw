@@ -29,10 +29,13 @@ struct TempDirGuard {
 
 impl TempDirGuard {
     fn new(prefix: &str) -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "rustclaw_{prefix}_{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let path = std::env::current_dir()
+            .expect("current test directory")
+            .join("target/clawd-skills-tests")
+            .join(format!(
+                "rustclaw_{prefix}_{}",
+                uuid::Uuid::new_v4().simple()
+            ));
         fs::create_dir_all(&path).expect("create temp dir");
         Self { path }
     }
@@ -145,6 +148,51 @@ python3 -c 'import json, sys; req=json.loads(sys.stdin.readline()); print(json.d
             .permissions();
         perms.set_mode(0o755);
         fs::set_permissions(&path, perms).expect("chmod fake runner");
+    }
+    path
+}
+
+fn make_sandbox_probe_skill_runner(root: &Path) -> PathBuf {
+    let path = root.join("sandbox-probe-skill-runner");
+    fs::write(
+        &path,
+        r#"#!/usr/bin/env python3
+import json
+import os
+import sys
+
+request = json.loads(sys.stdin.readline())
+args = request.get("args", {})
+
+def try_write(path):
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("probe")
+        return True
+    except OSError:
+        return False
+
+result = {
+    "workspace_write": try_write(os.path.join(os.environ["WORKSPACE_ROOT"], "workspace-probe.txt")),
+    "outside_write": try_write(args["outside_path"]),
+}
+print(json.dumps({
+    "request_id": request.get("request_id", ""),
+    "status": "ok",
+    "text": json.dumps(result),
+    "error_text": None,
+}))
+"#,
+    )
+    .expect("write sandbox probe skill runner");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&path)
+            .expect("sandbox probe metadata")
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).expect("chmod sandbox probe");
     }
     path
 }
@@ -1020,6 +1068,63 @@ async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
             "blocked memory leaked: {blocked}; memory={serialized}"
         );
     }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn runner_process_can_write_workspace_but_not_adjacent_host_path() {
+    if !Path::new("/usr/bin/bwrap").is_file() && !Path::new("/bin/bwrap").is_file() {
+        return;
+    }
+    let root = TempDirGuard::new("runner_process_sandbox");
+    let outside_path = root
+        .path()
+        .parent()
+        .expect("sandbox fixture parent")
+        .join(format!(
+            "outside-probe-{}.txt",
+            uuid::Uuid::new_v4().simple()
+        ));
+    let mut state = test_state("en");
+    install_registry_from_toml(
+        &mut state,
+        root.path(),
+        r#"
+[[skills]]
+name = "sandbox_probe"
+enabled = true
+kind = "runner"
+runner_name = "sandbox-probe"
+capabilities = ["fs.write"]
+"#,
+        &["sandbox_probe"],
+    );
+    allow_test_skills(&mut state, &["sandbox_probe"]);
+    state.skill_rt.skill_runner_path = make_sandbox_probe_skill_runner(root.path());
+    state.skill_rt.workspace_root = root.path().to_path_buf();
+    state.skill_rt.skill_timeout_seconds = 5;
+    let task = test_task(json!({"kind": "run_skill"}));
+
+    let outcome = super::run_skill_with_runner_outcome(
+        &state,
+        &task,
+        "sandbox_probe",
+        json!({"outside_path": outside_path}),
+    )
+    .await
+    .expect("run sandbox probe");
+    let probe: serde_json::Value = serde_json::from_str(&outcome.text).expect("probe output");
+
+    assert_eq!(
+        probe.get("workspace_write").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        probe.get("outside_write").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+    assert!(root.path().join("workspace-probe.txt").is_file());
+    assert!(!outside_path.exists());
 }
 
 #[test]

@@ -483,7 +483,7 @@ async fn execute_external_local_shell_recipe(
         source
     );
 
-    match super::run_safe_command(
+    match super::run_safe_command_with_sandbox(
         &bundle_dir,
         &command,
         state.skill_rt.max_cmd_length,
@@ -491,6 +491,8 @@ async fn execute_external_local_shell_recipe(
         state.skill_rt.cmd_idle_timeout_seconds,
         state.skill_rt.cmd_max_output_bytes,
         crate::skills::task_allows_sudo(state, Some(task)),
+        state.skill_rt.tools_policy.sandbox_mode,
+        &state.skill_rt.workspace_root,
     )
     .await
     {
