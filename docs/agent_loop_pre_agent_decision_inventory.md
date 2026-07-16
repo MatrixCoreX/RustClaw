@@ -110,30 +110,14 @@ belong in the agent loop.
 - Contract selection for ordinary read/list/summarize/status/config-read/log-read
   tasks once registry/schema can express the capability.
 
-## Intent-router Repair Classes
+## Agent-loop Repair Classes
 
-`intent_router` repair output is now classified with language-neutral machine
-tokens so later deletion can distinguish boundary repairs from ordinary semantic
-reroutes:
-
-- `schema_normalization`: enum aliases, structured contract repair, execution
-  recipe/schema normalization, and contract-driven planner promotion.
-- `machine_locator_repair`: locator-kind normalization, current-turn anchor
-  correction, missing locator machine state, and workspace scope locator hints.
-- `boundary_safety_repair`: untrusted model fields ignored, unsafe fallback
-  schema, and structural cleanup of answer candidates.
-- `legacy_semantic_reroute`: any repair code not explicitly classified above;
-  this conservative default prevents unknown normalizer repair from being
-  treated as a permanent boundary gate.
-
-Runtime code must continue to classify only internal repair source/detail tokens,
-not user natural-language text.
-
-Legacy semantic reroute is isolated during the agent-loop migration: a
-contract-repair judge result may only change the first-layer decision when the
-change is backed by machine contract fields, an execution recipe, or an
-allow-listed machine marker. Ordinary semantic route changes that lack those
-signals are rejected before they can mutate runtime state.
+The intent-router and pre-route contract-repair classes have been deleted. Current
+repair inventory is limited to bounded planner/verifier recovery, permission
+contracts, provider blockers, and checkpoint/resume recovery. These paths consume
+schema issues, policy tokens, execution observations, evidence gaps, and lifecycle
+state only. They must not inspect user natural-language phrases or localized
+`text` / `error_text` fields to choose the next action.
 
 ## Deterministic Shortcuts Allowed To Remain
 

@@ -2,8 +2,6 @@ use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RepairBoundaryClass {
-    SchemaCompatRepair,
-    BoundarySafetyRepair,
     LoopBoundedRecovery,
     PermissionContractRepair,
     CheckpointResumeRepair,
@@ -12,8 +10,6 @@ pub(crate) enum RepairBoundaryClass {
 impl RepairBoundaryClass {
     pub(crate) fn as_token(self) -> &'static str {
         match self {
-            Self::SchemaCompatRepair => "schema_compat_repair",
-            Self::BoundarySafetyRepair => "boundary_safety_repair",
             Self::LoopBoundedRecovery => "loop_bounded_recovery",
             Self::PermissionContractRepair => "permission_contract_repair",
             Self::CheckpointResumeRepair => "checkpoint_resume_repair",
@@ -57,141 +53,6 @@ impl RepairBoundaryInventoryItem {
 
 pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
     RepairBoundaryInventoryItem {
-        reason_code: "normalizer_schema_contract_repair",
-        repair_class: RepairBoundaryClass::SchemaCompatRepair,
-        owner_layer: "intent_router_normalizer_model",
-        runtime_scope: "pre_route_normalizer",
-        source_files: &[
-            "crates/clawd/src/intent_router_normalizer_model.rs",
-            "crates/clawd/src/intent_router_normalizer_boundary_repair.rs",
-            "crates/clawd/src/intent_router_contract_repair_report.rs",
-            "crates/clawd/src/intent_router_contract_repair_judge.rs",
-            "crates/clawd/src/prompt_utils_json_repair.rs",
-        ],
-        entrypoints: &[
-            "run_intent_normalizer_model_step",
-            "apply_boundary_contract_judge_repair",
-        ],
-        allowed_input_fields: &[
-            "llm_json_parse_error",
-            "schema_field_path",
-            "contract_repair_report",
-            "machine_reason_code",
-        ],
-        forbidden_input_fields: &[
-            "user_prompt_phrase",
-            "localized_reply_text",
-            "text",
-            "error_text",
-            "skill_name_phrase",
-        ],
-        migration_target: "keep_schema_compat_only",
-        next_recovery_kind: "schema_repair",
-        deletion_gate: "keep_schema_compat_boundary",
-    },
-    RepairBoundaryInventoryItem {
-        reason_code: "contract_repair_judge_schema_boundary",
-        repair_class: RepairBoundaryClass::SchemaCompatRepair,
-        owner_layer: "contract_repair_judge",
-        runtime_scope: "pre_route_normalizer",
-        source_files: &[
-            "crates/clawd/src/intent_router_contract_repair_context.rs",
-            "crates/clawd/src/intent_router_contract_repair_judge.rs",
-            "crates/clawd/src/prompt_utils_contract_repair_judge.rs",
-            "prompts/layers/overlays/contract_repair_judge_prompt.md",
-        ],
-        entrypoints: &[
-            "run_contract_repair_judge",
-            "apply_contract_repair_judge_output",
-            "canonicalize_contract_repair_judge_object",
-        ],
-        allowed_input_fields: &[
-            "normalized_contract_json",
-            "schema_violation_code",
-            "machine_override_marker",
-            "contract_repair_context",
-            "contract_repair_judge_json",
-            "turn_type_token",
-            "target_task_policy_token",
-        ],
-        forbidden_input_fields: &[
-            "user_prompt_phrase",
-            "localized_reply_text",
-            "text",
-            "error_text",
-            "ordinary_semantic_route",
-            "skill_selection_phrase",
-        ],
-        migration_target: "limit_to_schema_and_boundary_repair",
-        next_recovery_kind: "schema_repair",
-        deletion_gate: "keep_schema_compat_boundary",
-    },
-    RepairBoundaryInventoryItem {
-        reason_code: "ask_pipeline_contract_candidate_observation",
-        repair_class: RepairBoundaryClass::BoundarySafetyRepair,
-        owner_layer: "ask_pipeline_contract_repair",
-        runtime_scope: "pre_loop_contract_candidate_observation",
-        source_files: &["crates/clawd/src/worker/ask_pipeline_contract_repair.rs"],
-        entrypoints: &[
-            "registry_capability_contract_observation",
-            "contract_repair_candidate_observations",
-        ],
-        allowed_input_fields: &[
-            "route_result",
-            "capability_ref_token",
-            "output_contract",
-            "structured_locator",
-            "sqlite_schema_probe",
-            "registry_contract_candidate",
-        ],
-        forbidden_input_fields: &[
-            "user_prompt_phrase",
-            "localized_reply_text",
-            "text",
-            "error_text",
-            "natural_language_skill_phrase",
-        ],
-        migration_target: "planner_contract_observation_or_capability_ref",
-        next_recovery_kind: "schema_repair",
-        deletion_gate: "keep_boundary_safety",
-    },
-    RepairBoundaryInventoryItem {
-        reason_code: "current_turn_missing_locator_boundary_repair",
-        repair_class: RepairBoundaryClass::BoundarySafetyRepair,
-        owner_layer: "intent_router_normalizer_run",
-        runtime_scope: "pre_route_normalizer",
-        source_files: &[
-            "crates/clawd/src/intent_router_normalizer_run.rs",
-            "crates/clawd/src/intent_router_active_task_repair.rs",
-            "crates/clawd/src/intent_router_current_turn_structural_repair.rs",
-            "crates/clawd/src/intent_router_observation_repair.rs",
-        ],
-        entrypoints: &[
-            "run_intent_normalizer",
-            "apply_current_turn_structural_contract_repair",
-            "apply_missing_active_task_reuse_clarify",
-            "apply_locatorless_observation_clarify_repair",
-        ],
-        allowed_input_fields: &[
-            "current_turn_locator",
-            "active_task_snapshot",
-            "field_path",
-            "state_patch",
-            "target_kind",
-            "route_reason_token",
-        ],
-        forbidden_input_fields: &[
-            "user_prompt_phrase",
-            "localized_reply_text",
-            "text",
-            "error_text",
-            "guessed_path_from_phrase",
-        ],
-        migration_target: "planner_clarify_or_structured_locator_recovery",
-        next_recovery_kind: "clarify",
-        deletion_gate: "keep_boundary_safety",
-    },
-    RepairBoundaryInventoryItem {
         reason_code: "plan_repair_loop_recovery",
         repair_class: RepairBoundaryClass::LoopBoundedRecovery,
         owner_layer: "agent_engine_plan_repair",
@@ -201,6 +62,7 @@ pub(crate) const REPAIR_BOUNDARY_INVENTORY: &[RepairBoundaryInventoryItem] = &[
             "crates/clawd/src/agent_engine/config_guard_capability_repair.rs",
             "crates/clawd/src/agent_engine/direct_observed_finalize_support.rs",
             "crates/clawd/src/agent_engine/session_alias_target_coverage.rs",
+            "crates/clawd/src/prompt_utils_json_repair.rs",
             "prompts/layers/overlays/plan_repair_prompt.md",
         ],
         entrypoints: &[

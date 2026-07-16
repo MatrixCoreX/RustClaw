@@ -16,6 +16,8 @@ SOURCE_FILE_RE = re.compile(r'"(crates/clawd/src/[^"]+)"')
 
 EXEMPT_FILES = {
     SRC / "repair_boundary_inventory.rs",
+    # This module is compiled only through a #[cfg(test)] declaration in prompt_utils.rs.
+    SRC / "prompt_utils_contract_repair_judge.rs",
 }
 
 
