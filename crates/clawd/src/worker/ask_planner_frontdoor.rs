@@ -48,13 +48,11 @@ pub(super) async fn prepare_planner_owned_ask_routing(
         needs_clarify: false,
         clarify_question: String::new(),
         route_reason: "agent_loop_semantic_authority".to_string(),
-        route_confidence: None,
         #[cfg(test)]
         visible_skill_candidates: state.planner_available_skills_for_task(task),
         risk_ceiling: crate::RiskCeiling::Unknown,
         resume_behavior: crate::ResumeBehavior::None,
         schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
         wants_file_delivery: false,
         should_refresh_long_term_memory: false,
         agent_display_name_hint: String::new(),
