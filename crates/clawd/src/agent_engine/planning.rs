@@ -43,6 +43,9 @@ use super::{
     },
     AgentLoopGuardPolicy, LoopState, AGENT_TOOL_SPEC_PATH, PLAN_REPAIR_PROMPT_LOGICAL_PATH,
 };
+// Legacy planning helpers are included as child modules and still import this
+// machine contract through `super::*`. The planner entry point itself no longer
+// receives or consults a pre-planner route result.
 use crate::{llm_gateway, AgentAction, AppState, ClaimedTask, PlanKind, PlanResult, RouteResult};
 
 /// Planner-visible tool and skill inventory for one loop round.
@@ -179,7 +182,6 @@ pub(super) async fn plan_round_actions(
     loop_state: &LoopState,
     turn_analysis_for_prompt: Option<&crate::turn_context::TurnAnalysis>,
     boundary_envelope_for_prompt: Option<&crate::turn_boundary_envelope::TurnBoundaryEnvelope>,
-    route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
 ) -> Result<PlanResult, String> {
     let runtime_os = runtime_os_label();
@@ -200,11 +202,8 @@ pub(super) async fn plan_round_actions(
     let skill_playbooks = planner_tool_library.skill_playbooks();
     let skill_quick_index = planner_tool_library.skill_quick_index();
     let tool_spec_template = planner_tool_library.tool_spec()?;
-    let turn_analysis = build_turn_analysis_prompt_block(
-        turn_analysis_for_prompt,
-        boundary_envelope_for_prompt,
-        route_result,
-    );
+    let turn_analysis =
+        build_turn_analysis_prompt_block(turn_analysis_for_prompt, boundary_envelope_for_prompt);
     let request_language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_text);
     let user_request_for_prompt =
@@ -317,7 +316,7 @@ pub(super) async fn plan_round_actions(
         recent_assistant_replies.chars().count(),
         crate::truncate_for_log(user_text)
     );
-    ensure_required_contract_block_present(route_result, &prompt_text)?;
+    ensure_required_contract_block_present(None, &prompt_text)?;
     let plan_raw = llm_gateway::run_with_fallback_with_prompt_source(
         state,
         task,
@@ -336,7 +335,7 @@ pub(super) async fn plan_round_actions(
         .map(|actions| {
             normalize_planned_actions_with_original_and_context(
                 state,
-                route_result,
+                None,
                 loop_state,
                 user_text,
                 Some(&original_user_text_for_policy),
@@ -346,14 +345,11 @@ pub(super) async fn plan_round_actions(
             )
         });
     let needs_repair = match initial_actions.as_ref() {
-        Some(actions) => {
-            should_force_actionable_plan_repair(state, route_result, loop_state, actions)
-        }
+        Some(actions) => should_force_actionable_plan_repair(state, None, loop_state, actions),
         None => true,
     };
     let (plan_actions, plan_kind, raw_plan_text, planner_notes) = if needs_repair {
-        let repair_reason =
-            plan_repair_reason(state, route_result, loop_state, initial_actions.as_deref());
+        let repair_reason = plan_repair_reason(state, None, loop_state, initial_actions.as_deref());
         warn!(
             "plan_repair_required task_id={} round={} reason={}",
             task.task_id, loop_state.round_no, repair_reason
@@ -383,7 +379,7 @@ pub(super) async fn plan_round_actions(
                         .map(|actions| {
                             normalize_planned_actions_with_original_and_context(
                                 state,
-                                route_result,
+                                None,
                                 loop_state,
                                 user_text,
                                 Some(&original_user_text_for_policy),
@@ -395,10 +391,7 @@ pub(super) async fn plan_round_actions(
                 match repaired_actions {
                     Some(actions)
                         if !should_force_actionable_plan_repair(
-                            state,
-                            route_result,
-                            loop_state,
-                            &actions,
+                            state, None, loop_state, &actions,
                         ) =>
                     {
                         (
@@ -410,7 +403,7 @@ pub(super) async fn plan_round_actions(
                     }
                     Some(actions) => {
                         let second_repair_reason =
-                            plan_repair_reason(state, route_result, loop_state, Some(&actions));
+                            plan_repair_reason(state, None, loop_state, Some(&actions));
                         warn!(
                             "plan_repair_still_invalid task_id={} round={} reason={}",
                             task.task_id, loop_state.round_no, second_repair_reason
@@ -435,7 +428,7 @@ pub(super) async fn plan_round_actions(
                                 .map(|actions| {
                                     normalize_planned_actions_with_original_and_context(
                                         state,
-                                        route_result,
+                                        None,
                                         loop_state,
                                         user_text,
                                         Some(&original_user_text_for_policy),
@@ -448,7 +441,7 @@ pub(super) async fn plan_round_actions(
                             Some(second_actions)
                                 if !should_force_actionable_plan_repair(
                                     state,
-                                    route_result,
+                                    None,
                                     loop_state,
                                     &second_actions,
                                 ) =>
@@ -466,10 +459,7 @@ pub(super) async fn plan_round_actions(
                             Some(_) => {
                                 let fallback_actions = initial_actions.as_ref().filter(|actions| {
                                     can_fallback_to_initial_plan_after_repair_failure(
-                                        state,
-                                        route_result,
-                                        loop_state,
-                                        actions,
+                                        state, None, loop_state, actions,
                                     )
                                 });
                                 if let Some(actions) = fallback_actions {
@@ -499,10 +489,7 @@ pub(super) async fn plan_round_actions(
                             None => {
                                 let fallback_actions = initial_actions.as_ref().filter(|actions| {
                                     can_fallback_to_initial_plan_after_repair_failure(
-                                        state,
-                                        route_result,
-                                        loop_state,
-                                        actions,
+                                        state, None, loop_state, actions,
                                     )
                                 });
                                 if let Some(actions) = fallback_actions {
@@ -529,7 +516,6 @@ pub(super) async fn plan_round_actions(
                                         goal,
                                         &turn_analysis,
                                         user_text,
-                                        route_result,
                                         loop_state,
                                         auto_locator_path,
                                         Some(&original_user_text_for_policy),
@@ -563,10 +549,7 @@ pub(super) async fn plan_round_actions(
                     None => {
                         let fallback_actions = initial_actions.as_ref().filter(|actions| {
                             can_fallback_to_initial_plan_after_repair_failure(
-                                state,
-                                route_result,
-                                loop_state,
-                                actions,
+                                state, None, loop_state, actions,
                             )
                         });
                         if let Some(actions) = fallback_actions {
@@ -593,7 +576,6 @@ pub(super) async fn plan_round_actions(
                                 goal,
                                 &turn_analysis,
                                 user_text,
-                                route_result,
                                 loop_state,
                                 auto_locator_path,
                                 Some(&original_user_text_for_policy),
@@ -624,10 +606,7 @@ pub(super) async fn plan_round_actions(
             Err(err) => {
                 let fallback_actions = initial_actions.as_ref().filter(|actions| {
                     can_fallback_to_initial_plan_after_repair_failure(
-                        state,
-                        route_result,
-                        loop_state,
-                        actions,
+                        state, None, loop_state, actions,
                     )
                 });
                 if let Some(actions) = fallback_actions {
@@ -690,7 +669,6 @@ async fn try_compact_abort_recovery_plan(
     goal: &str,
     turn_analysis: &str,
     user_text: &str,
-    route_result: Option<&RouteResult>,
     loop_state: &LoopState,
     auto_locator_path: Option<&str>,
     original_user_text_for_policy: Option<&str>,
@@ -713,7 +691,6 @@ async fn try_compact_abort_recovery_plan(
             first_raw_plan,
             latest_raw_plan,
             round_no: loop_state.round_no,
-            route_result,
             loop_state,
         },
     )
@@ -723,7 +700,7 @@ async fn try_compact_abort_recovery_plan(
     };
     let actions = normalize_planned_actions_with_original_and_context(
         state,
-        route_result,
+        None,
         loop_state,
         user_text,
         original_user_text_for_policy,
@@ -731,7 +708,7 @@ async fn try_compact_abort_recovery_plan(
         auto_locator_path,
         actions,
     );
-    if should_force_actionable_plan_repair(state, route_result, loop_state, &actions) {
+    if should_force_actionable_plan_repair(state, None, loop_state, &actions) {
         warn!(
             "planner_abort_compact_retry_non_actionable task_id={} round={}",
             task.task_id, loop_state.round_no

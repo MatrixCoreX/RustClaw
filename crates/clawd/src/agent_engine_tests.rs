@@ -590,26 +590,7 @@ fn test_build_safe_skill_args_summary_empty_object() {
 }
 
 #[test]
-fn turn_analysis_prompt_block_includes_contract_matrix_for_structured_route() {
-    let route = crate::RouteResult {
-        resolved_intent: "列出文件名".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            semantic_kind: crate::OutputSemanticKind::FileNames,
-            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-            ..Default::default()
-        },
-    };
-
+fn turn_analysis_prompt_block_includes_boundary_without_route_policy() {
     let task = crate::ClaimedTask {
         task_id: "task-turn-envelope".to_string(),
         user_id: 1,
@@ -630,18 +611,15 @@ fn turn_analysis_prompt_block_includes_contract_matrix_for_structured_route() {
         false,
         false,
     );
-    let block = build_turn_analysis_prompt_block(None, Some(&boundary_envelope), Some(&route));
+    let block = build_turn_analysis_prompt_block(None, Some(&boundary_envelope));
 
     assert!(block.contains("- turn_boundary_envelope="));
     assert!(block.contains("\"raw_chars\":26"));
     assert!(block.contains("\"structured_locator_facts\":[\"notes.md\"]"));
     assert!(block.contains("\"session_id\":\"resume_execute\""));
     assert!(!block.contains("private project notes"));
-    assert!(block.contains("- evidence_policy_context"));
-    assert!(block.contains("- evidence_policy"));
-    assert!(block.contains("planner_authority=agent_loop_registry"));
-    assert!(block.contains("required_evidence=candidates"));
-    assert!(block.contains("final_answer_shape=name_list"));
+    assert!(!block.contains("evidence_policy_context"));
+    assert!(!block.contains("planner_authority=agent_loop_registry"));
     assert!(!block.contains("allowed_actions="));
     assert!(!block.contains("forbidden_actions="));
 }

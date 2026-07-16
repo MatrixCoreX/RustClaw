@@ -871,7 +871,6 @@ async fn http_download_artifact_contract_reaches_planner_path() {
         &loop_state,
         None,
         None,
-        Some(&route),
         None,
     )
     .await

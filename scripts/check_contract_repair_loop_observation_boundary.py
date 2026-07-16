@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Guard worker contract repair stays loop-observation-only.
+"""Guard contract repair stays loop-observation-only.
 
 The Codex/Claude-style migration keeps ordinary semantic repair inside the
-agent loop. Worker-side contract repair may expose structured machine
-candidates to the loop, but it must not mutate RouteResult, gate kind,
-output_contract, or route reason before the planner. It also must not
-reintroduce legacy OutputSemanticKind-based contract identity; repair
-candidates should emit stable contract_ref machine tokens directly.
+agent loop. Boundary material may expose structured machine candidates to the
+loop, but the loop-state evidence extractor must not mutate RouteResult, gate
+kind, output_contract, or route reason. It also must not reintroduce legacy
+OutputSemanticKind-based contract identity; repair candidates should emit
+stable contract_ref machine tokens directly.
 """
 from __future__ import annotations
 
@@ -17,7 +17,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGET = ROOT / "crates/clawd/src/worker/ask_pipeline_contract_repair.rs"
+TARGETS = (
+    ROOT / "crates/clawd/src/agent_engine/loop_state_contract_evidence.rs",
+)
 
 FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -80,7 +82,13 @@ def scan_text(rel_path: str, text: str) -> list[Finding]:
 
 
 def scan_repo() -> list[Finding]:
-    return scan_text(rel(TARGET), TARGET.read_text(encoding="utf-8"))
+    findings: list[Finding] = []
+    for target in TARGETS:
+        if not target.is_file():
+            findings.append(Finding(rel(target), 0, "missing_guard_target", "file not found"))
+            continue
+        findings.extend(scan_text(rel(target), target.read_text(encoding="utf-8")))
+    return findings
 
 
 def print_report(findings: list[Finding]) -> int:
@@ -91,7 +99,7 @@ def print_report(findings: list[Finding]) -> int:
 
 
 def run_self_test() -> int:
-    rel_path = "crates/clawd/src/worker/ask_pipeline_contract_repair.rs"
+    rel_path = "crates/clawd/src/agent_engine/loop_state_contract_evidence.rs"
     assert scan_text(rel_path, "fn f(route_result: &mut crate::RouteResult) {}")
     assert scan_text(rel_path, "let mut route_result = route_result.clone();")
     assert scan_text(rel_path, "route_result.output_contract.semantic_kind = OutputSemanticKind::None;")
