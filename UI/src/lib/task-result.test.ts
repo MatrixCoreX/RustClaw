@@ -63,6 +63,31 @@ test("builds a task-bound approval request from structured resume context", () =
   assert.equal(buildTaskApprovalRequest(result), null);
 });
 
+test("projects workspace patch evidence from task events", () => {
+  const event = {
+    seq: 8,
+    event_type: "tool_finished",
+    payload: {
+      status: "ok",
+      checkpoint_id: "patch_checkpoint_1",
+      patch_id: "sha256:patch-1",
+      isolation_root: "workspace://current",
+      reversible: true,
+      additions: 4,
+      deletions: 2,
+      changed_hunks: 2,
+    },
+  };
+
+  const meta = traceEventMeta(event);
+
+  assert.ok(meta.includes("checkpoint_id=patch_checkpoint_1"));
+  assert.ok(meta.includes("patch_id=sha256:patch-1"));
+  assert.ok(meta.includes("isolation_root=workspace://current"));
+  assert.ok(meta.includes("reversible=true"));
+  assert.ok(meta.includes("changed_hunks=2"));
+});
+
 test("builds completed task outcome from machine task_outcome fields", () => {
   const result: TaskQueryResponse = {
     task_id: "task-2",

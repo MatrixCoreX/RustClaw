@@ -408,6 +408,48 @@ fn event_lines_include_coding_checkpoint_machine_fields() {
 }
 
 #[test]
+fn event_lines_include_workspace_patch_and_rewind_fields() {
+    let data = json!({
+        "result_json": {
+            "task_journal": {
+                "trace": {
+                    "event_stream": [{
+                        "seq": 8,
+                        "event_type": "tool_finished",
+                        "payload": {
+                            "status": "ok",
+                            "checkpoint_id": "patch_checkpoint_1",
+                            "patch_id": "sha256:patch-1",
+                            "isolation_root": "workspace://current",
+                            "reversible": true,
+                            "additions": 4,
+                            "deletions": 2,
+                            "changed_hunks": 2
+                        }
+                    }]
+                }
+            }
+        }
+    });
+
+    let events = task_event_lines(&data);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].fields.get("patch_id").map(String::as_str),
+        Some("sha256:patch-1")
+    );
+    assert_eq!(
+        events[0].fields.get("reversible").map(String::as_str),
+        Some("true")
+    );
+    assert!(events[0].line.contains("checkpoint_id=patch_checkpoint_1"));
+    assert!(events[0].line.contains("changed_hunks=2"));
+    let filters = EventFilters::from_parts(&[], Some("patch_checkpoint_1"), None, None, None);
+    assert!(filters.matches(&events[0]));
+}
+
+#[test]
 fn event_lines_include_coding_task_contract_machine_fields() {
     let data = json!({
         "result_json": {

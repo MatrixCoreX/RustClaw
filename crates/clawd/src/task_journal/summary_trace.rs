@@ -524,6 +524,46 @@ fn artifact_refs_from_step_output(output: Option<&str>) -> Vec<Value> {
     refs
 }
 
+fn structured_workspace_mutation_from_step_output(output: Option<&str>) -> Option<Value> {
+    let value = output.and_then(|text| serde_json::from_str::<Value>(text.trim()).ok())?;
+    let source = value
+        .get("extra")
+        .filter(|extra| extra.is_object())
+        .unwrap_or(&value);
+    if source.get("source").and_then(Value::as_str) != Some("workspace_patch") {
+        return None;
+    }
+    let action = source.get("action").and_then(Value::as_str)?;
+    if !matches!(action, "apply_patch" | "rewind") {
+        return None;
+    }
+    let mut mutation = serde_json::Map::new();
+    for field in [
+        "schema_version",
+        "source",
+        "status",
+        "action",
+        "patch_id",
+        "checkpoint_id",
+        "state",
+        "isolation_root",
+        "reversible",
+        "additions",
+        "deletions",
+        "hunk_count",
+        "changed_hunks",
+        "changed_files",
+        "restored_files",
+        "files",
+        "artifact_refs",
+    ] {
+        if let Some(value) = source.get(field) {
+            mutation.insert(field.to_string(), value.clone());
+        }
+    }
+    Some(Value::Object(mutation))
+}
+
 fn collect_artifact_refs(
     value: &Value,
     refs: &mut Vec<Value>,
@@ -535,6 +575,14 @@ fn collect_artifact_refs(
     }
     match value {
         Value::Object(map) => {
+            if let Some(items) = map.get("artifact_refs").and_then(Value::as_array) {
+                for item in items {
+                    push_explicit_artifact_ref(refs, item);
+                    if refs.len() >= 8 {
+                        return;
+                    }
+                }
+            }
             for key in [
                 "path",
                 "resolved_path",
@@ -586,6 +634,28 @@ fn collect_artifact_refs(
         Value::String(_) => {}
         Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
+}
+
+fn push_explicit_artifact_ref(refs: &mut Vec<Value>, item: &Value) {
+    let Some(reference) = item
+        .get("ref")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    if refs.iter().any(|item| {
+        item.get("ref")
+            .and_then(Value::as_str)
+            .is_some_and(|existing| existing == reference)
+    }) {
+        return;
+    }
+    refs.push(json!({
+        "kind": item.get("kind").and_then(Value::as_str).unwrap_or("artifact"),
+        "ref": crate::truncate_for_log(reference),
+    }));
 }
 
 fn artifact_string_looks_like_path(value: &str) -> bool {
@@ -648,6 +718,8 @@ pub(super) fn step_trace_json(
     let output_evidence_count = output_evidence_ids.len();
     let artifact_refs = artifact_refs_from_step_output(step.output_excerpt.as_deref());
     let artifact_ref_count = artifact_refs.len();
+    let structured_workspace_mutation =
+        structured_workspace_mutation_from_step_output(step.output_excerpt.as_deref());
     json!({
         "step_id": &step.step_id,
         "action_kind": action_kind,
@@ -679,6 +751,7 @@ pub(super) fn step_trace_json(
         "output_evidence_count": output_evidence_count,
         "artifact_refs": artifact_refs,
         "artifact_ref_count": artifact_ref_count,
+        "structured_workspace_mutation": structured_workspace_mutation,
         "retry_fingerprint": null,
         "retry_fingerprint_status": "not_recorded_in_step_trace",
         "error_excerpt": step.error_excerpt.as_deref(),

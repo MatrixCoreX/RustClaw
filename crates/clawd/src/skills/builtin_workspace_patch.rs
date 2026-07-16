@@ -197,10 +197,13 @@ fn apply_patch(
         "message_key": "workspace.patch.applied",
         "patch_id": patch_id,
         "checkpoint_id": checkpoint_id,
+        "isolation_root": "workspace://current",
+        "reversible": true,
         "changed_files": manifest.files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(),
         "additions": additions,
         "deletions": deletions,
         "hunk_count": patch.lines().filter(|line| line.starts_with("@@ ")).count(),
+        "changed_hunks": patch.lines().filter(|line| line.starts_with("@@ ")).count(),
         "files": manifest.files,
         "artifact_refs": [
             {"kind": "workspace_patch", "ref": format!("workspace_patch:{patch_id}")},
@@ -232,6 +235,8 @@ fn diff(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, Stri
             "checkpoint_id": manifest.checkpoint_id,
             "patch_id": manifest.patch_id,
             "state": manifest.state,
+            "isolation_root": "workspace://current",
+            "reversible": manifest.state == "applied",
             "changed_files": manifest.files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(),
             "patch": patch,
         }));
@@ -331,6 +336,8 @@ fn rewind(workspace_root: &Path, args: &Map<String, Value>) -> Result<String, St
         "message_key": "workspace.patch.rewound",
         "checkpoint_id": checkpoint_id,
         "patch_id": manifest.patch_id,
+        "isolation_root": "workspace://current",
+        "reversible": false,
         "restored_files": manifest.files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>(),
         "artifact_refs": [
             {"kind": "workspace_checkpoint", "ref": format!("workspace_checkpoint:{checkpoint_id}")},
