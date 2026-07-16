@@ -11,37 +11,29 @@ mod attempt_ledger;
 mod context_compaction;
 mod dispatch_support;
 mod execution_loop;
+mod explicit_machine_command;
 mod filesystem_lifecycle_contract;
 pub(crate) mod loop_control;
 mod loop_state_contract_evidence;
 mod loop_state_seed;
+mod media_artifact_plan;
 pub(crate) mod observed_output;
 mod planner_skill_context;
 mod planning;
-pub(crate) use planning::explicit_machine_syntax_command_segment;
+pub(crate) use explicit_machine_command::explicit_machine_syntax_command_segment;
+mod planning_action_normalization;
 mod planning_actions;
-mod planning_followup;
 #[path = "agent_engine/planning_output_contract.rs"]
 mod planning_output_contract;
 mod planning_parse;
-mod planning_path_metadata;
 mod planning_prompt;
-mod planning_recent_artifacts;
-mod planning_registry_preference;
-mod planning_route_markers;
-mod planning_structured_field_exact;
+mod planning_repair;
 mod prepare_round;
-pub(crate) mod service_probe_contract;
 mod skill_execution;
 mod skill_quick_index;
 mod subagent_runtime;
 mod support;
 mod user_output_path;
-
-#[cfg(test)]
-pub(crate) fn explicit_command_segment_for_policy(request: &str) -> Option<String> {
-    planning::explicit_machine_syntax_command_segment(request)
-}
 
 use self::arg_resolver::{
     normalize_skill_arg_aliases, resolve_arg_string, resolve_arg_value,
@@ -90,17 +82,9 @@ pub(crate) fn local_code_strict_json_projection_should_defer_finalizer_fallback(
     )
 }
 use self::execution_loop::execute_actions_once;
-#[cfg(test)]
-pub(crate) use self::filesystem_lifecycle_contract::{
-    effective_filesystem_cleanup_recovery_output_contract_for_plan_steps,
-    effective_filesystem_lifecycle_output_contract_for_plan_steps,
-};
 pub(crate) use self::filesystem_lifecycle_contract::{
     enrich_scratch_filesystem_cleanup_runtime_args,
-    output_contract_can_upgrade_scratch_filesystem_lifecycle,
-    scratch_filesystem_cleanup_recovery_action_allowed,
-    scratch_filesystem_lifecycle_action_allowed, scratch_filesystem_lifecycle_observed_steps_match,
-    scratch_filesystem_lifecycle_plan_actions_match,
+    scratch_filesystem_lifecycle_observed_steps_match,
 };
 use self::loop_control::{run_agent_with_loop, run_agent_with_loop_seeded};
 use self::loop_state_contract_evidence::{
@@ -122,9 +106,7 @@ use self::support::{
     publish_agent_loop_user_input_checkpoint_progress, registry_idempotency_guard_attribution,
     AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN,
 };
-pub(crate) use self::user_output_path::{
-    action_is_user_named_new_workspace_write, CLAWD_USER_NAMED_OUTPUT_PATH_ARG,
-};
+pub(crate) use self::user_output_path::CLAWD_USER_NAMED_OUTPUT_PATH_ARG;
 
 use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
 
@@ -322,7 +304,6 @@ impl LoopState {
 use self::loop_state_seed::seed_loop_state_from_agent_context;
 #[cfg(test)]
 pub(crate) use self::loop_state_seed::seed_loop_state_from_task_checkpoint;
-pub(in crate::agent_engine) use self::loop_state_seed::session_alias_bindings_from_context_summary;
 pub(crate) use self::loop_state_seed::{
     seed_loop_state_for_agent_run, LoopStateCheckpointSeedReport,
 };

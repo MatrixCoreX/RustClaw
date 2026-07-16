@@ -30,6 +30,10 @@ def rel(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
 
 
+def source_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
 def rust_private_or_pub_function_block(text: str, function_name: str) -> tuple[int, str] | None:
     pattern = re.compile(
         rf"^(?:pub\(super\)\s+)?fn\s+{re.escape(function_name)}\b", re.MULTILINE
@@ -57,7 +61,7 @@ def function_block(text: str, function_name: str) -> tuple[int, str] | None:
 def scan_git_deterministic_user_text_action_selection() -> list[Finding]:
     return scan_git_deterministic_text(
         rel(VALUE_STRING_LIST_FILE),
-        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+        source_text(VALUE_STRING_LIST_FILE),
     )
 
 
@@ -94,7 +98,7 @@ def scan_git_deterministic_text(rel_path: str, text: str) -> list[Finding]:
 def scan_sqlite_route_request_semantic_fallback() -> list[Finding]:
     return scan_sqlite_route_request_text(
         rel(SINGLE_TARGET_STRUCTURED_FIELD_REWRITE_FILE),
-        SINGLE_TARGET_STRUCTURED_FIELD_REWRITE_FILE.read_text(encoding="utf-8"),
+        source_text(SINGLE_TARGET_STRUCTURED_FIELD_REWRITE_FILE),
     )
 
 
@@ -129,7 +133,7 @@ def scan_sqlite_route_request_text(rel_path: str, text: str) -> list[Finding]:
 def scan_service_status_identity_user_text_selection() -> list[Finding]:
     return scan_service_status_identity_text(
         rel(VALUE_STRING_LIST_FILE),
-        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+        source_text(VALUE_STRING_LIST_FILE),
     )
 
 
@@ -162,7 +166,7 @@ def scan_service_status_identity_text(rel_path: str, text: str) -> list[Finding]
 def scan_service_status_process_user_text_selection() -> list[Finding]:
     return scan_service_status_process_text(
         rel(VALUE_STRING_LIST_FILE),
-        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+        source_text(VALUE_STRING_LIST_FILE),
     )
 
 
@@ -192,7 +196,7 @@ def scan_service_status_process_text(rel_path: str, text: str) -> list[Finding]:
 def scan_service_status_url_user_text_selection() -> list[Finding]:
     return scan_service_status_url_text(
         rel(VALUE_STRING_LIST_FILE),
-        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+        source_text(VALUE_STRING_LIST_FILE),
     )
 
 
@@ -223,7 +227,7 @@ def scan_service_status_url_text(rel_path: str, text: str) -> list[Finding]:
 def scan_service_status_workspace_product_text_selection() -> list[Finding]:
     return scan_service_status_workspace_product_text(
         rel(VALUE_STRING_LIST_FILE),
-        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+        source_text(VALUE_STRING_LIST_FILE),
     )
 
 
@@ -250,7 +254,7 @@ def scan_service_status_workspace_product_text(rel_path: str, text: str) -> list
 def scan_service_status_scalar_shape_health_selection() -> list[Finding]:
     return scan_service_status_scalar_shape_health_text(
         rel(VALUE_STRING_LIST_FILE),
-        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+        source_text(VALUE_STRING_LIST_FILE),
     )
 
 
@@ -280,7 +284,7 @@ def scan_service_status_scalar_shape_health_text(rel_path: str, text: str) -> li
 def scan_task_control_task_id_user_text_selection() -> list[Finding]:
     return scan_task_control_task_id_user_text(
         rel(VALUE_STRING_LIST_FILE),
-        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+        source_text(VALUE_STRING_LIST_FILE),
     )
 
 
@@ -321,7 +325,7 @@ def scan_task_control_task_id_user_text(rel_path: str, text: str) -> list[Findin
 def scan_task_control_legacy_token_fallback() -> list[Finding]:
     return scan_task_control_legacy_token_text(
         rel(VALUE_STRING_LIST_FILE),
-        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+        source_text(VALUE_STRING_LIST_FILE),
     )
 
 
@@ -352,7 +356,7 @@ def scan_task_control_legacy_token_text(rel_path: str, text: str) -> list[Findin
 def scan_async_job_start_user_text_command_selection() -> list[Finding]:
     return scan_async_job_start_user_text_command_text(
         rel(VALUE_STRING_LIST_FILE),
-        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+        source_text(VALUE_STRING_LIST_FILE),
     )
 
 
@@ -385,7 +389,7 @@ def scan_async_job_start_user_text_command_text(rel_path: str, text: str) -> lis
 def scan_web_search_user_text_query_selection() -> list[Finding]:
     return scan_web_search_user_text_query_text(
         rel(VALUE_STRING_LIST_FILE),
-        VALUE_STRING_LIST_FILE.read_text(encoding="utf-8"),
+        source_text(VALUE_STRING_LIST_FILE),
     )
 
 
@@ -435,7 +439,7 @@ def scan_runtime_surface_user_text_token_selection() -> list[Finding]:
         return []
     return scan_runtime_surface_user_text_token_text(
         rel(RUNTIME_SURFACE_PLAN_FILE),
-        RUNTIME_SURFACE_PLAN_FILE.read_text(encoding="utf-8"),
+        source_text(RUNTIME_SURFACE_PLAN_FILE),
     )
 
 
@@ -468,7 +472,7 @@ def scan_runtime_surface_user_text_token_text(rel_path: str, text: str) -> list[
 def scan_config_change_preview_user_text_selection() -> list[Finding]:
     return scan_config_change_preview_user_text_selection_text(
         rel(READ_RANGE_ACTION_FILE),
-        READ_RANGE_ACTION_FILE.read_text(encoding="utf-8"),
+        source_text(READ_RANGE_ACTION_FILE),
     )
 
 

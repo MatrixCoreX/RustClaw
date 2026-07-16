@@ -129,43 +129,6 @@ fn boundary_observation_with_concrete_tool_target_defers_to_agent_loop() {
 }
 
 #[test]
-fn pre_loop_locator_candidate_wraps_plain_respond_as_structured_clarify() {
-    let actions = vec![AgentAction::Respond {
-        content: "Please provide the file path.".to_string(),
-    }];
-    let mut loop_state = LoopState::new(2);
-    loop_state.output_vars.insert(
-        "pre_loop_clarify_candidates".to_string(),
-        json!(["background_only_locator"]).to_string(),
-    );
-
-    let intent =
-        structured_respond_terminal_intent_from_pre_loop_clarify_candidate(&loop_state, &actions)
-            .expect("pre-loop locator boundary should create structured clarify intent");
-    let outcome = apply_structured_respond_clarify_to_loop_state(&mut loop_state, &intent);
-
-    assert!(loop_state.pending_user_input_required);
-    assert_eq!(
-        outcome.stop_signal.as_deref(),
-        Some("structured_respond_clarify")
-    );
-    assert_eq!(
-        loop_state
-            .output_vars
-            .get("agent_loop.clarify_reason_code")
-            .map(String::as_str),
-        Some("pre_loop_boundary_clarify_candidate")
-    );
-    assert_eq!(
-        loop_state
-            .output_vars
-            .get("agent_loop.missing_slot")
-            .map(String::as_str),
-        Some("locator")
-    );
-}
-
-#[test]
 fn inconsistent_locator_clarify_without_route_boundary_replans_then_finishes_as_answer() {
     let plan = plan_result_with_raw_and_steps(
         "{}",

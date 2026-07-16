@@ -153,20 +153,12 @@ INVENTORY: tuple[InventoryEntry, ...] = (
 
 BRANCH_INVENTORY: tuple[BranchInventoryEntry, ...] = (
     BranchInventoryEntry(
-        name="planner_structural_route_markers",
-        path="crates/clawd/src/agent_engine/planning_route_markers.rs",
+        name="planner_action_protocol_normalization",
+        path="crates/clawd/src/agent_engine/planning_action_normalization.rs",
         category="contract_boundary",
-        input_fields=("route_reason", "needs_clarify"),
-        output_fields=("structured_marker_match",),
-        tokens=("route_reason_has_structural_marker", "route_has_unresolved_clarify_or_locator_marker"),
-    ),
-    BranchInventoryEntry(
-        name="recent_artifact_selector_machine_tokens",
-        path="crates/clawd/src/agent_engine/planning_recent_artifacts.rs",
-        category="contract_boundary",
-        input_fields=("resolved_intent", "route_reason", "list_selector"),
-        output_fields=("selector_target_kind", "selector_limit", "selector_sort_by"),
-        tokens=("selector_value_machine_token", "selector_bool_machine_token"),
+        input_fields=("planner_actions", "registry_capabilities", "machine_args"),
+        output_fields=("resolved_actions", "normalized_args"),
+        tokens=("normalize_planned_actions", "normalize_action_arg_aliases"),
     ),
     BranchInventoryEntry(
         name="observed_output_generic_projection",

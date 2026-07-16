@@ -1,5 +1,5 @@
 use super::plan_step_label;
-use crate::{plan_step_from_agent_action, AgentAction, AppState, PlanKind, PlanResult};
+use crate::{plan_step_from_agent_action, AgentAction, PlanKind, PlanResult};
 
 pub(super) fn build_plan_result_with_notes(
     goal: &str,
@@ -35,57 +35,4 @@ pub(super) fn build_plan_result_with_notes(
         plan_kind,
         raw_plan_text: raw_plan_text.to_string(),
     }
-}
-
-pub(super) fn has_executable_observation_or_action(actions: &[AgentAction]) -> bool {
-    actions.iter().any(|action| {
-        matches!(
-            action,
-            AgentAction::CallSkill { .. }
-                | AgentAction::CallTool { .. }
-                | AgentAction::CallCapability { .. }
-        )
-    })
-}
-
-pub(super) fn has_tool_or_skill_observation(actions: &[AgentAction]) -> bool {
-    actions.iter().any(|action| {
-        matches!(
-            action,
-            AgentAction::CallSkill { .. }
-                | AgentAction::CallTool { .. }
-                | AgentAction::CallCapability { .. }
-        )
-    })
-}
-
-pub(super) fn planned_action_skill_name(action: &AgentAction) -> Option<&str> {
-    match action {
-        AgentAction::CallSkill { skill, .. } => Some(skill.as_str()),
-        AgentAction::CallTool { tool, .. } => Some(tool.as_str()),
-        AgentAction::CallCapability { capability, .. } => Some(capability.as_str()),
-        AgentAction::Think { .. }
-        | AgentAction::Respond { .. }
-        | AgentAction::SynthesizeAnswer { .. } => None,
-    }
-}
-
-fn planner_internal_runtime_tool_is_available(canonical: &str) -> bool {
-    matches!(canonical, "subagent")
-}
-
-pub(super) fn contains_unavailable_skill_action(state: &AppState, actions: &[AgentAction]) -> bool {
-    let enabled_skills = state.get_skills_list();
-    if enabled_skills.is_empty() {
-        return false;
-    }
-    actions.iter().any(|action| {
-        let Some(skill) = planned_action_skill_name(action) else {
-            return false;
-        };
-        let canonical = state.resolve_canonical_skill_name(skill);
-        canonical.trim().is_empty()
-            || (!planner_internal_runtime_tool_is_available(&canonical)
-                && !enabled_skills.contains(&canonical))
-    })
 }

@@ -79,15 +79,6 @@ pub(crate) fn route_has_capability_action_name(
     })
 }
 
-pub(crate) fn route_capability_action_for_namespaces<'a>(
-    route: &'a crate::RouteResult,
-    namespaces: &[&str],
-) -> Option<&'a str> {
-    route_capability_refs(route)
-        .find(|capability| capability.namespace_matches(namespaces))
-        .map(|capability| capability.action)
-}
-
 pub(crate) fn route_capability_ref_tokens(route: &crate::RouteResult) -> Vec<String> {
     let mut tokens = route_capability_refs(route)
         .map(|capability| format!("{}.{}", capability.namespace, capability.action))

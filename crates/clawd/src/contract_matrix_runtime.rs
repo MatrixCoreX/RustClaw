@@ -567,13 +567,6 @@ pub(crate) fn preferred_action_refs_for_route(route: &RouteResult) -> Vec<Action
     preferred_action_refs_for_output_contract(&output_contract)
 }
 
-pub(crate) fn capability_ref_action_refs_for_route(
-    route: &RouteResult,
-    preferred_only: bool,
-) -> Vec<ActionRef> {
-    route_capability_ref_action_refs(route, preferred_only)
-}
-
 #[cfg(test)]
 pub(crate) fn allowed_action_refs_for_output_contract(
     output_contract: &IntentOutputContract,
@@ -863,19 +856,6 @@ pub(crate) fn capability_ref_action_policy_for_route(
     None
 }
 
-pub(crate) fn capability_ref_replacement_action_policy_for_route(
-    route: Option<&RouteResult>,
-    normalized_skill: &str,
-    args: &Value,
-) -> Option<ContractActionPolicy> {
-    let route = route?;
-    if !route_has_capability_refs(route) {
-        return None;
-    }
-    route_capability_ref_action_policy(route, normalized_skill, args)
-        .or_else(|| route_capability_ref_replacement_policy(route, normalized_skill, args))
-}
-
 #[cfg(test)]
 pub(crate) fn action_policy_for_route(
     route: Option<&RouteResult>,
@@ -920,43 +900,6 @@ fn route_capability_ref_action_policy(
         original_action_ref: action.original.as_key(),
         replacement_action_ref: action.replacement_action_ref(),
         contract_repair_source: "capability_ref_route_policy".to_string(),
-        preferred_replacement_reason_code: action.replacement_reason_code.map(str::to_string),
-        contract_match: "capability_ref".to_string(),
-        required_evidence: crate::evidence_policy::required_evidence_fields_for_route(route),
-        preferred_actions,
-        final_answer_shape_kind,
-        final_answer_shape: final_answer_shape_kind.as_str().to_string(),
-        evidence_expression: EvidenceExpression::default(),
-        policy_mode: "observe".to_string(),
-        evidence_scope: "conversation".to_string(),
-        freshness: "conversation".to_string(),
-        artifact_kind: "text".to_string(),
-        channel_visibility: "user_visible".to_string(),
-        evidence_profile: "capability_ref".to_string(),
-    })
-}
-
-fn route_capability_ref_replacement_policy(
-    route: &RouteResult,
-    normalized_skill: &str,
-    args: &Value,
-) -> Option<ContractActionPolicy> {
-    let action = route_capability_policy_action_ref(normalized_skill, args)?;
-    let preferred_actions = route_capability_ref_action_refs(route, false)
-        .into_iter()
-        .map(|action_ref| action_ref.as_key())
-        .collect::<Vec<_>>();
-    if preferred_actions.is_empty() {
-        return None;
-    }
-    let final_answer_shape_kind =
-        final_answer_shape_for_route_capability_ref(route).unwrap_or(FinalAnswerShape::Free);
-    Some(ContractActionPolicy {
-        decision: ActionPolicyDecision::RejectedNotAllowed,
-        action_key: action.effective.as_key(),
-        original_action_ref: action.original.as_key(),
-        replacement_action_ref: action.replacement_action_ref(),
-        contract_repair_source: action.repair_source.to_string(),
         preferred_replacement_reason_code: action.replacement_reason_code.map(str::to_string),
         contract_match: "capability_ref".to_string(),
         required_evidence: crate::evidence_policy::required_evidence_fields_for_route(route),
