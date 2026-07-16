@@ -98,4 +98,22 @@ fn pending_request_is_task_bound_and_expiring() {
     assert!(request["request_id"]
         .as_str()
         .is_some_and(|value| value.starts_with("approval-")));
+    assert_eq!(
+        request["allowed_decisions"],
+        json!(["approve_once", "deny"])
+    );
+}
+
+#[test]
+fn approval_decision_protocol_is_closed_to_machine_tokens() {
+    assert_eq!(
+        ApprovalDecision::parse_token("approve_once"),
+        Some(ApprovalDecision::ApproveOnce)
+    );
+    assert_eq!(
+        ApprovalDecision::parse_token("deny"),
+        Some(ApprovalDecision::Deny)
+    );
+    assert_eq!(ApprovalDecision::parse_token("approve"), None);
+    assert_eq!(ApprovalDecision::parse_token("yes"), None);
 }

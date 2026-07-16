@@ -1,4 +1,4 @@
-import { Loader2, MessageCircle, Pause, Play, RefreshCw, Save, ShieldCheck, Trash2 } from "lucide-react";
+import { Loader2, MessageCircle, Pause, Play, RefreshCw, Save, ShieldCheck, ShieldX, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -46,7 +46,11 @@ export interface TaskResultPanelProps {
   onQueryTaskLlmDebug: (taskId?: string) => unknown | Promise<unknown>;
   onResumeDraftChange: (taskId: string, value: string) => void;
   onSubmitResume: (taskId: string) => unknown | Promise<unknown>;
-  onApproveTask: (taskId: string, approvalRequestId: string) => unknown | Promise<unknown>;
+  onDecideTaskApproval: (
+    taskId: string,
+    approvalRequestId: string,
+    decision: "approve_once" | "deny",
+  ) => unknown | Promise<unknown>;
   onControlTask: (control: "pause" | "resume", taskId: string) => unknown | Promise<unknown>;
   onControlTaskGoal: (
     operation: "edit" | "clear",
@@ -81,7 +85,7 @@ export function TaskResultPanel({
   onQueryTaskLlmDebug,
   onResumeDraftChange,
   onSubmitResume,
-  onApproveTask,
+  onDecideTaskApproval,
   onControlTask,
   onControlTaskGoal,
 }: TaskResultPanelProps) {
@@ -117,7 +121,10 @@ export function TaskResultPanel({
     ? taskControlSubmittingId === `goal-clear:${taskResult.task_id}`
     : false;
   const approvalSubmitting = taskResult
-    ? taskControlSubmittingId === `approve:${taskResult.task_id}`
+    ? taskControlSubmittingId === `approve_once:${taskResult.task_id}`
+    : false;
+  const approvalDenySubmitting = taskResult
+    ? taskControlSubmittingId === `deny:${taskResult.task_id}`
     : false;
   const approvalExpired = approvalRequest ? approvalRequest.expiresAt * 1000 <= Date.now() : false;
   const approvalPending = approvalRequest?.status === "pending" && !approvalExpired;
@@ -343,15 +350,26 @@ export function TaskResultPanel({
                 {t("授权有效期至", "Approval expires at")}: {new Date(approvalRequest.expiresAt * 1000).toLocaleString(lang === "zh" ? "zh-CN" : "en-US")}
               </p>
               {approvalPending ? (
-                <button
-                  type="button"
-                  onClick={() => void onApproveTask(taskResult.task_id, approvalRequest.requestId)}
-                  disabled={approvalSubmitting || approvalExpired}
-                  className="theme-accent-btn mt-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {approvalSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
-                  {t("仅授权这一次", "Approve once")}
-                </button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void onDecideTaskApproval(taskResult.task_id, approvalRequest.requestId, "approve_once")}
+                    disabled={approvalSubmitting || approvalDenySubmitting || approvalExpired}
+                    className="theme-accent-btn text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {approvalSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                    {t("仅授权这一次", "Approve once")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void onDecideTaskApproval(taskResult.task_id, approvalRequest.requestId, "deny")}
+                    disabled={approvalSubmitting || approvalDenySubmitting || approvalExpired}
+                    className="inline-flex items-center justify-center gap-2 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-xs font-medium transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {approvalDenySubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldX className="h-3.5 w-3.5" />}
+                    {t("拒绝这一次", "Deny")}
+                  </button>
+                </div>
               ) : null}
               <details className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
                 <summary className="cursor-pointer text-xs font-medium opacity-75">

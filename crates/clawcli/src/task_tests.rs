@@ -142,19 +142,30 @@ fn resume_payload_only_carries_explicit_approval_grant() {
         },
     );
     assert_eq!(ordinary["task_id"], "task-1");
-    assert!(ordinary.get("approve").is_none());
+    assert!(ordinary.get("approval_decision").is_none());
     assert!(ordinary.get("approval_request_id").is_none());
 
     let approved = resume_task_payload(
         "task-1",
         TaskResumeRequest {
             approval_request_id: Some(" approval-1 "),
-            approve: true,
+            approval_decision: Some("approve_once"),
             ..Default::default()
         },
     );
     assert_eq!(approved["approval_request_id"], "approval-1");
-    assert_eq!(approved["approve"], true);
+    assert_eq!(approved["approval_decision"], "approve_once");
+
+    let denied = resume_task_payload(
+        "task-1",
+        TaskResumeRequest {
+            approval_request_id: Some("approval-1"),
+            approval_decision: Some("deny"),
+            ..Default::default()
+        },
+    );
+    assert_eq!(denied["approval_decision"], "deny");
+    assert!(denied.get("approve").is_none());
 }
 
 #[test]

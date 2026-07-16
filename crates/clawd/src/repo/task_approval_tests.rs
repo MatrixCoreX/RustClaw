@@ -57,11 +57,18 @@ fn approval_requeues_and_consumes_exact_binding_once() {
     let db = db();
     insert_pending(&db, 500);
 
-    let update = approve_task_approval_request_in_db(&db, "task-1", "approval-1", 100)
-        .expect("approve")
-        .expect("approval update");
+    let update = decide_task_approval_request_in_db(
+        &db,
+        "task-1",
+        "approval-1",
+        ApprovalDecision::ApproveOnce,
+        100,
+    )
+    .expect("approve")
+    .expect("approval update");
     assert_eq!(update.request_id, "approval-1");
     assert_eq!(update.expires_at, 500);
+    assert_eq!(update.decision, ApprovalDecision::ApproveOnce);
     db.execute(
         "UPDATE tasks SET status = 'running' WHERE task_id = 'task-1'",
         [],
@@ -84,9 +91,15 @@ fn approval_requeues_and_consumes_exact_binding_once() {
 fn changed_arguments_do_not_consume_approved_grant() {
     let db = db();
     insert_pending(&db, 500);
-    approve_task_approval_request_in_db(&db, "task-1", "approval-1", 100)
-        .expect("approve")
-        .expect("approval update");
+    decide_task_approval_request_in_db(
+        &db,
+        "task-1",
+        "approval-1",
+        ApprovalDecision::ApproveOnce,
+        100,
+    )
+    .expect("approve")
+    .expect("approval update");
     db.execute(
         "UPDATE tasks SET status = 'running' WHERE task_id = 'task-1'",
         [],
@@ -105,11 +118,15 @@ fn expired_request_cannot_be_approved() {
     let db = db();
     insert_pending(&db, 100);
 
-    assert!(
-        approve_task_approval_request_in_db(&db, "task-1", "approval-1", 100)
-            .expect("approve expired")
-            .is_none()
-    );
+    assert!(decide_task_approval_request_in_db(
+        &db,
+        "task-1",
+        "approval-1",
+        ApprovalDecision::ApproveOnce,
+        100,
+    )
+    .expect("approve expired")
+    .is_none());
     let (status, result): (String, String) = db
         .query_row(
             "SELECT status, result_json FROM tasks WHERE task_id = 'task-1'",
@@ -123,4 +140,54 @@ fn expired_request_cannot_be_approved() {
             ["approval_request"]["status"],
         "expired"
     );
+}
+
+#[test]
+fn deny_closes_the_exact_request_without_requeueing() {
+    let db = db();
+    insert_pending(&db, 500);
+
+    let update = decide_task_approval_request_in_db(
+        &db,
+        "task-1",
+        "approval-1",
+        ApprovalDecision::Deny,
+        100,
+    )
+    .expect("deny")
+    .expect("denial update");
+    assert_eq!(update.decision, ApprovalDecision::Deny);
+
+    let (status, result): (String, String) = db
+        .query_row(
+            "SELECT status, result_json FROM tasks WHERE task_id = 'task-1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("denied task");
+    let result = serde_json::from_str::<Value>(&result).expect("result json");
+    assert_eq!(status, "failed");
+    assert_eq!(
+        result["resume_context"]["approval_request"]["status"],
+        "denied"
+    );
+    assert_eq!(
+        result["resume_context"]["approval_request"]["decision"],
+        "deny"
+    );
+    assert_eq!(result["task_lifecycle"]["state"], "failed");
+    assert_eq!(
+        result["task_lifecycle"]["terminal_reason"],
+        "approval_request_denied"
+    );
+
+    assert!(decide_task_approval_request_in_db(
+        &db,
+        "task-1",
+        "approval-1",
+        ApprovalDecision::ApproveOnce,
+        110,
+    )
+    .expect("replay decision")
+    .is_none());
 }

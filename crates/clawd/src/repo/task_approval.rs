@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
-use crate::approval_grant::ApprovalBinding;
+use crate::approval_grant::{ApprovalBinding, ApprovalDecision};
 use crate::AppState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,6 +9,7 @@ pub(crate) struct TaskApprovalUpdate {
     pub(crate) task_id: String,
     pub(crate) request_id: String,
     pub(crate) expires_at: i64,
+    pub(crate) decision: ApprovalDecision,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,17 +45,24 @@ impl TaskApprovalConsumeOutcome {
     }
 }
 
-pub(crate) fn approve_task_approval_request(
+pub(crate) fn decide_task_approval_request(
     state: &AppState,
     task_id: &str,
     request_id: &str,
+    decision: ApprovalDecision,
 ) -> anyhow::Result<Option<TaskApprovalUpdate>> {
     let db = state
         .core
         .db
         .get()
         .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
-    approve_task_approval_request_in_db(&db, task_id, request_id, crate::now_ts_u64() as i64)
+    decide_task_approval_request_in_db(
+        &db,
+        task_id,
+        request_id,
+        decision,
+        crate::now_ts_u64() as i64,
+    )
 }
 
 pub(crate) fn consume_task_approval_grant(
@@ -70,10 +78,11 @@ pub(crate) fn consume_task_approval_grant(
     consume_task_approval_grant_in_db(&db, task_id, binding, crate::now_ts_u64() as i64)
 }
 
-fn approve_task_approval_request_in_db(
+fn decide_task_approval_request_in_db(
     db: &Connection,
     task_id: &str,
     request_id: &str,
+    decision: ApprovalDecision,
     now_ts: i64,
 ) -> anyhow::Result<Option<TaskApprovalUpdate>> {
     let task_id = task_id.trim();
@@ -117,26 +126,51 @@ fn approve_task_approval_request_in_db(
         let _ = update_approval_result_cas(db, task_id, &raw_result_json, &result, now_ts)?;
         return Ok(None);
     }
-    approval.insert("status".to_string(), json!("approved"));
-    approval.insert("approved_at".to_string(), json!(now_ts));
+    let (request_status, reason_code, next_task_status) = match decision {
+        ApprovalDecision::ApproveOnce => ("approved", "approval_grant_approved", "queued"),
+        ApprovalDecision::Deny => ("denied", "approval_request_denied", "failed"),
+    };
+    approval.insert("status".to_string(), json!(request_status));
+    approval.insert("decision".to_string(), json!(decision.as_token()));
+    approval.insert("decided_at".to_string(), json!(now_ts));
     result["task_lifecycle"] = json!({
         "schema_version": 1,
-        "state": "queued",
-        "reason_code": "approval_grant_approved",
+        "state": if decision == ApprovalDecision::ApproveOnce { "queued" } else { "failed" },
+        "reason_code": reason_code,
+        "terminal_reason": if decision == ApprovalDecision::Deny {
+            Value::String("approval_request_denied".to_string())
+        } else {
+            Value::Null
+        },
         "approval_request_id": request_id,
+        "approval_decision": decision.as_token(),
     });
-    let changed = db.execute(
-        "UPDATE tasks
-         SET status = 'queued', result_json = ?2, error_text = NULL, updated_at = ?3,
-             lease_owner = NULL, lease_expires_at = 0, claimed_at = 0
-         WHERE task_id = ?1 AND status = 'failed' AND result_json = ?4",
-        params![
-            task_id,
-            result.to_string(),
-            now_ts.to_string(),
-            raw_result_json
-        ],
-    )?;
+    let changed = if decision == ApprovalDecision::ApproveOnce {
+        db.execute(
+            "UPDATE tasks
+             SET status = ?2, result_json = ?3, error_text = NULL, updated_at = ?4,
+                 lease_owner = NULL, lease_expires_at = 0, claimed_at = 0
+             WHERE task_id = ?1 AND status = 'failed' AND result_json = ?5",
+            params![
+                task_id,
+                next_task_status,
+                result.to_string(),
+                now_ts.to_string(),
+                raw_result_json
+            ],
+        )?
+    } else {
+        db.execute(
+            "UPDATE tasks SET result_json = ?2, error_text = NULL, updated_at = ?3
+             WHERE task_id = ?1 AND status = 'failed' AND result_json = ?4",
+            params![
+                task_id,
+                result.to_string(),
+                now_ts.to_string(),
+                raw_result_json
+            ],
+        )?
+    };
     if changed == 0 {
         return Ok(None);
     }
@@ -144,6 +178,7 @@ fn approve_task_approval_request_in_db(
         task_id: task_id.to_string(),
         request_id: request_id.to_string(),
         expires_at,
+        decision,
     }))
 }
 

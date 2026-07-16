@@ -20,7 +20,7 @@ pub(crate) struct TaskResumeRequest<'a> {
     pub(crate) user_message: Option<&'a str>,
     pub(crate) new_constraints: Option<Value>,
     pub(crate) approval_request_id: Option<&'a str>,
-    pub(crate) approve: bool,
+    pub(crate) approval_decision: Option<&'a str>,
 }
 
 impl TaskStatusView {
@@ -431,8 +431,8 @@ fn resume_task_payload(task_id: &str, request: TaskResumeRequest<'_>) -> Value {
                 json!(approval_request_id),
             );
         }
-        if request.approve {
-            obj.insert("approve".to_string(), json!(true));
+        if let Some(approval_decision) = non_empty_token(request.approval_decision) {
+            obj.insert("approval_decision".to_string(), json!(approval_decision));
         }
     }
     payload

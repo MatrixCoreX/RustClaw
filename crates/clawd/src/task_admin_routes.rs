@@ -51,7 +51,7 @@ pub(super) struct ResumeTaskByIdRequest {
     user_message: Option<String>,
     new_constraints: Option<Value>,
     approval_request_id: Option<String>,
-    approve: Option<bool>,
+    approval_decision: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -341,27 +341,60 @@ pub(super) async fn resume_task_by_id(
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty());
-        if req.approve != Some(true) || request_id.is_none() {
+        let Some(decision_token) = req.approval_decision.as_deref() else {
             return super::api_err::<serde_json::Value>(
                 StatusCode::CONFLICT,
                 "approval_grant_explicit_decision_required",
             );
-        }
-        return match crate::repo::approve_task_approval_request(
+        };
+        let Some(decision) = crate::approval_grant::ApprovalDecision::parse_token(decision_token)
+        else {
+            return super::api_err::<serde_json::Value>(
+                StatusCode::BAD_REQUEST,
+                "approval_decision_invalid",
+            );
+        };
+        let Some(request_id) = request_id else {
+            return super::api_err::<serde_json::Value>(
+                StatusCode::CONFLICT,
+                "approval_grant_explicit_decision_required",
+            );
+        };
+        return match crate::repo::decide_task_approval_request(
             &state,
             &target.task_id,
-            request_id.unwrap_or_default(),
+            request_id,
+            decision,
         ) {
-            Ok(Some(update)) => super::api_ok(json!({
-                "status": "approval_grant_approved",
-                "task_id": update.task_id,
-                "approval_request_id": update.request_id,
-                "expires_at": update.expires_at,
-                "task_lifecycle": {
-                    "state": "queued",
-                    "reason_code": "approval_grant_approved",
-                },
-            })),
+            Ok(Some(update)) => {
+                crate::task_event_transport::publish_task_status_projection(
+                    &state,
+                    &update.task_id,
+                );
+                super::api_ok(json!({
+                    "status": if update.decision == crate::approval_grant::ApprovalDecision::ApproveOnce {
+                        "approval_grant_approved"
+                    } else {
+                        "approval_request_denied"
+                    },
+                    "task_id": update.task_id,
+                    "approval_request_id": update.request_id,
+                    "approval_decision": update.decision.as_token(),
+                    "expires_at": update.expires_at,
+                    "task_lifecycle": {
+                        "state": if update.decision == crate::approval_grant::ApprovalDecision::ApproveOnce {
+                            "queued"
+                        } else {
+                            "failed"
+                        },
+                        "reason_code": if update.decision == crate::approval_grant::ApprovalDecision::ApproveOnce {
+                            "approval_grant_approved"
+                        } else {
+                            "approval_request_denied"
+                        },
+                    },
+                }))
+            }
             Ok(None) => super::api_err::<serde_json::Value>(
                 StatusCode::CONFLICT,
                 "approval_grant_not_approvable",

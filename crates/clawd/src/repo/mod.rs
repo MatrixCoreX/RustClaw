@@ -35,7 +35,7 @@ pub(crate) use task_admin::{
     TaskResumeControlInput,
 };
 pub(crate) use task_approval::{
-    approve_task_approval_request, consume_task_approval_grant, TaskApprovalConsumeOutcome,
+    consume_task_approval_grant, decide_task_approval_request, TaskApprovalConsumeOutcome,
 };
 pub(crate) use task_goal::{update_task_goal_payload, TaskGoalControlOperation};
 pub(crate) use task_resume_execution::record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal;
