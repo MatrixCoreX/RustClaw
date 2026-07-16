@@ -11,6 +11,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 - Search text content under a bounded root.
 - Compare explicit paths.
 - Write or append text, create directories, or remove files/directories when confirmation permits.
+- Apply/review/revert structured workspace patches with exact-context and checkpoint protection.
 
 ## Actions
 - `stat_paths`
@@ -24,6 +25,9 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 - `append_text`
 - `make_dir`
 - `remove_path`
+- `apply_patch`
+- `diff`
+- `rewind`
 
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
@@ -57,6 +61,9 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 | `make_dir` | `path` | yes | string(path) | - | Create directory. Requires confirmation. |
 | `make_dir` | `parents` / `recursive` | no | bool | `true` | Create missing parent directories for mkdir-p style operations. |
 | `remove_path` | `path` | yes | string(path) | - | Remove one file. Directory removal requires `target_kind="directory"` and `recursive=true`. Requires confirmation. |
+| `apply_patch` | `patch` | yes | string(unified diff) | - | Apply a Git-compatible unified diff. Exact context must match; optional `precondition_hashes` maps paths to `sha256:<hex>` or `missing`. Requires confirmation. |
+| `diff` | `checkpoint_id` / `paths` | no | string / string[] | current workspace | Return a checkpoint patch or a bounded current Git diff as machine evidence. |
+| `rewind` | `checkpoint_id` | yes | string | - | Restore a patch checkpoint only when target hashes still match the recorded post-patch state. Requires confirmation. |
 
 ## Boundaries
 - Known explicit path facts: use `stat_paths`, not search.
@@ -70,6 +77,8 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 - Raw file excerpts: use `read_text_range`; semantic document understanding belongs to `doc_parse`.
 - Document heading/title scalar from a known text/markdown file: use `read_text_range` with `field_selector="title"` and a bounded head read, then answer from observed `field_value` when present.
 - File appends: use `append_text`, not `read_text_range` and not `run_cmd` redirection.
+- Existing source edits: prefer `apply_patch` over whole-file `write_text`; keep whole-file writes for explicit small replacements or new files.
+- Review and recovery: use `diff` and `rewind` checkpoint artifacts; never reconstruct a patch or checkpoint id from final-answer prose.
 - Shell semantics, pipelines, or platform-specific commands belong to `run_cmd`.
 - Legacy `read_file`, `write_file`, `list_dir`, `make_dir`, `remove_file`, `fs_search`, and `system_basic` remain accepted for compatibility, but prefer `fs_basic` when this contract covers the task.
 

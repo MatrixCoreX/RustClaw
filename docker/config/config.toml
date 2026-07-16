@@ -315,6 +315,7 @@ skills_list = [
     "list_dir",
     "make_dir",
     "remove_file",
+    "workspace_patch",
     "schedule",
     "x",
     "system_basic",

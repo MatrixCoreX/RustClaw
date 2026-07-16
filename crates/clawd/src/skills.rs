@@ -1442,6 +1442,7 @@ pub(crate) fn is_builtin_skill_name(name: &str) -> bool {
             | "list_dir"
             | "make_dir"
             | "remove_file"
+            | "workspace_patch"
             | "schedule"
     )
 }
@@ -1557,17 +1558,25 @@ pub(crate) async fn run_skill_with_runner_outcome(
                     &mut args,
                 );
             }
-            let extra = append_extra_artifact_refs(
+            let mut extra = append_extra_artifact_refs(
                 builtin_success_extra(&execution_state.skill_rt.workspace_root, &skill_name, &args),
                 isolation_artifact_refs,
             );
             return execute_builtin_skill_for_task(execution_state, task, &skill_name, &args)
                 .await
-                .map(|text| SkillRunOutcome {
-                    text,
-                    notify: None,
-                    validation: None,
-                    extra,
+                .map(|text| {
+                    if skill_name == "workspace_patch" {
+                        extra = append_extra_artifact_refs(
+                            serde_json::from_str::<Value>(&text).ok(),
+                            isolation_artifact_refs,
+                        );
+                    }
+                    SkillRunOutcome {
+                        text,
+                        notify: None,
+                        validation: None,
+                        extra,
+                    }
                 });
         }
         SkillKind::External | SkillKind::Runner => {}
