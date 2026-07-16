@@ -16,6 +16,96 @@ fn sse_parser_handles_comments_multiple_frames_and_terminal_stop() {
     .unwrap();
     assert_eq!(seen, vec![1, 2]);
 }
+
+#[test]
+fn event_follow_state_uses_machine_fields() {
+    let terminal = serde_json::json!({"event_type": "task_final", "payload": {}});
+    assert!(task_event_is_terminal(&terminal));
+    assert!(!task_event_is_background(&terminal));
+
+    let background = serde_json::json!({
+        "event_type": "task_lifecycle",
+        "payload": {"execution_state": "needs_user"}
+    });
+    assert!(task_event_is_background(&background));
+    assert!(!task_event_is_terminal(&background));
+
+    let running = serde_json::json!({
+        "event_type": "tool_started",
+        "payload": {"state": "running"}
+    });
+    assert!(!task_event_is_terminal(&running));
+    assert!(!task_event_is_background(&running));
+    assert_eq!(task_event_seq(&serde_json::json!({"seq": 41})), Some(41));
+}
+
+#[test]
+fn event_stream_status_classifies_only_unsupported_endpoints_as_fallback() {
+    for status in [
+        StatusCode::NOT_FOUND,
+        StatusCode::METHOD_NOT_ALLOWED,
+        StatusCode::NOT_ACCEPTABLE,
+        StatusCode::NOT_IMPLEMENTED,
+    ] {
+        let error: anyhow::Error = TaskEventHttpStatusError {
+            status,
+            body: String::new(),
+        }
+        .into();
+        assert!(task_event_stream_is_unavailable(&error));
+        assert!(task_event_stream_has_http_status(&error));
+    }
+
+    let unauthorized: anyhow::Error = TaskEventHttpStatusError {
+        status: StatusCode::UNAUTHORIZED,
+        body: String::new(),
+    }
+    .into();
+    assert!(!task_event_stream_is_unavailable(&unauthorized));
+    assert!(task_event_stream_has_http_status(&unauthorized));
+}
+
+#[test]
+fn event_stream_read_timeout_is_classified_from_real_transport() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::Duration;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind stream server");
+    let address = listener.local_addr().expect("stream server address");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept stream request");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).expect("read request header");
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+        }
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"
+        )
+        .expect("write stream headers");
+        stream.flush().expect("flush stream headers");
+        thread::sleep(Duration::from_millis(300));
+    });
+
+    let error = follow_task_events_with_timeout(
+        &format!("http://{address}"),
+        "test-key",
+        "task-timeout",
+        0,
+        Some(Duration::from_millis(100)),
+        |_| Ok(true),
+    )
+    .expect_err("stream should time out");
+    server.join().expect("stream server");
+
+    assert!(task_event_stream_timed_out(&error), "{error:#}");
+}
 use serde_json::json;
 use std::collections::BTreeMap;
 
