@@ -44,7 +44,7 @@ pub(super) enum ExecExitClass {
 }
 
 impl ExecExitClass {
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::Success => "success",
             Self::Failed => "failed",
@@ -240,16 +240,16 @@ fn exec_event_summary(task: &task::TaskStatusView) -> Vec<Value> {
         .collect()
 }
 
-struct ExecWaitOptions {
-    interval_ms: u64,
-    timeout_seconds: Option<u64>,
-    continue_on_background: bool,
-    fail_on_background: bool,
-    json_output: bool,
-    jsonl_output: bool,
+pub(super) struct ExecWaitOptions {
+    pub(super) interval_ms: u64,
+    pub(super) timeout_seconds: Option<u64>,
+    pub(super) continue_on_background: bool,
+    pub(super) fail_on_background: bool,
+    pub(super) json_output: bool,
+    pub(super) jsonl_output: bool,
 }
 
-fn wait_for_exec_task(
+pub(super) fn wait_for_exec_task(
     base_url: &str,
     key: &str,
     task_id: &str,
