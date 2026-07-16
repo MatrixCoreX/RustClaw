@@ -114,7 +114,6 @@ pub(super) struct AgentLoopGuardPolicy {
     pub(super) answer_verifier_retry_limit: usize,
     pub(super) answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope,
     pub(super) registry_idempotency_guard_scope: RegistryIdempotencyGuardScope,
-    pub(super) structured_evidence_required_for_selected_contracts: bool,
     pub(super) fast_read: LoopRecipeOverrides,
     pub(super) grounded_summary: LoopRecipeOverrides,
     pub(super) multi_step_workspace: LoopRecipeOverrides,
@@ -132,9 +131,6 @@ impl AgentLoopGuardPolicy {
         }
         if self.effective_registry_idempotency_guard_scope().enabled() {
             switches.push("registry_idempotency_guard_scope");
-        }
-        if self.structured_evidence_required_for_selected_contracts {
-            switches.push("structured_evidence_required_for_selected_contracts");
         }
         switches
     }
@@ -470,15 +466,6 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
         ),
         answer_verifier_enforce_required_scope,
         registry_idempotency_guard_scope,
-        structured_evidence_required_for_selected_contracts: parse_bool_from_toml(
-            &parsed,
-            &[
-                "agent",
-                "loop_guard",
-                "structured_evidence_required_for_selected_contracts",
-            ],
-            false,
-        ),
         fast_read: parse_loop_recipe_overrides(
             &parsed,
             &["agent", "loop_guard", "budget_profiles", "fast_read"],

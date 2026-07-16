@@ -48,37 +48,6 @@ impl TaskJournalRolloutAttribution {
         }
     }
 
-    pub(crate) fn selected_contract_structured_evidence_block(
-        summary: Option<&TaskJournalAnswerVerifierSummary>,
-        selected_class: impl Into<String>,
-    ) -> Self {
-        Self {
-            switch_name: "structured_evidence_required_for_selected_contracts".to_string(),
-            event: "selected_contract_structured_evidence_block".to_string(),
-            outcome: "blocked".to_string(),
-            reason_code: Some("selected_contract_missing_structured_evidence".to_string()),
-            owner_layer: Some("answer_verifier".to_string()),
-            decision: Some("blocked".to_string()),
-            failure_attribution: Some(
-                crate::evidence_policy::FailureAttribution::ContractGap
-                    .as_str()
-                    .to_string(),
-            ),
-            missing_evidence_fields: summary
-                .map(|summary| summary.missing_evidence_fields.clone())
-                .unwrap_or_default(),
-            confidence: summary.map(|summary| summary.confidence),
-            output_contract_ref: Some(selected_class.into()),
-            boundary_context: Some(Self::deterministic_boundary_context(
-                "contract_boundary",
-                "selected_contract_missing_structured_evidence",
-                "answer_verifier_summary",
-                "selected_contract_structured_evidence",
-            )),
-            ..Self::default()
-        }
-    }
-
     pub(crate) fn registry_idempotency_guard_block(
         reason_code: impl Into<String>,
         skill: impl Into<String>,

@@ -174,7 +174,6 @@ pub(super) async fn attach_answer_verifier_if_missing(
     state: &AppState,
     task: &ClaimedTask,
     user_text: &str,
-    policy: &AgentLoopGuardPolicy,
     route_result: Option<&RouteResult>,
     reply: &mut AskReply,
 ) {
@@ -188,19 +187,6 @@ pub(super) async fn attach_answer_verifier_if_missing(
         return;
     };
     if journal.answer_verifier_summary.is_some() {
-        return;
-    }
-    if let Some((selected_class, answer_verifier)) =
-        selected_contract_structured_evidence_gap(policy, route_result, journal)
-    {
-        journal.record_answer_verifier_summary(answer_verifier);
-        let summary = journal.answer_verifier_summary.as_ref();
-        journal.rollout_attribution.push(
-            crate::task_journal::TaskJournalRolloutAttribution::selected_contract_structured_evidence_block(
-                summary,
-                selected_class,
-            ),
-        );
         return;
     }
     if let Some(answer_verifier) =
@@ -232,26 +218,4 @@ pub(super) fn answer_contract_route_result_for_reply(
         .as_ref()
         .and_then(|journal| journal.route_result.clone())
         .or_else(|| agent_run_context.and_then(|ctx| ctx.route_result.clone()))
-}
-
-pub(super) fn selected_contract_structured_evidence_gap(
-    policy: &AgentLoopGuardPolicy,
-    route_result: &RouteResult,
-    journal: &crate::task_journal::TaskJournal,
-) -> Option<(&'static str, crate::answer_verifier::AnswerVerifierOut)> {
-    if !policy.structured_evidence_required_for_selected_contracts {
-        return None;
-    }
-    if route_result.risk_ceiling == crate::RiskCeiling::High
-        || route_result.schedule_kind != crate::ScheduleKind::None
-    {
-        return None;
-    }
-    let selected_class =
-        crate::agent_engine::migration_class::agent_decides_eligible_migration_class(route_result);
-    if selected_class == "none" {
-        return None;
-    }
-    crate::answer_verifier::local_missing_evidence_verifier_gap(route_result, journal)
-        .map(|gap| (selected_class, gap))
 }

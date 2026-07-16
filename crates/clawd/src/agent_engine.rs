@@ -15,7 +15,6 @@ mod filesystem_lifecycle_contract;
 pub(crate) mod loop_control;
 mod loop_state_contract_evidence;
 mod loop_state_seed;
-pub(crate) mod migration_class;
 pub(crate) mod observed_output;
 mod planner_skill_context;
 mod planning;

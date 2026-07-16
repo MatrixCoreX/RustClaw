@@ -14,7 +14,6 @@ AGENT_ENGINE_FILE = SRC_ROOT / "agent_engine.rs"
 AGENT_ENGINE_LOOP_STATE_SEED_FILE = SRC_ROOT / "agent_engine/loop_state_seed.rs"
 PREFERRED_RUN_CMD_FILE = SRC_ROOT / "agent_engine/scalar_count_deterministic_plan.rs"
 PREFERRED_STRUCTURED_ACTION_FILE = SRC_ROOT / "agent_engine/preferred_structured_action.rs"
-MIGRATION_CLASS_FILE = SRC_ROOT / "agent_engine/migration_class.rs"
 ASK_PREPARE_FILE = SRC_ROOT / "worker/ask_prepare.rs"
 ASK_PIPELINE_FILE = SRC_ROOT / "worker/ask_pipeline.rs"
 TASK_JOURNAL_EVIDENCE_COVERAGE_FILE = SRC_ROOT / "task_journal_evidence_coverage.rs"
@@ -201,16 +200,6 @@ def scan_preferred_structured_action_registry_bridge_fallback() -> list[Finding]
         FORBIDDEN_REGISTRY_BRIDGE_SEMANTIC_ENUMS
         + FORBIDDEN_REGISTRY_BRIDGE_MACHINE_TOKENS,
         "preferred_structured_action_registry_bridge_fallback",
-    )
-
-
-def scan_migration_class_registry_bridge_fallback() -> list[Finding]:
-    return scan_token_list_text(
-        rel(MIGRATION_CLASS_FILE),
-        MIGRATION_CLASS_FILE.read_text(encoding="utf-8"),
-        FORBIDDEN_REGISTRY_BRIDGE_SEMANTIC_ENUMS
-        + FORBIDDEN_REGISTRY_BRIDGE_MACHINE_TOKENS,
-        "migration_class_registry_bridge_fallback",
     )
 
 

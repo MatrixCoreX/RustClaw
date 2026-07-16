@@ -58,6 +58,7 @@ REMOVED_SEMANTIC_FRONTDOOR_GLOBS: tuple[str, ...] = (
     "post_route_policy*.rs",
     "worker/ask_pipeline*.rs",
     "worker/ask_prepare*.rs",
+    "agent_engine/migration_class*.rs",
 )
 
 

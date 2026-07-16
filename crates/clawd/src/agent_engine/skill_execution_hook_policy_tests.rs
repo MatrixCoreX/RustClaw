@@ -52,7 +52,6 @@ fn test_policy() -> super::AgentLoopGuardPolicy {
         answer_verifier_retry_limit: 2,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
-        structured_evidence_required_for_selected_contracts: false,
         fast_read: Default::default(),
         grounded_summary: Default::default(),
         multi_step_workspace: Default::default(),

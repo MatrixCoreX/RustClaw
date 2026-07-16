@@ -14,9 +14,8 @@ wiring and intended ownership.
 - Route-authority runtime switches have been removed from
   `AgentLoopGuardPolicy`; old route-authority, canary, and `agent_decides_*`
   names are ignored historical keys and must not return to production config.
-- `structured_evidence_required_for_selected_contracts` is default-on for
-  selected agent-loop contracts. `registry_idempotency_guard_scope` and
-  `answer_verifier_enforce_required_scope` have converged to final `all`
+- `registry_idempotency_guard_scope` and `answer_verifier_enforce_required_scope`
+  have converged to final `all`
   machine boundaries; non-`all` historical values are normalized to `all` and
   must not be used as rollback/debug controls.
 - Domain action lists, `dynamic_rules`, `messages`, and `trace_messages` need
@@ -53,7 +52,6 @@ wiring and intended ownership.
 | `agent.loop_guard.agent_decides_migration_class` | Historical name ignored by current runtime config load. | Ignored legacy key. | Config migration guard. | Do not document or extend as a config field. |
 | `agent.loop_guard.registry_idempotency_guard_scope` | Parsed as final machine token `all`; missing or non-`all` historical values normalize to `all`, so execution-loop repeat/idempotency behavior is not gated by route class. | Wired behavior. | Registry idempotency boundary. | Keep repeat-block attribution review active; fix false repeat blocks through registry `effect`, `once_per_task`, `dedup_scope`, or verifier policy rather than disabling the guard. |
 | `agent.loop_guard.registry_idempotency_guard` | Historical bool name; current runtime config loader does not parse it. | Ignored legacy key. | Config migration. | Do not document or extend as a config field; use `registry_idempotency_guard_scope`. |
-| `agent.loop_guard.structured_evidence_required_for_selected_contracts` | Parsed and consumed by selected agent-loop contract evidence gate. Current default is true. | Wired behavior. | Evidence coverage gate. | Keep enabled; rollback only if canary shows false evidence gaps. |
 | `agent.hooks.blocked_action_refs` | Parsed by `agent_hooks::load_hook_policy()` and evaluated against normalized `tool.action` machine refs in PreToolUse. | Wired behavior. | Agent hook policy. | Keep machine-token only; run `check_policy_decision_tokens.py` after policy changes. |
 | `agent.hooks.blocked_tools` | Parsed by `agent_hooks::load_hook_policy()` and evaluated against normalized tool tokens in PreToolUse. | Wired behavior. | Agent hook policy. | Keep machine-token only; do not add natural-language aliases. |
 | `agent.hooks.require_confirmation_action_refs` | Parsed by `agent_hooks::load_hook_policy()`; matching action refs publish a `hook_confirmation_required` checkpoint that waits for user input. | Wired behavior. | Agent hook policy / checkpoint runtime. | Keep as action-ref tokens; expand to tool-level confirmation only if a machine-token use case appears. |
