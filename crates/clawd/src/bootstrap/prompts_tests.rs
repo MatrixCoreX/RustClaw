@@ -230,13 +230,13 @@ fn reload_runtime_prompts_keeps_schedule_when_schedule_prompt_missing() {
 #[test]
 fn strict_prompt_validation_error_lists_missing_prompts() {
     let report = PromptValidationReport {
-        checked: 15,
+        checked: 17,
         active_llm_vendor: Some("mimo".to_string()),
         vendor: "minimax".to_string(),
         missing: vec![PromptValidationIssue {
-            logical_path: "prompts/intent_normalizer_prompt.md".to_string(),
-            label: "intent_normalizer (routing)".to_string(),
-            resolved_disk_path: "prompts/intent_normalizer_prompt.md".to_string(),
+            logical_path: "prompts/loop_incremental_plan_prompt.md".to_string(),
+            label: "loop_incremental_plan (agent_engine.planning)".to_string(),
+            resolved_disk_path: "prompts/loop_incremental_plan_prompt.md".to_string(),
         }],
     };
 
@@ -245,8 +245,8 @@ fn strict_prompt_validation_error_lists_missing_prompts() {
     assert!(message.contains("strict mode blocked startup"));
     assert!(message.contains("active_llm_vendor=mimo"));
     assert!(message.contains("prompt_vendor_patch=minimax"));
-    assert!(message.contains("intent_normalizer (routing)"));
-    assert!(message.contains("prompts/intent_normalizer_prompt.md"));
+    assert!(message.contains("loop_incremental_plan (agent_engine.planning)"));
+    assert!(message.contains("prompts/loop_incremental_plan_prompt.md"));
 }
 
 #[test]
