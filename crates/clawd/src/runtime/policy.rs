@@ -198,6 +198,7 @@ impl ToolsPolicy {
                 "skill:list_dir",
                 "skill:make_dir",
                 "skill:remove_file",
+                "skill:workspace_patch",
                 "skill:system_basic",
                 "skill:git_basic",
                 "skill:process_basic",

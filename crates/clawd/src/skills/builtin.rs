@@ -8,6 +8,8 @@ use crate::{AppState, ClaimedTask};
 mod builtin_run_cmd;
 #[path = "builtin_schedule.rs"]
 mod builtin_schedule;
+#[path = "builtin_workspace_patch.rs"]
+mod builtin_workspace_patch;
 pub(crate) use builtin_run_cmd::run_safe_command;
 use builtin_run_cmd::{
     command_has_shell_background_operator, run_cmd_checkpoint_claim_markers,
@@ -18,6 +20,7 @@ use builtin_run_cmd::{
 #[cfg(test)]
 use builtin_run_cmd::{looks_detached_background_command, parse_run_cmd_suggestion_payload};
 use builtin_schedule::execute_schedule_workflow_for_task;
+use builtin_workspace_patch::execute_workspace_patch;
 
 fn builtin_error(
     skill: &str,
@@ -643,6 +646,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
             })?;
             Ok(format!("removed {}", real_path.display()))
         }
+        "workspace_patch" => execute_workspace_patch(state, task, map),
         _ => Err(format!("unknown skill: {skill_name}")),
     }
 }

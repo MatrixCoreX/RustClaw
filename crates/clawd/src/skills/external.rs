@@ -221,16 +221,16 @@ async fn verify_external_python_modules(
         .kill_on_drop(true);
     let child = cmd
         .spawn()
-        .map_err(|err| format!("checking Python dependencies failed: {err}"))?;
+        .map_err(|_| "external_python_dependency_probe_spawn_failed".to_string())?;
     let child_pid = child.id();
     let output = match tokio::time::timeout(Duration::from_secs(10), child.wait_with_output()).await
     {
         Ok(result) => {
-            result.map_err(|err| format!("checking Python dependencies failed: {err}"))?
+            result.map_err(|_| "external_python_dependency_probe_wait_failed".to_string())?
         }
         Err(_) => {
             let _ = terminate_subprocess_group(child_pid).await;
-            return Err("checking Python dependencies timed out".to_string());
+            return Err("external_python_dependency_probe_timeout".to_string());
         }
     };
     if output.status.success() {
@@ -346,21 +346,16 @@ async fn execute_external_local_script(
 
     let child = cmd
         .spawn()
-        .map_err(|err| format!("run imported external skill failed: {err}"))?;
+        .map_err(|_| "external_skill_spawn_failed".to_string())?;
     let child_pid = child.id();
     let output =
         match tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
             .await
         {
-            Ok(result) => {
-                result.map_err(|err| format!("run imported external skill failed: {err}"))?
-            }
+            Ok(result) => result.map_err(|_| "external_skill_wait_failed".to_string())?,
             Err(_) => {
                 let _ = terminate_subprocess_group(child_pid).await;
-                return Err(format!(
-                    "imported external skill timed out after {}s",
-                    timeout_secs
-                ));
+                return Err(format!("external_skill_timeout:{timeout_secs}"));
             }
         };
 

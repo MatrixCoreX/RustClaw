@@ -419,6 +419,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("video_generate", &["fs.read", "fs.write", "llm", "net"]),
         ("weather", &["net"]),
         ("web_search_extract", &["net"]),
+        ("workspace_patch", &["fs.read", "fs.write"]),
         ("write_file", &["fs.write"]),
     ];
     let docker_expected_with_caps: &[(&str, &[&str])] = &[
@@ -472,6 +473,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("video_generate", &["fs.read", "fs.write", "llm", "net"]),
         ("weather", &["net"]),
         ("web_search_extract", &["net"]),
+        ("workspace_patch", &["fs.read", "fs.write"]),
         ("write_file", &["fs.write"]),
     ];
 

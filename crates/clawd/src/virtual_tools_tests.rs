@@ -793,6 +793,18 @@ fn fs_basic_write_text_write_mode_alias_rewrites_to_write_file_mode() {
 }
 
 #[test]
+fn fs_basic_patch_actions_rewrite_to_workspace_patch() {
+    for action in ["apply_patch", "diff", "rewind"] {
+        let args = json!({"action": action, "checkpoint_id": "patch_12345678"});
+        let rewrite = rewrite_virtual_tool_call("fs_basic", args.clone())
+            .unwrap()
+            .expect("rewrite");
+        assert_eq!(rewrite.runtime_tool, "workspace_patch");
+        assert_eq!(rewrite.runtime_args, args);
+    }
+}
+
+#[test]
 fn config_basic_read_field_rewrites_to_system_basic_extract_field() {
     let mut args =
         json!({"action":"extract_field", "file":"Cargo.toml", "key":"workspace.package.version"});

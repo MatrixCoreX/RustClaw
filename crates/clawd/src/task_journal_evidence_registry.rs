@@ -129,6 +129,20 @@ const EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
 
 const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
     step_json_extractor(
+        "workspace_patch",
+        "workspace_patch.structured_json_v1",
+        &[
+            "additions",
+            "artifact_refs",
+            "changed_files",
+            "checkpoint_id",
+            "deletions",
+            "field_value",
+            "patch_id",
+            "status",
+        ],
+    ),
+    step_json_extractor(
         "fs_basic",
         "fs_basic.structured_json_v1",
         &[

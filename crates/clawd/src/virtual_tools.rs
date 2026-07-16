@@ -200,7 +200,10 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
         "read_text_range" => {
             move_value_alias_if_missing(&mut obj, "path", &["file", "file_path"]);
             normalize_read_text_range_args(&mut obj);
-            obj.insert("action".to_string(), Value::String("read_range".to_string()));
+            obj.insert(
+                "action".to_string(),
+                Value::String("read_range".to_string()),
+            );
             Ok(rewrite_to("system_basic", obj))
         }
         "find_entries" => {
@@ -279,15 +282,28 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
                 }
                 if string_field_matches(&obj, &["target_kind", "kind"], &["file", "files"]) {
                     obj.insert("files_only".to_string(), Value::Bool(true));
-                } else if string_field_matches(&obj, &["target_kind", "kind"], &["dir", "dirs", "directory", "directories"]) {
+                } else if string_field_matches(
+                    &obj,
+                    &["target_kind", "kind"],
+                    &["dir", "dirs", "directory", "directories"],
+                ) {
                     obj.insert("dirs_only".to_string(), Value::Bool(true));
                 }
-                obj.entry("names_only".to_string()).or_insert(Value::Bool(true));
+                obj.entry("names_only".to_string())
+                    .or_insert(Value::Bool(true));
                 obj.insert(
                     "action".to_string(),
                     Value::String("inventory_dir".to_string()),
                 );
-                for key in ["by", "mode", "match_kind", "target_kind", "kind", "dir", "directory"] {
+                for key in [
+                    "by",
+                    "mode",
+                    "match_kind",
+                    "target_kind",
+                    "kind",
+                    "dir",
+                    "directory",
+                ] {
                     obj.remove(key);
                 }
                 return Ok(rewrite_to("system_basic", obj));
@@ -299,7 +315,14 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             }
             obj.insert(
                 "action".to_string(),
-                Value::String(if search_by_ext { "find_ext" } else { "find_name" }.to_string()),
+                Value::String(
+                    if search_by_ext {
+                        "find_ext"
+                    } else {
+                        "find_name"
+                    }
+                    .to_string(),
+                ),
             );
             for key in ["by", "mode", "match_kind", "path", "dir", "directory"] {
                 obj.remove(key);
@@ -328,9 +351,12 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
         }
         "compare_paths" => {
             if !obj.contains_key("left_path") || !obj.contains_key("right_path") {
-                let path_pair = obj.get("paths").and_then(Value::as_array).and_then(|paths| {
-                    (paths.len() == 2).then(|| (paths[0].clone(), paths[1].clone()))
-                });
+                let path_pair = obj
+                    .get("paths")
+                    .and_then(Value::as_array)
+                    .and_then(|paths| {
+                        (paths.len() == 2).then(|| (paths[0].clone(), paths[1].clone()))
+                    });
                 if let Some((left, right)) = path_pair {
                     obj.entry("left_path".to_string()).or_insert(left);
                     obj.entry("right_path".to_string()).or_insert(right);
@@ -365,10 +391,8 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             obj.remove("action");
             Ok(rewrite_to("remove_file", obj))
         }
-        _ => Err(format!(
-            "unsupported fs_basic action `{}`; allowed: stat_paths|list_dir|count_entries|read_text_range|find_entries|grep_text|compare_paths|write_text|append_text|make_dir|remove_path",
-            action
-        )),
+        "apply_patch" | "diff" | "rewind" => Ok(rewrite_to("workspace_patch", obj)),
+        _ => Err(format!("unsupported_fs_basic_action:{action}")),
     }
 }
 
@@ -459,6 +483,7 @@ fn normalize_fs_basic_args(args: &mut Value) -> bool {
             ("mkdir", "make_dir"),
             ("remove_file", "remove_path"),
             ("delete_file", "remove_path"),
+            ("revert_checkpoint", "rewind"),
         ],
     );
     let action = action_name(obj);
