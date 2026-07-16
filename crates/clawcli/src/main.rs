@@ -5,6 +5,7 @@ mod chat;
 mod client;
 mod commands;
 mod events;
+mod interrupt;
 mod output;
 mod replay;
 mod task;

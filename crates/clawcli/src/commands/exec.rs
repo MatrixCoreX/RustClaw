@@ -18,6 +18,7 @@ pub(super) enum ExecWaitOutcome {
     Terminal,
     Background,
     Timeout,
+    Detached,
 }
 
 impl ExecWaitOutcome {
@@ -26,6 +27,7 @@ impl ExecWaitOutcome {
             Self::Terminal => "terminal",
             Self::Background => "background",
             Self::Timeout => "timeout",
+            Self::Detached => "detached",
         }
     }
 }
@@ -41,6 +43,7 @@ pub(super) enum ExecExitClass {
     ProviderUnavailable,
     InvalidRequest,
     Background,
+    Detached,
 }
 
 impl ExecExitClass {
@@ -55,6 +58,7 @@ impl ExecExitClass {
             Self::ProviderUnavailable => "provider_unavailable",
             Self::InvalidRequest => "invalid_request",
             Self::Background => "background",
+            Self::Detached => "detached",
         }
     }
 
@@ -69,6 +73,7 @@ impl ExecExitClass {
             Self::ProviderUnavailable => 69,
             Self::InvalidRequest => 64,
             Self::Background => 75,
+            Self::Detached => 130,
         }
     }
 }
@@ -255,12 +260,35 @@ pub(super) fn wait_for_exec_task(
     task_id: &str,
     options: ExecWaitOptions,
 ) -> Result<(task::TaskStatusView, ExecWaitOutcome)> {
+    wait_for_exec_task_with_interrupt(
+        base_url,
+        key,
+        task_id,
+        options,
+        &crate::interrupt::requested,
+    )
+}
+
+fn wait_for_exec_task_with_interrupt<F>(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    options: ExecWaitOptions,
+    interrupted: &F,
+) -> Result<(task::TaskStatusView, ExecWaitOutcome)>
+where
+    F: Fn() -> bool,
+{
     let deadline = options
         .timeout_seconds
         .map(|seconds| Instant::now() + Duration::from_secs(seconds.max(1)));
     let mut cursor = 0_u64;
     let mut consecutive_stream_failures = 0_u8;
     loop {
+        if interrupted() {
+            let task = task::get_task_status(base_url, key, task_id)?;
+            return Ok((task, ExecWaitOutcome::Detached));
+        }
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             let task = task::get_task_status(base_url, key, task_id)?;
             return Ok((task, ExecWaitOutcome::Timeout));
@@ -282,7 +310,7 @@ pub(super) fn wait_for_exec_task(
                 terminal_observed = events::task_event_is_terminal(raw_event);
                 background_observed = events::task_event_is_background(raw_event)
                     && (options.continue_on_background || options.fail_on_background);
-                Ok(!terminal_observed && !background_observed)
+                Ok(!terminal_observed && !background_observed && !interrupted())
             },
         );
 
@@ -290,7 +318,14 @@ pub(super) fn wait_for_exec_task(
             .as_ref()
             .is_err_and(events::task_event_stream_is_unavailable)
         {
-            return wait_for_exec_task_polling(base_url, key, task_id, &options, deadline);
+            return wait_for_exec_task_polling(
+                base_url,
+                key,
+                task_id,
+                &options,
+                deadline,
+                interrupted,
+            );
         }
         if stream_result
             .as_ref()
@@ -310,6 +345,10 @@ pub(super) fn wait_for_exec_task(
             continue;
         }
         consecutive_stream_failures = 0;
+        if interrupted() {
+            let task = task::get_task_status(base_url, key, task_id)?;
+            return Ok((task, ExecWaitOutcome::Detached));
+        }
         if terminal_observed || background_observed {
             let task = task::get_task_status(base_url, key, task_id)?;
             return Ok((
@@ -340,9 +379,14 @@ fn wait_for_exec_task_polling(
     task_id: &str,
     options: &ExecWaitOptions,
     deadline: Option<Instant>,
+    interrupted: &impl Fn() -> bool,
 ) -> Result<(task::TaskStatusView, ExecWaitOutcome)> {
     let interval = Duration::from_millis(options.interval_ms.max(100));
     loop {
+        if interrupted() {
+            let task = task::get_task_status(base_url, key, task_id)?;
+            return Ok((task, ExecWaitOutcome::Detached));
+        }
         let task = task::get_task_status(base_url, key, task_id)?;
         if task.is_terminal() {
             return Ok((task, ExecWaitOutcome::Terminal));
@@ -372,13 +416,13 @@ fn wait_for_exec_task_polling(
 }
 
 fn stream_read_window(deadline: Option<Instant>, now: Instant) -> Option<Duration> {
-    const MAX_STREAM_READ_WINDOW: Duration = Duration::from_secs(10);
-    deadline.map(|deadline| {
+    const MAX_STREAM_READ_WINDOW: Duration = Duration::from_secs(2);
+    Some(deadline.map_or(MAX_STREAM_READ_WINDOW, |deadline| {
         deadline
             .saturating_duration_since(now)
             .min(MAX_STREAM_READ_WINDOW)
             .max(Duration::from_millis(100))
-    })
+    }))
 }
 
 fn render_exec_stream_event(event: &Value, options: &ExecWaitOptions) -> Result<()> {
@@ -471,6 +515,9 @@ pub(crate) fn run_exec(
             write_exec_detached_artifacts(artifact_dir, &summary)?;
         }
         return Ok(exit_class.code());
+    }
+    if !effective.detach {
+        crate::interrupt::install()?;
     }
     let task_id = if let Some(resume_task_id) = resume_task_id {
         task::submit_resume_ask(base_url, key, resume_task_id, prompt)?
@@ -724,6 +771,7 @@ pub(super) fn exec_exit_class(
 ) -> ExecExitClass {
     match outcome {
         ExecWaitOutcome::Timeout => ExecExitClass::Timeout,
+        ExecWaitOutcome::Detached => ExecExitClass::Detached,
         ExecWaitOutcome::Background if !fail_on_background => ExecExitClass::Success,
         ExecWaitOutcome::Background => {
             if task.lifecycle_state() == Some("needs_user") {

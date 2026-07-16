@@ -41,6 +41,9 @@ pub(crate) fn run_code_capability(
     args: Value,
     options: CodeCapabilityOptions,
 ) -> Result<u8> {
+    if !options.detach {
+        crate::interrupt::install()?;
+    }
     let task_id = task::submit_capability(base_url, key, capability, args)?;
     if options.detach {
         let summary = json!({
