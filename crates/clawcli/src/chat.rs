@@ -17,13 +17,6 @@ pub(super) enum ChatControl<'a> {
     Unknown(&'a str),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FollowOutcome {
-    Terminal,
-    Background,
-    StreamEnded,
-}
-
 pub(crate) fn run_chat(
     base_url: &str,
     key: &str,
@@ -106,7 +99,7 @@ fn follow_and_render_task(
         .ok_or_else(|| anyhow::anyhow!("chat_task_missing"))?;
     let mut cursor = thread.last_event_seq;
     let followed = events::follow_task_events(base_url, key, &task_id, cursor, |raw_event| {
-        if let Some(seq) = raw_event.get("seq").and_then(serde_json::Value::as_u64) {
+        if let Some(seq) = events::task_event_seq(raw_event) {
             cursor = cursor.max(seq);
         }
         if jsonl_output {
@@ -114,10 +107,8 @@ fn follow_and_render_task(
         } else if let Some(event) = events::task_event_line_from_value(raw_event) {
             println!("event: {}", event.line);
         }
-        Ok(!matches!(
-            follow_outcome(raw_event),
-            Some(FollowOutcome::Terminal | FollowOutcome::Background)
-        ))
+        Ok(!events::task_event_is_terminal(raw_event)
+            && !events::task_event_is_background(raw_event))
     });
     commands::record_chat_cursor(thread, cursor)?;
 
@@ -159,27 +150,6 @@ pub(super) fn chat_control(input: &str) -> Option<ChatControl<'_>> {
         ("/attach", Some(task_id)) => ChatControl::Attach(task_id),
         _ => ChatControl::Unknown(command),
     })
-}
-
-fn follow_outcome(event: &serde_json::Value) -> Option<FollowOutcome> {
-    let event_type = event
-        .get("event_kind")
-        .or_else(|| event.get("event_type"))
-        .and_then(serde_json::Value::as_str)?;
-    if event_type == "task_final" {
-        return Some(FollowOutcome::Terminal);
-    }
-    let state = event
-        .pointer("/payload/execution_state")
-        .or_else(|| event.pointer("/payload/state"))
-        .and_then(serde_json::Value::as_str);
-    if matches!(
-        state,
-        Some("background" | "waiting" | "needs_user" | "needs_confirmation")
-    ) {
-        return Some(FollowOutcome::Background);
-    }
-    Some(FollowOutcome::StreamEnded)
 }
 
 fn print_thread_binding(thread: &commands::ChatThreadState) {

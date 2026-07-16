@@ -1,5 +1,6 @@
 use anyhow::Result;
 use reqwest::blocking::Client;
+use std::time::Duration;
 
 const V1: &str = "/v1";
 
@@ -14,6 +15,6 @@ pub(crate) fn make_client() -> Result<Client> {
         .build()?)
 }
 
-pub(crate) fn make_stream_client() -> Result<Client> {
-    Ok(Client::builder().timeout(None).build()?)
+pub(crate) fn make_stream_client_with_timeout(timeout: Option<Duration>) -> Result<Client> {
+    Ok(Client::builder().timeout(timeout).build()?)
 }

@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
+use std::fmt;
 use std::io::{BufRead, BufReader};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
+use reqwest::StatusCode;
 
 use crate::client;
 
@@ -151,6 +154,20 @@ pub(crate) fn follow_task_events<F>(
     key: &str,
     task_id: &str,
     cursor: u64,
+    on_event: F,
+) -> Result<()>
+where
+    F: FnMut(&serde_json::Value) -> Result<bool>,
+{
+    follow_task_events_with_timeout(base_url, key, task_id, cursor, None, on_event)
+}
+
+pub(crate) fn follow_task_events_with_timeout<F>(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    cursor: u64,
+    request_timeout: Option<Duration>,
     mut on_event: F,
 ) -> Result<()>
 where
@@ -162,7 +179,7 @@ where
         task_id,
         cursor
     );
-    let response = client::make_stream_client()?
+    let response = client::make_stream_client_with_timeout(request_timeout)?
         .get(url)
         .header("x-rustclaw-key", key)
         .header("accept", "text/event-stream")
@@ -172,9 +189,95 @@ where
     let status = response.status();
     if !status.is_success() {
         let body = response.text().unwrap_or_default();
-        anyhow::bail!("task event stream returned {status}: {body}");
+        return Err(TaskEventHttpStatusError { status, body }.into());
     }
     consume_sse(BufReader::new(response), &mut on_event)
+}
+
+#[derive(Debug)]
+struct TaskEventHttpStatusError {
+    status: StatusCode,
+    body: String,
+}
+
+impl fmt::Display for TaskEventHttpStatusError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "task event stream returned {}: {}",
+            self.status, self.body
+        )
+    }
+}
+
+impl std::error::Error for TaskEventHttpStatusError {}
+
+pub(crate) fn task_event_stream_is_unavailable(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<TaskEventHttpStatusError>()
+        .is_some_and(|error| {
+            matches!(
+                error.status,
+                StatusCode::NOT_FOUND
+                    | StatusCode::METHOD_NOT_ALLOWED
+                    | StatusCode::NOT_ACCEPTABLE
+                    | StatusCode::NOT_IMPLEMENTED
+            )
+        })
+}
+
+pub(crate) fn task_event_stream_has_http_status(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<TaskEventHttpStatusError>().is_some()
+}
+
+pub(crate) fn task_event_stream_timed_out(error: &anyhow::Error) -> bool {
+    error.chain().any(|source| {
+        source
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(reqwest::Error::is_timeout)
+            || source
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| {
+                    error.kind() == std::io::ErrorKind::TimedOut
+                        || error
+                            .get_ref()
+                            .and_then(|source| source.downcast_ref::<reqwest::Error>())
+                            .is_some_and(reqwest::Error::is_timeout)
+                })
+    })
+}
+
+pub(crate) fn task_event_seq(event: &serde_json::Value) -> Option<u64> {
+    event.get("seq").and_then(serde_json::Value::as_u64)
+}
+
+pub(crate) fn task_event_is_terminal(event: &serde_json::Value) -> bool {
+    event_kind(event) == Some("task_final")
+        || matches!(
+            event_execution_state(event),
+            Some("completed" | "failed" | "cancelled")
+        )
+}
+
+pub(crate) fn task_event_is_background(event: &serde_json::Value) -> bool {
+    matches!(
+        event_execution_state(event),
+        Some("background" | "waiting" | "needs_user" | "needs_confirmation")
+    )
+}
+
+fn event_kind(event: &serde_json::Value) -> Option<&str> {
+    event
+        .get("event_kind")
+        .or_else(|| event.get("event_type"))
+        .and_then(serde_json::Value::as_str)
+}
+
+fn event_execution_state(event: &serde_json::Value) -> Option<&str> {
+    event
+        .pointer("/payload/execution_state")
+        .or_else(|| event.pointer("/payload/state"))
+        .and_then(serde_json::Value::as_str)
 }
 
 fn consume_sse<R, F>(mut reader: R, on_event: &mut F) -> Result<()>

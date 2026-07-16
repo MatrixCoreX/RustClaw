@@ -94,6 +94,21 @@ fn lifecycle_summary_accepts_api_lifecycle_field() {
 }
 
 #[test]
+fn needs_user_is_a_background_wait_state() {
+    let view = TaskStatusView {
+        task_id: "task-needs-user".to_string(),
+        status: "running".to_string(),
+        raw_data: serde_json::json!({"execution_state": "needs_user"}),
+        result_text: None,
+        error_text: None,
+        events: Vec::new(),
+    };
+
+    assert!(view.is_background_waiting());
+    assert!(!view.is_terminal());
+}
+
+#[test]
 fn async_final_result_value_extracts_terminal_output() {
     let result_json = serde_json::json!({
         "task_lifecycle": {

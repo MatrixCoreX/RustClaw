@@ -37,8 +37,12 @@ impl TaskStatusView {
     }
 
     pub(crate) fn is_background_waiting(&self) -> bool {
-        self.execution_state()
-            .is_some_and(|state| matches!(state, "waiting" | "background" | "needs_confirmation"))
+        self.execution_state().is_some_and(|state| {
+            matches!(
+                state,
+                "waiting" | "background" | "needs_user" | "needs_confirmation"
+            )
+        })
     }
 
     pub(crate) fn lifecycle(&self) -> Option<&Value> {

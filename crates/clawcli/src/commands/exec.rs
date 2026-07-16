@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::{events::EventFilters, output, task};
+use crate::{events, events::EventFilters, output, task};
 
 use super::report::{
     async_final_result_json, coding_diff_summary_artifact_json, coding_exec_has_signals,
@@ -245,6 +245,7 @@ struct ExecWaitOptions {
     timeout_seconds: Option<u64>,
     continue_on_background: bool,
     fail_on_background: bool,
+    json_output: bool,
     jsonl_output: bool,
 }
 
@@ -254,10 +255,93 @@ fn wait_for_exec_task(
     task_id: &str,
     options: ExecWaitOptions,
 ) -> Result<(task::TaskStatusView, ExecWaitOutcome)> {
-    let interval = Duration::from_millis(options.interval_ms.max(100));
     let deadline = options
         .timeout_seconds
         .map(|seconds| Instant::now() + Duration::from_secs(seconds.max(1)));
+    let mut cursor = 0_u64;
+    let mut consecutive_stream_failures = 0_u8;
+    loop {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            let task = task::get_task_status(base_url, key, task_id)?;
+            return Ok((task, ExecWaitOutcome::Timeout));
+        }
+        let request_timeout = stream_read_window(deadline, Instant::now());
+        let mut terminal_observed = false;
+        let mut background_observed = false;
+        let stream_result = events::follow_task_events_with_timeout(
+            base_url,
+            key,
+            task_id,
+            cursor,
+            request_timeout,
+            |raw_event| {
+                if let Some(seq) = events::task_event_seq(raw_event) {
+                    cursor = cursor.max(seq);
+                }
+                render_exec_stream_event(raw_event, &options)?;
+                terminal_observed = events::task_event_is_terminal(raw_event);
+                background_observed = events::task_event_is_background(raw_event)
+                    && (options.continue_on_background || options.fail_on_background);
+                Ok(!terminal_observed && !background_observed)
+            },
+        );
+
+        if stream_result
+            .as_ref()
+            .is_err_and(events::task_event_stream_is_unavailable)
+        {
+            return wait_for_exec_task_polling(base_url, key, task_id, &options, deadline);
+        }
+        if stream_result
+            .as_ref()
+            .is_err_and(events::task_event_stream_timed_out)
+        {
+            continue;
+        }
+        if let Err(error) = stream_result {
+            if events::task_event_stream_has_http_status(&error) {
+                return Err(error).context("exec_task_event_stream_failed");
+            }
+            consecutive_stream_failures = consecutive_stream_failures.saturating_add(1);
+            if consecutive_stream_failures >= 3 {
+                return Err(error).context("exec_task_event_stream_retry_exhausted");
+            }
+            std::thread::sleep(Duration::from_millis(options.interval_ms.max(100)));
+            continue;
+        }
+        consecutive_stream_failures = 0;
+        if terminal_observed || background_observed {
+            let task = task::get_task_status(base_url, key, task_id)?;
+            return Ok((
+                task,
+                if terminal_observed {
+                    ExecWaitOutcome::Terminal
+                } else {
+                    ExecWaitOutcome::Background
+                },
+            ));
+        }
+
+        let task = task::get_task_status(base_url, key, task_id)?;
+        if task.is_terminal() {
+            return Ok((task, ExecWaitOutcome::Terminal));
+        }
+        if task.is_background_waiting()
+            && (options.continue_on_background || options.fail_on_background)
+        {
+            return Ok((task, ExecWaitOutcome::Background));
+        }
+    }
+}
+
+fn wait_for_exec_task_polling(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    options: &ExecWaitOptions,
+    deadline: Option<Instant>,
+) -> Result<(task::TaskStatusView, ExecWaitOutcome)> {
+    let interval = Duration::from_millis(options.interval_ms.max(100));
     loop {
         let task = task::get_task_status(base_url, key, task_id)?;
         if task.is_terminal() {
@@ -268,10 +352,8 @@ fn wait_for_exec_task(
         {
             return Ok((task, ExecWaitOutcome::Background));
         }
-        if let Some(deadline) = deadline {
-            if Instant::now() >= deadline {
-                return Ok((task, ExecWaitOutcome::Timeout));
-            }
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Ok((task, ExecWaitOutcome::Timeout));
         }
         if options.jsonl_output {
             println!(
@@ -281,12 +363,33 @@ fn wait_for_exec_task(
                     "status": task.status,
                     "lifecycle_state": task.lifecycle_state(),
                     "terminal": false,
-                    "outcome": "poll",
+                    "outcome": "poll_fallback",
                 }))?
             );
         }
         std::thread::sleep(interval);
     }
+}
+
+fn stream_read_window(deadline: Option<Instant>, now: Instant) -> Option<Duration> {
+    const MAX_STREAM_READ_WINDOW: Duration = Duration::from_secs(10);
+    deadline.map(|deadline| {
+        deadline
+            .saturating_duration_since(now)
+            .min(MAX_STREAM_READ_WINDOW)
+            .max(Duration::from_millis(100))
+    })
+}
+
+fn render_exec_stream_event(event: &Value, options: &ExecWaitOptions) -> Result<()> {
+    if options.jsonl_output {
+        println!("{}", serde_json::to_string(event)?);
+    } else if !options.json_output {
+        if let Some(event) = events::task_event_line_from_value(event) {
+            println!("event: {}", event.line);
+        }
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -328,7 +431,7 @@ pub(crate) fn run_exec(
                 "resume": exec_resume_summary(resume_task_id),
             });
             if json_output || jsonl_output {
-                output::print_json_pretty(&summary);
+                print_exec_structured(&summary, json_output, jsonl_output)?;
             } else {
                 eprintln!("error_code=exec_profile_invalid");
             }
@@ -337,7 +440,11 @@ pub(crate) fn run_exec(
     };
 
     if print_effective_config {
-        output::print_json_pretty(&exec_effective_config_json(&effective));
+        print_exec_structured(
+            &exec_effective_config_json(&effective),
+            effective.json_output,
+            effective.jsonl_output,
+        )?;
         return Ok(ExecExitClass::Success.code());
     }
 
@@ -351,7 +458,7 @@ pub(crate) fn run_exec(
             "effective_config": exec_effective_config_json(&effective),
         });
         if effective.json_output || effective.jsonl_output {
-            output::print_json_pretty(&summary);
+            print_exec_structured(&summary, effective.json_output, effective.jsonl_output)?;
         } else {
             eprintln!("error_code=exec_background_policy_conflict");
         }
@@ -376,7 +483,7 @@ pub(crate) fn run_exec(
             "effective_config": exec_effective_config_json(&effective),
         });
         if effective.json_output || effective.jsonl_output {
-            output::print_json_pretty(&summary);
+            print_exec_structured(&summary, effective.json_output, effective.jsonl_output)?;
         } else {
             println!("task_id: {}", task_id);
         }
@@ -395,6 +502,7 @@ pub(crate) fn run_exec(
             timeout_seconds: effective.timeout_seconds,
             continue_on_background: effective.continue_on_background,
             fail_on_background: effective.fail_on_background,
+            json_output: effective.json_output,
             jsonl_output: effective.jsonl_output,
         },
     )?;
@@ -417,7 +525,7 @@ pub(crate) fn run_exec(
         write_exec_artifacts(artifact_dir, &task, &summary)?;
     }
     if effective.json_output || effective.jsonl_output {
-        output::print_json_pretty(&summary);
+        print_exec_structured(&summary, effective.json_output, effective.jsonl_output)?;
     } else {
         output::print_task_status(&task, false, &EventFilters::default());
         for line in exec_compact_text_lines(&summary) {
@@ -438,6 +546,15 @@ pub(crate) fn run_exec(
         println!("exec_exit_code: {}", exit_class.code());
     }
     Ok(exit_class.code())
+}
+
+fn print_exec_structured(value: &Value, json_output: bool, jsonl_output: bool) -> Result<()> {
+    if jsonl_output {
+        println!("{}", serde_json::to_string(value)?);
+    } else if json_output {
+        output::print_json_pretty(value);
+    }
+    Ok(())
 }
 
 pub(super) fn exec_compact_text_lines(summary: &Value) -> Vec<String> {
@@ -924,3 +1041,7 @@ fn write_json_file(path: &Path, value: &Value) -> Result<()> {
     let body = serde_json::to_vec_pretty(value)?;
     fs::write(path, body).with_context(|| format!("write artifact {}", path.display()))
 }
+
+#[cfg(test)]
+#[path = "exec_stream_tests.rs"]
+mod tests;

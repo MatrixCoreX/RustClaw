@@ -1,4 +1,4 @@
-use super::{chat_control, follow_outcome, ChatControl, FollowOutcome};
+use super::{chat_control, ChatControl};
 
 #[test]
 fn chat_controls_are_explicit_slash_protocol_not_natural_language() {
@@ -17,22 +17,4 @@ fn chat_controls_are_explicit_slash_protocol_not_natural_language() {
         chat_control("/attach task-1 extra"),
         Some(ChatControl::Unknown("/attach"))
     );
-}
-
-#[test]
-fn chat_event_follow_stops_on_terminal_or_background_machine_state() {
-    let terminal = serde_json::json!({"event_type": "task_final", "payload": {}});
-    assert_eq!(follow_outcome(&terminal), Some(FollowOutcome::Terminal));
-
-    let background = serde_json::json!({
-        "event_type": "task_lifecycle",
-        "payload": {"execution_state": "background"}
-    });
-    assert_eq!(follow_outcome(&background), Some(FollowOutcome::Background));
-
-    let running = serde_json::json!({
-        "event_type": "tool_started",
-        "payload": {"state": "running"}
-    });
-    assert_eq!(follow_outcome(&running), Some(FollowOutcome::StreamEnded));
 }
