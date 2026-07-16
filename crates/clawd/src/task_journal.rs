@@ -658,6 +658,10 @@ fn summarize_verify_result(
 }
 
 impl TaskJournal {
+    pub(crate) fn event_stream_snapshot(&self) -> Vec<Value> {
+        task_event_stream_json(self)
+    }
+
     pub(crate) fn new(input_text: impl Into<String>) -> Self {
         Self {
             input_text: input_text.into(),

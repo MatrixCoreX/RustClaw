@@ -329,6 +329,9 @@ pub(super) async fn execute_actions_once(
             agent_run_context,
         )
         .await?;
+        crate::task_event_transport::publish_loop_state_snapshot(
+            state, task, user_text, loop_state,
+        );
         let executed_limit = policy.max_steps.max(1);
         let remaining_actions = &actions[idx + 1..actions.len().min(executed_limit)];
         if matches!(

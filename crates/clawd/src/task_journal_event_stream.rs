@@ -71,6 +71,7 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
                 "execution_recipe_summary_present": round.execution_recipe_summary.is_some(),
             }),
         ));
+        append_planner_and_verifier_events(&mut seq, &mut events, round);
     }
     append_provider_call_events(&mut seq, &mut events, journal);
     let mut requested = requested_capability_sequence(journal);
@@ -213,6 +214,65 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
         ));
     }
     events
+}
+
+fn append_planner_and_verifier_events(
+    seq: &mut u64,
+    events: &mut Vec<Value>,
+    round: &super::TaskJournalRoundTrace,
+) {
+    if let Some(plan) = round.plan_result.as_ref() {
+        events.push(task_event_json(
+            seq,
+            "planner_finished",
+            json!({
+                "round_no": round.round_no,
+                "plan_kind": plan.plan_kind.as_str(),
+                "step_count": plan.steps.len(),
+                "missing_slot_count": plan.missing_slots.len(),
+                "needs_confirmation": plan.needs_confirmation,
+                "actions": plan.steps.iter().map(|step| json!({
+                    "step_id": step.step_id,
+                    "action_type": step.action_type,
+                    "capability_or_tool": step.skill,
+                    "dependency_count": step.depends_on.len(),
+                })).collect::<Vec<_>>(),
+            }),
+        ));
+    }
+    let Some(verify) = round.verify_result.as_ref() else {
+        return;
+    };
+    events.push(task_event_json(
+        seq,
+        "plan_verification",
+        json!({
+            "round_no": round.round_no,
+            "mode": verify.mode.as_str(),
+            "approved": verify.approved,
+            "needs_confirmation": verify.needs_confirmation,
+            "issue_count": verify.issues.len(),
+            "issues": verify.issues.iter().map(|issue| json!({
+                "step_id": issue.step_id,
+                "reason_code": issue.kind.reason_code(),
+                "status_code": issue.kind.status_code(),
+                "message_key": issue.kind.message_key(),
+                "missing_fields": issue.missing_fields,
+            })).collect::<Vec<_>>(),
+        }),
+    ));
+    events.push(task_event_json(
+        seq,
+        if verify.needs_confirmation {
+            "permission_request"
+        } else {
+            "permission_decision"
+        },
+        json!({
+            "round_no": round.round_no,
+            "decision": verify.permission_decision,
+        }),
+    ));
 }
 
 fn append_context_budget_events(seq: &mut u64, events: &mut Vec<Value>, journal: &TaskJournal) {

@@ -120,3 +120,24 @@ CREATE TABLE IF NOT EXISTS scheduled_job_runs (
 CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_job_updated ON scheduled_job_runs(job_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_task ON scheduled_job_runs(task_id);
 CREATE INDEX IF NOT EXISTS idx_scheduled_job_runs_triage ON scheduled_job_runs(triage_status, updated_at);
+
+CREATE TABLE IF NOT EXISTS task_event_stream (
+    task_id       TEXT NOT NULL,
+    seq           INTEGER NOT NULL,
+    event_hash    TEXT NOT NULL,
+    event_json    TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (task_id, seq),
+    UNIQUE (task_id, event_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_task_event_stream_task_seq
+    ON task_event_stream(task_id, seq);
+
+CREATE TABLE IF NOT EXISTS task_event_artifacts (
+    task_id       TEXT NOT NULL,
+    artifact_id   TEXT NOT NULL,
+    payload_json  TEXT NOT NULL,
+    payload_bytes INTEGER NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (task_id, artifact_id)
+);

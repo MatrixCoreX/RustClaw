@@ -53,10 +53,30 @@ export interface HealthResponse {
 export interface TaskQueryResponse {
   task_id: string;
   status: "queued" | "running" | "succeeded" | "failed" | "canceled" | "timeout";
+  execution_state?: string | null;
   goal?: unknown | null;
   result_json?: unknown | null;
   error_text?: string | null;
   lifecycle?: TaskLifecycleProjection | null;
+}
+
+export interface TaskEventEnvelope {
+  schema_version: number;
+  seq?: number;
+  timestamp_ms?: number;
+  task_id: string;
+  thread_id?: string | null;
+  session_id?: string | null;
+  parent_task_id?: string | null;
+  child_task_id?: string | null;
+  event_kind: string;
+  event_type?: string;
+  payload?: Record<string, unknown> | null;
+  redaction?: {
+    applied?: boolean;
+    field_count?: number;
+  } | null;
+  artifact_refs?: unknown[];
 }
 
 export interface TaskLlmDebugUsage {

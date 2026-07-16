@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { followTaskEventStream } from "../lib/task-event-stream";
 import type {
   ActiveTaskItem,
   ActiveTasksResponse,
@@ -19,6 +20,10 @@ const TERMINAL_TASK_STATUSES = ["succeeded", "failed", "canceled", "timeout"];
 
 function isTerminalTaskStatus(status: string): boolean {
   return TERMINAL_TASK_STATUSES.includes(status);
+}
+
+function isTaskQueryStatus(status: string): status is TaskQueryResponse["status"] {
+  return ["queued", "running", ...TERMINAL_TASK_STATUSES].includes(status);
 }
 
 export interface UseTaskRuntimeParams {
@@ -494,14 +499,43 @@ export function useTaskRuntime({
   useEffect(() => {
     if (!uiAuthReady) return;
     if (!trackingTaskId) return;
-    const interval = window.setInterval(async () => {
-      const result = await queryTaskById(trackingTaskId, false);
-      if (!result) return;
-      if (isTerminalTaskStatus(result.status)) {
-        setTrackingTaskId(null);
-      }
-    }, 2000);
-    return () => window.clearInterval(interval);
+    const controller = new AbortController();
+    void followTaskEventStream(
+      apiFetch,
+      trackingTaskId,
+      (event) => {
+        if (event.event_kind !== "task_state") return;
+        const status = event.payload?.status;
+        if (typeof status !== "string" || !isTaskQueryStatus(status)) return;
+        setTaskResult((current) => ({
+          task_id: trackingTaskId,
+          status,
+          execution_state:
+            typeof event.payload?.execution_state === "string"
+              ? event.payload.execution_state
+              : current?.execution_state,
+          result_json: current?.result_json ?? null,
+          error_text: current?.error_text ?? null,
+          lifecycle:
+            event.payload?.lifecycle && typeof event.payload.lifecycle === "object"
+              ? (event.payload.lifecycle as TaskQueryResponse["lifecycle"])
+              : current?.lifecycle,
+        }));
+      },
+      controller.signal,
+    )
+      .then(async () => {
+        if (controller.signal.aborted) return;
+        const result = await fetchTaskById(trackingTaskId);
+        setTaskResult(result);
+        setTaskError(null);
+        if (isTerminalTaskStatus(result.status)) setTrackingTaskId(null);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setTaskError(error instanceof Error ? error.message : "task_event_stream_failed");
+      });
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackingTaskId, apiBase, uiAuthReady]);
 

@@ -1,4 +1,21 @@
 use super::*;
+
+#[test]
+fn sse_parser_handles_comments_multiple_frames_and_terminal_stop() {
+    let input = concat!(
+        ": heartbeat\n\n",
+        "id: 1\nevent: tool_started\ndata: {\"seq\":1,\"event_kind\":\"tool_started\",\"payload\":{}}\n\n",
+        "id: 2\nevent: task_final\ndata: {\"seq\":2,\"event_kind\":\"task_final\",\"payload\":{}}\n\n",
+        "id: 3\ndata: {\"seq\":3,\"event_kind\":\"after_final\"}\n\n",
+    );
+    let mut seen = Vec::new();
+    consume_sse(std::io::Cursor::new(input), &mut |event| {
+        seen.push(event["seq"].as_u64().unwrap());
+        Ok(event["event_kind"] != "task_final")
+    })
+    .unwrap();
+    assert_eq!(seen, vec![1, 2]);
+}
 use serde_json::json;
 use std::collections::BTreeMap;
 

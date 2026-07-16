@@ -151,6 +151,7 @@ pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
                 .await?
             }
         }
+        crate::task_event_transport::publish_task_status_projection(state, &task.task_id);
         Ok(())
     }
     .instrument(call_span)
@@ -193,6 +194,7 @@ async fn process_claimed_task_by_kind(
             info!("{}", crate::LOG_CALL_WRAP);
         }
     }
+    crate::task_event_transport::publish_persisted_task_events(state, &task.task_id);
     Ok(())
 }
 
