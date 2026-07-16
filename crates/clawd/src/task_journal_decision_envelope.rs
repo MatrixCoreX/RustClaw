@@ -16,6 +16,76 @@ pub(super) fn agent_loop_round_plan_decision_envelope_json(
     envelope
 }
 
+pub(super) fn agent_loop_round_plan_contract_envelope_json(plan: &crate::PlanResult) -> Value {
+    let actions = plan
+        .steps
+        .iter()
+        .filter_map(crate::PlanStep::to_agent_action)
+        .collect::<Vec<_>>();
+    let output_contract = plan.output_contract.clone().unwrap_or_default();
+    let required_evidence_fields =
+        crate::evidence_policy::required_evidence_fields_for_output_contract(&output_contract);
+    let decision = agent_loop_decision_from_first_action(&actions);
+    let (validation_status, validation_reason_code) = agent_loop_contract_decision_validation(
+        &output_contract,
+        &actions,
+        decision,
+        &plan.missing_slots,
+    );
+    let terminal_intent = agent_loop_terminal_intent(decision);
+    let control_intent = agent_loop_control_intent(
+        decision,
+        terminal_intent,
+        validation_status,
+        validation_reason_code,
+        &actions,
+    );
+    let control_reason_code = agent_loop_control_reason_code(
+        control_intent,
+        terminal_intent,
+        validation_status,
+        validation_reason_code,
+        &actions,
+    );
+    let missing_slot = plan.missing_slots.first().map(String::as_str);
+    let answer_shape =
+        crate::evidence_policy::final_answer_shape_for_output_contract(&output_contract)
+            .map(|shape| shape.as_str().to_string())
+            .unwrap_or_else(|| output_contract.response_shape.as_str().to_string());
+    let output_contract_ref = output_contract_ref(&output_contract);
+    let mut envelope = json!({
+        "schema_version": 1,
+        "source": "planner_round_action",
+        "semantic_authority": "planner_loop_runtime",
+        "decision": decision,
+        "terminal_intent": terminal_intent,
+        "control_intent": control_intent,
+        "control_reason_code": control_reason_code,
+        "reason_code": agent_loop_decision_reason_code(decision, &actions),
+        "clarify_reason_code": agent_loop_clarify_reason_code(
+            decision,
+            validation_reason_code,
+        ),
+        "validation_status": validation_status,
+        "validation_reason_code": validation_reason_code,
+        "confidence": null,
+        "missing_slots": &plan.missing_slots,
+        "missing_slot": missing_slot,
+        "capability_ref": first_non_think_action_capability_ref(&actions),
+        "output_contract_ref": output_contract_ref,
+        "required_evidence": &required_evidence_fields,
+        "evidence_needed": &required_evidence_fields,
+        "answer_shape": answer_shape,
+        "risk_level": "unknown",
+        "delivery_required": output_contract.delivery_required,
+        "language_rendering_policy": agent_loop_language_rendering_policy(decision),
+    });
+    if let Some(intent) = structured_respond_terminal_intent_from_plan(plan) {
+        apply_structured_respond_terminal_intent(&mut envelope, intent);
+    }
+    envelope
+}
+
 fn agent_loop_round_decision_envelope_json(
     route: &crate::RouteResult,
     actions: &[crate::AgentAction],
@@ -256,7 +326,12 @@ pub(super) fn agent_loop_decision_envelope_json(
 
 pub(super) fn output_contract_ref_for_route(route: &crate::RouteResult) -> String {
     let contract = route.effective_output_contract();
-    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route);
+    output_contract_ref(&contract)
+}
+
+fn output_contract_ref(contract: &crate::IntentOutputContract) -> String {
+    let final_answer_shape =
+        crate::evidence_policy::final_answer_shape_for_output_contract(contract);
     format!(
         concat!(
             "final_answer_shape=",
@@ -427,6 +502,24 @@ fn agent_loop_decision_validation(
 ) -> (&'static str, &'static str) {
     if decision == "respond"
         && route.output_contract.requires_content_evidence
+        && first_non_think_action_decision(actions) == "respond"
+    {
+        return ("shadow_invalid", "respond_requires_evidence_observation");
+    }
+    if decision == "clarify" && missing_parameters.is_empty() {
+        return ("shadow_invalid", "clarify_missing_structured_slots");
+    }
+    ("valid", "agent_loop_decision_shadow_valid")
+}
+
+fn agent_loop_contract_decision_validation(
+    output_contract: &crate::IntentOutputContract,
+    actions: &[crate::AgentAction],
+    decision: &str,
+    missing_parameters: &[String],
+) -> (&'static str, &'static str) {
+    if decision == "respond"
+        && output_contract.requires_content_evidence
         && first_non_think_action_decision(actions) == "respond"
     {
         return ("shadow_invalid", "respond_requires_evidence_observation");

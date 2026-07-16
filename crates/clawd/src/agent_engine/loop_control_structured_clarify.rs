@@ -2,7 +2,7 @@ use serde_json::Value;
 use tracing::info;
 
 use super::{attempt_ledger, LoopState, RoundOutcome};
-use crate::{AgentAction, RouteResult};
+use crate::{AgentAction, IntentOutputContract};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct StructuredRespondTerminalIntent {
@@ -83,32 +83,6 @@ pub(super) fn structured_respond_terminal_intent_from_plan(
                 .iter()
                 .find_map(structured_respond_terminal_intent_from_raw_step)
         })
-}
-
-pub(super) fn structured_respond_terminal_intent_from_route_owned_clarify(
-    route: Option<&RouteResult>,
-    actions: &[AgentAction],
-) -> Option<StructuredRespondTerminalIntent> {
-    let route = route?;
-    if !route.needs_clarify || !actions_allow_structured_respond_terminal_intent(actions) {
-        return None;
-    }
-    let content = actions.iter().find_map(|action| match action {
-        AgentAction::Respond { content } => Some(content.trim()),
-        _ => None,
-    })?;
-    if content.is_empty() {
-        return None;
-    }
-    Some(StructuredRespondTerminalIntent {
-        terminal_intent: "clarify".to_string(),
-        content: Some(content.to_string()),
-        clarify_reason_code: None,
-        missing_slot: None,
-        message_key: None,
-        field_path: None,
-        locator_kind: Some(route.output_contract.locator_kind.as_str().to_string()),
-    })
 }
 
 pub(super) fn structured_respond_terminal_intent_from_boundary_observation_clarify(
@@ -252,148 +226,10 @@ pub(super) fn apply_structured_respond_clarify_to_loop_state(
     }
 }
 
-fn machine_slot_is_nonblocking_freeform_slot(slot: Option<&str>) -> bool {
-    let Some(slot) = slot.map(str::trim).filter(|slot| !slot.is_empty()) else {
-        return false;
-    };
-    if slot == "user_input" {
-        return true;
-    }
-    slot.split(|ch: char| !ch.is_ascii_alphanumeric())
-        .filter(|part| !part.is_empty())
-        .any(|part| {
-            matches!(
-                part,
-                "topic"
-                    | "scope"
-                    | "audience"
-                    | "style"
-                    | "format"
-                    | "detail"
-                    | "details"
-                    | "section"
-                    | "sections"
-                    | "content"
-                    | "context"
-                    | "goal"
-                    | "goals"
-            )
-        })
-}
-
-fn route_allows_side_effect_free_freeform_clarify_replan(
-    loop_state: &LoopState,
-    route: &RouteResult,
-) -> bool {
-    if route.wants_file_delivery {
-        return false;
-    }
-    if route.schedule_kind != crate::ScheduleKind::None || route.should_refresh_long_term_memory {
-        return false;
-    }
-    if route.needs_clarify && !loop_state.pending_user_boundary_present {
-        return false;
-    }
-    if route.risk_ceiling == crate::RiskCeiling::High {
-        return false;
-    }
-    if !matches!(
-        route.risk_ceiling,
-        crate::RiskCeiling::Low | crate::RiskCeiling::Medium
-    ) {
-        return false;
-    }
-    let contract = &route.output_contract;
-    if contract.delivery_required
-        || contract.delivery_intent != crate::OutputDeliveryIntent::None
-        || contract.semantic_kind != crate::OutputSemanticKind::None
-        || !matches!(
-            contract.response_shape,
-            crate::OutputResponseShape::Free
-                | crate::OutputResponseShape::Strict
-                | crate::OutputResponseShape::OneSentence
-        )
-    {
-        return false;
-    }
-    if contract.locator_kind == crate::OutputLocatorKind::None {
-        return !contract.requires_content_evidence || loop_state.pending_user_boundary_present;
-    }
-    loop_state.pending_user_boundary_present
-        && route.has_route_reason_machine_marker("structured_observation_clarify_repair")
-}
-
-pub(super) fn try_replan_avoidable_side_effect_free_freeform_clarify(
-    loop_state: &mut LoopState,
-    route: Option<&RouteResult>,
-    intent: &StructuredRespondTerminalIntent,
-) -> Option<RoundOutcome> {
-    let route = route?;
-    if !route_allows_side_effect_free_freeform_clarify_replan(loop_state, route) {
-        return None;
-    }
-    if !machine_slot_is_nonblocking_freeform_slot(intent.missing_slot.as_deref()) {
-        return None;
-    }
-    if loop_state
-        .output_vars
-        .contains_key("agent_loop.avoidable_clarify_replan_used")
-    {
-        return Some(apply_nonblocking_structured_clarify_as_answer(
-            loop_state, intent,
-        ));
-    }
-
-    loop_state.has_recoverable_failure_context = true;
-    loop_state.output_vars.insert(
-        "agent_loop.avoidable_clarify_replan_used".to_string(),
-        "true".to_string(),
-    );
-    loop_state.history_compact.push(format!(
-        "round={} recoverable_clarify=side_effect_free_freeform missing_slot={}",
-        loop_state.round_no,
-        intent.missing_slot.as_deref().unwrap_or("")
-    ));
-    attempt_ledger::record_attempt_with_retry_instruction(
-        loop_state,
-        "planner_clarify",
-        &format!(
-            "terminal_intent=clarify missing_slot={} route_risk={} locator_kind={} delivery_required={}",
-            intent.missing_slot.as_deref().unwrap_or(""),
-            route.risk_ceiling.as_str(),
-            route.output_contract.locator_kind.as_str(),
-            route.output_contract.delivery_required
-        ),
-        crate::executor::StepExecutionStatus::Error,
-        intent.clarify_reason_code.as_deref().unwrap_or(""),
-        Some("avoidable_clarify"),
-        "recoverable_clarify_side_effect_free_freeform",
-        Some(
-            "The previous planner step asked for optional drafting details, but the current plan is respond-only and the output contract has no required evidence, locator, delivery, credential, confirmation, or side-effect boundary. Replan with a useful best-effort draft/outline using neutral assumptions unless a real boundary slot is missing.",
-        ),
-    );
-    info!(
-        "side_effect_free_freeform_clarify_replan round={} missing_slot={}",
-        loop_state.round_no,
-        intent.missing_slot.as_deref().unwrap_or("")
-    );
-    Some(RoundOutcome {
-        executed_actions: 0,
-        had_error: false,
-        stop_signal: Some("recoverable_failure_continue_round".to_string()),
-        next_goal_hint: None,
-        no_progress: false,
-    })
-}
-
-fn planner_locator_clarify_has_no_route_boundary(
-    route: &RouteResult,
+fn planner_locator_clarify_has_no_contract_boundary(
+    contract: &IntentOutputContract,
     intent: &StructuredRespondTerminalIntent,
 ) -> bool {
-    if route.needs_clarify || route.wants_file_delivery {
-        return false;
-    }
-    let contract = &route.output_contract;
     if contract.delivery_required
         || contract.delivery_intent != crate::OutputDeliveryIntent::None
         || contract.locator_kind != crate::OutputLocatorKind::None
@@ -485,11 +321,11 @@ pub(super) fn record_structured_clarify_machine_fields(
 
 pub(super) fn try_recover_inconsistent_boundary_clarify(
     loop_state: &mut LoopState,
-    route: Option<&RouteResult>,
+    output_contract: Option<&IntentOutputContract>,
     intent: &StructuredRespondTerminalIntent,
 ) -> Option<RoundOutcome> {
-    let route = route?;
-    if !planner_locator_clarify_has_no_route_boundary(route, intent) {
+    let output_contract = output_contract?;
+    if !planner_locator_clarify_has_no_contract_boundary(output_contract, intent) {
         return None;
     }
     if loop_state
@@ -516,20 +352,18 @@ pub(super) fn try_recover_inconsistent_boundary_clarify(
         loop_state,
         "planner_clarify",
         &format!(
-            "terminal_intent=clarify missing_slot={} locator_kind={} route_locator_kind={} delivery_required={} content_evidence={}",
+            "terminal_intent=clarify missing_slot={} locator_kind={} contract_locator_kind={} delivery_required={} content_evidence={}",
             intent.missing_slot.as_deref().unwrap_or(""),
             intent.locator_kind.as_deref().unwrap_or(""),
-            route.output_contract.locator_kind.as_str(),
-            route.output_contract.delivery_required,
-            route.output_contract.requires_content_evidence
+            output_contract.locator_kind.as_str(),
+            output_contract.delivery_required,
+            output_contract.requires_content_evidence
         ),
         crate::executor::StepExecutionStatus::Error,
         intent.clarify_reason_code.as_deref().unwrap_or(""),
         Some("inconsistent_boundary_clarify"),
         "recoverable_clarify_inconsistent_boundary",
-        Some(
-            "The previous planner step asked for a locator boundary, but the active route/output contract has no locator, delivery, content-evidence, or route-owned clarify boundary. Replan as a normal answer or recovery-guidance response unless the next plan can cite a concrete required machine boundary.",
-        ),
+        None,
     );
     info!(
         "inconsistent_boundary_clarify_replan round={} missing_slot={} locator_kind={}",
@@ -548,14 +382,9 @@ pub(super) fn try_recover_inconsistent_boundary_clarify(
 
 pub(super) fn record_agent_loop_decision_envelope_output_vars(
     loop_state: &mut LoopState,
-    route: Option<&RouteResult>,
     plan: &crate::PlanResult,
 ) {
-    let Some(route) = route else {
-        return;
-    };
-    let envelope =
-        crate::task_journal::agent_loop_round_plan_decision_envelope_for_runtime(route, plan);
+    let envelope = crate::task_journal::agent_loop_round_plan_contract_envelope(plan);
     loop_state.output_vars.insert(
         "agent_loop.decision_envelope".to_string(),
         envelope.to_string(),

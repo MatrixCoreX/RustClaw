@@ -177,7 +177,7 @@ fn bounded_read_range_observe_only_round_does_not_force_incremental_planner() {
     route.output_contract.semantic_kind = OutputSemanticKind::None;
 
     assert!(!observe_only_round_should_continue(
-        &route,
+        &route.output_contract,
         &loop_state,
         &actions,
     ));
@@ -209,7 +209,7 @@ fn summary_read_range_observe_only_round_still_uses_incremental_planner() {
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
 
     assert!(observe_only_round_should_continue(
-        &route,
+        &route.output_contract,
         &loop_state,
         &actions,
     ));
@@ -936,7 +936,7 @@ fn bounded_capability_observation_can_finalize_at_round_cap() {
     }];
 
     assert!(!observe_only_round_should_continue(
-        &route,
+        &route.output_contract,
         &loop_state,
         &actions,
     ));
@@ -970,7 +970,7 @@ fn fs_basic_capability_read_only_round_continues_planner() {
     }];
 
     assert!(observe_only_round_should_continue(
-        &route,
+        &route.output_contract,
         &loop_state,
         &actions,
     ));

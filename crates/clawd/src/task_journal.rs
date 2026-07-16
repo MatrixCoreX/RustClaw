@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 
 #[path = "task_journal_decision_envelope.rs"]
 mod decision_envelope;
+use self::decision_envelope::agent_loop_round_plan_contract_envelope_json;
 use self::decision_envelope::agent_loop_round_plan_decision_envelope_json;
 
 #[path = "task_journal_coding_state.rs"]
@@ -77,6 +78,10 @@ pub(crate) fn agent_loop_round_plan_decision_envelope_for_runtime(
     plan: &crate::PlanResult,
 ) -> Value {
     agent_loop_round_plan_decision_envelope_json(route, plan)
+}
+
+pub(crate) fn agent_loop_round_plan_contract_envelope(plan: &crate::PlanResult) -> Value {
+    agent_loop_round_plan_contract_envelope_json(plan)
 }
 const MAX_RESULT_TRACE_BYTES: usize = 128 * 1024;
 const MAX_RESULT_TRACE_ARRAY_ITEMS: usize = 24;

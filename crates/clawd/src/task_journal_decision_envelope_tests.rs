@@ -138,6 +138,51 @@ fn output_contract_ref_for_route_uses_evidence_policy_shape() {
 }
 
 #[test]
+fn planner_contract_envelope_uses_plan_slots_and_contract_evidence_without_route() {
+    let plan = crate::PlanResult {
+        goal: "count matching entries".to_string(),
+        missing_slots: vec!["root".to_string()],
+        needs_confirmation: false,
+        output_contract: Some(crate::IntentOutputContract {
+            response_shape: crate::OutputResponseShape::Scalar,
+            requires_content_evidence: true,
+            semantic_kind: crate::OutputSemanticKind::ScalarCount,
+            ..Default::default()
+        }),
+        steps: vec![crate::PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_capability".to_string(),
+            skill: "filesystem.count_entries".to_string(),
+            args: json!({}),
+            depends_on: Vec::new(),
+            why: String::new(),
+        }],
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: String::new(),
+    };
+
+    let envelope = super::decision_envelope::agent_loop_round_plan_contract_envelope_json(&plan);
+
+    assert_eq!(
+        envelope.get("missing_slot").and_then(Value::as_str),
+        Some("root")
+    );
+    assert_eq!(
+        envelope.get("risk_level").and_then(Value::as_str),
+        Some("unknown")
+    );
+    assert_eq!(
+        envelope.get("capability_ref").and_then(Value::as_str),
+        Some("filesystem.count_entries")
+    );
+    assert!(envelope
+        .get("required_evidence")
+        .and_then(Value::as_array)
+        .is_some_and(|fields| fields.iter().any(|field| field.as_str() == Some("count"))));
+}
+
+#[test]
 fn agent_loop_decision_envelope_schema_accepts_round_runtime_source() {
     const SCHEMA_RAW: &str =
         include_str!("../../../prompts/schemas/agent_loop_decision_envelope.schema.json");
