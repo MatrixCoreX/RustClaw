@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
-use crate::runtime::ask_mode::{ActFinalizeStyle, AskMode};
-use crate::runtime::types::{AgentAction, AskRouteTraceDecision, ScheduleIntentOutput};
+use crate::runtime::ask_mode::AskMode;
+use crate::runtime::types::{AgentAction, AskRouteTraceDecision};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum OutputResponseShape {
@@ -570,14 +570,12 @@ pub(crate) struct RouteResult {
     pub(crate) needs_clarify: bool,
     pub(crate) clarify_question: String,
     pub(crate) route_reason: String,
-    pub(crate) route_confidence: Option<f64>,
     #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) visible_skill_candidates: Vec<String>,
     pub(crate) risk_ceiling: RiskCeiling,
     pub(crate) resume_behavior: ResumeBehavior,
     pub(crate) schedule_kind: ScheduleKind,
-    pub(crate) schedule_intent: Option<ScheduleIntentOutput>,
     pub(crate) wants_file_delivery: bool,
     pub(crate) should_refresh_long_term_memory: bool,
     pub(crate) agent_display_name_hint: String,
@@ -585,29 +583,8 @@ pub(crate) struct RouteResult {
 }
 
 impl RouteResult {
-    pub(crate) fn set_ask_mode(&mut self, ask_mode: AskMode) {
-        self.ask_mode = ask_mode;
-    }
-
     pub(crate) fn route_trace_label_for_log(&self) -> &'static str {
         self.ask_mode.route_trace_label_for_log()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_clarify_gate(&mut self) {
-        self.set_ask_mode(AskMode::clarify_trace());
-    }
-
-    pub(crate) fn set_execute_gate(&mut self) {
-        let finalize = self
-            .ask_mode
-            .act_finalize_style()
-            .unwrap_or(ActFinalizeStyle::Plain);
-        self.set_ask_mode(AskMode::Act { finalize });
-    }
-
-    pub(crate) fn set_act_finalize(&mut self, finalize: ActFinalizeStyle) {
-        self.set_ask_mode(AskMode::Act { finalize });
     }
 
     pub(crate) fn route_trace_decision_for_journal(&self) -> AskRouteTraceDecision {

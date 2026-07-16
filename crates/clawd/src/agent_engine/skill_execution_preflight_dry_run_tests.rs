@@ -54,12 +54,10 @@ fn evidence_policy_preflight_rejects_async_start_for_dry_run_contract() {
         route_reason:
             "async_job_protocol=version:1 mode=dry_run would_mutate=false required_job_fields=job_id|status|poll_after_seconds|expires_at|cancel_ref|message_key"
                 .to_string(),
-        route_confidence: Some(0.9),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: crate::RiskCeiling::Low,
         resume_behavior: crate::ResumeBehavior::None,
         schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
         wants_file_delivery: false,
         should_refresh_long_term_memory: false,
         agent_display_name_hint: String::new(),

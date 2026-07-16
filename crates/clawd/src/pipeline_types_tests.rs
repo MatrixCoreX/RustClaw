@@ -11,12 +11,10 @@ fn route_result_with_mode(ask_mode: AskMode) -> RouteResult {
         needs_clarify: false,
         clarify_question: String::new(),
         route_reason: String::new(),
-        route_confidence: Some(1.0),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: RiskCeiling::Unknown,
         resume_behavior: ResumeBehavior::None,
         schedule_kind: ScheduleKind::None,
-        schedule_intent: None,
         wants_file_delivery: false,
         should_refresh_long_term_memory: false,
         agent_display_name_hint: String::new(),
@@ -131,17 +129,6 @@ fn route_result_gate_kind_uses_ask_mode() {
     assert_eq!(route.gate_kind(), crate::RouteGateKind::Chat);
     assert!(route.is_chat_gate());
     assert!(!route.is_execute_gate());
-}
-
-#[test]
-fn route_result_set_execute_gate_updates_structured_trace_label() {
-    let mut route = route_result_with_mode(crate::AskMode::respond_trace());
-
-    route.set_execute_gate();
-
-    assert_eq!(route.gate_kind(), crate::RouteGateKind::Execute);
-    assert_eq!(route.route_trace_label_for_log(), "act_plain_finalizer");
-    assert!(route.is_execute_gate());
 }
 
 #[test]
