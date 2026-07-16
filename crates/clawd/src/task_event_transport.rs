@@ -97,9 +97,10 @@ pub(crate) fn publish_event(
     let mut payload = payload;
     let redacted_fields = redact_event_value(&mut payload, None, 0);
     let timestamp_ms = now_ms();
+    let mut context = event_context(&payload);
+    context.fill_missing(task_payload_event_context(state, task_id));
     let (payload, artifact_refs) =
         persist_large_payload_if_needed(state, task_id, &event_kind, payload, timestamp_ms)?;
-    let context = event_context(&payload);
     let fingerprint_source = json!({
         "event_kind": event_kind,
         "payload": payload,
@@ -348,6 +349,23 @@ struct EventContext {
     child_task_id: Option<String>,
 }
 
+impl EventContext {
+    fn fill_missing(&mut self, fallback: Self) {
+        if self.thread_id.is_none() {
+            self.thread_id = fallback.thread_id;
+        }
+        if self.session_id.is_none() {
+            self.session_id = fallback.session_id;
+        }
+        if self.parent_task_id.is_none() {
+            self.parent_task_id = fallback.parent_task_id;
+        }
+        if self.child_task_id.is_none() {
+            self.child_task_id = fallback.child_task_id;
+        }
+    }
+}
+
 fn event_context(payload: &Value) -> EventContext {
     EventContext {
         thread_id: first_string(payload, &["thread_id", "thread_ref"]),
@@ -355,6 +373,23 @@ fn event_context(payload: &Value) -> EventContext {
         parent_task_id: first_string(payload, &["parent_task_id", "parent_id"]),
         child_task_id: first_string(payload, &["child_task_id", "child_run_id"]),
     }
+}
+
+fn task_payload_event_context(state: &AppState, task_id: &str) -> EventContext {
+    let Ok(db) = state.core.db.get() else {
+        return EventContext::default();
+    };
+    let payload = db
+        .query_row(
+            "SELECT payload_json FROM tasks WHERE task_id = ?1 LIMIT 1",
+            params![task_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
+    payload.as_ref().map(event_context).unwrap_or_default()
 }
 
 fn first_string(value: &Value, keys: &[&str]) -> Option<String> {
@@ -365,8 +400,16 @@ fn first_string(value: &Value, keys: &[&str]) -> Option<String> {
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
+            .filter(|value| valid_event_context_ref(value))
             .map(str::to_string)
     })
+}
+
+fn valid_event_context_ref(value: &str) -> bool {
+    value.len() <= 256
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':'))
 }
 
 fn persist_large_payload_if_needed(

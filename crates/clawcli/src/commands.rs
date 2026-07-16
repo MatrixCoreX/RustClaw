@@ -30,8 +30,9 @@ pub(crate) use permission::{
 };
 pub(crate) use run_skill::run_skill;
 pub(crate) use session::{
-    run_session_archive, run_session_delete, run_session_fork, run_session_list,
-    run_session_resume, run_session_show,
+    load_or_create_chat_thread, record_chat_cursor, record_chat_task, run_session_archive,
+    run_session_delete, run_session_fork, run_session_list, run_session_resume, run_session_show,
+    ChatThreadState,
 };
 pub(crate) use skills::{run_capabilities, run_reload_skills, run_skills};
 pub(crate) use submit::{run_resume, run_submit};
@@ -69,7 +70,9 @@ use report::{coding_review_json, subagent_report_json, task_report_json, task_re
 #[cfg(test)]
 use session::{
     session_list_json, session_resume_json, session_show_json, session_store_archive_json,
-    session_store_delete_json, session_store_fork_json, session_store_upsert_summary, SessionStore,
+    session_store_delete_json, session_store_fork_json, session_store_record_chat_cursor,
+    session_store_record_chat_task, session_store_select_chat_thread, session_store_upsert_summary,
+    SessionStore,
 };
 #[cfg(test)]
 use task_control::{automation_runs_request_payload, task_resume_control_summary_json};

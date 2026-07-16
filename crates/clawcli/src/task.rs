@@ -168,6 +168,44 @@ pub(crate) fn submit_resume_ask(
     )
 }
 
+pub(crate) fn submit_thread_ask(
+    base_url: &str,
+    key: &str,
+    text: &str,
+    thread_id: &str,
+    session_id: &str,
+    resume_task_id: Option<&str>,
+) -> Result<String> {
+    submit_ask_with_payload(
+        base_url,
+        key,
+        threaded_ask_payload(text, thread_id, session_id, resume_task_id),
+    )
+}
+
+pub(super) fn threaded_ask_payload(
+    text: &str,
+    thread_id: &str,
+    session_id: &str,
+    resume_task_id: Option<&str>,
+) -> Value {
+    let mut payload = json!({
+        "text": text,
+        "source": "clawcli_chat",
+        "thread_id": thread_id,
+        "session_id": session_id,
+    });
+    if let Some(resume_task_id) = resume_task_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let object = payload.as_object_mut().expect("thread payload object");
+        object.insert("resume_task_id".to_string(), json!(resume_task_id));
+        object.insert("resume_trigger".to_string(), json!("user_followup"));
+    }
+    payload
+}
+
 pub(crate) fn submit_goal_ask(
     base_url: &str,
     key: &str,

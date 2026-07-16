@@ -1,6 +1,8 @@
 use super::{
     session_list_json, session_resume_json, session_show_json, session_store_archive_json,
-    session_store_delete_json, session_store_fork_json, session_store_upsert_summary, SessionStore,
+    session_store_delete_json, session_store_fork_json, session_store_record_chat_cursor,
+    session_store_record_chat_task, session_store_select_chat_thread, session_store_upsert_summary,
+    SessionStore,
 };
 
 #[test]
@@ -131,4 +133,46 @@ fn session_store_archive_delete_and_fork_use_machine_metadata() {
     assert_eq!(delete["operation"], "session_delete");
     assert_eq!(delete["deleted"], true);
     assert_eq!(delete["store_session_count"], 1);
+}
+
+#[test]
+fn chat_thread_store_resumes_latest_and_persists_task_cursor() {
+    let mut store = SessionStore::default();
+    let mut first =
+        session_store_select_chat_thread(&mut store, None, false, "cli_thread_generated_1")
+            .expect("create chat thread");
+    assert_eq!(first.thread_id, "cli_thread_generated_1");
+    assert!(first.current_task_id.is_none());
+
+    session_store_record_chat_task(&mut store, &mut first, "task-first").expect("record task");
+    session_store_record_chat_cursor(&mut store, &mut first, 17).expect("record cursor");
+    assert_eq!(first.current_task_id.as_deref(), Some("task-first"));
+    assert_eq!(first.last_event_seq, 17);
+
+    let resumed =
+        session_store_select_chat_thread(&mut store, None, false, "cli_thread_generated_2")
+            .expect("resume latest thread");
+    assert_eq!(resumed.thread_id, first.thread_id);
+    assert_eq!(resumed.current_task_id, first.current_task_id);
+    assert_eq!(resumed.last_event_seq, 17);
+
+    let fresh = session_store_select_chat_thread(&mut store, None, true, "cli_thread_generated_3")
+        .expect("create fresh thread");
+    assert_eq!(fresh.thread_id, "cli_thread_generated_3");
+    assert!(fresh.current_task_id.is_none());
+}
+
+#[test]
+fn chat_thread_store_rejects_non_machine_thread_and_task_refs() {
+    let mut store = SessionStore::default();
+    assert!(session_store_select_chat_thread(
+        &mut store,
+        Some("thread with spaces"),
+        false,
+        "unused"
+    )
+    .is_err());
+    let mut state =
+        session_store_select_chat_thread(&mut store, None, false, "cli_thread_valid").unwrap();
+    assert!(session_store_record_chat_task(&mut store, &mut state, "task/invalid").is_err());
 }
