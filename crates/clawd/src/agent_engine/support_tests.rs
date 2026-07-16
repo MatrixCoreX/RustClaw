@@ -30,7 +30,6 @@ fn base_policy() -> AgentLoopGuardPolicy {
         answer_verifier_retry_limit: 2,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
-        structured_evidence_required_for_selected_contracts: false,
         fast_read: LoopRecipeOverrides {
             max_steps: Some(16),
             max_rounds: Some(2),
@@ -1100,9 +1099,9 @@ fn guard_policy_defaults_to_agent_loop_authority_when_config_missing() {
 
     assert_eq!(
         policy.effective_answer_verifier_required_evidence_scope(),
-        AnswerVerifierRequiredEvidenceScope::Off
+        AnswerVerifierRequiredEvidenceScope::All
     );
-    assert!(!policy.structured_evidence_required_for_selected_contracts);
+    assert!(policy.answer_verifier_required_evidence_enabled_for_route(None));
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1360,7 +1359,6 @@ fn rollout_switches_are_read_from_agent_guard_config() {
 [agent.loop_guard]
 answer_verifier_enforce_required_scope = "all"
 registry_idempotency_guard_scope = "all"
-structured_evidence_required_for_selected_contracts = true
 "#,
     )
     .expect("write agent guard config");
@@ -1377,7 +1375,6 @@ structured_evidence_required_for_selected_contracts = true
         policy.effective_registry_idempotency_guard_scope(),
         RegistryIdempotencyGuardScope::All
     );
-    assert!(policy.structured_evidence_required_for_selected_contracts);
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1627,8 +1624,9 @@ image_edit_skills = ["legacy_image_edit"]
     assert_eq!(policy.max_tool_calls, 12);
     assert_eq!(
         policy.effective_registry_idempotency_guard_scope(),
-        RegistryIdempotencyGuardScope::Off
+        RegistryIdempotencyGuardScope::All
     );
+    assert!(policy.registry_idempotency_guard_enabled_for_route(None));
 
     let _ = std::fs::remove_dir_all(root);
 }

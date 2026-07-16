@@ -107,10 +107,6 @@ answer_verifier_enforce_required_scope = "all"
 # 风险/Risk: 重复动作或外部副作用误拦截应通过 registry idempotency、dedup_scope、once_per_task
 # 或 verifier policy 修复，不再通过关闭守卫或回退 legacy route 选择解决。
 registry_idempotency_guard_scope = "all"
-# 用途/Purpose: selected agent-loop contracts 结构化证据强制门禁；只检查机器 evidence coverage.
-# 建议修改/Recommended change: 默认开启；若 canary 发现误判，可临时改回 false 回滚.
-# 风险/Risk: 可能把缺少结构化观测的回答转入 verifier retry，而不是直接发布.
-structured_evidence_required_for_selected_contracts = true
 # 用途/Purpose: 同一动作重复阈值（跨轮累计）.
 # 建议修改/Recommended change: 建议 3~6.
 # 风险/Risk: 过低易误杀，过高会放大重复调用.

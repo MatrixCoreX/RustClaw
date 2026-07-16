@@ -28,6 +28,7 @@ FORBIDDEN_SUPPORT_TOKENS = (
     "selected_agent_loop_route",
     '"selected_agent_loop"',
     "agent_decides_eligible_migration_class(route)",
+    "structured_evidence_required_for_selected_contracts",
 )
 
 
@@ -65,6 +66,10 @@ def config_findings(raw: str, rel_path: str) -> list[str]:
     for line_no, line in enumerate(raw.splitlines(), start=1):
         if "selected_agent_loop" in line:
             findings.append(f"{rel_path}:{line_no}: config_mentions_legacy_selected_scope")
+        if "structured_evidence_required_for_selected_contracts" in line:
+            findings.append(
+                f"{rel_path}:{line_no}: config_mentions_legacy_selected_contract_gate"
+            )
         if "可回滚" in line or "rollback" in line.lower():
             findings.append(f"{rel_path}:{line_no}: config_mentions_guard_scope_rollback")
     return findings
@@ -93,6 +98,7 @@ fn selected_agent_loop_route() {}
 let x = AnswerVerifierRequiredEvidenceScope::SelectedAgentLoop;
 let y = "selected_agent_loop";
 let z = parse().unwrap_or(RegistryIdempotencyGuardScope::Off);
+let old = structured_evidence_required_for_selected_contracts;
 """
     bad_support_findings = support_findings(bad_support, "support.rs")
     assert any("legacy_guard_scope_runtime_token" in item for item in bad_support_findings)
@@ -114,11 +120,16 @@ registry_idempotency_guard_scope = "all"
 # rollback to selected_agent_loop
 answer_verifier_enforce_required_scope = "off"
 registry_idempotency_guard_scope = "selected_agent_loop"
+structured_evidence_required_for_selected_contracts = true
 """
     bad_config_findings = config_findings(bad_config, "configs/agent_guard.toml")
     assert any("final_scope_key_not_all" in item for item in bad_config_findings)
     assert any("config_mentions_legacy_selected_scope" in item for item in bad_config_findings)
     assert any("config_mentions_guard_scope_rollback" in item for item in bad_config_findings)
+    assert any(
+        "config_mentions_legacy_selected_contract_gate" in item
+        for item in bad_config_findings
+    )
 
     print("AGENT_LOOP_GUARD_FINAL_SCOPE_SELF_TEST ok")
     return 0
@@ -139,4 +150,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
-

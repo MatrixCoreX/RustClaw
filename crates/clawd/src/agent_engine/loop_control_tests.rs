@@ -12,8 +12,7 @@ use super::{
     promote_local_code_projection_from_machine_evidence_for_verifier_candidate,
     promote_publishable_strict_json_projection_for_verifier_candidate,
     record_agent_loop_decision_envelope_output_vars, retry_verifier_accepts_rewritten_answer,
-    selected_contract_structured_evidence_gap, should_stop_for_observed_finalize,
-    structured_respond_terminal_intent_from_plan,
+    should_stop_for_observed_finalize, structured_respond_terminal_intent_from_plan,
     structured_respond_terminal_intent_from_pre_loop_clarify_candidate,
     structured_respond_terminal_intent_from_route_owned_clarify,
     suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
@@ -1532,30 +1531,11 @@ fn test_policy() -> AgentLoopGuardPolicy {
         answer_verifier_retry_limit: 2,
         answer_verifier_enforce_required_scope: AnswerVerifierRequiredEvidenceScope::Off,
         registry_idempotency_guard_scope: RegistryIdempotencyGuardScope::Off,
-        structured_evidence_required_for_selected_contracts: false,
         fast_read: Default::default(),
         grounded_summary: Default::default(),
         multi_step_workspace: Default::default(),
         ops_closed_loop: Default::default(),
     }
-}
-
-fn selected_scalar_path_route() -> RouteResult {
-    let mut route = route_result(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "configs/config.toml".to_string();
-    route
-}
-
-#[test]
-fn selected_contract_structured_evidence_gate_respects_switch() {
-    let policy = test_policy();
-    let route = selected_scalar_path_route();
-    let journal =
-        crate::task_journal::TaskJournal::for_task("task-evidence-off", "ask", "read field");
-
-    assert!(selected_contract_structured_evidence_gap(&policy, &route, &journal).is_none());
 }
 
 #[test]
@@ -1567,30 +1547,6 @@ fn answer_verifier_retry_budget_does_not_depend_on_global_multi_round_switch() {
     assert!(answer_verifier_retry_budget_available(&policy, 0));
     assert!(answer_verifier_retry_budget_available(&policy, 1));
     assert!(!answer_verifier_retry_budget_available(&policy, 2));
-}
-
-#[test]
-fn selected_contract_structured_evidence_gate_reports_missing_machine_fields() {
-    let mut policy = test_policy();
-    policy.structured_evidence_required_for_selected_contracts = true;
-    let route = selected_scalar_path_route();
-    let journal =
-        crate::task_journal::TaskJournal::for_task("task-evidence-on", "ask", "read field");
-
-    let (selected_class, gap) =
-        selected_contract_structured_evidence_gap(&policy, &route, &journal)
-            .expect("missing evidence gap");
-
-    assert_eq!(selected_class, "structured_field_read");
-    assert!(!gap.pass);
-    assert!(gap.should_retry);
-    assert!(gap
-        .answer_incomplete_reason
-        .starts_with("missing_required_evidence:"));
-    assert!(gap
-        .retry_instruction
-        .starts_with("collect_required_evidence_fields:"));
-    assert!(!gap.missing_evidence_fields.is_empty());
 }
 
 #[path = "loop_control_tests/answer_verifier_exhaustion.rs"]

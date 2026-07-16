@@ -986,7 +986,6 @@ pub(super) async fn run_agent_with_loop_seeded(
             state,
             task,
             user_text,
-            &policy,
             answer_contract_route_result.as_ref(),
             &mut reply,
         )

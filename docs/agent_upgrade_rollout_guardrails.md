@@ -38,7 +38,7 @@ These controls are read by current code and can be used for rollback after confi
 
 ### Rollout Controls And Retired Route-Authority Keys
 
-These controls are read from `configs/agent_guard.toml` and logged as machine tokens / task-journal attribution where relevant. Treat each control separately: `registry_idempotency_guard_scope` and `answer_verifier_enforce_required_scope` are machine-token rollout scopes, `structured_evidence_required_for_selected_contracts` is default-on for selected agent-loop contracts, and old route-authority / bool names are ignored historical config keys.
+These controls are read from `configs/agent_guard.toml` and logged as machine tokens / task-journal attribution where relevant. `registry_idempotency_guard_scope` and `answer_verifier_enforce_required_scope` are final machine-token scopes. Old route-authority, selected-contract, and bool names are ignored historical config keys.
 
 | Control | Current Default | Intended Effect | Required Before Behavior Use |
 | --- | --- | --- | --- |
@@ -48,7 +48,6 @@ These controls are read from `configs/agent_guard.toml` and logged as machine to
 | `agent_loop_canary_bucket` | retired | Historical canary bucket key; current runtime config load must not parse it. | Do not add it to new configs; use focused test subsets and replay diff artifacts for targeted debugging. |
 | `registry_idempotency_guard_scope` | `all` | Drive once/dedup/idempotency from registry metadata. | Final always-on boundary; false repeat blocks must be fixed through registry `effect`, `once_per_task`, `dedup_scope`, or verifier policy, not by disabling the guard. |
 | `registry_idempotency_guard` | ignored | Historical bool name; current runtime config load does not parse it. | Do not add it to new configs; use `registry_idempotency_guard_scope` instead. |
-| `structured_evidence_required_for_selected_contracts` | `true` | Require structured evidence for selected agent-loop contracts before final answer. | Keep route-delta and verifier attribution in canary runs; temporarily disable only as a rollback if selected contracts show false evidence gaps. |
 
 ## Attribution Requirements
 
