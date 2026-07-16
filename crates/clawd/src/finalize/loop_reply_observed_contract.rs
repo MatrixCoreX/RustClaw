@@ -1264,8 +1264,7 @@ fn direct_structured_observed_answer_impl(
             },
         ));
     }
-    if route.ask_mode.finalize_chat_wrapped()
-        && route.effective_output_contract().requires_content_evidence
+    if route.effective_output_contract().requires_content_evidence
         && latest_plan_requested_synthesis(loop_state)
         && !route.output_contract_marker_is(crate::OutputSemanticKind::GitRepositoryState)
         && !crate::finalize::route_matches_service_status_output_contract(route)
@@ -1290,8 +1289,8 @@ fn direct_structured_observed_answer_impl(
             },
         ));
     }
-    if route.ask_mode.finalize_chat_wrapped()
-        && route.effective_output_contract().requires_content_evidence
+    if route.effective_output_contract().requires_content_evidence
+        && route.output_contract.response_shape == crate::OutputResponseShape::Strict
         && route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath)
         && latest_path_batch_facts_has_implicit_metadata_fields(loop_state)
         && !allow_implicit_metadata_path_facts

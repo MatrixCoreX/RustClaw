@@ -116,7 +116,7 @@ pub(in crate::agent_engine::loop_control) async fn try_rewrite_answer_verifier_g
     )
     .await
     {
-        if retry_verifier_accepts_rewritten_answer(&retry_verifier, Some(route), &retried_answer) {
+        if retry_verifier_accepts_rewritten_answer(&retry_verifier, &retried_answer) {
             if commit_answer_verifier_retry_answer(reply, retried_answer) {
                 tracing::info!("answer_verifier_retry_rewritten_with_observed_evidence");
                 return true;
@@ -128,7 +128,7 @@ pub(in crate::agent_engine::loop_control) async fn try_rewrite_answer_verifier_g
         }
         return false;
     }
-    if retry_rewritten_answer_is_publishable(Some(route), &retried_answer) {
+    if retry_rewritten_answer_is_publishable(&retried_answer) {
         if commit_answer_verifier_retry_answer(reply, retried_answer) {
             tracing::info!("answer_verifier_retry_rewritten_with_observed_evidence");
             true

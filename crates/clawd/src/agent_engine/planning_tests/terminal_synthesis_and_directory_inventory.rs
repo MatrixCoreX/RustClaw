@@ -17,11 +17,7 @@ version = "0.1.7"
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let cargo_path = root.path.join("Cargo.toml");
     let readme_path = root.path.join("README.md");
@@ -88,11 +84,7 @@ version = "0.1.7"
 
 #[test]
 fn structured_scalar_compare_accepts_compare_paths_for_file_metadata() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
@@ -140,11 +132,7 @@ fn observation_only_terminal_answer_appends_synthesis_for_builtin_observation() 
             "max_entries": 2
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        false,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(false, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
 
     let normalized = super::super::normalize_planned_actions(
@@ -179,11 +167,7 @@ fn observation_only_terminal_answer_keeps_config_basic_scalar_finalizer() {
             "field_path": "run_cmd.planner_kind"
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_hint = "configs/skills_registry.toml".to_string();
 
     let normalized = super::super::normalize_planned_actions(
@@ -214,11 +198,7 @@ fn content_evidence_doc_parse_observation_appends_synthesis() {
             "max_chars": 12000
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "release_checklist.md".to_string();
@@ -278,11 +258,7 @@ fn terminal_synthesize_answer_appends_delivery_respond() {
 
 #[test]
 fn existing_observed_context_synthesis_allows_terminal_judgment_respond() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(false, OutputResponseShape::OneSentence);
     route.route_reason = "existing_observed_context_synthesis".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -301,12 +277,8 @@ fn existing_observed_context_synthesis_allows_terminal_judgment_respond() {
 #[test]
 fn active_bound_context_allows_conversation_evidence_terminal_respond() {
     let target = "/tmp/rustclaw/fixtures/device_local/README.md";
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::OneSentence,
-    );
-    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    let mut route = route_result(false, OutputResponseShape::OneSentence);
+    route.route_reason = "".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = target.to_string();
     let mut loop_state = LoopState::new(2);
@@ -328,12 +300,8 @@ fn active_bound_context_allows_conversation_evidence_terminal_respond() {
 
 #[test]
 fn active_bound_context_mismatched_locator_still_forces_terminal_respond_repair() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::OneSentence,
-    );
-    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    let mut route = route_result(false, OutputResponseShape::OneSentence);
+    route.route_reason = "".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/tmp/rustclaw/fixtures/current.md".to_string();
     let mut loop_state = LoopState::new(2);
@@ -355,13 +323,8 @@ fn active_bound_context_mismatched_locator_still_forces_terminal_respond_repair(
 
 #[test]
 fn active_ordered_target_path_respond_only_is_terminal_without_repair() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::OneSentence,
-    );
-    route.route_reason =
-        "executable_contract_preserved_for_agent_loop; active_task_scope_refinement_detached_from_structured_anchor".to_string();
+    let mut route = route_result(false, OutputResponseShape::OneSentence);
+    route.route_reason = "active_task_scope_refinement_detached_from_structured_anchor".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     let mut loop_state = LoopState::new(2);
@@ -387,14 +350,9 @@ fn active_ordered_target_path_respond_only_is_terminal_without_repair() {
 }
 
 #[test]
-fn active_ordered_target_non_member_respond_only_still_requires_repair() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::OneSentence,
-    );
-    route.route_reason =
-        "executable_contract_preserved_for_agent_loop; active_task_scope_refinement_detached_from_structured_anchor".to_string();
+fn planner_response_is_not_rejected_by_legacy_active_target_route_state() {
+    let mut route = route_result(false, OutputResponseShape::OneSentence);
+    route.route_reason = "active_task_scope_refinement_detached_from_structured_anchor".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     let mut loop_state = LoopState::new(2);
@@ -410,7 +368,7 @@ fn active_ordered_target_non_member_respond_only_still_requires_repair() {
         content: "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/not_listed.txt".to_string(),
     }];
 
-    assert!(should_force_actionable_plan_repair(
+    assert!(!should_force_actionable_plan_repair(
         &test_state(),
         Some(&route),
         &loop_state,
@@ -420,11 +378,7 @@ fn active_ordered_target_non_member_respond_only_still_requires_repair() {
 
 #[test]
 fn existing_observed_context_synthesis_still_requires_explicit_content_evidence() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.route_reason = "existing_observed_context_synthesis".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -444,11 +398,7 @@ fn existing_observed_context_synthesis_still_requires_explicit_content_evidence(
 fn observed_terminal_synthesis_replaces_concrete_respond_with_placeholder() {
     let mut loop_state = LoopState::new(3);
     loop_state.has_tool_or_skill_output = true;
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     let actions = vec![
         AgentAction::SynthesizeAnswer {
@@ -478,11 +428,7 @@ fn observed_terminal_synthesis_replaces_concrete_respond_with_placeholder() {
 fn observed_terminal_synthesis_keeps_service_status_concrete_respond() {
     let mut loop_state = LoopState::new(3);
     loop_state.has_tool_or_skill_output = true;
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let actions = vec![
         AgentAction::SynthesizeAnswer {
@@ -533,11 +479,7 @@ fn observed_terminal_synthesis_keeps_structurally_grounded_concrete_respond() {
         started_at: 0,
         finished_at: 0,
     });
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     let answer =
         "intent_normalizer.schema.json 最大（13160 字节），描述用户意图解析输出。".to_string();
@@ -582,11 +524,7 @@ fn observed_terminal_synthesis_keeps_identifier_grounded_summary_respond() {
         started_at: 0,
         finished_at: 0,
     });
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     let answer = "该目录为 RustClaw NL 回归测试提供稳定的本地文件样本。".to_string();
     let actions = vec![
@@ -639,11 +577,7 @@ fn observed_terminal_synthesis_drops_redundant_synthesis_for_fs_basic_interface_
         started_at: 0,
         finished_at: 0,
     });
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     let answer = "fs_basic is a virtual planner-facing filesystem tool that maps structured actions such as read_text_range and list_dir to stable backing tools like system_basic, fs_search, and file builtins.".to_string();
     let actions = vec![
@@ -677,11 +611,7 @@ fn observation_only_terminal_answer_keeps_file_names_runtime_finalizer() {
             "max_entries": 2
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        false,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(false, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
 
     let normalized = super::super::normalize_planned_actions(
@@ -708,7 +638,7 @@ fn general_directory_inventory_clears_file_only_filter() {
             "names_only": true
         }),
     }];
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
 
     let normalized = super::super::normalize_planned_actions(
@@ -737,11 +667,7 @@ fn directory_lookup_inventory_clears_file_only_even_with_file_names_semantic() {
             "names_only": true
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::DirectoryLookup;
 
@@ -771,11 +697,7 @@ fn file_names_directory_inventory_preserves_file_only_filter() {
             "names_only": true
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
 
     let normalized = super::super::normalize_planned_actions(
@@ -798,11 +720,7 @@ fn file_names_auto_locator_builds_list_dir_with_structural_extension_filter() {
     fs::write(root.path.join("alpha.md"), "alpha").expect("write md");
     fs::write(root.path.join("beta.txt"), "beta").expect("write txt");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -858,11 +776,7 @@ fn file_names_auto_locator_does_not_inherit_extension_from_history_text() {
     fs::write(root.path.join("clawd-dev.log"), "log").expect("write log");
     fs::write(root.path.join("act_plan.log"), "log").expect("write plan");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -908,11 +822,7 @@ fn file_names_auto_locator_does_not_use_stale_resolved_intent_selector() {
     fs::write(root.path.join("alpha.log"), "alpha").expect("write alpha");
     fs::write(root.path.join("beta.log"), "beta").expect("write beta");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -956,11 +866,7 @@ fn file_names_auto_locator_preserves_size_ranked_metadata() {
     fs::write(root.path.join("large.log"), "large").expect("write large");
     fs::write(root.path.join("small.log"), "s").expect("write small");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -1009,11 +915,7 @@ fn file_names_auto_locator_does_not_promote_negated_size_marker_over_name_sort()
     fs::write(root.path.join("zeta.sh"), "z").expect("write zeta");
     fs::write(root.path.join("alpha.py"), "a").expect("write alpha");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -1061,11 +963,7 @@ fn file_names_auto_locator_does_not_promote_size_marker_when_name_sort_is_explic
     fs::write(root.path.join("zeta.sh"), "z").expect("write zeta");
     fs::write(root.path.join("alpha.py"), "a").expect("write alpha");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -1111,11 +1009,7 @@ fn directory_purpose_auto_locator_preserves_file_selector_for_selected_entry_jud
         fs::write(root.path.join(format!("note_{idx}.txt")), "fixture").expect("write note");
     }
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -1170,11 +1064,7 @@ fn file_names_auto_locator_uses_structured_list_selector_without_reason_token() 
     fs::write(root.path.join("large.log"), "large").expect("write large");
     fs::write(root.path.join("small.log"), "s").expect("write small");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -1229,11 +1119,7 @@ fn file_names_auto_locator_preserves_recent_modified_file_selector() {
     fs::write(root.path.join("older.txt"), "old").expect("write older");
     fs::write(root.path.join("newer.txt"), "new").expect("write newer");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -1289,11 +1175,7 @@ fn file_names_auto_locator_preserves_structured_mtime_sort_selector_without_reas
     fs::write(root.path.join("b.log"), "b").expect("write b");
     fs::write(root.path.join("a.log"), "a").expect("write a");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -1347,11 +1229,7 @@ fn file_names_auto_locator_preserves_metadata_sort_with_machine_hint() {
     fs::write(root.path.join("b.log"), "b").expect("write b");
     fs::write(root.path.join("a.log"), "a").expect("write a");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -1408,11 +1286,7 @@ fn file_names_contract_enforces_file_only_after_find_entries_inventory_rewrite()
             "root": "/workspace/docs"
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
 
     let normalized = super::super::normalize_planned_actions(
@@ -1447,11 +1321,7 @@ fn strict_unclassified_directory_inventory_forces_metadata_for_fs_basic() {
             "names_only": true
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
 
@@ -1479,11 +1349,7 @@ fn strict_unclassified_system_inventory_forces_metadata_before_fs_rewrite() {
             "names_only": true
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
 
@@ -1512,11 +1378,7 @@ fn directory_names_contract_enforces_dirs_only_inventory() {
             "names_only": false
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
 
     let normalized = super::super::normalize_planned_actions(
@@ -1544,11 +1406,7 @@ fn directory_names_contract_does_not_invent_dirs_only_without_structured_filter(
             "names_only": true
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
 
     let normalized = super::super::normalize_planned_actions(
@@ -1575,11 +1433,7 @@ fn directory_names_contract_rewrites_filtered_list_dir_to_inventory() {
             "dirs_only": true
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
 
     let normalized = super::super::normalize_planned_actions(
@@ -1638,11 +1492,7 @@ fn file_paths_contract_rewrites_extension_inventory_to_fs_basic() {
             "max_entries": 5
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
 
@@ -1686,11 +1536,7 @@ fn file_paths_contract_rewrites_unfiltered_list_dir_with_extension_token_to_find
             "names_only": true
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.resolved_intent =

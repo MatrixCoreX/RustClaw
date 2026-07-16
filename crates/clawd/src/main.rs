@@ -121,10 +121,13 @@ pub(crate) use log_utils::{
 pub(crate) use memory::dynamic_chat_memory_budget_chars;
 pub(crate) use output_paths::ensure_default_file_path;
 pub(crate) use pipeline_types::{
-    plan_step_from_agent_action, IntentOutputContract, OutputDeliveryIntent, OutputListSelector,
-    OutputLocatorKind, OutputResponseShape, OutputScalarCountFilter, OutputScalarCountTargetKind,
-    OutputSemanticKind, PlanKind, PlanResult, PlanStep, ResumeBehavior, RiskCeiling,
-    RouteReasonMarkers, RouteResult, ScheduleKind, SelfExtensionContract, SelfExtensionMode,
+    plan_step_from_agent_action, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputScalarCountTargetKind, OutputSemanticKind, PlanKind, PlanResult,
+    PlanStep, ResumeBehavior, RiskCeiling, RouteReasonMarkers, RouteResult, ScheduleKind,
+};
+#[cfg(test)]
+pub(crate) use pipeline_types::{
+    OutputListSelector, OutputScalarCountFilter, SelfExtensionContract, SelfExtensionMode,
     SelfExtensionTrigger,
 };
 pub(crate) use prompt_utils::{
@@ -161,13 +164,12 @@ pub(crate) use repo::{
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
 pub(crate) use runtime::{
     build_skill_views, llm_model_kind, llm_vendor_name, log_ask_transition, reload_skill_views,
-    ActFinalizeStyle, AgentAction, AgentRuntimeConfig, AppState, AskMode, AskReply, AskState,
-    AskStateRegistry, AskTransition, ChannelConfig, ClaimedTask, CommandIntentRules,
-    CommandIntentRuntime, CoreServices, LlmCallSequenceEntry, LlmPromptBucket, LlmProviderRuntime,
-    LocalInteractionContext, MemoryConfigFileWrapper, PolicyConfig, RateLimiter, ReloadContext,
-    RouteGateKind, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue,
-    SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry, ToolsPolicy, WhatsappDeliveryRoute,
-    WorkerConfig,
+    AgentAction, AgentRuntimeConfig, AppState, AskReply, AskState, AskStateRegistry, AskTransition,
+    ChannelConfig, ClaimedTask, CommandIntentRuntime, CoreServices, LlmCallSequenceEntry,
+    LlmPromptBucket, LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper,
+    PolicyConfig, RateLimiter, ReloadContext, RuntimeChannel, ScheduleIntentOutput,
+    ScheduleRuntime, ScheduledJobDue, SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry,
+    ToolsPolicy, WhatsappDeliveryRoute, WorkerConfig,
 };
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};
@@ -440,7 +442,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let memory_runtime = load_memory_runtime_config(&workspace_root, &config.memory);
-    let command_intent = load_command_intent_runtime(&workspace_root, &config.command_intent);
+    let command_intent = load_command_intent_runtime(&config.command_intent);
     let schedule = load_schedule_runtime(
         &workspace_root,
         &config.schedule,

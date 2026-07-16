@@ -1049,7 +1049,6 @@ mod tests {
 
     fn service_status_route() -> RouteResult {
         RouteResult {
-            ask_mode: crate::AskMode::act_with_chat_finalizer(),
             resolved_intent:
                 "Check clawd service/process status and return target, status, manager_type."
                     .to_string(),

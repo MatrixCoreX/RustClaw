@@ -242,7 +242,6 @@ fn kb_filesystem_mutation_structured_answer_keeps_kb_observations_over_readback(
 
 fn filesystem_mutation_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "scratch filesystem lifecycle".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

@@ -44,11 +44,7 @@ fn chat_wrapped_execution_route_keeps_health_check_observation_only_plan() {
         args: serde_json::json!({}),
     }];
     assert!(!should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_with_chat_finalizer(),
-            false,
-            OutputResponseShape::OneSentence,
-        )),
+        Some(&route_result(false, OutputResponseShape::OneSentence,)),
         &loop_state,
         &actions,
     ));
@@ -63,11 +59,7 @@ fn non_scalar_route_still_repairs_after_prior_observation_when_delivery_is_empty
         args: serde_json::json!({ "command": "ls -l Cargo.toml Cargo.lock" }),
     }];
     assert!(should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_with_chat_finalizer(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
@@ -80,11 +72,7 @@ fn scalar_route_keeps_single_observation_plan_without_followup() {
         skill: "git_basic".to_string(),
         args: serde_json::json!({ "action": "current_branch" }),
     }];
-    let route = route_result(
-        crate::AskMode::act_plain(),
-        false,
-        OutputResponseShape::Scalar,
-    );
+    let route = route_result(false, OutputResponseShape::Scalar);
     assert!(
         !should_force_plan_repair(Some(&route), &loop_state, &actions),
         "unexpected repair reason: {}",
@@ -94,11 +82,7 @@ fn scalar_route_keeps_single_observation_plan_without_followup() {
 
 #[test]
 fn git_basic_branch_alias_scalar_route_normalizes_to_current_branch() {
-    let route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let route = route_result(true, OutputResponseShape::Scalar);
     let actions = vec![AgentAction::CallSkill {
         skill: "git_basic".to_string(),
         args: serde_json::json!({ "action": "branches" }),
@@ -116,7 +100,7 @@ fn git_basic_branch_alias_scalar_route_normalizes_to_current_branch() {
 
 #[test]
 fn git_basic_branch_alias_non_scalar_route_normalizes_to_branch() {
-    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let route = route_result(true, OutputResponseShape::Free);
     let actions = vec![AgentAction::CallSkill {
         skill: "git_basic".to_string(),
         args: serde_json::json!({ "action": "branches" }),
@@ -134,7 +118,7 @@ fn git_basic_branch_alias_non_scalar_route_normalizes_to_branch() {
 
 #[test]
 fn git_basic_show_head_path_target_normalizes_to_show_file_at_rev() {
-    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let route = route_result(true, OutputResponseShape::Free);
     let actions = vec![AgentAction::CallSkill {
         skill: "git_basic".to_string(),
         args: serde_json::json!({ "action": "show", "target": "HEAD:README.md" }),
@@ -154,7 +138,7 @@ fn git_basic_show_head_path_target_normalizes_to_show_file_at_rev() {
 
 #[test]
 fn git_show_file_at_rev_capability_rewrites_fs_read_to_git_basic() {
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.route_reason = "capability_ref=git.show_file_at_rev".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "fs_basic".to_string(),
@@ -265,11 +249,7 @@ fn literal_git_status_run_cmd_is_preserved() {
 #[test]
 fn git_repository_state_remote_request_plans_git_remote_action() {
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.resolved_intent = "capability_ref=git.remote".to_string();
     route.route_reason = "capability_ref=git.remote".to_string();
@@ -292,11 +272,7 @@ fn git_repository_state_remote_request_plans_git_remote_action() {
 #[test]
 fn git_repository_state_contract_without_machine_token_defers_to_planner() {
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::GitRepositoryState;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
 
@@ -306,11 +282,7 @@ fn git_repository_state_contract_without_machine_token_defers_to_planner() {
 #[test]
 fn git_repository_state_status_capability_ref_plans_git_status_action() {
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.resolved_intent = "capability_ref=git.status".to_string();
     route.route_reason = "capability_ref=git.status".to_string();
@@ -333,11 +305,7 @@ fn git_repository_state_status_capability_ref_plans_git_status_action() {
 #[test]
 fn git_repository_state_one_sentence_branch_summary_defers_to_planner() {
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::GitRepositoryState;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
 
@@ -347,11 +315,7 @@ fn git_repository_state_one_sentence_branch_summary_defers_to_planner() {
 #[test]
 fn git_repository_state_strict_branch_summary_defers_to_planner() {
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::GitRepositoryState;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
 
@@ -362,11 +326,7 @@ fn git_repository_state_strict_branch_summary_defers_to_planner() {
 fn recent_scalar_current_workspace_plans_git_branch_without_nl_matching() {
     let state = test_state_with_enabled_skills(&["git_basic", "run_cmd"]);
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
 
@@ -406,11 +366,7 @@ fn recent_scalar_current_workspace_plans_git_branch_without_nl_matching() {
 fn recent_scalar_current_workspace_git_observation_satisfies_repair_guard() {
     let state = test_state_with_enabled_skills(&["git_basic", "run_cmd"]);
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let actions = vec![
@@ -441,11 +397,7 @@ fn raw_command_output_route_keeps_single_run_cmd_plan_without_followup() {
         skill: "run_cmd".to_string(),
         args: serde_json::json!({ "command": "ls", "cwd": "/tmp/rustclaw-workspace" }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        false,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(false, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     assert!(!should_force_plan_repair(
         Some(&route),
@@ -458,11 +410,7 @@ fn raw_command_output_route_keeps_single_run_cmd_plan_without_followup() {
 fn runtime_status_scalar_patch_plans_current_user_system_basic_status() {
     let state = test_state_with_enabled_skills(&["system_basic"]);
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.route_reason = "capability_ref=system.runtime_status".to_string();
@@ -489,11 +437,7 @@ fn runtime_status_scalar_patch_plans_current_user_system_basic_status() {
 fn runtime_status_scalar_string_patch_plans_current_user_system_basic_status() {
     let state = test_state_with_enabled_skills(&["system_basic"]);
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.route_reason = "capability_ref=system.runtime_status".to_string();
@@ -520,11 +464,7 @@ fn runtime_status_scalar_string_patch_plans_current_user_system_basic_status() {
 fn runtime_status_scalar_patch_does_not_depend_on_route_trace() {
     let state = test_state_with_enabled_skills(&["system_basic"]);
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.route_reason = "capability_ref=system.runtime_status".to_string();
@@ -547,11 +487,7 @@ fn runtime_status_scalar_patch_does_not_depend_on_route_trace() {
 fn runtime_status_scalar_patch_prefers_system_basic_when_available() {
     let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.route_reason = "capability_ref=system.runtime_status".to_string();
@@ -578,11 +514,7 @@ fn runtime_status_scalar_patch_prefers_system_basic_when_available() {
 fn runtime_status_scalar_patch_plans_hostname_system_basic_status() {
     let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.route_reason = "capability_ref=system.runtime_status".to_string();
@@ -604,8 +536,7 @@ fn runtime_status_scalar_patch_plans_hostname_system_basic_status() {
 
 #[tokio::test]
 async fn runtime_status_query_reaches_planner_without_literal_command_fast_path() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
-    state.policy.command_intent.standalone_commands = vec!["hostname".to_string()];
+    let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     let prompt = "只输出当前机器 hostname，不要解释";
     let task = ClaimedTask {
         task_id: "runtime-hostname-fast-path".to_string(),
@@ -618,11 +549,7 @@ async fn runtime_status_query_reaches_planner_without_literal_command_fast_path(
         kind: "ask".to_string(),
         payload_json: json!({ "text": prompt }).to_string(),
     };
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.resolved_intent = "return current hostname".to_string();
@@ -672,11 +599,7 @@ async fn runtime_status_query_reaches_planner_without_literal_command_fast_path(
 fn runtime_status_scalar_patch_maps_kernel_release_to_uname_r() {
     let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.route_reason = "capability_ref=system.runtime_status".to_string();
@@ -703,11 +626,7 @@ fn runtime_status_scalar_patch_maps_kernel_release_to_uname_r() {
 fn raw_command_output_runtime_status_plan_keeps_system_basic_when_available() {
     let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
 
@@ -747,11 +666,7 @@ fn raw_command_output_runtime_status_plan_keeps_system_basic_when_available() {
 fn raw_command_output_runtime_status_planner_tool_choice_is_not_fallback_rewritten() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
 
@@ -816,11 +731,7 @@ fn ops_recipe_apply_phase_without_mutation_forces_plan_repair() {
         args: serde_json::json!({ "action": "get", "url": "http://127.0.0.1:60703/" }),
     }];
     assert!(should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
@@ -843,11 +754,7 @@ fn ops_recipe_apply_phase_without_mutation_uses_specific_repair_reason() {
     }];
     assert_eq!(
         repair_reason(
-            Some(&route_result(
-                crate::AskMode::act_plain(),
-                false,
-                OutputResponseShape::Free,
-            )),
+            Some(&route_result(false, OutputResponseShape::Free,)),
             &loop_state,
             Some(&actions),
         ),
@@ -877,11 +784,7 @@ fn ops_recipe_apply_phase_with_mutation_keeps_plan() {
         },
     ];
     assert!(!should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Scalar,
-        )),
+        Some(&route_result(false, OutputResponseShape::Scalar,)),
         &loop_state,
         &actions,
     ));
@@ -910,21 +813,13 @@ fn config_change_profile_without_post_change_validation_forces_repair() {
         },
     ];
     assert!(should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
     assert_eq!(
         repair_reason(
-            Some(&route_result(
-                crate::AskMode::act_plain(),
-                false,
-                OutputResponseShape::Free,
-            )),
+            Some(&route_result(false, OutputResponseShape::Free,)),
             &loop_state,
             Some(&actions),
         ),
@@ -959,21 +854,13 @@ fn skill_authoring_profile_requires_integration_validation_not_readback_only() {
         },
     ];
     assert!(should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
     assert_eq!(
         repair_reason(
-            Some(&route_result(
-                crate::AskMode::act_plain(),
-                false,
-                OutputResponseShape::Free,
-            )),
+            Some(&route_result(false, OutputResponseShape::Free,)),
             &loop_state,
             Some(&actions),
         ),
@@ -1008,21 +895,13 @@ fn code_change_profile_requires_verification_not_readback_only() {
         },
     ];
     assert!(should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
     assert_eq!(
         repair_reason(
-            Some(&route_result(
-                crate::AskMode::act_plain(),
-                false,
-                OutputResponseShape::Free,
-            )),
+            Some(&route_result(false, OutputResponseShape::Free,)),
             &loop_state,
             Some(&actions),
         ),
@@ -1059,11 +938,7 @@ fn code_change_profile_done_allows_terminal_response_without_extra_validation_st
     }];
 
     assert!(!should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
@@ -1093,21 +968,13 @@ fn package_change_profile_without_post_install_validation_forces_repair() {
         },
     ];
     assert!(should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
     assert_eq!(
         repair_reason(
-            Some(&route_result(
-                crate::AskMode::act_plain(),
-                false,
-                OutputResponseShape::Free,
-            )),
+            Some(&route_result(false, OutputResponseShape::Free,)),
             &loop_state,
             Some(&actions),
         ),
@@ -1148,21 +1015,13 @@ fn database_change_profile_keeps_schema_validation_after_execute() {
     ];
     assert!(
         !should_force_plan_repair(
-            Some(&route_result(
-                crate::AskMode::act_plain(),
-                false,
-                OutputResponseShape::Free,
-            )),
+            Some(&route_result(false, OutputResponseShape::Free,)),
             &loop_state,
             &actions,
         ),
         "unexpected repair reason: {}",
         repair_reason(
-            Some(&route_result(
-                crate::AskMode::act_plain(),
-                false,
-                OutputResponseShape::Free,
-            )),
+            Some(&route_result(false, OutputResponseShape::Free,)),
             &loop_state,
             Some(&actions),
         )
@@ -1199,11 +1058,7 @@ fn code_change_profile_with_structured_cargo_check_keeps_plan() {
         },
     ];
     assert!(!should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Scalar,
-        )),
+        Some(&route_result(false, OutputResponseShape::Scalar,)),
         &loop_state,
         &actions,
     ));
@@ -1232,11 +1087,7 @@ fn code_change_profile_with_run_cmd_cargo_check_keeps_plan() {
         },
     ];
     assert!(!should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Scalar,
-        )),
+        Some(&route_result(false, OutputResponseShape::Scalar,)),
         &loop_state,
         &actions,
     ));
@@ -1273,21 +1124,13 @@ fn current_repo_scope_rejects_external_absolute_path() {
         },
     ];
     assert!(should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
     assert_eq!(
         repair_reason(
-            Some(&route_result(
-                crate::AskMode::act_plain(),
-                false,
-                OutputResponseShape::Free,
-            )),
+            Some(&route_result(false, OutputResponseShape::Free,)),
             &loop_state,
             Some(&actions),
         ),
@@ -1326,21 +1169,13 @@ fn external_workspace_scope_requires_explicit_external_target() {
         },
     ];
     assert!(should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
     assert_eq!(
         repair_reason(
-            Some(&route_result(
-                crate::AskMode::act_plain(),
-                false,
-                OutputResponseShape::Free,
-            )),
+            Some(&route_result(false, OutputResponseShape::Free,)),
             &loop_state,
             Some(&actions),
         ),
@@ -1366,21 +1201,13 @@ fn greenfield_scope_requires_creation_step_before_validation() {
         args: serde_json::json!({ "command": "cargo check -p clawd" }),
     }];
     assert!(should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
     assert_eq!(
         repair_reason(
-            Some(&route_result(
-                crate::AskMode::act_plain(),
-                false,
-                OutputResponseShape::Free,
-            )),
+            Some(&route_result(false, OutputResponseShape::Free,)),
             &loop_state,
             Some(&actions),
         ),
@@ -1422,11 +1249,7 @@ fn greenfield_scope_with_make_dir_and_write_file_keeps_plan() {
             }),
         },
     ];
-    let route = route_result(
-        crate::AskMode::act_plain(),
-        false,
-        OutputResponseShape::Scalar,
-    );
+    let route = route_result(false, OutputResponseShape::Scalar);
     assert!(
         !should_force_plan_repair(Some(&route), &loop_state, &actions),
         "unexpected repair reason: {}",
@@ -1483,14 +1306,8 @@ fn greenfield_scope_with_fs_basic_make_dir_and_write_text_keeps_plan() {
             content: "{{last_output}}".to_string(),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        false,
-        OutputResponseShape::Strict,
-    );
-    route.route_reason =
-        "execution_recipe_target_locator_preserved_for_agent_loop; executable_contract_preserved_for_agent_loop"
-            .to_string();
+    let mut route = route_result(false, OutputResponseShape::Strict);
+    route.route_reason = "execution_recipe_target_locator_preserved_for_agent_loop".to_string();
     assert!(
         !should_force_plan_repair(Some(&route), &loop_state, &actions),
         "unexpected repair reason: {}",
@@ -1525,11 +1342,7 @@ fn external_workspace_scope_persists_across_rounds_without_repeating_path() {
         }),
     }];
     assert!(!should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Scalar,
-        )),
+        Some(&route_result(false, OutputResponseShape::Scalar,)),
         &loop_state,
         &actions,
     ));
@@ -1562,11 +1375,7 @@ fn greenfield_scope_persists_creation_across_rounds() {
         }),
     }];
     assert!(!should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Scalar,
-        )),
+        Some(&route_result(false, OutputResponseShape::Scalar,)),
         &loop_state,
         &actions,
     ));
@@ -1580,11 +1389,7 @@ fn content_evidence_route_allows_respond_only_after_prior_observation() {
         content: "grounded final answer".to_string(),
     }];
     assert!(!should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_with_chat_finalizer(),
-            true,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(true, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
@@ -1667,11 +1472,7 @@ fn strips_intermediate_synthesize_before_later_execution() {
 
 #[test]
 fn strips_terminal_placeholder_respond_for_exact_listing_contract() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     let actions = vec![
         AgentAction::CallSkill {
@@ -1754,11 +1555,7 @@ fn injects_synthesize_answer_when_respond_is_bare_placeholder() {
 
 #[test]
 fn appends_terminal_synthesize_for_command_summary_observation_plan() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
@@ -1784,11 +1581,7 @@ fn appends_terminal_synthesize_for_command_summary_observation_plan() {
 
 #[test]
 fn does_not_append_terminal_synthesize_for_strict_raw_command_output() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),

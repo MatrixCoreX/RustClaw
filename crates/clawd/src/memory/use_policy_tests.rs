@@ -51,7 +51,6 @@ fn planner_memory_includes_unfinished_goals_and_stable_context() {
     let decision = decide_planner_memory_use_policy(
         &state,
         ExecutionContextBudgetTier::Full,
-        &crate::AskMode::act_plain(),
         PlannerMemoryContextHint::Default,
     );
     assert_eq!(decision.profile, MemoryUseProfile::PlannerScoped);
@@ -81,7 +80,6 @@ fn planner_memory_stable_facts_disabled_keeps_docs_but_omits_facts_and_goals() {
     let decision = decide_planner_memory_use_policy(
         &state,
         ExecutionContextBudgetTier::Full,
-        &crate::AskMode::respond_trace(),
         PlannerMemoryContextHint::StableFactsDisabled,
     );
     assert_eq!(decision.profile, MemoryUseProfile::PlannerScoped);
@@ -115,7 +113,6 @@ fn chat_memory_pure_direct_answer_omits_long_term_and_assistant_results() {
     let decision = decide_chat_memory_use_policy(
         &state,
         ExecutionContextBudgetTier::Full,
-        &crate::AskMode::respond_trace(),
         "",
         false,
         1200,
@@ -150,7 +147,6 @@ fn chat_memory_active_session_allows_bounded_recent_context_only() {
     let decision = decide_chat_memory_use_policy(
         &state,
         ExecutionContextBudgetTier::Full,
-        &crate::AskMode::respond_trace(),
         "",
         true,
         1200,
@@ -177,7 +173,6 @@ fn chat_memory_standalone_freeform_clarify_loop_context_is_disabled() {
     let decision = decide_chat_memory_use_policy(
         &state,
         ExecutionContextBudgetTier::Full,
-        &crate::AskMode::respond_trace(),
         "standalone_freeform_clarify_loop_context",
         false,
         1200,
@@ -206,7 +201,6 @@ fn chat_memory_current_request_only_disables_indexed_memory_and_preferences() {
     let decision = decide_chat_memory_use_policy(
         &state,
         ExecutionContextBudgetTier::Full,
-        &crate::AskMode::respond_trace(),
         "",
         false,
         1200,
@@ -233,7 +227,6 @@ fn chat_memory_active_task_context_only_disables_indexed_memory() {
     let decision = decide_chat_memory_use_policy(
         &state,
         ExecutionContextBudgetTier::Full,
-        &crate::AskMode::respond_trace(),
         "",
         true,
         1200,

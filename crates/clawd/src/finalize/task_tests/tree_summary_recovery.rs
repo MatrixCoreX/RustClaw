@@ -23,7 +23,7 @@ fn raw_tail_recovery_fixture(
         kind: "ask".to_string(),
         payload_json: "{}".to_string(),
     };
-    let mut route = super::route_result(crate::AskMode::act_plain());
+    let mut route = super::route_result();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;

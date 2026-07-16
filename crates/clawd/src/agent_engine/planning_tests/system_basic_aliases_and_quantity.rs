@@ -365,11 +365,7 @@ fn hidden_entries_contract_forces_inventory_dir_include_hidden() {
             "names_only": true,
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::HiddenEntriesCheck;
 
     let normalized = normalize_planned_actions(
@@ -408,11 +404,7 @@ fn structured_scalar_compare_plan_appends_synthesize_answer() {
             }),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     route.resolved_intent =
             "UI/package.json 里的 name 和 crates/clawd/Cargo.toml 里的 package.name 一样吗？只回答一样或不一样"
@@ -447,7 +439,7 @@ fn free_quantity_compare_plan_appends_synthesize_for_compare_paths() {
             "right_path": "README.zh-CN.md",
         }),
     }];
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     route.route_reason = "quantity_comparison_requires_model_language_synthesis".to_string();
     route.resolved_intent =
@@ -481,11 +473,7 @@ fn quantity_comparison_single_directory_count_observation_is_nonrecursive() {
     fs::write(root.path.join("top.txt"), "top").expect("write top");
     fs::write(root.path.join("nested/deep.txt"), "deep").expect("write deep");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -505,11 +493,7 @@ fn quantity_comparison_single_directory_count_observation_is_nonrecursive() {
 
 #[test]
 fn structured_scalar_compare_repairs_whole_file_read_plan() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let actions = vec![
         AgentAction::CallSkill {
@@ -551,11 +535,7 @@ fn structured_scalar_compare_repairs_whole_file_read_plan() {
 fn structured_scalar_compare_repair_can_add_text_after_prior_scalar_extract() {
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
 
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 2;
@@ -599,11 +579,7 @@ fn structured_scalar_compare_repair_can_add_text_after_prior_scalar_extract() {
 fn recent_scalar_equality_repair_counts_prior_config_basic_field_extract() {
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
 
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     let mut loop_state = LoopState::new(4);
     loop_state.round_no = 2;
@@ -675,11 +651,7 @@ version = "0.1.0"
     state.skill_rt.workspace_root = root.path.clone();
     let package_path_text = package_path.display().to_string();
     let cargo_path_text = cargo_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -800,11 +772,7 @@ version = "0.1.0"
 fn structured_scalar_compare_allows_text_read_after_wrapped_inventory_evidence() {
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
 
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     route.output_contract.requires_content_evidence = true;
     let mut loop_state = LoopState::new(4);
@@ -882,11 +850,7 @@ fn structured_scalar_compare_allows_text_read_after_wrapped_inventory_evidence()
 
 #[test]
 fn structured_scalar_compare_keeps_two_structured_extracts_for_strict_shape() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let actions = vec![
         AgentAction::CallSkill {
@@ -935,11 +899,7 @@ fn structured_scalar_compare_keeps_two_structured_extracts_for_strict_shape() {
 
 #[test]
 fn structured_scalar_compare_accepts_two_directory_inventory_observations() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let actions = vec![
         AgentAction::CallSkill {
@@ -985,11 +945,7 @@ fn structured_scalar_compare_accepts_two_directory_inventory_observations() {
 
 #[test]
 fn structured_scalar_compare_accepts_path_batch_facts_for_file_metadata() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
@@ -1026,11 +982,7 @@ fn structured_scalar_compare_accepts_path_batch_facts_for_file_metadata() {
 
 #[test]
 fn structured_scalar_compare_one_sentence_accepts_path_batch_facts_metadata_evidence() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let actions = vec![
         AgentAction::CallSkill {
@@ -1068,11 +1020,7 @@ fn structured_scalar_compare_one_sentence_accepts_path_batch_facts_metadata_evid
 
 #[test]
 fn structured_scalar_compare_free_shape_accepts_path_batch_facts_metadata_evidence() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "Cargo.toml | Cargo.lock".to_string();
@@ -1127,11 +1075,7 @@ fn quantity_compare_rewrites_directory_name_searches_to_dir_compare() {
     state.skill_rt.workspace_root = root.path.clone();
     state.skill_rt.locator_scan_max_files = 5000;
 
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root.path.display().to_string();
@@ -1189,11 +1133,7 @@ fn quantity_compare_directory_pair_exposes_resolved_dir_compare_targets() {
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = format!("{} | {}", left.display(), right.display());
@@ -1222,11 +1162,7 @@ fn directory_pair_locator_exposes_resolved_targets_even_without_quantity_semanti
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = format!("{} | {}", left.display(), right.display());

@@ -33,11 +33,7 @@ fn generic_log_analyze_does_not_steal_directory_with_explicit_log_file_target() 
     let log = logs_dir.join("clawd.run.log");
     fs::write(&log, "INFO boot start\nINFO worker ready\n").expect("write clawd log");
     let logs_path = logs_dir.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = logs_path.clone();
@@ -73,11 +69,7 @@ fn explicit_document_targets_win_over_workspace_log_analyze() {
     let plan_path = "plan/background_task_resume_convergence_plan_20260621.md";
     let mut state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
@@ -165,11 +157,7 @@ fn explicit_log_and_document_targets_are_both_read_before_synthesis() {
     let doc_path = "docs/service_notes.md";
     let mut state = test_state_with_enabled_skills(&["fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -249,11 +237,7 @@ fn explicit_raw_output_file_target_preserves_tail_slice_selector() {
     let log_path = "logs/act_plan.log";
     let mut state = test_state_with_enabled_skills(&["fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -295,11 +279,7 @@ fn explicit_file_target_reads_structured_update_slice_from_goal_context() {
     let log_path = "logs/act_plan.log";
     let mut state = test_state_with_enabled_skills(&["fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -340,11 +320,7 @@ fn doc_parse_capability_ref_rewrites_bounded_read_to_doc_parse() {
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
     let readme_path = readme.display().to_string();
     let state = test_state_with_enabled_skills(&["doc_parse", "fs_basic"]);
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
@@ -385,10 +361,13 @@ fn doc_parse_capability_ref_rewrites_bounded_read_to_doc_parse() {
                 && args.get("action").and_then(Value::as_str) == Some("parse_doc")
                 && args.get("path").and_then(Value::as_str) == Some(readme_path.as_str())
     ));
-    assert!(matches!(
-        normalized.get(1),
-        Some(AgentAction::SynthesizeAnswer { .. })
-    ));
+    assert!(
+        matches!(
+            normalized.get(1),
+            Some(AgentAction::SynthesizeAnswer { .. })
+        ),
+        "{normalized:?}"
+    );
 }
 
 #[test]
@@ -406,11 +385,7 @@ fn excerpt_kind_mixed_field_and_read_plan_preserves_config_field_reads() {
     let package_path = package.display().to_string();
     let readme_path = readme.display().to_string();
     let state = test_state_with_enabled_skills(&["config_basic", "doc_parse", "fs_basic"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -495,11 +470,7 @@ fn content_excerpt_with_doc_parse_capability_ref_rewrites_bounded_read() {
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
     let readme_path = readme.display().to_string();
     let state = test_state_with_enabled_skills(&["doc_parse", "fs_basic"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -553,11 +524,7 @@ fn workspace_project_summary_keeps_contract_allowed_bounded_read() {
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
     let readme_path = readme.display().to_string();
     let state = test_state_with_enabled_skills(&["doc_parse", "fs_basic"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -612,11 +579,7 @@ fn generic_single_log_synthesis_rewrites_bounded_read_to_log_analyze() {
     .expect("write log");
     let log_path = log.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -673,11 +636,7 @@ fn generic_single_log_synthesis_preserves_tail_read_range() {
     .expect("write log");
     let log_path = log.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -717,10 +676,13 @@ fn generic_single_log_synthesis_preserves_tail_read_range() {
     );
     assert_eq!(args.get("mode").and_then(Value::as_str), Some("tail"));
     assert_eq!(args.get("n").and_then(Value::as_u64), Some(20));
-    assert!(matches!(
-        normalized.get(1),
-        Some(AgentAction::SynthesizeAnswer { .. })
-    ));
+    assert!(
+        matches!(
+            normalized.get(1),
+            Some(AgentAction::SynthesizeAnswer { .. })
+        ),
+        "{normalized:?}"
+    );
 }
 
 #[test]
@@ -736,11 +698,7 @@ fn generic_log_directory_auto_locator_uses_log_analyze_plan() {
     fs::write(logs_dir.join("notes.txt"), "not a log").expect("write notes");
     let logs_path = logs_dir.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -783,11 +741,7 @@ fn content_excerpt_summary_log_directory_auto_locator_uses_log_analyze_plan() {
     .expect("write log");
     let logs_path = logs_dir.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -826,11 +780,7 @@ fn content_excerpt_summary_single_log_file_without_slice_defers_to_log_analyze_p
     fs::write(&log, "INFO ok\nWARN slow provider\nERROR timeout\n").expect("write log");
     let log_path = log.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -867,11 +817,7 @@ fn content_excerpt_single_doc_file_with_doc_parse_capability_uses_doc_parse_plan
     fs::write(&readme, "# RustClaw\n\nLocal agent runtime.\n").expect("write readme");
     let readme_path = readme.display().to_string();
     let state = test_state_with_enabled_skills(&["doc_parse", "fs_basic"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -916,11 +862,7 @@ fn content_excerpt_summary_keeps_bounded_log_read_for_synthesis() {
     .expect("write log");
     let log_path = log.display().to_string();
     let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -970,11 +912,7 @@ fn content_excerpt_summary_keeps_bounded_log_read_for_synthesis() {
 #[test]
 fn content_excerpt_contract_rewrites_concrete_respond_after_synthesis() {
     let state = test_state_with_registry();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.delivery_required = false;
@@ -1017,11 +955,7 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_fs_basic_for_rep
     )
     .expect("write prompt file");
     let prompt_path = prompt_file.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.delivery_required = false;
@@ -1068,11 +1002,7 @@ fn excerpt_kind_judgment_resolved_file_path_uses_bounded_read_and_synthesis() {
     let log_path = log_file.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(false, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "clawd.codex.minimax.log".to_string();
@@ -1115,11 +1045,7 @@ fn content_excerpt_with_summary_does_not_use_head_read_deterministic_plan() {
     let log = root.path.join("model_io.log");
     fs::write(&log, "line 1\nline 2\nline 3\nline 4\n").expect("write log");
     let log_path = log.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.delivery_required = false;
@@ -1143,11 +1069,7 @@ fn scalar_content_auto_locator_skips_content_excerpt_with_summary_contract() {
     let log = root.path.join("model_io.log");
     fs::write(&log, "line 1\nline 2\nline 3\nline 4\n").expect("write log");
     let log_path = log.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.delivery_required = false;
@@ -1172,7 +1094,7 @@ fn generic_content_evidence_does_not_use_single_file_deterministic_plan() {
     let readme = root.path.join("README.md");
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
     let readme_path = readme.display().to_string();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.delivery_required = false;
@@ -1197,11 +1119,7 @@ fn structured_scalar_compare_does_not_use_single_file_content_deterministic_plan
     let readme = root.path.join("README.md");
     fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
     let readme_path = readme.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "README.md | AGENTS.md".to_string();
@@ -1227,11 +1145,7 @@ fn scalar_content_auto_locator_does_not_read_path_only_contract() {
     let note = root.path.join("service_notes.md");
     fs::write(&note, "# Reading Notes\n\nService status is healthy.").expect("write note");
     let note_path = note.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -1257,11 +1171,7 @@ fn scalar_content_auto_locator_does_not_read_generated_file_path_report_target()
     fs::create_dir_all(image.parent().expect("image parent")).expect("create document dir");
     fs::write(&image, b"existing media bytes").expect("write existing media");
     let image_path = image.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFilePathReport;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -1287,11 +1197,7 @@ fn scalar_content_auto_locator_does_not_read_existence_contract() {
     let note = root.path.join("package.json");
     fs::write(&note, r#"{"name":"fixture"}"#).expect("write package");
     let note_path = note.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -1316,11 +1222,7 @@ fn scalar_content_auto_locator_reads_generic_scalar_content_contract() {
     let note = root.path.join("service_notes.md");
     fs::write(&note, "# Reading Notes\n\nService status is healthy.").expect("write note");
     let note_path = note.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -1357,11 +1259,7 @@ fn scalar_content_auto_locator_validates_config_contract() {
     let config = root.path.join("config.toml");
     fs::write(&config, "[service]\nname = \"rustclaw\"\n").expect("write config");
     let config_path = config.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -1405,11 +1303,7 @@ fn scalar_content_auto_locator_validates_config_capability_ref_without_semantic_
     let config = root.path.join("config.toml");
     fs::write(&config, "[service]\nname = \"rustclaw\"\n").expect("write config");
     let config_path = config.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.route_reason = "capability_ref=config.validate".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = true;
@@ -1455,11 +1349,7 @@ fn scalar_content_auto_locator_uses_structured_read_field_for_structured_scalar_
     let manifest_path = manifest.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -1523,11 +1413,7 @@ version.workspace = true
     let member_path = member_manifest.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -1582,11 +1468,7 @@ fn scalar_content_auto_locator_ignores_memory_field_when_current_request_names_b
     let package_path = package.display().to_string();
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -1635,11 +1517,7 @@ fn scalar_path_respond_only_uses_loop_state_auto_locator_observation() {
     let report = root.path.join("Report.MD");
     fs::write(&report, "hello").expect("write report");
     let report_path = report.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.delivery_required = false;
     let actions = vec![AgentAction::Respond {
@@ -1677,11 +1555,7 @@ fn scalar_count_synthesis_only_uses_count_inventory_for_locator_dir() {
     fs::write(root.path.join("b.txt"), "b").expect("write b");
     fs::create_dir_all(root.path.join("child")).expect("create child");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();
@@ -1727,11 +1601,7 @@ fn scalar_count_listing_plan_uses_count_inventory_for_locator_dir() {
     fs::write(root.path.join("b.txt"), "b").expect("write b");
     fs::create_dir_all(root.path.join("child")).expect("create child");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = root_path.clone();

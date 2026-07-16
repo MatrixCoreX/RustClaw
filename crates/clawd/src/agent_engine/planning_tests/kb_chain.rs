@@ -61,7 +61,6 @@ fn command_output_summary_kb_machine_chain_exposes_kb_capability_actions() {
 #[test]
 fn direct_answer_kb_machine_chain_exposes_kb_capability_actions_from_contract() {
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::respond_trace();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;

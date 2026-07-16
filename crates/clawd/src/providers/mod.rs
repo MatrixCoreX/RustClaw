@@ -14,7 +14,6 @@ pub(crate) use client::{
 };
 pub(crate) use output::{
     append_model_io_log, log_color_enabled, maybe_sanitize_llm_text_output,
-    rotate_model_io_log_daily, truncate_text, utf8_safe_prefix, utf8_safe_suffix,
-    MODEL_IO_LOG_KEEP_DAYS,
+    rotate_model_io_log_daily, truncate_text, utf8_safe_prefix, MODEL_IO_LOG_KEEP_DAYS,
 };
 pub(crate) use usage::{anthropic_usage_snapshot, gemini_usage_snapshot, openai_usage_snapshot};

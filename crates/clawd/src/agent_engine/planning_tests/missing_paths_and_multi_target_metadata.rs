@@ -9,11 +9,7 @@ fn constructed_missing_stat_path_plan_rewrites_to_exact_find_entries() {
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
@@ -55,11 +51,7 @@ fn constructed_missing_stat_path_plan_rewrites_without_specific_semantic_kind() 
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let route = route_result(true, OutputResponseShape::Strict);
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
         args: serde_json::json!({
@@ -106,11 +98,7 @@ fn file_paths_missing_stat_path_rewrites_to_selector_find_entries() {
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
     let missing = plan_dir.join("definitely_missing_20260511.md");
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
     route.output_contract.locator_hint = plan_dir.display().to_string();
     let actions = vec![AgentAction::CallTool {
@@ -159,11 +147,7 @@ fn constructed_directory_stat_path_plan_rewrites_to_find_entries_for_child_selec
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
@@ -207,11 +191,7 @@ fn constructed_directory_absolute_stat_path_rewrites_to_find_entries_for_child_s
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
     let absolute_locator = locator.display().to_string();
     let actions = vec![AgentAction::CallTool {
@@ -257,11 +237,7 @@ fn split_dir_and_basename_stat_paths_rewrites_to_auto_locator_file() {
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = report_path.clone();
@@ -300,11 +276,7 @@ fn constructed_missing_stat_path_plan_preserves_explicit_full_path_check() {
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
@@ -331,11 +303,7 @@ fn constructed_missing_stat_path_plan_preserves_explicit_full_path_check() {
 
 #[test]
 fn structured_scalar_compare_replaces_single_file_read_with_explicit_multi_file_path_facts() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let actions = vec![AgentAction::CallSkill {
         skill: "doc_parse".to_string(),
@@ -378,11 +346,7 @@ fn structured_scalar_compare_replaces_single_file_read_with_explicit_multi_file_
 
 #[test]
 fn structured_task_contract_targets_drive_multi_file_metadata_plan() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "README.md | AGENTS.md".to_string();
@@ -434,11 +398,7 @@ fn content_evidence_synthesize_only_plan_reads_structural_file_targets_first() {
     fs::write(&first, "first file\nalpha\n").expect("write first file");
     fs::write(&second, "second file\nbeta\n").expect("write second file");
 
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.requires_content_evidence = true;
     let noisy_result_path = temp.path.join("mentioned_inside_result.toml");
     fs::write(&noisy_result_path, "ignored = true\n").expect("write noisy result file");
@@ -514,11 +474,7 @@ fn content_evidence_partial_multi_file_read_appends_missing_structural_targets()
 
     let mut state = test_state();
     state.skill_rt.workspace_root = temp.path.clone();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = first_rel.to_string();
@@ -591,11 +547,7 @@ fn content_evidence_current_auto_locator_does_not_append_previous_anchor_target(
 
     let mut state = test_state();
     state.skill_rt.workspace_root = temp.path.clone();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = service_rel.to_string();
@@ -670,11 +622,7 @@ fn content_evidence_current_auto_locator_does_not_append_previous_anchor_target(
 
 #[test]
 fn existence_multi_file_stat_paths_are_repaired_from_structural_targets() {
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.output_contract.requires_content_evidence = true;
@@ -714,11 +662,7 @@ fn existence_multi_file_stat_paths_are_repaired_from_structural_targets() {
 
 #[test]
 fn explicit_multi_file_metadata_plan_is_not_duplicated_when_targets_are_covered() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
@@ -747,11 +691,7 @@ fn explicit_multi_file_metadata_plan_is_not_duplicated_when_targets_are_covered(
 
 #[test]
 fn normalization_order_schema_aliases_before_multi_target_coverage() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "README.md | AGENTS.md".to_string();
@@ -799,11 +739,7 @@ fn normalization_order_schema_aliases_before_multi_target_coverage() {
 
 #[test]
 fn multi_file_modified_time_compare_uses_metadata_not_whole_file_reads() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "README.md | AGENTS.md".to_string();
@@ -844,11 +780,7 @@ fn multi_file_modified_time_compare_uses_metadata_not_whole_file_reads() {
 
 #[test]
 fn recent_scalar_equality_preserves_content_extract_plan_for_explicit_files() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     let actions = vec![
         AgentAction::CallSkill {
@@ -914,11 +846,7 @@ fn recent_scalar_equality_preserves_content_extract_plan_for_explicit_files() {
 #[test]
 fn recent_scalar_equality_pair_paths_skip_content_read_deterministic_fallback() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
@@ -942,11 +870,7 @@ fn recent_scalar_equality_pair_paths_skip_content_read_deterministic_fallback() 
 
 #[test]
 fn recent_scalar_equality_pair_paths_uses_compare_paths_plan() {
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
@@ -1007,11 +931,7 @@ reqwest = { version = "0.12" }
     state.skill_rt.workspace_root = root.path.clone();
     let cargo_path = root.path.join("Cargo.toml").display().to_string();
     let readme_path = root.path.join("README.md").display().to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -1074,11 +994,7 @@ reqwest = { version = "0.12" }
 
 #[test]
 fn recent_scalar_contract_overrides_literal_command_guard_for_deterministic_plan() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -1103,11 +1019,7 @@ version = "0.1.7"
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -1184,11 +1096,7 @@ version = "0.1.0"
         .join("crates/clawd/Cargo.toml")
         .display()
         .to_string();
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -1287,11 +1195,7 @@ reqwest = { version = "0.12" }
         kind: "ask".to_string(),
         payload_json: json!({ "text": prompt }).to_string(),
     };
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -1362,11 +1266,7 @@ reqwest = { version = "0.12" }
         kind: "ask".to_string(),
         payload_json: json!({ "text": prompt }).to_string(),
     };
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;

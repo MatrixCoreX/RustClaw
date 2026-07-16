@@ -440,8 +440,7 @@ fn active_user_boundary_freeform_clarify_replans_with_locatorless_content_contra
     let mut route = route_result(OutputResponseShape::Strict);
     route.needs_clarify = false;
     route.risk_ceiling = RiskCeiling::Low;
-    route.route_reason =
-        "boundary_only; inline_structured_payload_context_execute; executable_contract_preserved_for_agent_loop".to_string();
+    route.route_reason = "boundary_only; inline_structured_payload_context_execute".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.delivery_required = false;

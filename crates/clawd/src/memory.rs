@@ -15,7 +15,7 @@ pub(crate) mod use_policy;
 pub(super) use memory_recent::is_transient_assistant_context_text_basic;
 pub(crate) use memory_recent::{
     build_last_turn_full_context, build_recent_assistant_replies_context,
-    build_recent_turns_full_context, latest_terminal_assistant_reply_for_chat,
+    build_recent_turns_full_context,
 };
 pub(crate) use service::dynamic_chat_memory_budget_chars;
 

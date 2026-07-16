@@ -25,10 +25,9 @@ fn context_with_machine_fields(
     fields: &[&str],
 ) -> AgentRunContext {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "local code strict json".to_string(),
         needs_clarify: false,
-        route_reason: "executable_contract_preserved_for_agent_loop".to_string(),
+        route_reason: "".to_string(),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: RiskCeiling::Unknown,
         resume_behavior: ResumeBehavior::None,

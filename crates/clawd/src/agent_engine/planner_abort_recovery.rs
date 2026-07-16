@@ -51,13 +51,7 @@ pub(super) fn should_try_compact_planner_abort_recovery(
     if loop_state.execution_recipe.is_active() {
         return true;
     }
-    route_result.is_some_and(|route| {
-        !route.needs_clarify
-            && (matches!(route.gate_kind(), crate::RouteGateKind::Execute)
-                || route.has_route_reason_machine_marker(
-                    "executable_contract_preserved_for_agent_loop",
-                ))
-    })
+    route_result.is_some_and(|route| !route.needs_clarify)
 }
 
 async fn run_compact_retry_prompt(
@@ -128,8 +122,6 @@ fn route_contract_summary(route_result: Option<&RouteResult>) -> String {
     };
     let contract = &route.output_contract;
     let value = serde_json::json!({
-        "ask_mode": route.route_trace_label_for_log(),
-        "gate_kind": route.gate_kind().as_str(),
         "needs_clarify": route.needs_clarify,
         "route_reason": route.route_reason,
         "resolved_intent": route.resolved_intent,
@@ -247,9 +239,8 @@ mod tests {
         }
     }
 
-    fn route_with_mode(ask_mode: crate::AskMode, route_reason: &str) -> crate::RouteResult {
+    fn route_with_mode(route_reason: &str) -> crate::RouteResult {
         crate::RouteResult {
-            ask_mode,
             resolved_intent: String::new(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -266,41 +257,31 @@ mod tests {
     }
 
     #[test]
-    fn compact_retry_is_limited_to_executable_routes_or_recipes() {
+    fn compact_retry_requires_agent_loop_route_without_pending_clarification() {
         let loop_state = LoopState::default();
-        let chat_route = route_with_mode(crate::AskMode::state_patch_ack(), "");
-        assert!(!should_try_compact_planner_abort_recovery(
-            Some(&chat_route),
-            &loop_state
-        ));
-
-        let execute_route = route_with_mode(crate::AskMode::act_plain(), "");
+        let execute_route = route_with_mode("");
         assert!(should_try_compact_planner_abort_recovery(
             Some(&execute_route),
             &loop_state
         ));
 
-        let marker_route = route_with_mode(
-            crate::AskMode::state_patch_ack(),
-            "executable_contract_preserved_for_agent_loop",
-        );
-        assert!(should_try_compact_planner_abort_recovery(
-            Some(&marker_route),
+        let mut clarify_route = route_with_mode("");
+        clarify_route.needs_clarify = true;
+        assert!(!should_try_compact_planner_abort_recovery(
+            Some(&clarify_route),
             &loop_state
         ));
     }
 
     #[test]
     fn route_contract_summary_uses_machine_fields() {
-        let mut route = route_with_mode(
-            crate::AskMode::act_plain(),
-            "executable_contract_preserved_for_agent_loop",
-        );
+        let mut route = route_with_mode("");
         route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
         route.output_contract.locator_hint = "src/main.rs".to_string();
 
         let summary = route_contract_summary(Some(&route));
-        assert!(summary.contains("\"gate_kind\": \"execute\""));
+        assert!(!summary.contains("\"gate_kind\""));
+        assert!(!summary.contains("\"ask_mode\""));
         assert!(summary.contains("\"response_shape\": \"scalar\""));
         assert!(summary.contains("\"locator_hint\": \"src/main.rs\""));
     }
@@ -324,10 +305,7 @@ mod tests {
             kind: "ask".to_string(),
             payload_json: "{}".to_string(),
         };
-        let route = route_with_mode(
-            crate::AskMode::act_plain(),
-            "executable_contract_preserved_for_agent_loop",
-        );
+        let route = route_with_mode("");
         let loop_state = LoopState::new(1);
 
         let Some((actions, raw)) = compact_retry_plan_actions(

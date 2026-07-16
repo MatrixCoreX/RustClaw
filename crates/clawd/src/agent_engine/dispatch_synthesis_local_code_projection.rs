@@ -196,9 +196,8 @@ fn local_code_task_projection_allowed(
     ) {
         return true;
     }
-    let local_code_route = route
-        .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
-        || route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace;
+    let local_code_route =
+        route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace;
     local_code_route
         && requested_fields
             .iter()

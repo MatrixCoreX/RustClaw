@@ -1636,7 +1636,6 @@ fn route_with_contract(
     locator_kind: OutputLocatorKind,
 ) -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "test".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -1711,11 +1710,10 @@ fn route_contract_selects_grounded_summary_budget() {
 #[test]
 fn route_contract_budget_does_not_depend_on_legacy_route_trace() {
     let recipe = ExecutionRecipeRuntimeState::default();
-    let mut route = route_with_contract(
+    let route = route_with_contract(
         OutputSemanticKind::CommandOutputSummary,
         OutputLocatorKind::None,
     );
-    route.ask_mode = crate::AskMode::respond_trace();
 
     assert_eq!(
         AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route)),

@@ -17,8 +17,6 @@ mod loop_control_answer_recovery;
 mod loop_control_answer_recovery_parse;
 #[path = "loop_control_answer_recovery_text.rs"]
 mod loop_control_answer_recovery_text;
-#[path = "loop_control_executable_contract_observe.rs"]
-mod loop_control_executable_contract_observe;
 #[path = "loop_control_filesystem_mutation_recovery.rs"]
 mod loop_control_filesystem_mutation_recovery;
 #[path = "loop_control_finalization_gate.rs"]
@@ -27,6 +25,8 @@ mod loop_control_finalization_gate;
 mod loop_control_local_health_recovery;
 #[path = "loop_control_machine_status_gap.rs"]
 mod loop_control_machine_status_gap;
+#[path = "loop_control_observe_round.rs"]
+mod loop_control_observe_round;
 #[path = "loop_control_post_write_evidence_guard.rs"]
 mod loop_control_post_write_evidence_guard;
 #[path = "loop_control_pre_loop_clarify.rs"]
@@ -41,15 +41,14 @@ mod loop_control_verifier_retry_commit;
 use loop_control_answer_recovery::*;
 use loop_control_answer_recovery_parse::*;
 use loop_control_answer_recovery_text::*;
-use loop_control_executable_contract_observe::{
-    executable_contract_observation_round_needs_planner,
-    executable_contract_observe_only_round_should_continue,
-    executable_contract_read_observe_round_should_continue,
-};
 use loop_control_filesystem_mutation_recovery::*;
 use loop_control_finalization_gate::*;
 use loop_control_local_health_recovery::*;
 use loop_control_machine_status_gap::*;
+pub(in crate::agent_engine) use loop_control_observe_round::observation_round_needs_planner;
+use loop_control_observe_round::{
+    observe_only_round_should_continue, read_observe_round_should_continue,
+};
 use loop_control_post_write_evidence_guard::*;
 use loop_control_pre_loop_clarify::*;
 use loop_control_recent_artifacts_recovery::*;
@@ -339,10 +338,10 @@ fn should_stop_for_observed_finalize(
         } else {
             super::observed_output::has_observed_answer_candidates(loop_state)
         };
-    if executable_contract_read_observe_round_should_continue(route_result, loop_state, actions) {
+    if read_observe_round_should_continue(route_result, loop_state, actions) {
         return false;
     }
-    if executable_contract_observation_round_needs_planner(route_result, loop_state, actions)
+    if observation_round_needs_planner(route_result, loop_state, actions)
         && !has_observed_stop_candidate
     {
         return false;
@@ -782,13 +781,12 @@ async fn run_agent_round(
         outcome.stop_signal = Some("observed_output_ready".to_string());
     }
     if outcome.stop_signal.is_none()
-        && route_result.is_some_and(|route| {
-            executable_contract_observe_only_round_should_continue(route, loop_state, &actions)
-        })
+        && route_result
+            .is_some_and(|route| observe_only_round_should_continue(route, loop_state, &actions))
     {
         loop_state.has_recoverable_failure_context = true;
         loop_state.output_vars.insert(
-            "agent_loop.executable_contract_observe_only_continue".to_string(),
+            "agent_loop.observe_only_continue".to_string(),
             "true".to_string(),
         );
         outcome.stop_signal = Some("recoverable_failure_continue_round".to_string());
@@ -949,7 +947,6 @@ pub(super) async fn run_agent_with_loop_seeded(
             answer_contract_route_result_for_reply(agent_run_context, &reply);
         promote_local_code_projection_from_machine_evidence_for_verifier_candidate(
             &mut reply,
-            answer_contract_route_result.as_ref(),
             user_text,
             &pre_finalize_loop_state,
             agent_run_context,
@@ -1030,7 +1027,6 @@ pub(super) async fn run_agent_with_loop_seeded(
                         if let Some(retry_verifier) = retry_verifier {
                             if retry_verifier_accepts_rewritten_answer(
                                 &retry_verifier,
-                                route_result,
                                 &retried_answer,
                             ) {
                                 if commit_answer_verifier_retry_answer(&mut reply, retried_answer) {
@@ -1043,10 +1039,7 @@ pub(super) async fn run_agent_with_loop_seeded(
                             if let Some(journal) = reply.task_journal.as_mut() {
                                 journal.record_answer_verifier_summary(retry_verifier);
                             }
-                        } else if retry_rewritten_answer_is_publishable(
-                            route_result,
-                            &retried_answer,
-                        ) {
+                        } else if retry_rewritten_answer_is_publishable(&retried_answer) {
                             if commit_answer_verifier_retry_answer(&mut reply, retried_answer) {
                                 info!(
                                     "answer_verifier_machine_payload_rewritten_to_visible_answer"

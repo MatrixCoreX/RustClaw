@@ -65,7 +65,7 @@ fn answer_verifier_retry_machine_evidence_accepts_local_code_json_with_artifact_
 #[test]
 fn verifier_gap_recovery_projects_machine_evidence_before_llm_retry() {
     let prompt = "Return only branch and remotes.";
-    let route = route_result(crate::AskMode::act_plain());
+    let route = route_result();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-verifier-gap-machine-recovery",
         "ask",

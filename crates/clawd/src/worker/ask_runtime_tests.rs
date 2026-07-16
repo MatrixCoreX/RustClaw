@@ -17,7 +17,6 @@ fn planner_context_keeps_neutral_route_and_raw_request() {
         context_bundle_summary: "summary".to_string(),
         memory_trace: None,
         route_result: crate::RouteResult {
-            ask_mode: crate::AskMode::act_plain(),
             resolved_intent: "raw request".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),

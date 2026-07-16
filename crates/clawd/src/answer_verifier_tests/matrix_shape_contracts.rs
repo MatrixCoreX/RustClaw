@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn matrix_scalar_shape_requires_plain_scalar_answer() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     let mut journal =
@@ -34,7 +34,7 @@ fn matrix_scalar_shape_requires_plain_scalar_answer() {
 
 #[test]
 fn matrix_scalar_count_shape_allows_observed_component_breakdown() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     let mut journal =
@@ -75,7 +75,7 @@ fn matrix_scalar_count_shape_allows_observed_component_breakdown() {
 
 #[test]
 fn matrix_single_path_shape_accepts_root_prefixed_results() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
     let mut journal =
@@ -109,7 +109,7 @@ fn matrix_single_path_shape_accepts_root_prefixed_results() {
 
 #[test]
 fn structured_keys_answer_covering_all_keys_skips_llm_verifier() {
-    let mut route = route_with_mode(crate::AskMode::act_with_chat_finalizer());
+    let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
@@ -154,7 +154,7 @@ fn structured_keys_answer_covering_all_keys_skips_llm_verifier() {
 
 #[test]
 fn matrix_strict_list_shape_rejects_unobserved_items() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
@@ -202,7 +202,7 @@ fn matrix_strict_list_shape_rejects_unobserved_items() {
 
 #[test]
 fn matrix_table_shape_requires_markdown_table_answer() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
@@ -255,7 +255,7 @@ fn matrix_table_shape_requires_markdown_table_answer() {
 
 #[test]
 fn matrix_single_path_shape_requires_plain_grounded_path() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
     let mut journal =
@@ -303,7 +303,7 @@ fn matrix_single_path_shape_requires_plain_grounded_path() {
 
 #[test]
 fn matrix_scalar_shape_uses_observed_evidence_map_values() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     let mut journal = crate::task_journal::TaskJournal::for_task(
@@ -327,7 +327,7 @@ fn matrix_scalar_shape_uses_observed_evidence_map_values() {
 
 #[test]
 fn recent_scalar_equality_answer_is_structurally_grounded() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.requires_content_evidence = true;

@@ -71,7 +71,7 @@ fn observed_call_capability_inventory_names_can_stop_loop_without_second_round()
 }
 
 #[test]
-fn executable_contract_call_capability_inventory_names_can_stop_without_incremental_planner() {
+fn capability_inventory_names_can_stop_without_incremental_planner() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
@@ -85,7 +85,7 @@ fn executable_contract_call_capability_inventory_names_can_stop_without_incremen
         args: json!({"path":"/workspace/document","files_only":true,"names_only":true,"max_entries":5}),
     }];
     let mut route = route_result(OutputResponseShape::Strict);
-    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.route_reason = "".to_string();
 
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
@@ -171,13 +171,12 @@ fn bounded_read_range_observe_only_round_does_not_force_incremental_planner() {
         args: json!({"action":"read_text_range","path":"/tmp/README.md","mode":"head","n":4}),
     }];
     let mut route = route_result(OutputResponseShape::Free);
-    route.ask_mode = crate::AskMode::act_plain();
-    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.route_reason = "".to_string();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
 
-    assert!(!executable_contract_observe_only_round_should_continue(
+    assert!(!observe_only_round_should_continue(
         &route,
         &loop_state,
         &actions,
@@ -206,11 +205,10 @@ fn summary_read_range_observe_only_round_still_uses_incremental_planner() {
         args: json!({"action":"read_text_range","path":"/tmp/service_notes.md","mode":"head","n":3}),
     }];
     let mut route = route_result(OutputResponseShape::Free);
-    route.ask_mode = crate::AskMode::act_plain();
-    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.route_reason = "".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
 
-    assert!(executable_contract_observe_only_round_should_continue(
+    assert!(observe_only_round_should_continue(
         &route,
         &loop_state,
         &actions,
@@ -513,7 +511,6 @@ fn fs_basic_inventory_names_can_stop_before_synthesis_followup() {
         r#"{"action":"inventory_dir","path":"/tmp/document","resolved_path":"/tmp/document","files_only":true,"names_only":true,"names":["a.txt","b.md","c.png"]}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.ask_mode = crate::AskMode::act_plain();
     route.resolved_intent = "List file names from a known directory.".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
@@ -548,7 +545,6 @@ fn recent_artifacts_inventory_can_stop_before_content_read_round() {
         r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\"}","error_text":null,"extra":{"action":"inventory_dir","entries":[{"kind":"file","modified_ts":9,"name":"clawd.run.log","path":"logs/clawd.run.log","size_bytes":2300},{"kind":"file","modified_ts":8,"name":"model_io.log","path":"logs/model_io.log","size_bytes":900},{"kind":"file","modified_ts":7,"name":"act_plan.log","path":"logs/act_plan.log","size_bytes":300}],"names":["clawd.run.log","model_io.log","act_plan.log"],"path":"/repo/logs","resolved_path":"/repo/logs","sort_by":"mtime_desc"}}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "logs".to_string();
@@ -589,7 +585,6 @@ fn recent_artifacts_inventory_stop_respects_file_selector() {
         r#"{"action":"inventory_dir","entries":[{"kind":"dir","modified_ts":9,"name":"bundle_unpack","path":"tmp/bundle_unpack"},{"kind":"dir","modified_ts":8,"name":"manual_unpack","path":"tmp/manual_unpack"}],"path":"/repo/tmp","sort_by":"mtime_desc"}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "tmp".to_string();
@@ -845,7 +840,7 @@ fn recipe_inspect_stage_does_not_stop_on_observed_output() {
 }
 
 #[test]
-fn executable_contract_read_only_round_continues_planner_without_runtime_recipe() {
+fn read_only_round_continues_planner_without_runtime_recipe() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
@@ -855,7 +850,7 @@ fn executable_contract_read_only_round_continues_planner_without_runtime_recipe(
         r#"{"extra":{"action":"list_dir","path":"/tmp/demo","entries":["calc_core.py"]}}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.route_reason = "boundary_only; executable_contract_preserved_for_agent_loop".to_string();
+    route.route_reason = "boundary_only".to_string();
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -878,7 +873,7 @@ fn executable_contract_read_only_round_continues_planner_without_runtime_recipe(
 }
 
 #[test]
-fn executable_contract_strict_json_read_only_round_continues_planner_for_live_code_workspace() {
+fn strict_json_read_only_round_continues_planner_for_live_code_workspace() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
@@ -898,7 +893,7 @@ fn executable_contract_strict_json_read_only_round_continues_planner_for_live_co
         r#"{"extra":{"action":"read_text_range","path":"/workspace/project/test_calc_core.py","excerpt":"1|from calc_core import add, sub"}}"#,
     ));
     let mut route = route_result(OutputResponseShape::Strict);
-    route.route_reason = "execution_recipe_target_locator_preserved_for_agent_loop; executionless_finalize_trace_plain; command_payload_preserved_for_agent_loop; executable_contract_preserved_for_agent_loop; current_turn_locator_overrides_contextual_path".to_string();
+    route.route_reason = "execution_recipe_target_locator_preserved_for_agent_loop; command_payload_preserved_for_agent_loop; current_turn_locator_overrides_contextual_path".to_string();
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -925,7 +920,7 @@ fn executable_contract_strict_json_read_only_round_continues_planner_for_live_co
 }
 
 #[test]
-fn executable_contract_capability_observe_only_round_continues_at_round_cap() {
+fn bounded_capability_observation_can_finalize_at_round_cap() {
     let mut loop_state = LoopState::new(2);
     loop_state.round_no = 2;
     loop_state.has_tool_or_skill_output = true;
@@ -934,19 +929,18 @@ fn executable_contract_capability_observe_only_round_continues_at_round_cap() {
         "fs_basic",
         r#"{"extra":{"action":"read_text_range","path":"/workspace/project/calc_core.py","resolved_path":"/workspace/project/calc_core.py","excerpt":"1|def add(a,b): return a+b"}}"#,
     ));
-    let mut route = route_result(OutputResponseShape::Strict);
-    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    let route = route_result(OutputResponseShape::Strict);
     let actions = vec![AgentAction::CallCapability {
         capability: "filesystem.read_text_range".to_string(),
         args: json!({"path":"/workspace/project/calc_core.py","start_line":1,"end_line":16}),
     }];
 
-    assert!(executable_contract_observe_only_round_should_continue(
+    assert!(!observe_only_round_should_continue(
         &route,
         &loop_state,
         &actions,
     ));
-    assert!(!should_stop_for_observed_finalize(
+    assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
             route_result: Some(route),
             ..Default::default()
@@ -957,7 +951,7 @@ fn executable_contract_capability_observe_only_round_continues_at_round_cap() {
 }
 
 #[test]
-fn executable_contract_fs_basic_capability_read_only_round_continues_planner() {
+fn fs_basic_capability_read_only_round_continues_planner() {
     let mut loop_state = LoopState::new(4);
     loop_state.round_no = 1;
     loop_state.has_tool_or_skill_output = true;
@@ -967,13 +961,15 @@ fn executable_contract_fs_basic_capability_read_only_round_continues_planner() {
         r#"{"extra":{"action":"read_text_range","path":"/workspace/project/calc_core.py","resolved_path":"/workspace/project/calc_core.py","excerpt":"1|def add(a,b): return a+b\n2|def sub(a,b): return a-b"}}"#,
     ));
     let mut route = route_result(OutputResponseShape::FileToken);
-    route.route_reason = "command_payload_preserved_for_agent_loop; executable_contract_preserved_for_agent_loop; current_turn_locator_overrides_contextual_path".to_string();
+    route.route_reason =
+        "command_payload_preserved_for_agent_loop; current_turn_locator_overrides_contextual_path"
+            .to_string();
     let actions = vec![AgentAction::CallCapability {
         capability: "fs_basic.read_text_range".to_string(),
         args: json!({"path":"/workspace/project/calc_core.py"}),
     }];
 
-    assert!(executable_contract_observe_only_round_should_continue(
+    assert!(observe_only_round_should_continue(
         &route,
         &loop_state,
         &actions,

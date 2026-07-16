@@ -35,6 +35,7 @@ pub(crate) struct PromptSurfaceSignals {
 }
 
 impl PromptSurfaceSignals {
+    #[cfg(test)]
     pub(crate) fn has_explicit_path_or_url(&self) -> bool {
         matches!(
             self.locator_hint_prompt_shape,
@@ -52,6 +53,7 @@ impl PromptSurfaceSignals {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn is_structural_locator_only_reply(&self) -> bool {
         matches!(
             self.locator_reply_prompt_shape,
@@ -59,14 +61,7 @@ impl PromptSurfaceSignals {
         )
     }
 
-    pub(crate) fn has_any_locator_reference(&self) -> bool {
-        self.has_concrete_locator_hint()
-    }
-
-    pub(crate) fn has_single_filename_candidate(&self) -> bool {
-        self.single_filename_candidate.is_some()
-    }
-
+    #[cfg(test)]
     pub(crate) fn has_filename_candidates(&self) -> bool {
         !self
             .filename_candidates_excluding_field_selectors()
@@ -77,14 +72,7 @@ impl PromptSurfaceSignals {
         self.single_filename_candidate.as_deref()
     }
 
-    pub(crate) fn has_structured_target_refinement(&self) -> bool {
-        self.field_selector_count > 0 || self.dotted_field_selector.is_some()
-    }
-
-    pub(crate) fn single_quoted_literal(&self) -> Option<&str> {
-        (self.quoted_literals.len() == 1).then(|| self.quoted_literals[0].as_str())
-    }
-
+    #[cfg(test)]
     pub(crate) fn has_delivery_token_reference(&self) -> bool {
         self.delivery_token_reference
     }
@@ -233,6 +221,7 @@ fn prompt_without_contract_test_hint_blocks(prompt: &str) -> Cow<'_, str> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn inline_json_transform_request(prompt: &str) -> bool {
     let Some(raw) = crate::extract_first_json_value_any(prompt) else {
         return prompt_has_inline_csv_records(prompt);
@@ -242,10 +231,12 @@ pub(crate) fn inline_json_transform_request(prompt: &str) -> bool {
         .is_some_and(|value| value_has_structured_transform_request(&value))
 }
 
+#[cfg(test)]
 fn prompt_has_inline_csv_records(prompt: &str) -> bool {
     inline_csv_record_block(prompt).is_some()
 }
 
+#[cfg(test)]
 pub(crate) fn inline_csv_record_block(prompt: &str) -> Option<Vec<String>> {
     let lines = split_inline_record_lines(prompt);
     for idx in 0..lines.len().saturating_sub(1) {
@@ -270,6 +261,7 @@ pub(crate) fn inline_csv_record_block(prompt: &str) -> Option<Vec<String>> {
     None
 }
 
+#[cfg(test)]
 fn split_inline_record_lines(prompt: &str) -> Vec<String> {
     let normalized = prompt
         .replace("\\r\\n", "\n")
@@ -297,6 +289,7 @@ fn split_inline_record_lines(prompt: &str) -> Vec<String> {
     lines
 }
 
+#[cfg(test)]
 fn parse_csv_surface_line(line: &str) -> Vec<&str> {
     line.split(',')
         .map(str::trim)
@@ -304,6 +297,7 @@ fn parse_csv_surface_line(line: &str) -> Vec<&str> {
         .collect()
 }
 
+#[cfg(test)]
 fn is_plain_record_field_name(value: &str) -> bool {
     let mut chars = value.chars();
     let Some(first) = chars.next() else {
@@ -313,6 +307,7 @@ fn is_plain_record_field_name(value: &str) -> bool {
         && chars.all(|ch| ch == '_' || ch == '-' || ch.is_ascii_alphanumeric())
 }
 
+#[cfg(test)]
 fn value_has_structured_transform_request(value: &serde_json::Value) -> bool {
     let Some(obj) = value.as_object() else {
         return false;
@@ -334,6 +329,7 @@ fn value_has_structured_transform_request(value: &serde_json::Value) -> bool {
     action_requests_transform && has_structural_ops && value_has_inline_transform_input(obj)
 }
 
+#[cfg(test)]
 fn value_has_inline_transform_input(obj: &serde_json::Map<String, serde_json::Value>) -> bool {
     obj.get("data")
         .or_else(|| obj.get("records"))
@@ -342,6 +338,7 @@ fn value_has_inline_transform_input(obj: &serde_json::Map<String, serde_json::Va
         .is_some_and(|items| !items.is_empty() && items.iter().any(serde_json::Value::is_object))
 }
 
+#[cfg(test)]
 fn value_is_structured_transform_op(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::String(op) => matches!(

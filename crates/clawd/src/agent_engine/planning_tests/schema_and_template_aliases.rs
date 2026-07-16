@@ -60,11 +60,7 @@ fn rewrite_terminal_placeholder_preserves_mixed_last_output_respond() {
 
 #[test]
 fn unresolved_template_arg_multi_file_read_plan_uses_direct_file_reads() {
-    let route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let route = route_result(true, OutputResponseShape::OneSentence);
     let actions = vec![
         AgentAction::CallSkill {
             skill: "system_basic".to_string(),
@@ -467,7 +463,7 @@ fn agent_loop_execution_code_plan_defers_to_verifier_without_pre_repair() {
     let state = test_state_with_enabled_skills(&["fs_basic", "run_cmd"]);
     let mut route = base_route_result();
     route.risk_ceiling = RiskCeiling::Medium;
-    route.route_reason = "inline_structured_payload_preserved_as_execution_spec; executable_contract_preserved_for_agent_loop; execution_recipe_target_locator_preserved_for_agent_loop".to_string();
+    route.route_reason = "inline_structured_payload_preserved_as_execution_spec; execution_recipe_target_locator_preserved_for_agent_loop".to_string();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
@@ -485,7 +481,7 @@ fn agent_loop_execution_code_plan_can_fallback_when_repair_aborts() {
     let state = test_state_with_enabled_skills(&["fs_basic", "run_cmd"]);
     let mut route = base_route_result();
     route.risk_ceiling = RiskCeiling::Medium;
-    route.route_reason = "inline_structured_payload_preserved_as_execution_spec; executable_contract_preserved_for_agent_loop; execution_recipe_target_locator_preserved_for_agent_loop".to_string();
+    route.route_reason = "inline_structured_payload_preserved_as_execution_spec; execution_recipe_target_locator_preserved_for_agent_loop".to_string();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;

@@ -231,6 +231,7 @@ fn append_structured_field_selector_token(mut text: String, selector: Option<&st
     text
 }
 
+#[cfg(test)]
 pub(crate) fn structured_field_selector_token_from_text(text: &str) -> Option<String> {
     text.split_whitespace().find_map(|part| {
         part.strip_prefix(STRUCTURED_FIELD_SELECTOR_TOKEN_PREFIX)

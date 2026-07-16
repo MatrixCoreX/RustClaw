@@ -566,7 +566,6 @@ fn fs_basic_read_text_range_negative_start_line_count_becomes_tail_count() {
 fn service_status_process_request_allows_planner_supplied_process_filter() {
     let state = test_state_with_enabled_skills(&["process_basic"]);
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::respond_trace();
     route.resolved_intent = "capability_ref=process.ps filter=clawd".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Strict;
@@ -976,7 +975,6 @@ fn service_status_task_id_token_allows_planner_supplied_task_get() {
 fn command_output_summary_task_id_token_allows_planner_supplied_task_get() {
     let state = test_state_with_enabled_skills(&["git_basic", "task_control"]);
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::respond_trace();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
@@ -1020,7 +1018,6 @@ fn command_output_summary_task_id_token_allows_planner_supplied_task_get() {
 fn content_presence_task_control_first_detail_allows_planner_supplied_action() {
     let state = test_state_with_enabled_skills(&["task_control"]);
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::respond_trace();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
@@ -1551,11 +1548,7 @@ fn archive_basic_unknown_mutating_shape_does_not_normalize_to_list() {
 fn preferred_route_allows_more_specific_structured_tool_action() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.route_reason = "capability_ref=archive.pack".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_hint = "tmp/nl_archive_case.zip".to_string();
@@ -1845,7 +1838,6 @@ fn doc_parse_unsupported_transform_action_normalizes_to_parse_doc() {
 fn archive_auto_locator_plans_list_instead_of_text_read() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = "Inspect the archive contents without unpacking it.".to_string();
     route.route_reason = "capability_ref=archive.list".to_string();
     route.output_contract.requires_content_evidence = true;
@@ -1891,7 +1883,6 @@ fn archive_auto_locator_plans_list_instead_of_text_read() {
 fn archive_read_contract_plans_direct_member_read() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "Read member notes.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"
             .to_string();
@@ -1937,7 +1928,6 @@ fn archive_read_contract_ignores_non_archive_auto_locator() {
     let state = test_state_with_enabled_skills(&["archive_basic"]);
     let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
     let mut route = base_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = format!("Read notes.txt from {archive}");
     route.route_reason = "capability_ref=archive.read".to_string();
     route.output_contract.requires_content_evidence = true;

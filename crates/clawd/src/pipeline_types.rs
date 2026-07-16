@@ -1,7 +1,6 @@
 use serde_json::{json, Value};
 
-use crate::runtime::ask_mode::AskMode;
-use crate::runtime::types::{AgentAction, AskRouteTraceDecision};
+use crate::runtime::types::AgentAction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum OutputResponseShape {
@@ -565,7 +564,6 @@ impl RiskCeiling {
 pub(crate) struct RouteResult {
     /// Runtime mode for ask-flow dispatch. Legacy route labels for logs and
     /// journals are derived from this field.
-    pub(crate) ask_mode: AskMode,
     pub(crate) resolved_intent: String,
     pub(crate) needs_clarify: bool,
     pub(crate) clarify_question: String,
@@ -583,47 +581,6 @@ pub(crate) struct RouteResult {
 }
 
 impl RouteResult {
-    pub(crate) fn route_trace_label_for_log(&self) -> &'static str {
-        self.ask_mode.route_trace_label_for_log()
-    }
-
-    pub(crate) fn route_trace_decision_for_journal(&self) -> AskRouteTraceDecision {
-        self.ask_mode.route_trace_decision_for_journal()
-    }
-
-    pub(crate) fn gate_kind(&self) -> crate::RouteGateKind {
-        self.ask_mode.gate_kind()
-    }
-
-    pub(crate) fn is_resume_discussion_mode(&self) -> bool {
-        #[cfg(test)]
-        {
-            self.ask_mode.is_resume_discussion() || self.ask_mode.is_chat_gate()
-        }
-        #[cfg(not(test))]
-        {
-            self.ask_mode.is_resume_discussion()
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn is_chat_gate(&self) -> bool {
-        matches!(self.gate_kind(), crate::RouteGateKind::Chat)
-    }
-
-    pub(crate) fn is_execute_gate(&self) -> bool {
-        matches!(self.gate_kind(), crate::RouteGateKind::Execute)
-    }
-
-    pub(crate) fn uses_chat_finalizer(&self) -> bool {
-        self.ask_mode.finalize_chat_wrapped()
-    }
-
-    pub(crate) fn uses_pure_chat_agent_loop_submode(&self) -> bool {
-        self.uses_chat_finalizer()
-            || self.has_route_reason_machine_marker("pure_chat_agent_loop_submode")
-    }
-
     pub(crate) fn has_route_reason_machine_marker(&self, marker: &str) -> bool {
         RouteReasonMarkers::new(&self.route_reason).has_machine_marker(marker)
     }
@@ -726,9 +683,8 @@ impl RouteResult {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn is_clarify_gate(&self) -> bool {
-        matches!(self.gate_kind(), crate::RouteGateKind::Clarify)
+        false
     }
 }
 

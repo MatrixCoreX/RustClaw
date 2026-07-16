@@ -10,7 +10,6 @@ fn synthesize_direct_fallback_blocks_multiline_raw_read_range_when_plan_requests
         r#"{"action":"read_range","mode":"tail","excerpt":"1|WARN cache miss ratio above baseline\n2|ERROR provider timeout\n3|INFO provider retry succeeded","path":"/tmp/app.log"}"#,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "tail a log slice and provide a takeaway".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -82,7 +81,6 @@ fn synthesize_direct_fallback_blocks_multiline_read_range_for_scalar_extraction(
         r##"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|Operators should check the app log first when requests fail, then verify the config file and database tables.","path":"/tmp/service_notes.md"}"##,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "extract one scalar from a markdown file".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -126,7 +124,6 @@ fn synthesize_direct_fallback_blocks_nested_extra_multiline_read_range() {
         r##"{"extra":{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|Operators should check the app log first when requests fail, then verify the config file and database tables.","path":"/tmp/service_notes.md"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|# Service Notes\\n2|\\n3|Operators should check the app log first when requests fail, then verify the config file and database tables.\",\"path\":\"/tmp/service_notes.md\"}"}"##,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "summarize a markdown document from observed content".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -169,7 +166,6 @@ fn deterministic_scalar_markdown_heading_uses_title_field_selector_for_free_rout
         r##"{"extra":{"action":"read_range","field_selector":"title","field_value":"Service Notes","value_text":"Service Notes","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"/tmp/service_notes.md"}}"##,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -213,7 +209,6 @@ fn deterministic_scalar_markdown_heading_keeps_free_route_without_title_selector
         r##"{"extra":{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"/tmp/service_notes.md"}}"##,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -254,11 +249,10 @@ fn bounded_read_range_direct_answer_allows_unclassified_free_path_route() {
         r##"{"extra":{"action":"read_range","mode":"head","requested_n":4,"start_line":1,"end_line":4,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for RustClaw NL regression tests.\n4|","path":"/tmp/README.md"}}"##,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
-        route_reason: "executable_contract_preserved_for_agent_loop".to_string(),
+        route_reason: "".to_string(),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: crate::RiskCeiling::Low,
         resume_behavior: crate::ResumeBehavior::None,
@@ -300,7 +294,6 @@ fn bounded_read_range_direct_answer_blocks_summary_and_scalar_routes() {
         r##"{"extra":{"action":"read_range","mode":"head","requested_n":3,"excerpt":"1|# Service Notes\n2|\n3|Operators should check logs first.","path":"/tmp/service_notes.md"}}"##,
     ));
     let base_route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

@@ -10,12 +10,12 @@ const MAX_SESSION_ALIAS_BINDINGS: usize = 12;
 #[path = "conversation_alias.rs"]
 mod conversation_alias;
 
-pub(crate) use conversation_alias::session_alias_bindings_from_state_patch;
+pub(crate) use conversation_alias::alias_bindings_mentioned_in_prompt;
+
+#[cfg(test)]
 pub(crate) use conversation_alias::{
-    alias_bindings_mentioned_in_prompt, alias_surface_matches_prompt,
-    single_alias_binding_mentioned_in_prompt, state_patch_is_alias_bindings_only,
-    structural_quoted_alias_binding_from_single_locator_prompt,
-    structural_quoted_alias_bindings_from_prompt,
+    session_alias_bindings_from_state_patch, single_alias_binding_mentioned_in_prompt,
+    state_patch_is_alias_bindings_only,
 };
 
 use conversation_alias::{merge_alias_bindings_for_turn, turn_analysis_has_alias_only_state_patch};
@@ -296,7 +296,6 @@ fn standalone_contextual_chat_result_starts_primary_task(
             )
         );
     if !allowed_turn
-        || !route_result.is_resume_discussion_mode()
         || route_result.needs_clarify
         || route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
@@ -375,8 +374,7 @@ fn standalone_preference_or_memory_turn_clears_primary_task(
             crate::turn_context::TargetTaskPolicy::ReuseActive
                 | crate::turn_context::TargetTaskPolicy::ReplaceActive
         )
-    ) && route_result.is_resume_discussion_mode()
-        && !route_result.output_contract.requires_content_evidence
+    ) && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && matches!(
             route_result.output_contract.locator_kind,
@@ -462,11 +460,7 @@ fn standalone_scalar_result_should_not_promote(
 }
 
 fn route_allows_standalone_scalar_non_promotion(route_result: &crate::RouteResult) -> bool {
-    if route_result.is_resume_discussion_mode() {
-        return true;
-    }
-    route_result.uses_pure_chat_agent_loop_submode()
-        && route_result.schedule_kind == crate::ScheduleKind::None
+    route_result.schedule_kind == crate::ScheduleKind::None
         && !route_result.needs_clarify
         && !route_result.wants_file_delivery
         && !route_result.should_refresh_long_term_memory
@@ -521,141 +515,6 @@ fn current_turn_answer_text(answer_text: &str, answer_messages: &[String]) -> Op
         })
 }
 
-fn substantial_text_deliverable(answer_text: &str) -> bool {
-    let trimmed = answer_text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-
-    let char_count = trimmed.chars().count();
-    if char_count >= 180 {
-        return true;
-    }
-
-    let non_empty_line_count = trimmed
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .count();
-    if char_count >= 80 && non_empty_line_count >= 3 {
-        return true;
-    }
-
-    let has_structural_markdown = trimmed.lines().any(|line| {
-        let line = line.trim_start();
-        line.starts_with('#')
-            || line.starts_with("- ")
-            || line.starts_with("* ")
-            || line.starts_with("> ")
-            || line.starts_with("| ")
-            || line.starts_with("```")
-            || line.split_once('.').is_some_and(|(prefix, suffix)| {
-                !suffix.trim_start().is_empty()
-                    && !prefix.is_empty()
-                    && prefix.chars().all(|ch| ch.is_ascii_digit())
-            })
-    });
-    if has_structural_markdown && char_count >= 60 && non_empty_line_count >= 2 {
-        return true;
-    }
-
-    compact_sentence_deliverable(trimmed, char_count, non_empty_line_count)
-}
-
-fn compact_sentence_deliverable(
-    trimmed: &str,
-    char_count: usize,
-    non_empty_line_count: usize,
-) -> bool {
-    if !(24..=180).contains(&char_count) || non_empty_line_count != 1 {
-        return false;
-    }
-    let starts_like_machine_payload = trimmed.starts_with('{')
-        || trimmed.starts_with('[')
-        || trimmed.starts_with("FILE:")
-        || trimmed.starts_with('/')
-        || trimmed.starts_with("./")
-        || trimmed.starts_with("../");
-    if starts_like_machine_payload {
-        return false;
-    }
-    let Some(last) = trimmed.chars().last() else {
-        return false;
-    };
-    matches!(last, '.' | '!' | '。' | '！')
-}
-
-fn unannotated_chat_output_starts_primary_task(
-    prior_state: Option<&ConversationState>,
-    route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
-    answer_text: &str,
-    answer_messages: &[String],
-) -> bool {
-    if turn_analysis.is_some()
-        || has_prior_primary_task(prior_state)
-        || !route_result.is_resume_discussion_mode()
-        || route_result.needs_clarify
-        || route_result.output_contract.requires_content_evidence
-        || route_result.output_contract.delivery_required
-        || !matches!(
-            route_result.output_contract.locator_kind,
-            crate::OutputLocatorKind::None
-        )
-        || !matches!(
-            route_result.output_contract.delivery_intent,
-            crate::OutputDeliveryIntent::None
-        )
-        || !matches!(
-            route_result.effective_output_contract_semantic_kind(),
-            crate::OutputSemanticKind::None
-        )
-        || matches!(
-            route_result.output_contract.response_shape,
-            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
-        )
-    {
-        return false;
-    }
-
-    current_turn_answer_text(answer_text, answer_messages)
-        .as_deref()
-        .is_some_and(substantial_text_deliverable)
-}
-
-fn current_turn_primary_task_prompt(
-    prompt: &str,
-    resolved_prompt_for_execution: &str,
-) -> Option<String> {
-    let user_prompt = prompt.trim();
-    let resolved_prompt = resolved_prompt_for_execution.trim();
-    let current_prompt = if user_prompt.is_empty() {
-        resolved_prompt
-    } else {
-        user_prompt
-    };
-    (!current_prompt.is_empty()).then(|| current_prompt.to_string())
-}
-
-fn unannotated_chat_primary_prompt_for_output(
-    prior_state: Option<&ConversationState>,
-    route_result: &crate::RouteResult,
-    turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
-    prompt: &str,
-    resolved_prompt_for_execution: &str,
-    answer_text: &str,
-    answer_messages: &[String],
-) -> Option<String> {
-    unannotated_chat_output_starts_primary_task(
-        prior_state,
-        route_result,
-        turn_analysis,
-        answer_text,
-        answer_messages,
-    )
-    .then(|| current_turn_primary_task_prompt(prompt, resolved_prompt_for_execution))
-    .flatten()
-}
-
 fn standalone_chat_deliverable_starts_primary_task(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
@@ -675,8 +534,7 @@ fn standalone_chat_deliverable_starts_primary_task(
             Some(crate::turn_context::TurnType::TaskRequest),
             Some(crate::turn_context::TargetTaskPolicy::Standalone)
         )
-    ) && route_result.is_resume_discussion_mode()
-        && !route_result.needs_clarify
+    ) && !route_result.needs_clarify
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && matches!(
@@ -729,16 +587,6 @@ fn next_last_primary_task_output(
             return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
         }
         if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
-            let latest_output = current_turn_answer_text(answer_text, answer_messages);
-            return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
-        }
-        if unannotated_chat_output_starts_primary_task(
-            prior_state,
-            route_result,
-            turn_analysis,
-            answer_text,
-            answer_messages,
-        ) {
             let latest_output = current_turn_answer_text(answer_text, answer_messages);
             return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
         }
@@ -1000,7 +848,7 @@ pub(crate) fn update_active_session_from_ask_outcome(
                     active_observed_facts_task_id,
                 )
             };
-        let mut last_primary_task_prompt = if preserve_primary_task_for_clarifying_output {
+        let last_primary_task_prompt = if preserve_primary_task_for_clarifying_output {
             prior_state
                 .as_ref()
                 .and_then(|state| state.last_primary_task_prompt.clone())
@@ -1029,17 +877,6 @@ pub(crate) fn update_active_session_from_ask_outcome(
                 answer_messages,
             )
         };
-        if last_primary_task_prompt.is_none() && last_primary_task_output.is_some() {
-            last_primary_task_prompt = unannotated_chat_primary_prompt_for_output(
-                prior_state.as_ref(),
-                route_result,
-                turn_analysis,
-                prompt,
-                resolved_prompt_for_execution,
-                answer_text,
-                answer_messages,
-            );
-        }
         let conversation_state = ConversationState {
             active_followup_task_id,
             active_clarify_task_id,

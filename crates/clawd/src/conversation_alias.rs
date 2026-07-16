@@ -59,6 +59,7 @@ pub(crate) fn alias_surface_matches_prompt(prompt: &str, alias: &str) -> bool {
     normalized_alias_surface_for_match(prompt).contains(&alias)
 }
 
+#[cfg(test)]
 pub(crate) fn single_alias_binding_mentioned_in_prompt<'a>(
     bindings: &'a [SessionAliasBinding],
     prompt: &str,
@@ -658,9 +659,6 @@ fn structural_alias_bindings_from_prompt(
         .is_some_and(|turn_type| {
             matches!(turn_type, crate::turn_context::TurnType::PreferenceOrMemory)
         })
-        || (route_result.is_resume_discussion_mode()
-            && !route_result.output_contract.requires_content_evidence
-            && !route_result.output_contract.delivery_required)
     {
         out.extend(structural_alias_bindings_from_single_locator_prefix(prompt));
     }
@@ -1016,9 +1014,7 @@ pub(crate) fn structural_alias_binding_from_prompt(
     route_result: &crate::RouteResult,
     resolved_prompt_for_execution: &str,
 ) -> Option<SessionAliasBinding> {
-    if !route_result.is_resume_discussion_mode()
-        || route_result.output_contract.requires_content_evidence
-    {
+    if route_result.output_contract.requires_content_evidence {
         return None;
     }
     let alias = single_structural_quoted_alias(prompt)?;

@@ -7,7 +7,6 @@ use crate::finalize::raw_command_machine_field_projection_from_journal;
 fn raw_command_chatact_prefers_exact_observed_output_over_planned_extra_content() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -46,7 +45,6 @@ fn raw_command_chatact_prefers_exact_observed_output_over_planned_extra_content(
 fn raw_command_multiline_output_replaces_reordered_synthesis() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -86,7 +84,6 @@ async fn finalize_loop_reply_replaces_drifted_raw_command_short_list_synthesis()
     let state = test_state();
     let task = claimed_task("task-raw-command-short-list-drift");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -128,7 +125,6 @@ async fn finalize_loop_reply_replaces_drifted_raw_command_short_list_synthesis()
 fn raw_command_projection_plan_replaces_drifted_projected_answer() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "List /home/guagua/rustclaw/scripts in descending name order and return only five names."
             .to_string();
@@ -179,7 +175,6 @@ fn raw_command_projection_plan_replaces_drifted_projected_answer() {
 fn raw_command_projection_plan_replaces_unprojected_listing_output() {
     let state = test_state();
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "List /home/guagua/rustclaw/scripts in descending name order and return only five names."
             .to_string();
@@ -544,7 +539,6 @@ async fn finalize_loop_reply_returns_redirected_file_path_for_scalar_raw_command
 fn backfill_suppresses_raw_run_cmd_when_plan_declares_projection() {
     let task = claimed_task("task-backfill-raw-projection");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -713,7 +707,6 @@ fn raw_command_direct_structured_replacement_keeps_multi_step_projection() {
     loop_state.delivery_messages.push("ThinkPad-X1".to_string());
     loop_state.last_user_visible_respond = Some("ThinkPad-X1".to_string());
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -801,7 +794,6 @@ async fn finalize_loop_reply_uses_raw_read_projection_when_delivery_empty() {
         .push(ok_step_result("step_2", "synthesize_answer", synthesis));
     loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -849,7 +841,6 @@ fn direct_structured_observed_answer_accepts_wrapped_raw_read_range() {
         .executed_step_results
         .push(ok_step_result("step_1", "fs_basic", &read_range_output));
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -890,7 +881,6 @@ fn raw_read_range_observed_answer_replaces_planned_error_interpretation() {
         .delivery_messages
         .push("planned interpretation of old log error".to_string());
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;

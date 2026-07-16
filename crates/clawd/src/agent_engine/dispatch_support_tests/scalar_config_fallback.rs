@@ -10,7 +10,6 @@ fn synthesize_direct_fallback_allows_wrapped_empty_config_scalar_for_path_contra
         r#"{"extra":{"action":"extract_field","exists":true,"field_path":"workspace.package.repository","format":"toml","path":"Cargo.toml","value":"","value_text":"","value_type":"string"},"text":"{\"action\":\"extract_field\",\"exists\":true,\"field_path\":\"workspace.package.repository\",\"value\":\"\",\"value_text\":\"\",\"value_type\":\"string\"}"}"#,
     ));
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "read workspace.package.repository from Cargo.toml".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

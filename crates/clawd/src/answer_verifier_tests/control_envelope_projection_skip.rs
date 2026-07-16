@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn should_verify_answer_skips_grounded_agent_loop_control_envelope() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
 

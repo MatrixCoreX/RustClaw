@@ -7,15 +7,7 @@ use toml::Value as TomlValue;
 use tracing::{info, warn};
 
 use super::prompts::{load_required_prompt_template_for_vendor, RequiredPromptLoadError};
-use crate::{CommandIntentRules, CommandIntentRuntime, MemoryConfigFileWrapper, ScheduleRuntime};
-
-fn push_unique_trimmed(values: &mut Vec<String>, value: impl AsRef<str>) {
-    let value = value.as_ref().trim();
-    if value.is_empty() || values.iter().any(|existing| existing == value) {
-        return;
-    }
-    values.push(value.to_string());
-}
+use crate::{CommandIntentRuntime, MemoryConfigFileWrapper, ScheduleRuntime};
 
 fn locale_i18n_paths(i18n_root: &Path, locale: &str) -> Vec<PathBuf> {
     let suffix = format!(".{locale}.toml");
@@ -184,42 +176,13 @@ fn insert_schedule_i18n_defaults(i18n_dict: &mut HashMap<String, String>) {
         });
 }
 
-pub(crate) fn load_command_intent_runtime(
-    workspace_root: &Path,
-    cfg: &CommandIntentConfig,
-) -> CommandIntentRuntime {
+pub(crate) fn load_command_intent_runtime(cfg: &CommandIntentConfig) -> CommandIntentRuntime {
     let default_locale = if cfg.default_locale.trim().is_empty() {
         "zh-CN".to_string()
     } else {
         cfg.default_locale.trim().to_string()
     };
-    let rules_dir = workspace_root.join(cfg.rules_dir.trim());
-    let mut standalone_commands = Vec::new();
-    let path = rules_dir.join("common.toml");
-    match std::fs::read_to_string(&path) {
-        Ok(raw) => match toml::from_str::<CommandIntentRules>(&raw) {
-            Ok(rules) => {
-                for value in rules.standalone_commands {
-                    push_unique_trimmed(&mut standalone_commands, value);
-                }
-            }
-            Err(err) => {
-                warn!(
-                    "load command intent rules failed: path={} err={err}",
-                    path.display()
-                );
-            }
-        },
-        Err(err) => {
-            warn!(
-                "read command intent rules failed: path={} err={err}",
-                path.display()
-            );
-        }
-    }
-
     CommandIntentRuntime {
-        standalone_commands,
         default_locale,
         verify_enforce_enabled: cfg.verify_enforce_enabled,
     }

@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn filesystem_count_entries_capability_ref_verifies_scalar_without_semantic_kind() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.resolved_intent = "capability_ref=filesystem.count_entries".to_string();
     route.route_reason = "capability_ref=filesystem.count_entries".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -32,7 +32,7 @@ fn filesystem_count_entries_capability_ref_verifies_scalar_without_semantic_kind
 
 #[test]
 fn system_runtime_status_capability_ref_verifies_scalar_without_semantic_kind() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.resolved_intent = "capability_ref=system.runtime_status".to_string();
     route.route_reason = "capability_ref=system.runtime_status".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -70,7 +70,7 @@ fn system_runtime_status_capability_ref_verifies_scalar_without_semantic_kind() 
 
 #[test]
 fn config_read_field_capability_ref_verifies_scalar_without_semantic_kind() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.resolved_intent = "capability_ref=config.read_field".to_string();
     route.route_reason = "capability_ref=config.read_field".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -110,7 +110,7 @@ fn config_read_field_capability_ref_verifies_scalar_without_semantic_kind() {
 
 #[test]
 fn system_extract_field_capability_ref_verifies_scalar_without_semantic_kind() {
-    let mut route = route_with_mode(crate::AskMode::act_plain());
+    let mut route = route_with_mode();
     route.resolved_intent = "capability_ref=system_basic.extract_field".to_string();
     route.route_reason = "capability_ref=system_basic.extract_field".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;

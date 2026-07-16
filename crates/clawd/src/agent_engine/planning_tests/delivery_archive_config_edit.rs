@@ -1059,11 +1059,7 @@ fn config_mutation_without_recipe_does_not_upgrade_readback_to_apply() {
 #[test]
 fn unrequested_config_edit_is_stripped_from_text_rewrite_followup() {
     let state = test_state_with_enabled_skills(&["config_edit", "synthesize_answer"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.resolved_intent = "rewrite_active_text_style_only".to_string();
     route.route_reason = "style_transform_without_config_anchor".to_string();
@@ -1109,11 +1105,7 @@ fn unrequested_config_edit_is_stripped_from_text_rewrite_followup() {
 #[test]
 fn requested_config_edit_plan_is_preserved_by_structural_anchors() {
     let state = test_state_with_enabled_skills(&["config_edit"]);
-    let route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let route = route_result(true, OutputResponseShape::Strict);
     let loop_state = LoopState::new(2);
     let actions = vec![AgentAction::CallTool {
         tool: "config_edit".to_string(),
@@ -1144,11 +1136,7 @@ fn requested_config_edit_plan_is_preserved_by_structural_anchors() {
 #[test]
 fn direct_answer_config_contract_preserves_config_edit_plan() {
     let state = test_state_with_enabled_skills(&["config_edit"]);
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.route_reason =
         "capability_ref=config.plan_change field_path=server.port value=8787".to_string();
     let loop_state = LoopState::new(2);
@@ -1231,11 +1219,7 @@ fn rustclaw_config_syntax_only_validation_keeps_validate_action() {
 #[test]
 fn command_output_summary_preserves_structured_config_validate() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -1283,11 +1267,7 @@ fn command_output_summary_preserves_structured_config_validate() {
 #[test]
 fn plain_main_config_validation_rewrites_to_planner_guard_when_contract_allows_guard() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
@@ -1324,11 +1304,7 @@ fn plain_main_config_validation_rewrites_to_planner_guard_when_contract_allows_g
 #[test]
 fn main_config_content_summary_read_rewrites_to_guard() {
     let state = test_state_with_registry();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
@@ -1368,11 +1344,7 @@ fn main_config_content_summary_read_rewrites_to_guard() {
 
 #[test]
 fn guard_config_with_invalid_product_locator_uses_main_config_default() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/home/guagua/rustclaw/rustclaw".to_string();
@@ -1477,11 +1449,7 @@ fn config_validation_capability_ref_rewrites_broad_read_without_semantic_kind() 
 #[test]
 fn config_validation_contract_normalizes_tool_read_to_validate() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
@@ -1535,11 +1503,7 @@ fn config_validation_contract_normalizes_tool_read_to_validate() {
 #[test]
 fn config_validation_contract_normalizes_legacy_system_validate_structured_to_validate() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
@@ -1588,11 +1552,7 @@ fn config_validation_contract_normalizes_legacy_system_validate_structured_to_va
 #[test]
 fn config_validation_contract_normalizes_config_field_read_to_validate() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
@@ -1645,11 +1605,7 @@ fn unrequested_path_like_config_field_read_rewrites_to_validate() {
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_text.clone();
     route.resolved_intent = format!("Validate TOML syntax of {config_text}.");
@@ -1696,11 +1652,7 @@ fn explicit_path_like_config_field_read_is_preserved_when_user_mentions_field() 
 
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_text.clone();
     route.resolved_intent = format!("Read field no_such_note.md from {config_text}.");
@@ -1732,7 +1684,7 @@ fn explicit_path_like_config_field_read_is_preserved_when_user_mentions_field() 
 #[test]
 fn rustclaw_config_section_header_field_reads_rewrite_to_guard_config() {
     let state = test_state();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
@@ -1783,7 +1735,7 @@ fn rustclaw_config_section_header_field_reads_rewrite_to_guard_config() {
 #[test]
 fn config_risk_assessment_rewrites_key_listing_to_guard_config() {
     let state = test_state();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -1822,7 +1774,7 @@ fn config_risk_assessment_rewrites_key_listing_to_guard_config() {
 #[test]
 fn config_risk_assessment_rewrites_file_head_read_to_guard_config() {
     let state = test_state();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -1862,11 +1814,7 @@ fn config_risk_assessment_rewrites_file_head_read_to_guard_config() {
 #[test]
 fn config_risk_assessment_rewrites_config_edit_guard_to_preferred_config_basic_guard() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -1900,7 +1848,7 @@ fn config_risk_assessment_rewrites_config_edit_guard_to_preferred_config_basic_g
 #[test]
 fn rustclaw_main_config_content_excerpt_broad_read_rewrites_to_guard_config() {
     let state = test_state();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;

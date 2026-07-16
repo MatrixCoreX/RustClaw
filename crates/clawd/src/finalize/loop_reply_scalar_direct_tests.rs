@@ -83,9 +83,7 @@ async fn finalize_loop_reply_replaces_scalar_machine_assignment_with_observed_va
     let state = test_state();
     let task = claimed_task("task-schema-version-scalar-machine-assignment");
     let mut route = free_route_result();
-    route.route_reason =
-        "scalar_locator_requires_evidence; executable_contract_preserved_for_agent_loop"
-            .to_string();
+    route.route_reason = "scalar_locator_requires_evidence".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
@@ -792,7 +790,6 @@ fn direct_structured_observed_answer_preserves_publishable_respond_for_content_r
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -820,7 +817,6 @@ fn direct_structured_observed_answer_skips_raw_passthrough_for_strict_exact_sent
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.exact_sentence_count = Some(1);
     route.output_contract.requires_content_evidence = true;
@@ -852,7 +848,6 @@ fn direct_non_builtin_raw_answer_skips_synthesized_delivery_contract() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.exact_sentence_count = Some(1);
     route.output_contract.requires_content_evidence = true;
@@ -1205,9 +1200,7 @@ fn scalar_locator_marker_projects_find_ext_count_from_machine_field() {
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
     route.output_contract.requires_content_evidence = true;
-    route.route_reason =
-        "scalar_locator_requires_evidence; executable_contract_preserved_for_agent_loop"
-            .to_string();
+    route.route_reason = "scalar_locator_requires_evidence".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         original_user_request: Some(
@@ -1722,7 +1715,6 @@ fn archive_exit_zero_passthrough_is_dropped_when_structured_answer_exists() {
         finished_at: 0,
     });
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功"
                 .to_string(),

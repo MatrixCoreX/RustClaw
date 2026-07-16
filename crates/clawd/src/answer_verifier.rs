@@ -146,11 +146,7 @@ pub(crate) fn should_verify_answer(
     if structured_machine_projection_can_skip_answer_verifier(route_result, journal, candidate) {
         return false;
     }
-    if pure_chat_agent_loop_submode_can_skip_answer_verifier(route_result, journal) {
-        return false;
-    }
-    let pure_chat_agent_loop = pure_chat_agent_loop_submode_should_verify(route_result, journal);
-    if pure_chat_agent_loop {
+    if route_reason_has_backend_identity_metadata_marker(route_result) {
         return true;
     }
     evidence_policy_requires_observation(route_result)
@@ -158,37 +154,7 @@ pub(crate) fn should_verify_answer(
         || route_has_output_contract_marker(route_result)
 }
 
-fn pure_chat_agent_loop_submode_should_verify(
-    route_result: &RouteResult,
-    _journal: &crate::task_journal::TaskJournal,
-) -> bool {
-    if !route_result.uses_pure_chat_agent_loop_submode() {
-        return false;
-    }
-    if route_reason_has_backend_identity_metadata_marker(route_result) {
-        return true;
-    }
-    false
-}
-
-fn pure_chat_agent_loop_submode_can_skip_answer_verifier(
-    route_result: &RouteResult,
-    journal: &crate::task_journal::TaskJournal,
-) -> bool {
-    route_result.uses_pure_chat_agent_loop_submode()
-        && !route_reason_has_backend_identity_metadata_marker(route_result)
-        && !route_result.output_contract.requires_content_evidence
-        && !route_result.output_contract.delivery_required
-        && !route_result.wants_file_delivery
-        && !route_has_output_contract_marker(route_result)
-        && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
-        && route_result.output_contract.locator_hint.trim().is_empty()
-        && pure_chat_agent_loop_has_no_tool_observations(journal)
-}
-
-fn pure_chat_agent_loop_has_no_tool_observations(
-    journal: &crate::task_journal::TaskJournal,
-) -> bool {
+fn terminal_answer_has_no_tool_observations(journal: &crate::task_journal::TaskJournal) -> bool {
     journal.step_results.iter().all(|step| {
         matches!(step.skill.as_str(), "respond" | "synthesize_answer")
             && step.status == crate::executor::StepExecutionStatus::Ok
@@ -232,7 +198,7 @@ fn terminal_answer_only_can_skip_answer_verifier(
         && !route_has_output_contract_marker(route_result)
         && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
         && route_result.output_contract.locator_hint.trim().is_empty()
-        && pure_chat_agent_loop_has_no_tool_observations(journal)
+        && terminal_answer_has_no_tool_observations(journal)
 }
 
 pub(crate) fn structurally_satisfies_answer_contract(

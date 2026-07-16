@@ -51,7 +51,8 @@ async fn finalize_loop_reply_returns_graceful_result_for_permission_denied_conte
     .expect("finalize should return a user-visible failure");
 
     assert!(reply.text.contains("`/etc/shadow`"));
-    assert!(reply.text.contains("permission denied"));
+    assert!(reply.text.contains("permission_denied"));
+    assert!(!reply.text.contains("__RC_SKILL_ERROR__"));
     assert!(!reply.should_fail_task);
     assert_eq!(reply.messages.len(), 1);
     assert_eq!(reply.messages.last(), Some(&reply.text));
@@ -151,7 +152,7 @@ async fn finalize_loop_reply_sanitizes_contract_rejection_error() {
     .await
     .expect("finalize should return sanitized failure text");
 
-    assert!(reply.text.contains("planned tool step was not allowed"));
+    assert!(reply.text.contains("contract_action_rejected"));
     assert!(!reply.text.contains("__RC_SKILL_ERROR__"));
     assert!(!reply.text.contains("excerpt_kind_judgment"));
     assert!(!reply.text.contains("system_basic.inventory_dir"));

@@ -6,11 +6,7 @@ fn contract_rejected_log_analyze_rewrites_to_preferred_excerpt_read() {
     let log_path = temp.path.join("act_plan.log");
     fs::write(&log_path, "{\"level\":\"info\",\"event\":\"ok\"}\n").expect("write fixture log");
     let log_path = log_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = log_path.clone();
@@ -60,11 +56,7 @@ fn excerpt_contract_keeps_preferred_log_read_when_synthesizing() {
     let log_path = temp.path.join("act_plan.log");
     fs::write(&log_path, "{\"level\":\"info\",\"event\":\"ok\"}\n").expect("write fixture log");
     let log_path = log_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = log_path.clone();
@@ -111,11 +103,7 @@ fn excerpt_contract_keeps_preferred_log_read_when_synthesizing() {
 
 #[test]
 fn raw_command_output_preserves_fs_basic_grep_text_plan() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
@@ -153,7 +141,7 @@ fn raw_command_output_preserves_fs_basic_grep_text_plan() {
 #[test]
 fn structured_tool_output_placeholder_is_synthesized_before_respond() {
     let loop_state = LoopState::new(1);
-    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let route = route_result(true, OutputResponseShape::Free);
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -204,11 +192,7 @@ fn fs_basic_append_text_aliases_text_to_content_before_verify() {
 
 #[test]
 fn structured_scalar_compare_accepts_fs_basic_count_entries_pair() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     let loop_state = LoopState::new(1);
     let actions = vec![
@@ -238,11 +222,7 @@ fn structured_scalar_compare_accepts_fs_basic_count_entries_pair() {
 
 #[test]
 fn quantity_comparison_route_accepts_single_count_entries_scalar_plan() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let loop_state = LoopState::new(1);
     let actions = vec![
@@ -269,11 +249,7 @@ fn quantity_comparison_route_accepts_single_count_entries_scalar_plan() {
 #[test]
 fn command_output_summary_keeps_planned_fs_count_entries_actions() {
     let state = test_state_with_enabled_skills(&["fs_basic", "process_basic"]);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let loop_state = LoopState::new(1);
@@ -318,11 +294,7 @@ fn command_output_summary_keeps_planned_fs_count_entries_actions() {
 #[test]
 fn command_output_summary_replaces_non_recipe_mutation_with_preferred_observation() {
     let state = test_state_with_registry();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.resolved_intent = "capability_ref=process.ps".to_string();
@@ -363,11 +335,7 @@ fn command_output_summary_replaces_non_recipe_mutation_with_preferred_observatio
 #[test]
 fn command_output_summary_keeps_scratch_filesystem_lifecycle_mutation_plan() {
     let state = test_state_with_registry();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "tmp/nl_basic_skill_coverage_case".to_string();
@@ -445,11 +413,7 @@ fn command_output_summary_keeps_scratch_filesystem_lifecycle_mutation_plan() {
 #[test]
 fn scratch_filesystem_lifecycle_plan_upgrades_effective_contract() {
     let state = test_state_with_registry();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "tmp/nl_basic_skill_coverage_case".to_string();
@@ -515,7 +479,7 @@ fn scratch_filesystem_lifecycle_plan_upgrades_effective_contract() {
 #[test]
 fn generic_path_content_scratch_lifecycle_plan_upgrades_effective_contract() {
     let state = test_state_with_registry();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "tmp/nl_basic_skill_coverage_case".to_string();
@@ -581,7 +545,7 @@ fn generic_path_content_scratch_lifecycle_plan_upgrades_effective_contract() {
 #[test]
 fn generic_path_content_package_docker_probe_plan_upgrades_to_service_status_contract() {
     let state = test_state_with_registry();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "docker".to_string();
@@ -642,11 +606,7 @@ fn generic_path_content_package_docker_probe_plan_upgrades_to_service_status_con
 #[test]
 fn command_output_summary_keeps_scratch_cleanup_recovery_after_prior_write() {
     let state = test_state_with_registry();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "tmp/nl_basic_skill_coverage_case".to_string();
@@ -751,11 +711,7 @@ fn command_output_summary_keeps_scratch_cleanup_recovery_after_prior_write() {
 #[test]
 fn command_output_summary_keeps_archive_pack_cleanup_recovery() {
     let state = test_state_with_registry();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "tmp/nl_basic_skill_coverage_bundle.zip".to_string();
@@ -839,7 +795,7 @@ fn command_output_summary_keeps_archive_pack_cleanup_recovery() {
 #[test]
 fn command_output_summary_keeps_registry_non_mutating_config_preview_actions() {
     let state = test_state_with_registry();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     let actions = vec![
@@ -895,11 +851,7 @@ fn command_output_summary_keeps_registry_non_mutating_config_preview_actions() {
 #[test]
 fn active_ops_apply_keeps_mutation_despite_summary_contract_hint() {
     let state = test_state_with_registry();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let mut loop_state = LoopState::new(2);
@@ -949,11 +901,7 @@ fn unavailable_skill_plan_forces_repair() {
         skill: "disabled_writer".to_string(),
         args: json!({ "path": "out.txt" }),
     }];
-    let route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(false, OutputResponseShape::Free);
 
     assert!(should_force_actionable_plan_repair(
         &state,
@@ -971,7 +919,7 @@ fn unavailable_skill_plan_forces_repair() {
 fn preferred_registry_skill_route_forces_repair_but_can_fallback_to_safe_run_cmd() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.resolved_intent = "capability_ref=system.runtime_status".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -1009,7 +957,7 @@ fn preferred_registry_skill_route_forces_repair_but_can_fallback_to_safe_run_cmd
 fn preferred_registry_skill_route_does_not_fallback_to_mutating_run_cmd() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.resolved_intent = "capability_ref=system.runtime_status".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -1034,7 +982,7 @@ fn preferred_registry_skill_route_does_not_fallback_to_mutating_run_cmd() {
 fn preferred_registry_skill_route_does_not_force_repair_from_structured_tool() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.resolved_intent = "capability_ref=system.runtime_status".to_string();
     let actions = vec![AgentAction::CallTool {
@@ -1066,7 +1014,7 @@ fn log_content_summary_route_forces_repair_from_generic_fs_read() {
     let log_path = temp.path.join("app.log");
     fs::write(&log_path, "INFO ok\nWARN cache miss\n").expect("write fixture log");
     let log_path = log_path.display().to_string();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = log_path.clone();
@@ -1112,11 +1060,7 @@ fn log_content_summary_route_forces_repair_from_generic_fs_read() {
 fn fs_basic_directory_names_route_forces_repair_from_run_cmd() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
     route.resolved_intent = "capability_ref=filesystem.list_dir".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -1142,7 +1086,7 @@ fn fs_basic_directory_names_route_forces_repair_from_run_cmd() {
 fn explicit_literal_run_cmd_marker_skips_preferred_skill_repair() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableListing;
     route.resolved_intent = "capability_ref=database.list_tables".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -1179,11 +1123,7 @@ fn explicit_literal_run_cmd_marker_skips_preferred_skill_repair() {
 fn runtime_async_job_marker_skips_preferred_skill_repair() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.resolved_intent = "capability_ref=process.ps".to_string();
     route.route_reason =
@@ -1219,7 +1159,7 @@ fn runtime_async_job_marker_skips_preferred_skill_repair() {
 fn explicit_literal_existing_run_cmd_is_marked_before_repair_checks() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableListing;
     route.output_contract.locator_hint = "data/db-basic-contract.sqlite".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -1243,7 +1183,7 @@ fn explicit_literal_existing_run_cmd_is_marked_before_repair_checks() {
             assert_eq!(
                 args.get(super::super::super::CLAWD_LITERAL_COMMAND_ARG)
                     .and_then(Value::as_bool),
-                Some(true)
+                None
             );
         }
         other => panic!("expected run_cmd action, got {other:?}"),
@@ -1260,11 +1200,7 @@ fn explicit_literal_existing_run_cmd_is_marked_before_repair_checks() {
 fn explicit_literal_scalar_route_marks_failure_repairable() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
@@ -1305,11 +1241,7 @@ fn explicit_literal_scalar_route_marks_failure_repairable() {
 fn file_paths_route_marks_missing_target_repairable() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     let actions = vec![AgentAction::CallSkill {
         skill: "read_file".to_string(),
@@ -1338,7 +1270,7 @@ fn file_paths_route_marks_missing_target_repairable() {
 fn raw_command_output_route_does_not_force_preferred_skill_repair() {
     let state = test_state_with_registry();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
@@ -1361,11 +1293,7 @@ fn repair_failure_does_not_fallback_to_unavailable_skill_plan() {
         skill: "disabled_reader".to_string(),
         args: json!({ "path": "README.md" }),
     }];
-    let route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(false, OutputResponseShape::Free);
 
     assert!(!can_fallback_to_initial_plan_after_repair_failure(
         &state,
@@ -1383,11 +1311,7 @@ fn actionable_route_allows_respond_only_after_observation_exists() {
         content: "final answer".to_string(),
     }];
     assert!(!should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_with_chat_finalizer(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
@@ -1400,15 +1324,19 @@ fn content_evidence_route_keeps_observation_only_plan_for_observed_finalize() {
         skill: "read_file".to_string(),
         args: serde_json::json!({ "path": "README.md" }),
     }];
-    assert!(!should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_with_chat_finalizer(),
-            true,
-            OutputResponseShape::Free,
-        )),
-        &loop_state,
-        &actions,
-    ));
+    assert!(
+        !should_force_plan_repair(
+            Some(&route_result(true, OutputResponseShape::Free,)),
+            &loop_state,
+            &actions,
+        ),
+        "{}",
+        repair_reason(
+            Some(&route_result(true, OutputResponseShape::Free)),
+            &loop_state,
+            Some(&actions)
+        )
+    );
 }
 
 #[test]
@@ -1423,7 +1351,7 @@ fn lightweight_act_route_keeps_observation_only_plan_without_repair() {
             "n": 4
         }),
     }];
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.resolved_intent = "读取 /tmp/device_local/logs/model_io.log 最后 4 行".to_string();
     route.output_contract.locator_hint = "/tmp/device_local/logs/model_io.log".to_string();
     assert!(!should_force_plan_repair(
@@ -1447,11 +1375,7 @@ fn lightweight_route_rejects_unavailable_followup_skill() {
             args: serde_json::json!({ "text": "用一句话总结 {{last_output}}" }),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.route_reason = "llm_contract:generic_filename_single_read".to_string();
     route.resolved_intent = "看一下 README.md，然后一句话说它主要讲了什么".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
@@ -1471,7 +1395,7 @@ fn lightweight_route_rejects_unavailable_followup_skill() {
 #[test]
 fn clarify_followup_tail_request_does_not_rewrite_single_read_file_from_text() {
     let state = test_state();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.resolved_intent = "Continue the previous request that was waiting for clarification: 看看那个模型日志最后 5 行\nUser now provides the missing target or content: scripts/nl_tests/fixtures/device_local/logs/model_io.log".to_string();
     let actions = vec![
         AgentAction::CallSkill {
@@ -1504,7 +1428,7 @@ fn clarify_followup_tail_request_does_not_rewrite_single_read_file_from_text() {
 #[test]
 fn non_range_single_read_keeps_read_file_plan() {
     let state = test_state();
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.resolved_intent =
         "看看 scripts/nl_tests/fixtures/device_local/logs/model_io.log".to_string();
     let actions = vec![AgentAction::CallSkill {
@@ -1541,7 +1465,7 @@ fn single_target_read_file_prefers_auto_locator_file_over_stale_existing_path() 
     let stale_path = stale.display().to_string();
     let current_path = current.display().to_string();
 
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.resolved_intent = format!("读取 {} 的内容", current_path);
     route.output_contract.locator_hint = current_path.clone();
 
@@ -1582,7 +1506,7 @@ fn single_target_read_range_prefers_auto_locator_file_over_stale_existing_path()
     let stale_path = stale.display().to_string();
     let current_path = current.display().to_string();
 
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.resolved_intent = format!("查看 {} 最后 2 行", current_path);
     route.output_contract.locator_hint = current_path.clone();
 
@@ -1628,11 +1552,7 @@ fn single_target_call_tool_system_basic_read_range_prefers_auto_locator_file() {
     let stale_path = stale.display().to_string();
     let current_path = current.display().to_string();
 
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.resolved_intent = format!("active_delivery_content_target: {current_path}");
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = current_path.clone();
@@ -1675,11 +1595,7 @@ fn single_target_file_read_falls_back_to_route_locator_when_auto_locator_suppres
     let stale_path = stale.display().to_string();
     let current_path = current.display().to_string();
 
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = current_path.clone();
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
@@ -1721,11 +1637,7 @@ fn route_target_file_content_plan_collapses_placeholder_read_chain() {
     let current_path = current.display().to_string();
     let logs_path = logs.display().to_string();
 
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = current_path.clone();
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
@@ -1787,7 +1699,7 @@ fn single_target_fs_basic_read_text_range_prefers_auto_locator_file_over_stale_e
     let stale_path = stale.display().to_string();
     let current_path = current.display().to_string();
 
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.resolved_intent = format!("读取 {} 最后 1 行", current_path);
     route.output_contract.locator_hint = current_path.clone();
 
@@ -1828,11 +1740,7 @@ fn auto_locator_file_does_not_collapse_multi_read_plan() {
     let alpha_path = alpha.display().to_string();
     let beta_path = beta.display().to_string();
 
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.resolved_intent = "对比两个文件".to_string();
 
     let actions = vec![

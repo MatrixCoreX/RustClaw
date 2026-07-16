@@ -494,7 +494,6 @@ fn assert_missing_file_delivery_text(text: &str) {
 
 fn scalar_route_result() -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "extract scalar".to_string(),
         needs_clarify: false,
         route_reason: String::new(),
@@ -571,7 +570,6 @@ async fn finalize_loop_reply_attaches_requested_control_machine_envelope() {
     let state = test_state();
     let task = claimed_task("task-control-envelope");
     let mut route = scalar_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.semantic_kind = OutputSemanticKind::DocumentHeading;
     let agent_run_context = crate::agent_engine::AgentRunContext {
         route_result: Some(route),

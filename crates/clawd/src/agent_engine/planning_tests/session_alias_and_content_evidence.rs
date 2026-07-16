@@ -38,11 +38,7 @@ fn session_alias_delivery_rewrites_stale_stat_path_to_route_locator() {
 
 #[test]
 fn active_bound_target_rewrites_matching_basename_without_route_prebind_marker() {
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "test_bundle.zip".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ArchiveList;
@@ -78,11 +74,7 @@ fn active_bound_target_rewrites_matching_basename_without_route_prebind_marker()
 
 #[test]
 fn active_bound_target_does_not_rewrite_current_turn_concrete_path() {
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "README.md".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
@@ -117,11 +109,7 @@ fn active_bound_target_does_not_rewrite_current_turn_concrete_path() {
 
 #[test]
 fn auto_locator_file_read_rewrite_preserves_current_turn_concrete_path() {
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "README.md".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
@@ -195,11 +183,7 @@ fn multi_session_alias_target_plan_requires_all_targets_before_execution() {
         "/tmp/docs/archive",
         "/tmp/docs/release_checklist.md",
     ]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
@@ -232,11 +216,7 @@ fn multi_session_alias_target_plan_accepts_actions_covering_all_targets() {
         "/tmp/docs/archive",
         "/tmp/docs/release_checklist.md",
     ]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
     let actions = vec![
         AgentAction::CallTool {
@@ -256,11 +236,11 @@ fn multi_session_alias_target_plan_accepts_actions_covering_all_targets() {
         },
     ];
 
-    assert!(!should_force_plan_repair(
-        Some(&route),
-        &loop_state,
-        &actions
-    ));
+    assert!(
+        !should_force_plan_repair(Some(&route), &loop_state, &actions),
+        "{}",
+        repair_reason(Some(&route), &loop_state, Some(&actions))
+    );
 }
 
 #[test]
@@ -277,11 +257,7 @@ fn normalizer_completes_missing_session_alias_file_target_observation() {
         archive_dir.to_string_lossy().as_ref(),
         checklist.to_string_lossy().as_ref(),
     ]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
@@ -336,11 +312,7 @@ fn normalizer_recovers_session_alias_targets_from_plan_context_alias_block() {
     let mut state = test_state_with_registry();
     state.skill_rt.workspace_root = tmp.path.clone();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     let plan_context = format!(
         "resolved_prompt=列取甲目录内容并摘要乙文件核心提醒\n\n\
@@ -401,11 +373,7 @@ fn normalizer_recovers_session_alias_targets_from_boundary_observation_block() {
     let mut state = test_state_with_registry();
     state.skill_rt.workspace_root = tmp.path.clone();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     let observation = json!({
         "kind": "agent_loop_boundary_observations",
@@ -469,11 +437,7 @@ fn normalizer_recovers_session_alias_targets_from_goal_alias_block() {
     let mut state = test_state_with_registry();
     state.skill_rt.workspace_root = tmp.path.clone();
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     let goal = format!(
         "resolved_prompt=列取甲目录内容并摘要乙文件核心提醒\n\n\
@@ -541,28 +505,19 @@ fn actionable_route_repairs_respond_only_plan_before_any_observation() {
         content: "final answer".to_string(),
     }];
     assert!(should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_with_chat_finalizer(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
 }
 
 #[test]
-fn pure_chat_agent_loop_submode_allows_respond_only_plan_before_observation() {
+fn unclassified_terminal_contract_allows_respond_before_observation() {
     let loop_state = LoopState::new(2);
     let actions = vec![AgentAction::Respond {
         content: "final answer".to_string(),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::OneSentence,
-    );
-    route.route_reason = "pure_chat_agent_loop_submode".to_string();
+    let mut route = route_result(false, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
@@ -580,11 +535,7 @@ fn tool_discovery_route_allows_context_only_respond_plan() {
     let actions = vec![AgentAction::Respond {
         content: "capability inventory".to_string(),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(false, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ToolDiscovery;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
@@ -597,13 +548,9 @@ fn tool_discovery_route_allows_context_only_respond_plan() {
 }
 
 #[test]
-fn plain_act_path_action_rejects_readonly_file_plan_before_execution() {
+fn readonly_file_plan_is_allowed_without_legacy_plain_act_mode() {
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "document/nl_tool200/group_02/memo.txt".to_string();
     let actions = vec![
@@ -624,15 +571,11 @@ fn plain_act_path_action_rejects_readonly_file_plan_before_execution() {
         },
     ];
 
-    assert!(should_force_plan_repair(
+    assert!(!should_force_plan_repair(
         Some(&route),
         &loop_state,
         &actions
     ));
-    assert_eq!(
-        repair_reason(Some(&route), &loop_state, Some(&actions)),
-        "plain_act_file_action_requires_non_readonly_plan"
-    );
 }
 
 #[tokio::test]
@@ -650,11 +593,7 @@ async fn active_task_append_current_locator_reaches_planner_path() {
         payload_json: json!({ "text": "append beta to the active file" }).to_string(),
     };
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     let analysis = crate::turn_context::TurnAnalysis {
@@ -694,13 +633,9 @@ async fn active_task_append_current_locator_reaches_planner_path() {
 }
 
 #[test]
-fn execute_route_without_content_evidence_rejects_doc_parse_only_file_plan() {
+fn doc_parse_plan_is_allowed_without_legacy_execute_mode() {
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(false, OutputResponseShape::OneSentence);
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "document/nl_tool200/group_02/memo.txt".to_string();
     let actions = vec![
@@ -710,51 +645,6 @@ fn execute_route_without_content_evidence_rejects_doc_parse_only_file_plan() {
                 "action": "parse_doc",
                 "path": "/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt",
                 "mode": "auto"
-            }),
-        },
-        AgentAction::SynthesizeAnswer {
-            evidence_refs: vec!["last_output".to_string()],
-        },
-        AgentAction::Respond {
-            content: "{{last_output}}".to_string(),
-        },
-    ];
-
-    assert!(should_force_plan_repair(
-        Some(&route),
-        &loop_state,
-        &actions
-    ));
-    assert_eq!(
-        repair_reason(Some(&route), &loop_state, Some(&actions)),
-        "execute_route_requires_non_readonly_file_plan"
-    );
-    assert!(!can_fallback_to_initial_plan_after_repair_failure(
-        &test_state(),
-        Some(&route),
-        &loop_state,
-        &actions
-    ));
-}
-
-#[test]
-fn execute_route_without_content_evidence_allows_direct_text_read_terminal_answer() {
-    let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::Strict,
-    );
-    route.output_contract.locator_kind = OutputLocatorKind::Filename;
-    route.output_contract.locator_hint = "document/nl_tool200/group_02/memo.txt".to_string();
-    let actions = vec![
-        AgentAction::CallTool {
-            tool: "fs_basic".to_string(),
-            args: json!({
-                "action": "read_text_range",
-                "path": "/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt",
-                "mode": "head",
-                "n": 5
             }),
         },
         AgentAction::SynthesizeAnswer {
@@ -779,13 +669,46 @@ fn execute_route_without_content_evidence_allows_direct_text_read_terminal_answe
 }
 
 #[test]
+fn execute_route_without_content_evidence_allows_direct_text_read_terminal_answer() {
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(false, OutputResponseShape::Strict);
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "document/nl_tool200/group_02/memo.txt".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt",
+                "mode": "head",
+                "n": 5
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    assert!(
+        !should_force_plan_repair(Some(&route), &loop_state, &actions),
+        "{}",
+        repair_reason(Some(&route), &loop_state, Some(&actions))
+    );
+    assert!(can_fallback_to_initial_plan_after_repair_failure(
+        &test_state(),
+        Some(&route),
+        &loop_state,
+        &actions
+    ));
+}
+
+#[test]
 fn existing_observed_synthesis_read_only_file_plan_does_not_force_repair() {
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(false, OutputResponseShape::OneSentence);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/home/guagua/rustclaw/logs/act_plan.log".to_string();
     route.route_reason = "existing_observed_context_synthesis".to_string();
@@ -807,11 +730,11 @@ fn existing_observed_synthesis_read_only_file_plan_does_not_force_repair() {
         },
     ];
 
-    assert!(!should_force_plan_repair(
-        Some(&route),
-        &loop_state,
-        &actions
-    ));
+    assert!(
+        !should_force_plan_repair(Some(&route), &loop_state, &actions),
+        "{}",
+        repair_reason(Some(&route), &loop_state, Some(&actions))
+    );
     assert!(can_fallback_to_initial_plan_after_repair_failure(
         &test_state(),
         Some(&route),
@@ -823,11 +746,7 @@ fn existing_observed_synthesis_read_only_file_plan_does_not_force_repair() {
 #[test]
 fn active_anchor_detached_read_only_plan_does_not_force_repair() {
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(false, OutputResponseShape::OneSentence);
     route.route_reason = "active_task_scope_refinement_detached_from_structured_anchor".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
@@ -849,11 +768,11 @@ fn active_anchor_detached_read_only_plan_does_not_force_repair() {
         },
     ];
 
-    assert!(!should_force_plan_repair(
-        Some(&route),
-        &loop_state,
-        &actions
-    ));
+    assert!(
+        !should_force_plan_repair(Some(&route), &loop_state, &actions),
+        "{}",
+        repair_reason(Some(&route), &loop_state, Some(&actions))
+    );
     assert!(can_fallback_to_initial_plan_after_repair_failure(
         &test_state(),
         Some(&route),
@@ -865,11 +784,7 @@ fn active_anchor_detached_read_only_plan_does_not_force_repair() {
 #[test]
 fn content_evidence_route_accepts_doc_parse_file_plan() {
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "README.md".to_string();
     let actions = vec![
@@ -889,11 +804,11 @@ fn content_evidence_route_accepts_doc_parse_file_plan() {
         },
     ];
 
-    assert!(!should_force_plan_repair(
-        Some(&route),
-        &loop_state,
-        &actions
-    ));
+    assert!(
+        !should_force_plan_repair(Some(&route), &loop_state, &actions),
+        "{}",
+        repair_reason(Some(&route), &loop_state, Some(&actions))
+    );
 }
 
 #[test]
@@ -903,11 +818,7 @@ fn content_evidence_route_repairs_respond_only_plan_even_in_chat_mode() {
         content: "guessed answer".to_string(),
     }];
     assert!(should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::respond_trace(),
-            true,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(true, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
@@ -924,7 +835,7 @@ fn content_evidence_route_repairs_synthesize_only_plan_before_any_observation() 
             content: "{{last_output}}".to_string(),
         },
     ];
-    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let route = route_result(true, OutputResponseShape::Free);
 
     assert!(should_force_plan_repair(
         Some(&route),
@@ -947,7 +858,7 @@ fn content_evidence_route_repairs_locator_only_observation_plan() {
             "pattern": "crates/clawd/src/prompt_utils.rs",
         }),
     }];
-    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let route = route_result(true, OutputResponseShape::Free);
 
     assert!(should_force_plan_repair(
         Some(&route),
@@ -980,7 +891,7 @@ fn content_evidence_route_accepts_structured_listing_terminal_plan() {
             content: "{{last_output}}".to_string(),
         },
     ];
-    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let route = route_result(true, OutputResponseShape::Free);
 
     assert!(!should_force_plan_repair(
         Some(&route),
@@ -1011,11 +922,7 @@ fn existence_route_accepts_stat_paths_synthesized_metadata_evidence() {
             content: "{{last_output}}".to_string(),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
 
     assert!(!should_force_plan_repair(
@@ -1039,11 +946,7 @@ fn existence_route_accepts_observation_only_stat_paths_for_runtime_finalizer() {
             "paths": ["/workspace/README.md"]
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        false,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(false, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
 
     assert!(!should_force_plan_repair(
@@ -1068,7 +971,7 @@ fn existence_route_accepts_observation_only_stat_paths_even_when_content_evidenc
             "include_missing": true
         }),
     }];
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
 
     assert!(!should_force_plan_repair(
@@ -1101,11 +1004,7 @@ fn generic_path_route_accepts_stat_paths_synthesized_metadata_evidence() {
             content: "{{last_output}}".to_string(),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint =
@@ -1142,11 +1041,7 @@ fn directory_names_route_accepts_fs_basic_find_entries_evidence() {
             content: "{{last_output}}".to_string(),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
 
     assert!(!should_force_plan_repair(
@@ -1171,7 +1066,7 @@ fn content_evidence_route_accepts_scoped_grep_observation_plan() {
             "query": "run_cmd",
         }),
     }];
-    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let route = route_result(true, OutputResponseShape::Free);
 
     assert!(!should_force_plan_repair(
         Some(&route),
@@ -1200,11 +1095,7 @@ fn content_presence_route_accepts_text_read_observation_plan() {
             content: "{{last_output}}".to_string(),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
 
     assert!(
@@ -1217,11 +1108,7 @@ fn content_presence_route_accepts_text_read_observation_plan() {
 #[test]
 fn workspace_synthesis_respond_only_plan_gets_default_evidence_actions() {
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     let actions = vec![AgentAction::Respond {
@@ -1261,7 +1148,7 @@ fn workspace_synthesis_respond_only_plan_gets_default_evidence_actions() {
 #[test]
 fn workspace_synthesis_plan_adds_missing_text_evidence_and_synthesizes_all_steps() {
     let loop_state = LoopState::new(2);
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     let actions = vec![
@@ -1342,11 +1229,7 @@ fn workspace_synthesis_default_text_evidence_prefers_current_request_child() {
         "current_request_resolved_workspace_child_targets".to_string(),
         serde_json::to_string(&vec![agents_path.clone()]).expect("targets json"),
     );
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     let actions = vec![
@@ -1415,11 +1298,7 @@ fn workspace_synthesis_default_text_evidence_reads_multiple_current_request_chil
         serde_json::to_string(&vec![agents_path.clone(), active_plan_path.clone()])
             .expect("targets json"),
     );
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     let actions = vec![
@@ -1477,11 +1356,7 @@ fn workspace_synthesis_default_text_evidence_uses_active_plan_target() {
         "active_plan_file_targets".to_string(),
         serde_json::to_string(&vec![active_plan_path.clone()]).expect("targets json"),
     );
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
     let actions = vec![
@@ -1522,11 +1397,7 @@ fn workspace_synthesis_default_text_evidence_uses_active_plan_target() {
 #[test]
 fn workspace_discovery_only_plan_waits_for_text_evidence_before_synthesis() {
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     let actions = vec![
@@ -1561,11 +1432,7 @@ fn workspace_discovery_only_plan_waits_for_text_evidence_before_synthesis() {
 #[test]
 fn workspace_text_read_observation_can_append_synthesis() {
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     let actions = vec![AgentAction::CallSkill {
@@ -1596,11 +1463,7 @@ fn workspace_text_read_observation_can_append_synthesis() {
 #[test]
 fn workspace_default_evidence_does_not_expand_mixed_last_output_answer() {
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     let actions = vec![
@@ -1645,11 +1508,7 @@ fn workspace_default_evidence_does_not_expand_mixed_last_output_answer() {
 #[test]
 fn listing_grounded_workspace_synthesis_does_not_expand_default_text_evidence() {
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     let actions = vec![
@@ -1695,11 +1554,7 @@ fn listing_grounded_workspace_synthesis_does_not_expand_default_text_evidence() 
 #[test]
 fn workspace_default_evidence_does_not_expand_structured_count_answer() {
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     let actions = vec![
@@ -1742,11 +1597,7 @@ fn workspace_default_evidence_does_not_expand_structured_count_answer() {
 #[test]
 fn workspace_default_evidence_does_not_expand_single_structured_count_answer() {
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     let actions = vec![
@@ -1794,11 +1645,7 @@ fn workspace_default_evidence_does_not_expand_single_structured_count_answer() {
 #[test]
 fn compound_listing_and_content_synthesis_refs_include_both_observations() {
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -1849,11 +1696,7 @@ fn compound_listing_and_content_synthesis_refs_include_both_observations() {
 #[test]
 fn content_excerpt_summary_listing_and_content_synthesis_refs_include_both_observations() {
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = OutputLocatorKind::Path;

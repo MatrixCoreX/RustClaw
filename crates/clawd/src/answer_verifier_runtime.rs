@@ -741,12 +741,10 @@ pub(super) fn structured_machine_projection_can_skip_answer_verifier(
 }
 
 pub(crate) fn post_write_content_evidence_missing_before_verifier(
-    route_result: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    route_result.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
-        && local_code_strict_json_projection_has_supported_keys(candidate_answer)
+    local_code_strict_json_projection_has_supported_keys(candidate_answer)
         && journal_has_code_write_validation_missing_readback(journal)
 }
 
@@ -767,11 +765,10 @@ fn journal_grounded_local_code_strict_json_projection_can_skip_answer_verifier(
         && (latest_synthesis_step_matches_candidate(journal, candidate_answer)
             || strict_json_projection_observation_matches_candidate(journal, candidate_answer))
         && crate::task_journal::evidence_coverage_for_route(route_result, journal).is_complete();
-    let publishable_projection_matches = route_result
-        .has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
-        && strict_json_projection_observation_matches_candidate(journal, candidate_answer)
-        && (journal_has_code_write_readback_validation_evidence(journal)
-            || journal_has_readback_only_code_validation_evidence(journal));
+    let publishable_projection_matches =
+        strict_json_projection_observation_matches_candidate(journal, candidate_answer)
+            && (journal_has_code_write_readback_validation_evidence(journal)
+                || journal_has_readback_only_code_validation_evidence(journal));
     strict_contract_matches || publishable_projection_matches
 }
 

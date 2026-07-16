@@ -178,15 +178,10 @@ impl EvidencePolicyContract {
 
 pub(crate) fn evidence_policy_context_prompt_line_for_route(route: &RouteResult) -> String {
     let missing_parameters = missing_parameters_for_route(route);
-    let execution_boundary = route_uses_agent_loop_execution_boundary(route);
     let required_evidence_fields = required_evidence_fields_for_route(route);
-    let evidence_required = if execution_boundary {
-        false
-    } else {
-        route.output_contract.requires_content_evidence
-            || route.output_contract.delivery_required
-            || !required_evidence_fields.is_empty()
-    };
+    let evidence_required = route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !required_evidence_fields.is_empty();
     compact_prompt_line_with_fields(
         "evidence_policy_context",
         &targets_for_route(route),
@@ -451,9 +446,6 @@ fn operation_for_capability_ref(route: &RouteResult) -> Option<TaskOperation> {
 }
 
 pub(crate) fn operation_for_route(route: &RouteResult) -> TaskOperation {
-    if route_uses_agent_loop_execution_boundary(route) {
-        return TaskOperation::Run;
-    }
     if let Some(operation) = operation_for_capability_ref(route) {
         return operation;
     }
@@ -552,9 +544,6 @@ fn delivery_shape_for_response_shape(response_shape: OutputResponseShape) -> Tas
 }
 
 pub(crate) fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<String> {
-    if route_uses_agent_loop_execution_boundary(route) {
-        return Vec::new();
-    }
     if let Some(fields) = required_evidence_fields_for_capability_ref(route) {
         return fields;
     }
@@ -566,14 +555,6 @@ pub(crate) fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<Str
         return Vec::new();
     }
     required_evidence_fields_for_output_contract(&output_contract)
-}
-
-fn route_uses_agent_loop_execution_boundary(route: &RouteResult) -> bool {
-    !route.needs_clarify
-        && !route.output_contract.delivery_required
-        && !route.wants_file_delivery
-        && matches!(route.schedule_kind, crate::ScheduleKind::None)
-        && route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
 }
 
 fn required_evidence_fields_for_capability_ref(route: &RouteResult) -> Option<Vec<String>> {

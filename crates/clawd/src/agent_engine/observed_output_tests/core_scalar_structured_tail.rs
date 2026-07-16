@@ -278,7 +278,6 @@ fn direct_count_inventory_answer_uses_file_count_and_explanation_for_one_sentenc
             r#"{"action":"count_inventory","counts":{"total":53,"files":53,"dirs":0},"kind_filter":"file","path":".","recursive":false}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "数一下当前目录一级有多少个普通文件，只告诉我数字和一句解释".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

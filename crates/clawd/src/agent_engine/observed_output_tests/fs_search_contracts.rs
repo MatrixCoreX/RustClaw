@@ -74,7 +74,6 @@ fn fs_search_file_paths_contract_filters_with_structured_pattern() {
             r#"{"action":"find_name","pattern":"execution_intent","count":8,"results":["crates/clawd/src/agent_engine/planning.rs","docs/planning_deterministic_guardrails_audit.md","plan/agent_intelligence_architecture_plan_20260511_已完成.md","plan/builtin_skill_capability_governance_plan_20260510.md","plan/codex_style_agent_architecture_refactor_plan_20260511.md","plan/execution_intent_routing_repair_plan_20260509_已完成.md","plan/llm_first_agent_convergence_plan_20260511.md","prompts/layers/overlays/plan_repair_prompt.md"],"root":""}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.ask_mode = crate::AskMode::act_plain();
     route.resolved_intent = "Read plan/definitely_missing_20260511.md; if missing, search the plan directory for md files related to execution_intent and return only found paths.".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -99,7 +98,6 @@ fn fs_search_file_paths_contract_accepts_route_marker_without_semantic_enum() {
             r#"{"action":"find_name","pattern":"execution_intent","count":8,"results":["crates/clawd/src/agent_engine/planning.rs","docs/planning_deterministic_guardrails_audit.md","plan/execution_intent_routing_repair_plan_20260509_已完成.md","prompts/layers/overlays/plan_repair_prompt.md"],"root":""}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.ask_mode = crate::AskMode::act_plain();
     route.route_reason = "contract:file_paths".to_string();
     route.resolved_intent = "machine contract only".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -125,7 +123,6 @@ fn fs_search_file_paths_contract_preserves_multi_candidates_when_not_decisive() 
             r#"{"action":"find_name","pattern":"README","count":5,"results":["README.md","README.zh-CN.md","UI/README.md","data/vendor/whisper.cpp/examples/whisper.android.java/README_files","data/vendor/whisper.cpp/README.md"],"root":""}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.ask_mode = crate::AskMode::act_plain();
     route.resolved_intent =
             "Find files named README under the current repo. If there are multiple candidates, list candidates instead of choosing one."
                 .to_string();
@@ -161,7 +158,6 @@ fn fs_search_file_paths_contract_i18n_expands_to_five_full_paths() {
         r#"{"action":"find_name","count":6,"results":["README.md","README.zh-CN.md","README_cn.md","RUSTCLAW_SERVICE_README.md","UI/README.md","Cargo.toml"],"root":""}"#,
     ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.ask_mode = crate::AskMode::act_plain();
     route.resolved_intent =
         "Find README-like files in the current repository and list the first five full paths."
             .to_string();
@@ -303,7 +299,6 @@ fn raw_command_output_grep_text_direct_answer_returns_matching_lines() {
         r#"{"action":"grep_text","query":"ERROR","count":1,"match_count":1,"matches":[{"path":"scripts/nl_tests/fixtures/device_local/logs/app.log","line":16,"text":"2026-04-01 10:08:44 ERROR provider timeout while fetching external metadata"}],"results":["scripts/nl_tests/fixtures/device_local/logs/app.log"]}"#,
     ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.ask_mode = crate::AskMode::act_plain();
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint =
@@ -521,7 +516,6 @@ fn fs_search_find_ext_directory_contract_returns_parent_dirs() {
             r#"{"action":"find_ext","ext":"sh","count":4,"results":["system_report.sh","scripts/run.sh","scripts/dev/check.sh","component_start/start-clawd.sh"],"root":""}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "list directories containing sh files".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -561,7 +555,6 @@ fn virtual_fs_basic_find_ext_directory_contract_returns_parent_dirs() {
             r#"{"action":"find_ext","ext":"sh","count":4,"results":["system_report.sh","scripts/run.sh","scripts/dev/check.sh","component_start/start-clawd.sh"],"root":""}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "list unique directories containing sh scripts".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -715,7 +708,6 @@ fn direct_answer_for_strict_file_names_fs_search_uses_plain_path() {
             r#"{"action":"find_name","count":1,"results":["scripts/nl_tests/fixtures/locator_smart/stem_unique/ABCD.txt"],"root":"scripts/nl_tests/fixtures/locator_smart/stem_unique"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "在目标目录里找 abcd，只输出路径".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -889,7 +881,6 @@ fn observed_entries_preserve_full_find_name_results_for_synthesis() {
 #[test]
 fn observed_contract_json_includes_final_answer_shape_and_locator_hint() {
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "读一下 README.md 开头，然后用一句话总结".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1031,7 +1022,6 @@ fn observed_direct_answer_defers_non_bilingual_existence_with_path_template() {
 #[test]
 fn observed_response_style_hint_reflects_output_contract_shape() {
     let mut route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "读一下 README.md 开头，然后用一句话总结".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1383,7 +1373,6 @@ fn direct_observation_passthrough_detector_matches_raw_output() {
 #[test]
 fn route_observation_facts_pin_resolved_path_for_existence_summary() {
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "check service file and explain purpose".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

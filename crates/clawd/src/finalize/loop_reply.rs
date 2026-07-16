@@ -1790,7 +1790,6 @@ pub(crate) async fn finalize_loop_reply(
     if let Some(route_result) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
         let defer_to_post_write_readback =
             crate::answer_verifier::post_write_content_evidence_missing_before_verifier(
-                route_result,
                 &journal,
                 &final_text,
             );

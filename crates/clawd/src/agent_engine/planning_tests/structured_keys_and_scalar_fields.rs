@@ -6,11 +6,7 @@ fn structured_keys_contract_preserves_planner_list_keys_action() {
     let config_path = root.path.join("config.toml");
     fs::write(&config_path, "alpha = 1\n[beta]\nvalue = 2\n").expect("write config");
     let config_path = config_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
@@ -52,11 +48,7 @@ fn structured_keys_plan_ignores_background_field_selectors() {
     )
     .expect("write config");
     let config_path = config_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
@@ -99,11 +91,7 @@ fn structured_keys_planner_action_preserves_nested_field_path() {
     )
     .expect("write package json");
     let config_path = config_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
@@ -157,11 +145,7 @@ planner_kind = "tool"
     )
     .expect("write skills registry");
     let config_path = config_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
@@ -209,11 +193,7 @@ selected_vendor = "minimax"
     )
     .expect("write config");
     let config_path = config_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
@@ -253,11 +233,7 @@ fn structured_keys_retry_after_validation_uses_list_keys_plan() {
     let config_path = root.path.join("config.toml");
     fs::write(&config_path, "alpha = 1\n[beta]\nvalue = 2\n").expect("write config");
     let config_path = config_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
@@ -318,11 +294,7 @@ fn structured_keys_contract_rewrites_multi_field_value_read_to_list_keys() {
     )
     .expect("write config");
     let config_path = config_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
@@ -370,11 +342,7 @@ fn structured_keys_contract_keeps_explicit_structured_field_read() {
     let config_path = root.path.join("Cargo.toml");
     fs::write(&config_path, "[package]\nname = \"clawd\"\n").expect("write config");
     let config_path = config_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
@@ -432,11 +400,7 @@ fn strict_structured_keys_contract_rewrites_background_field_read_to_list_keys()
     let config_path = root.path.join("config.toml");
     fs::write(&config_path, "alpha = 1\n[skills]\nvalue = true\n").expect("write config");
     let config_path = config_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = config_path.clone();
@@ -485,11 +449,7 @@ fn generic_scalar_structured_file_plan_rewrites_to_read_field_without_repair_mar
     fs::write(ui_dir.join("package.json"), r#"{"name":"react-example"}"#)
         .expect("write ui package");
     let package_path = package_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "package.json".to_string();
@@ -537,11 +497,7 @@ fn structured_scalar_file_plan_uses_contract_field_selector_without_nl_mapping()
     let package_path = root.path.join("package.json");
     fs::write(&package_path, r#"{"name":"rustclaw","private":true}"#).expect("write package");
     let package_path = package_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "package.json".to_string();
@@ -591,11 +547,7 @@ fn structured_scalar_file_plan_uses_resolved_machine_selector_after_clarify() {
     let package_path = root.path.join("package.json");
     fs::write(&package_path, r#"{"name":"rustclaw","private":true}"#).expect("write package");
     let package_path = package_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "package.json".to_string();
@@ -648,11 +600,7 @@ fn generic_scalar_structured_field_read_stays_bound_to_auto_locator() {
     fs::write(&ui_package_path, r#"{"name":"react-example"}"#).expect("write ui package");
     let package_path = package_path.display().to_string();
     let ui_package_path = ui_package_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "package.json".to_string();
@@ -697,11 +645,7 @@ fn file_names_route_accepts_structured_key_listing_for_structured_document() {
     )
     .expect("write package");
     let package_path = package_path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = package_path.clone();
@@ -735,7 +679,7 @@ fn file_names_route_accepts_structured_key_listing_for_structured_document() {
 
 #[test]
 fn plain_act_read_range_plan_uses_direct_observed_finalizer_without_synthesis() {
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/tmp/service_notes.md".to_string();
@@ -770,11 +714,7 @@ fn plain_act_read_range_plan_uses_direct_observed_finalizer_without_synthesis() 
 
 #[test]
 fn observation_only_filtered_list_dir_can_finalize_without_route_semantic_kind() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/tmp/device".to_string();
@@ -804,12 +744,8 @@ fn observation_only_filtered_list_dir_can_finalize_without_route_semantic_kind()
 }
 
 #[test]
-fn chat_wrapped_read_range_plan_adds_synthesis_terminal_answer() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+fn read_range_only_plan_is_left_for_the_next_planner_round() {
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/tmp/release_checklist.md".to_string();
@@ -833,31 +769,18 @@ fn chat_wrapped_read_range_plan_adds_synthesis_terminal_answer() {
         actions,
     );
 
-    assert_eq!(normalized.len(), 3);
+    assert_eq!(normalized.len(), 1);
     assert!(matches!(
         &normalized[0],
         AgentAction::CallTool { tool, args }
             if tool == "fs_basic"
                 && args.get("action").and_then(Value::as_str) == Some("read_text_range")
     ));
-    assert!(matches!(
-        &normalized[1],
-        AgentAction::SynthesizeAnswer { evidence_refs }
-            if evidence_refs == &vec!["last_output".to_string()]
-    ));
-    assert!(matches!(
-        &normalized[2],
-        AgentAction::Respond { content } if content == "{{last_output}}"
-    ));
 }
 
 #[test]
 fn registry_does_not_prefer_config_basic_from_structured_keys_marker_only() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "package.json".to_string();
@@ -870,11 +793,7 @@ fn registry_does_not_prefer_config_basic_from_structured_keys_marker_only() {
 
 #[test]
 fn registry_prefers_config_basic_from_capability_ref_without_semantic_kind() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "configs/config.toml".to_string();
@@ -886,11 +805,7 @@ fn registry_prefers_config_basic_from_capability_ref_without_semantic_kind() {
 
 #[test]
 fn registry_prefers_archive_basic_from_capability_ref_without_semantic_kind() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "tmp/example.zip".to_string();
@@ -901,13 +816,9 @@ fn registry_prefers_archive_basic_from_capability_ref_without_semantic_kind() {
 }
 
 #[test]
-fn explicit_configured_command_request_rewrites_semantic_substitute_to_run_cmd() {
+fn natural_language_command_request_keeps_planner_filesystem_selection() {
     let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let loop_state = LoopState::new(1);
@@ -941,22 +852,11 @@ fn explicit_configured_command_request_rewrites_semantic_substitute_to_run_cmd()
 
     assert_eq!(normalized.len(), 3);
     match &normalized[0] {
-        AgentAction::CallSkill { skill, args } => {
-            assert_eq!(skill, "run_cmd");
-            assert_eq!(
-                args.get("request_text").and_then(Value::as_str),
-                Some(original_request)
-            );
-            assert!(args
-                .get("cwd")
-                .and_then(Value::as_str)
-                .is_some_and(|cwd| !cwd.trim().is_empty()));
-            assert_eq!(
-                args.get("command").and_then(Value::as_str),
-                Some("ls scripts")
-            );
+        AgentAction::CallTool { tool, args } => {
+            assert_eq!(tool, "fs_basic");
+            assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
         }
-        other => panic!("expected run_cmd action, got {other:?}"),
+        other => panic!("expected planner filesystem action, got {other:?}"),
     }
     assert!(matches!(
         &normalized[1],
@@ -967,11 +867,7 @@ fn explicit_configured_command_request_rewrites_semantic_substitute_to_run_cmd()
 #[test]
 fn natural_language_execute_prefix_does_not_override_planner_action() {
     let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
-    let route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(true, OutputResponseShape::Free);
     let loop_state = LoopState::new(1);
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
@@ -994,20 +890,16 @@ fn natural_language_execute_prefix_does_not_override_planner_action() {
 
     assert!(matches!(
         &normalized[0],
-        AgentAction::CallSkill { skill, args }
-            if skill == "system_basic"
-                && args.get("action").and_then(Value::as_str) == Some("inventory_dir")
+        AgentAction::CallTool { tool, args }
+            if tool == "fs_basic"
+                && args.get("action").and_then(Value::as_str) == Some("list_dir")
     ));
 }
 
 #[test]
 fn structured_directory_contract_keeps_safe_listing_for_explicit_command_request() {
     let state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/workspace/scripts".to_string();
@@ -1049,37 +941,25 @@ fn structured_directory_contract_keeps_safe_listing_for_explicit_command_request
 }
 
 #[test]
-fn explicit_command_extracts_configured_standalone_command_before_freeform_tail() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
-
+fn natural_language_command_is_not_extracted_before_planner() {
     assert_eq!(
-        super::super::explicit_command_segment(
-            &state.policy.command_intent,
+        super::super::explicit_machine_syntax_command_segment(
             "Run pwd and output only the raw result."
-        )
-        .as_deref(),
-        Some("pwd")
+        ),
+        None
     );
     assert_eq!(
-        super::super::explicit_command_segment(
-            &state.policy.command_intent,
+        super::super::explicit_machine_syntax_command_segment(
             "Run cargo test and output only the raw result."
-        )
-        .as_deref(),
+        ),
         None
     );
 }
 
 #[test]
-fn explicit_command_rewrite_preserves_configured_standalone_command_before_freeform_tail() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+fn configured_natural_language_command_does_not_override_planner_selection() {
+    let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     let loop_state = LoopState::new(1);
@@ -1104,21 +984,16 @@ fn explicit_command_rewrite_preserves_configured_standalone_command_before_freef
 
     assert!(matches!(
         &normalized[0],
-        AgentAction::CallSkill { skill, args }
-            if skill == "run_cmd"
-                && args.get("command").and_then(Value::as_str) == Some("pwd")
+        AgentAction::CallTool { tool, args }
+            if tool == "fs_basic"
+                && args.get("action").and_then(Value::as_str) == Some("list_dir")
     ));
 }
 
 #[test]
 fn explicit_command_rewrite_corrects_narrative_run_cmd_arg_to_code_span_command() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.requires_content_evidence = true;
@@ -1158,13 +1033,8 @@ fn explicit_command_rewrite_corrects_narrative_run_cmd_arg_to_code_span_command(
 
 #[test]
 fn scalar_path_contract_keeps_safe_path_observation_for_standalone_command() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
-    state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = "/workspace".to_string();
@@ -1194,7 +1064,7 @@ fn scalar_path_contract_keeps_safe_path_observation_for_standalone_command() {
 #[test]
 fn multi_structured_scalar_observations_append_terminal_synthesis() {
     let state = test_state_with_enabled_skills(&["config_basic"]);
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     let loop_state = LoopState::new(1);
     let actions = vec![
@@ -1241,11 +1111,7 @@ fn multi_structured_scalar_observations_append_terminal_synthesis() {
 fn scalar_path_route_treats_fs_search_query_as_name_pattern_when_action_missing() {
     let root = TempDirGuard::new("fs_search_name_contract");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.response_shape = OutputResponseShape::Scalar;
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.delivery_required = false;
@@ -1283,11 +1149,7 @@ fn scalar_path_route_treats_fs_search_query_as_name_pattern_when_action_missing(
 fn file_paths_route_preserves_grep_text_query_as_content_query() {
     let root = TempDirGuard::new("fs_search_grep_contract");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.delivery_required = false;
     let actions = vec![AgentAction::CallSkill {
@@ -1434,11 +1296,7 @@ fn system_basic_check_exists_target_alias_keeps_batch_shape() {
 
 #[test]
 fn missing_read_range_path_uses_route_locator_hint() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "definitely_missing_system_basic_case.txt".to_string();
     let actions = vec![

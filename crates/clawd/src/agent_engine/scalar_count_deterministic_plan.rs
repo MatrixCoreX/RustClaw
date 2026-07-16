@@ -55,25 +55,6 @@ pub(super) fn scalar_path_directory_locator_search_observation_plan(
     }])
 }
 
-#[cfg(test)]
-pub(super) fn explicit_command_request_present(
-    runtime: &crate::CommandIntentRuntime,
-    request: &str,
-    route_result: Option<&RouteResult>,
-) -> bool {
-    if !route_allows_explicit_command_preservation(route_result) {
-        return false;
-    }
-    if explicit_command_segment(runtime, request).is_some() {
-        return true;
-    }
-    route_result.is_some_and(|route| {
-        (route.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep)
-            || explicit_command_plan_needs_terminal_synthesis(Some(route)))
-            && execution_failed_step_literal_command_segments(request, None).len() >= 2
-    })
-}
-
 pub(super) fn execution_failed_step_literal_command_segments(
     request: &str,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
@@ -118,21 +99,6 @@ pub(super) fn conditional_step_update_immediate_command_count(
     }
     let step_to_modify = update.get("step_to_modify")?.as_u64()? as usize;
     step_to_modify.checked_sub(1).filter(|limit| *limit > 0)
-}
-
-#[cfg(test)]
-pub(super) fn explicit_command_plan_needs_terminal_synthesis(
-    route_result: Option<&RouteResult>,
-) -> bool {
-    route_result.is_some_and(|route| {
-        route.output_contract.requires_content_evidence
-            && !route.output_contract.delivery_required
-            && !matches!(
-                route.output_contract.response_shape,
-                crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
-            )
-            && route.output_contract_marker_is(crate::OutputSemanticKind::CommandOutputSummary)
-    })
 }
 
 pub(super) fn shell_single_quote(value: &str) -> String {

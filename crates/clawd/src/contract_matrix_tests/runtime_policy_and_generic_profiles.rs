@@ -3,7 +3,6 @@ use super::*;
 #[test]
 fn runtime_contract_snapshot_for_route_uses_route_trace_evidence() {
     let route = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -40,13 +39,12 @@ fn runtime_contract_snapshot_for_route_uses_route_trace_evidence() {
 }
 
 #[test]
-fn executable_agent_loop_route_does_not_match_generic_inline_transform() {
+fn unclassified_inline_contract_uses_generic_inline_transform() {
     let route = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
-        route_reason: "inline_structured_payload_context_execute; executable_contract_preserved_for_agent_loop".to_string(),
+        route_reason: "inline_structured_payload_context_execute".to_string(),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: RiskCeiling::Low,
         resume_behavior: ResumeBehavior::None,
@@ -70,36 +68,35 @@ fn executable_agent_loop_route_does_not_match_generic_inline_transform() {
         snapshot
             .pointer("/contract/contract_match")
             .and_then(Value::as_str),
-        Some("agent_loop_execution")
+        Some("generic_inline_transform")
     );
     assert_eq!(
         snapshot
             .pointer("/contract/required_evidence")
             .and_then(Value::as_array)
             .map(Vec::len),
-        Some(0)
+        Some(1)
     );
-    assert_eq!(final_answer_shape_for_route(&route), None);
+    assert_eq!(
+        final_answer_shape_for_route(&route),
+        Some(FinalAnswerShape::SummaryWithEvidence)
+    );
     assert!(compact_prompt_line_for_route(&route)
         .expect("compact prompt line")
-        .contains("match=agent_loop_execution"));
-    assert!(crate::evidence_policy::required_evidence_fields_for_route(&route).is_empty());
+        .contains("match=generic_inline_transform"));
     assert_eq!(
-        crate::evidence_policy::operation_for_route(&route),
-        crate::evidence_policy::EvidenceOperation::Run
+        crate::evidence_policy::required_evidence_fields_for_route(&route),
+        vec!["field_value"]
     );
 }
 
 #[test]
-fn executable_agent_loop_action_trace_does_not_fall_back_to_generic_path_content() {
+fn unclassified_path_contract_rejects_action_outside_generic_profile() {
     let route = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
-        route_reason:
-            "inline_structured_payload_context_execute; executable_contract_preserved_for_agent_loop"
-                .to_string(),
+        route_reason: "inline_structured_payload_context_execute".to_string(),
         visible_skill_candidates: Vec::new(),
         risk_ceiling: RiskCeiling::Low,
         resume_behavior: ResumeBehavior::None,
@@ -123,11 +120,11 @@ fn executable_agent_loop_action_trace_does_not_fall_back_to_generic_path_content
 
     assert_eq!(
         trace.get("contract_match").and_then(Value::as_str),
-        Some("agent_loop_execution")
+        Some("generic_path_content")
     );
     assert_eq!(
         trace.get("decision").and_then(Value::as_str),
-        Some("allowed")
+        Some("rejected_not_allowed")
     );
     assert_eq!(
         trace
@@ -136,13 +133,12 @@ fn executable_agent_loop_action_trace_does_not_fall_back_to_generic_path_content
             .and_then(Value::as_str),
         Some("db_basic.schema_version")
     );
-    assert_eq!(
-        trace
-            .get("allowed_actions")
-            .and_then(Value::as_array)
-            .map(Vec::len),
-        Some(1)
-    );
+    assert!(trace
+        .get("allowed_actions")
+        .and_then(Value::as_array)
+        .is_some_and(|actions| actions
+            .iter()
+            .all(|action| { action.as_str() != Some("db_basic.schema_version") })));
 }
 
 #[test]
@@ -391,7 +387,6 @@ fn route_specific_evidence_augments_matrix_base_contract() {
 #[test]
 fn route_marker_quantity_comparison_augments_trace_evidence_without_semantic_enum() {
     let route = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -429,7 +424,6 @@ fn route_marker_quantity_comparison_augments_trace_evidence_without_semantic_enu
 #[test]
 fn action_trace_for_route_uses_route_trace_evidence() {
     let route = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -502,7 +496,6 @@ fn action_trace_for_archive_capability_ref_supplies_structured_extractor() {
 #[test]
 fn route_effective_contract_marker_prevents_stale_raw_semantic_action_lock() {
     let route = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),

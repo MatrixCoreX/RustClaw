@@ -10,11 +10,7 @@ fn file_paths_contract_rewrites_legacy_list_dir_with_extension_token_to_find_ent
             "names_only": true
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.resolved_intent =
@@ -98,11 +94,7 @@ fn file_paths_contract_enforces_structured_selector_limit_on_find_entries() {
             "recursive": true
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.output_contract.self_extension.list_selector.limit = Some(5);
@@ -135,11 +127,7 @@ fn file_paths_contract_uses_original_user_text_selector_limit_token() {
             "recursive": true
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     route.resolved_intent =
@@ -196,11 +184,7 @@ fn file_paths_contract_preserves_allowed_grep_text_and_prunes_disallowed_steps()
             }),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "plan".to_string();
@@ -249,11 +233,7 @@ fn file_paths_contract_rewrites_fs_basic_list_dir_extension_filter_to_recursive_
             "names_only": true
         }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
@@ -299,11 +279,7 @@ fn file_paths_contract_preserves_planned_synthesis_selection() {
             content: "{{last_output}}".to_string(),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
 
@@ -330,11 +306,7 @@ fn file_paths_contract_preserves_planned_synthesis_selection() {
 
 #[test]
 fn file_paths_anchor_respond_only_adds_find_entries_evidence() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint =
@@ -378,11 +350,7 @@ followup_ordered_entries: 1:scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/a
 
 #[test]
 fn scalar_path_anchor_respond_only_adds_stat_paths_evidence() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint =
@@ -426,11 +394,7 @@ followup_ordered_entries: 1:scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/a
 fn file_paths_contract_normalizes_fs_search_glob_extension_args() {
     let root = TempDirGuard::new("fs_search_file_paths_contract");
     let root_path = root.path.display().to_string();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
     let actions = vec![AgentAction::CallSkill {
@@ -477,11 +441,7 @@ fn observation_only_terminal_answer_keeps_raw_command_runtime_finalizer() {
         skill: "run_cmd".to_string(),
         args: serde_json::json!({ "command": "pwd" }),
     }];
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        false,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(false, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
 
     let normalized = super::super::normalize_planned_actions(
@@ -507,11 +467,7 @@ fn raw_command_output_keeps_user_named_new_file_write_path_plan() {
     state.skill_rt.workspace_root = root.path.clone();
     let file_path = root.path.join("pwd_line_abs.txt");
     let request = "Run pwd, write one short line based on it into pwd_line_abs.txt, and reply with the absolute saved file path only.";
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Scalar,
-    );
+    let mut route = route_result(true, OutputResponseShape::Scalar);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.delivery_required = false;
@@ -597,11 +553,7 @@ fn workspace_summary_keeps_requested_structured_field_evidence() {
             ],
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
     route.resolved_intent =
         "先看顶层目录，再读 UI/package.json 的 name，最后一句话判断 UI 定位".to_string();
@@ -634,11 +586,7 @@ fn workspace_summary_with_scope_prunes_sibling_evidence() {
             args: serde_json::json!({ "path": "pi_app" }),
         },
     ];
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
     route.output_contract.locator_hint = "UI".to_string();
     route.resolved_intent = "Summarize only the UI part of this repository".to_string();
@@ -667,11 +615,7 @@ fn workspace_root_identity_scope_keeps_relative_workspace_evidence() {
     fs::write(root.path.join("README.md"), "# RustClaw").expect("write README");
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root
@@ -713,11 +657,7 @@ fn unscoped_workspace_evidence_appends_synthesis_after_existing_text_read_plan()
     fs::write(root.path.join("README.md"), "# RustClaw").expect("write README");
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_hint.clear();
@@ -761,11 +701,7 @@ fn unscoped_workspace_text_answer_strips_unrequested_file_artifact_plan() {
     .expect("write README");
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_hint.clear();
@@ -828,11 +764,7 @@ fn active_execution_recipe_keeps_workspace_file_mutation_plan() {
     fs::write(root.path.join("README.md"), "# RustClaw").expect("write README");
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_hint.clear();
@@ -868,11 +800,7 @@ fn explicit_workspace_file_locator_keeps_requested_file_mutation_plan() {
     let root = TempDirGuard::new("workspace_text_evidence_requested_mutation");
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
     route.output_contract.locator_hint = "plan/p2_expand_test.md".to_string();
@@ -915,11 +843,7 @@ fn delivery_write_strips_redundant_make_dir_and_appends_file_token() {
     let root = TempDirGuard::new("delivery_write_generic");
     let mut state = test_state();
     state.skill_rt.workspace_root = root.path.clone();
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        false,
-        OutputResponseShape::FileToken,
-    );
+    let mut route = route_result(false, OutputResponseShape::FileToken);
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = OutputResponseShape::FileToken;
@@ -984,11 +908,7 @@ fn free_route_strips_terminal_discussion_after_runner_skill() {
 
     let stripped = strip_terminal_discussion_for_direct_skill_passthrough(
         &state,
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free)),
         actions,
     );
     assert_eq!(stripped.len(), 1);
@@ -1016,11 +936,7 @@ fn process_basic_port_list_keeps_terminal_discussion_followup() {
 
     let kept = strip_terminal_discussion_for_direct_skill_passthrough(
         &state,
-        Some(&route_result(
-            crate::AskMode::act_with_chat_finalizer(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free)),
         actions.clone(),
     );
     assert_eq!(kept.len(), 3);
@@ -1044,11 +960,7 @@ fn process_basic_port_list_keeps_terminal_discussion_followup() {
 #[test]
 fn service_status_process_basic_port_list_keeps_terminal_synthesis() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let actions = vec![
         AgentAction::CallSkill {
@@ -1087,11 +999,7 @@ fn service_status_process_basic_port_list_keeps_terminal_synthesis() {
 #[test]
 fn service_status_process_basic_port_list_does_not_direct_finalize_model_language_shape() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     let actions = vec![AgentAction::CallSkill {
         skill: "process_basic".to_string(),
@@ -1109,11 +1017,7 @@ fn service_status_process_basic_port_list_does_not_direct_finalize_model_languag
 fn process_basic_synthesis_survives_workspace_text_guard_for_exact_sentence() {
     let state = test_state();
     let loop_state = LoopState::new(1);
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.exact_sentence_count = Some(1);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::None;
@@ -1181,11 +1085,7 @@ fn concrete_shell_code_span_still_uses_literal_command_path() {
 #[test]
 fn direct_passthrough_keeps_mixed_placeholder_terminal_respond() {
     let state = test_state();
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     let actions = vec![
         AgentAction::CallSkill {
@@ -1214,11 +1114,7 @@ fn direct_passthrough_keeps_mixed_placeholder_terminal_respond() {
 fn strict_run_cmd_template_preserves_mixed_last_output_respond() {
     let state = test_state_with_enabled_skills(&["run_cmd"]);
     let loop_state = LoopState::new(2);
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let actions = vec![
@@ -1265,29 +1161,21 @@ fn runner_skill_only_plan_does_not_require_terminal_respond() {
         args: serde_json::json!({ "action": "quote", "symbol": "BTCUSDT" }),
     }];
     assert!(!should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_plain(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
 }
 
 #[test]
-fn chat_wrapped_execution_route_repairs_observation_only_plan_before_any_observation() {
+fn observation_only_plan_runs_before_the_next_planner_round() {
     let loop_state = LoopState::new(2);
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args: serde_json::json!({ "command": "ls -l Cargo.toml Cargo.lock" }),
     }];
-    assert!(should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_with_chat_finalizer(),
-            false,
-            OutputResponseShape::Free,
-        )),
+    assert!(!should_force_plan_repair(
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));
@@ -1307,11 +1195,7 @@ fn chat_wrapped_execution_route_repairs_observation_plus_unavailable_followup_pl
             args: serde_json::json!({ "text": "explain {{last_output}}" }),
         },
     ];
-    let route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        false,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(false, OutputResponseShape::Free);
     assert!(should_force_actionable_plan_repair(
         &state,
         Some(&route),
@@ -1337,11 +1221,7 @@ fn chat_wrapped_execution_route_keeps_observation_plus_synthesize_followup_plan(
         },
     ];
     assert!(!should_force_plan_repair(
-        Some(&route_result(
-            crate::AskMode::act_with_chat_finalizer(),
-            false,
-            OutputResponseShape::Free,
-        )),
+        Some(&route_result(false, OutputResponseShape::Free,)),
         &loop_state,
         &actions,
     ));

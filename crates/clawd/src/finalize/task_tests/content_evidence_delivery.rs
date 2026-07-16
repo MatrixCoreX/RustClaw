@@ -5,7 +5,7 @@ use super::route_result;
 
 #[test]
 fn content_evidence_file_delivery_backfills_read_range_from_journal_excerpt() {
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = true;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -46,7 +46,7 @@ fn content_evidence_file_delivery_backfills_read_range_from_journal_excerpt() {
 
 #[test]
 fn content_evidence_file_delivery_backfills_missing_file_token_from_read_range_path() {
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = true;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -82,7 +82,7 @@ fn content_evidence_file_delivery_backfills_missing_file_token_from_read_range_p
 
 #[test]
 fn file_delivery_backfills_missing_file_token_from_write_output_path() {
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.output_contract.delivery_required = true;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;

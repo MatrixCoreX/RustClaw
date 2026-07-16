@@ -3,7 +3,6 @@ use serde_json::json;
 
 fn route_with_capability_ref(capability_ref: &str) -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: capability_ref.to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

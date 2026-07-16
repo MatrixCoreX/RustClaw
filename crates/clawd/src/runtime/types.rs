@@ -110,53 +110,8 @@ pub(crate) enum AgentAction {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AskRouteTraceDecision {
-    Respond,
-    #[cfg(test)]
-    Clarify,
-    Act,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RouteGateKind {
-    Chat,
-    #[cfg(test)]
-    Clarify,
-    Execute,
-}
-
-impl AskRouteTraceDecision {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Respond => "respond",
-            #[cfg(test)]
-            Self::Clarify => "clarify",
-            Self::Act => "act",
-        }
-    }
-}
-
-impl RouteGateKind {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Chat => "chat",
-            #[cfg(test)]
-            Self::Clarify => "clarify",
-            Self::Execute => "execute",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub(crate) struct CommandIntentRules {
-    #[serde(default)]
-    pub(crate) standalone_commands: Vec<String>,
-}
-
 #[derive(Clone)]
 pub(crate) struct CommandIntentRuntime {
-    pub(crate) standalone_commands: Vec<String>,
     pub(crate) default_locale: String,
     pub(crate) verify_enforce_enabled: bool,
 }

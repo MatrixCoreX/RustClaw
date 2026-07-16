@@ -7,8 +7,7 @@ pub(super) fn agent_loop_rich_content_should_defer_status(
     let Some(route) = agent_run_context.and_then(|context| context.route_result.as_ref()) else {
         return false;
     };
-    route.has_route_reason_machine_marker("executable_contract_preserved_for_agent_loop")
-        && route.output_contract.response_shape == crate::OutputResponseShape::Free
+    route.output_contract.response_shape == crate::OutputResponseShape::Free
         && !route.output_contract.delivery_required
         && successful_content_observation_count(loop_state) >= 2
 }

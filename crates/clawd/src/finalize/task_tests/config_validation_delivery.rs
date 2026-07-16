@@ -2,9 +2,7 @@ use super::{drop_execution_summaries_when_delivery_is_scalar, route_result};
 
 #[test]
 fn config_validation_capability_ref_drops_execution_summary_messages() {
-    let mut route = route_result(crate::AskMode::Act {
-        finalize: crate::ActFinalizeStyle::Plain,
-    });
+    let mut route = route_result();
     route.route_reason = "capability_ref=config.validate".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = crate::OutputResponseShape::Free;

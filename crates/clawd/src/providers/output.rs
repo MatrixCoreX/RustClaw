@@ -329,17 +329,3 @@ pub(crate) fn utf8_safe_prefix(text: &str, max_len: usize) -> &str {
     }
     &text[..cut]
 }
-
-pub(crate) fn utf8_safe_suffix(text: &str, max_len: usize) -> &str {
-    if text.len() <= max_len {
-        return text;
-    }
-    if max_len == 0 {
-        return "";
-    }
-    let mut start = text.len().saturating_sub(max_len);
-    while start < text.len() && !text.is_char_boundary(start) {
-        start += 1;
-    }
-    &text[start..]
-}

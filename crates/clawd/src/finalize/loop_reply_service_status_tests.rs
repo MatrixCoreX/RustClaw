@@ -7,7 +7,6 @@ async fn finalize_loop_reply_preserves_health_check_summary_synthesis() {
     let state = test_state();
     let task = claimed_task("task-service-status-wrapped-health-check");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = "Show system/service status".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
@@ -121,7 +120,6 @@ async fn finalize_loop_reply_honors_system_health_selector() {
     let state = test_state();
     let task = claimed_task("task-service-status-system-health-selector");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "Run a basic health check with system_health field selector".to_string();
     route.output_contract.response_shape = OutputResponseShape::Free;
@@ -233,7 +231,6 @@ async fn finalize_loop_reply_uses_machine_closeout_when_recipe_done_and_synthesi
     let state = test_state();
     let task = claimed_task("task-ops-validated-closeout");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = "Start local service and validate it".to_string();
     route.output_contract.response_shape = OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
@@ -301,7 +298,6 @@ async fn finalize_loop_reply_preserves_process_basic_status_summary_synthesis() 
     let state = test_state();
     let task = claimed_task("task-service-status-process-basic-json-synthesis");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "检查 telegramd 服务进程当前是否仍在运行，并用一句话解释其状态".to_string();
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
@@ -382,7 +378,6 @@ async fn finalize_loop_reply_prefers_service_control_status_over_health_check_du
     let state = test_state();
     let task = claimed_task("task-service-status-service-control-priority");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent = "check ssh service active status in one sentence".to_string();
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
@@ -489,7 +484,6 @@ async fn finalize_loop_reply_projects_service_control_target_status_fields() {
     let state = test_state();
     let task = claimed_task("task-service-status-service-control-target-fields");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "return target, status, manager_type for clawd service status".to_string();
     route.output_contract.response_shape = OutputResponseShape::Strict;
@@ -728,7 +722,6 @@ async fn finalize_loop_reply_uses_wrapped_system_basic_info_for_service_status()
 fn direct_structured_service_status_uses_capability_shape_without_semantic_kind() {
     let mut route = free_route_result();
     route.route_reason = "capability_ref=service.status".to_string();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -817,7 +810,6 @@ async fn finalize_loop_reply_projects_service_control_summary_without_route_mark
     let state = test_state();
     let task = claimed_task("task-service-status-planner-observed-summary");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -907,15 +899,12 @@ async fn finalize_loop_reply_projects_service_control_fields_when_short_synthesi
     let state = test_state();
     let task = claimed_task("task-service-status-short-synthesis-fields");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "service/process".to_string();
-    route.route_reason =
-        "structured_locator_contract_repair; executable_contract_preserved_for_agent_loop"
-            .to_string();
+    route.route_reason = "structured_locator_contract_repair".to_string();
     route.resolved_intent =
         "Read-only status check of the clawd service/process on the local system".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
@@ -1014,14 +1003,13 @@ async fn finalize_loop_reply_expands_service_control_summary_for_free_status_rou
     let state = test_state();
     let task = claimed_task("task-service-status-free-route-summary-expand");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
     route.route_reason = concat!(
-        "executable_contract_preserved_for_agent_loop; ",
+        "",
         "untrusted_normalizer_locator_completion_removed_from_execution_context"
     )
     .to_string();
@@ -1121,7 +1109,6 @@ async fn finalize_loop_reply_preserves_richer_service_control_synthesis_without_
     let state = test_state();
     let task = claimed_task("task-service-status-planner-observed-synthesis");
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -1175,7 +1162,6 @@ fn package_manager_summary_uses_structured_detect_answer() {
     });
 
     let mut route = free_route_result();
-    route.ask_mode = crate::AskMode::act_with_chat_finalizer();
     route.resolved_intent =
         "check which package manager is recognized and briefly say the everyday default"
             .to_string();

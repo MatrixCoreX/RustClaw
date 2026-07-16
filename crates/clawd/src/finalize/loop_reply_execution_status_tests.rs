@@ -65,7 +65,7 @@ fn status_shape_does_not_precede_with_generic_content_answer() {
 #[test]
 fn agent_loop_rich_content_precedes_status_summary_without_legacy_content_flag() {
     let mut route = free_route_result();
-    route.route_reason = "executable_contract_preserved_for_agent_loop".to_string();
+    route.route_reason = "".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.response_shape = OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = false;
@@ -337,8 +337,9 @@ fn deterministic_observed_execution_status_answer_uses_structured_run_cmd_stderr
     )
     .expect("mixed observed results should produce deterministic answer");
 
+    assert!(answer.contains("step.2.error_summary="), "answer: {answer}");
     assert!(
-        answer.contains("step.2.error_summary=command failed with exit code 7; stderr: problem"),
+        answer.contains("step.2.error_kind=nonzero_exit"),
         "answer: {answer}"
     );
     assert!(answer.contains("step.2.exit_code=7"), "answer: {answer}");

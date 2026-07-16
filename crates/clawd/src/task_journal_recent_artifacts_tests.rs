@@ -4,7 +4,6 @@ use super::{evidence_coverage_for_route, TaskJournal, TaskJournalStepTrace};
 
 fn recent_artifacts_route() -> crate::RouteResult {
     crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),

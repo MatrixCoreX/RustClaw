@@ -313,7 +313,6 @@ pub(super) fn route_result_with_risk(
     risk_ceiling: crate::RiskCeiling,
 ) -> RouteResult {
     RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "test".to_string(),
         needs_clarify,
         route_reason: "test".to_string(),
@@ -536,7 +535,6 @@ fn locatorless_runtime_status_plan_does_not_trip_route_clarify_block() {
     let state = test_state();
     let task = test_task();
     let mut route = route_result(true);
-    route.ask_mode = crate::AskMode::respond_trace();
     route.route_reason = "locatorless_observation_requires_clarify".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;

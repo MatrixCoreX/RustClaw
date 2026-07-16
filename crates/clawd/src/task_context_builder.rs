@@ -502,17 +502,14 @@ pub(crate) fn build_agent_loop_task_context_bundle(
     let budget_tier = ExecutionContextBudgetTier::Full;
     let has_active_session_state =
         session_snapshot_provides_execution_state_anchor(&session_snapshot);
-    let ask_mode = crate::AskMode::act_plain();
     let planner_memory_decision = memory::use_policy::decide_planner_memory_use_policy(
         state,
         budget_tier,
-        &ask_mode,
         memory::use_policy::PlannerMemoryContextHint::Default,
     );
     let chat_memory_decision = memory::use_policy::decide_chat_memory_use_policy(
         state,
         budget_tier,
-        &ask_mode,
         "agent_loop_semantic_authority",
         has_active_session_state,
         chat_memory_budget_chars,

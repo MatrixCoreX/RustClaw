@@ -2,7 +2,7 @@ use super::{deterministic_config_guard_candidates_recovery, route_result};
 
 #[test]
 fn config_guard_recovery_uses_capability_ref_without_semantic_kind() {
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.route_reason = "capability_ref=config.guard_config".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = true;
@@ -38,7 +38,7 @@ fn config_guard_recovery_uses_capability_ref_without_semantic_kind() {
 
 #[test]
 fn config_guard_recovery_uses_risk_assessment_shape_without_semantic_kind() {
-    let mut route = route_result(crate::AskMode::act_plain());
+    let mut route = route_result();
     route.route_reason = "capability_ref=config.risk".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.requires_content_evidence = true;

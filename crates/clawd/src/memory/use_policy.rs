@@ -179,7 +179,6 @@ impl MemoryUseDecision {
 pub(crate) fn decide_planner_memory_use_policy(
     state: &AppState,
     budget_tier: ExecutionContextBudgetTier,
-    ask_mode: &crate::AskMode,
     context_hint: PlannerMemoryContextHint,
 ) -> MemoryUseDecision {
     let prompt_cap = state.policy.memory.prompt_max_chars.max(512);
@@ -204,21 +203,15 @@ pub(crate) fn decide_planner_memory_use_policy(
             "standalone_planner_uses_knowledge_docs_without_stable_facts",
         );
     }
-    let reason = match ask_mode.gate_kind() {
-        crate::RouteGateKind::Execute => {
-            "planner_execution_uses_goals_preferences_and_stable_facts"
-        }
-        crate::RouteGateKind::Chat => "direct_answer_keeps_planner_promotion_context_stable",
-        #[cfg(test)]
-        crate::RouteGateKind::Clarify => "clarify_path_keeps_planner_context_stable",
-    };
-    MemoryUseDecision::planner_scoped(max_chars, reason)
+    MemoryUseDecision::planner_scoped(
+        max_chars,
+        "agent_loop_uses_goals_preferences_and_stable_facts",
+    )
 }
 
 pub(crate) fn decide_chat_memory_use_policy(
     state: &AppState,
     budget_tier: ExecutionContextBudgetTier,
-    ask_mode: &crate::AskMode,
     route_reason: &str,
     has_active_session_state: bool,
     chat_memory_budget_chars: usize,
@@ -256,18 +249,7 @@ pub(crate) fn decide_chat_memory_use_policy(
     let reason = if include_active_recent_context {
         "chat_with_active_session_state_allows_bounded_recent_context"
     } else {
-        match ask_mode.gate_kind() {
-            crate::RouteGateKind::Chat => {
-                "pure_direct_answer_uses_stable_memory_without_long_term_summary"
-            }
-            crate::RouteGateKind::Execute => {
-                "planner_chat_finalization_uses_stable_memory_without_long_term_summary"
-            }
-            #[cfg(test)]
-            crate::RouteGateKind::Clarify => {
-                "clarify_chat_path_uses_stable_memory_without_long_term_summary"
-            }
-        }
+        "agent_loop_finalization_uses_stable_memory_without_long_term_summary"
     };
     MemoryUseDecision::chat_scoped(max_chars, include_active_recent_context, reason)
 }

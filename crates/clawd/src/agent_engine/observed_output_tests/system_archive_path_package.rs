@@ -7,7 +7,6 @@ fn recent_artifacts_judgment_is_not_hard_classified_by_observed_output() {
             "total 151792\n-rw-r--r--@ 1 testuser staff 76509771 Apr 12 16:30 model_io.log\n-rw-r--r--@ 1 testuser staff 906739 Apr 12 16:30 act_plan.log\n-rw-r--r--@ 1 testuser staff 191187 Apr 12 15:48 service_ops.log\n",
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物"
             .to_string(),
         needs_clarify: false,
@@ -51,7 +50,6 @@ fn direct_answer_defers_system_basic_info_summary_to_llm_for_brief_request() {
             r#"{"action":"info","hostname":"rustclaw-test-host.local","os":"macos","arch":"x86_64","cwd":"/tmp/rustclaw-workspace"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "show me the basic machine info here like hostname and system, keep it brief"
                 .to_string(),
@@ -96,7 +94,6 @@ fn direct_answer_defers_archive_creation_success_to_synthesis() {
         "exit=0\nupdating: tmp/rustclaw-workspace/scripts/skill_calls/\n",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent:
             "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功"
                 .to_string(),
@@ -145,7 +142,6 @@ fn direct_answer_defers_archive_basic_output_destination_to_synthesis() {
             r#"{"action":"pack","format":"zip","source":"/tmp/rustclaw-workspace/scripts/skill_calls","archive":"/tmp/rustclaw-workspace/tmp/nl_archive_case.zip","output":"exit=0\nupdating: skill_calls/\n"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent:
             "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功"
                 .to_string(),
@@ -194,7 +190,6 @@ fn archive_read_direct_answer_projects_member_path_and_content_excerpt() {
         r#"{"action":"read","archive":"/repo/tmp/test_bundle.zip","path":"notes.txt","member":"notes.txt","member_path":"notes.txt","content":"fixture archive notes\n","content_excerpt":"fixture archive notes"}"#,
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "Read member notes.txt from tmp/test_bundle.zip and return member_path and content_excerpt"
                 .to_string(),
@@ -243,7 +238,6 @@ fn archive_pack_scalar_contract_returns_created_archive_path() {
             "archive_path=/tmp/rustclaw-workspace/tmp/nl_archive_case.zip\nexit=0\n  adding: /tmp/rustclaw-workspace/scripts/skill_calls/ (stored 0%)\n",
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，只返回生成路径"
                 .to_string(),
@@ -364,7 +358,6 @@ fn archive_unpack_contract_returns_one_sentence_destination_summary() {
             "dest_path=/tmp/rustclaw-workspace/tmp/contract_matrix_unpacked\nexit=0\nArchive: /tmp/test_bundle.zip\n inflating: /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked/notes.txt\n",
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "把 test_bundle.zip 解压到 tmp/contract_matrix_unpacked，并简短说明结果"
             .to_string(),
         needs_clarify: false,
@@ -413,7 +406,6 @@ fn direct_answer_defers_system_basic_info_summary_without_action_field() {
             r#"{"hostname":"rustclaw-test-host.local","os":"macos","arch":"x86_64","cwd":"/tmp/rustclaw-workspace"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "show me the basic machine info here like hostname and system, keep it brief"
                 .to_string(),
@@ -458,7 +450,6 @@ fn direct_answer_defers_system_basic_info_for_free_shape_request() {
             r#"{"action":"info","hostname":"ThinkPad-X1","os":"linux","arch":"x86_64","cwd":"/home/guagua/rustclaw"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent:
             "show me the basic machine info here like hostname and system, keep it brief"
                 .to_string(),
@@ -503,7 +494,6 @@ fn direct_answer_defers_system_basic_info_service_status_to_synthesis() {
         r#"{"extra":{"arch":"x86_64","current_user":"guagua","cwd":"/home/guagua/rustclaw","hostname":"ThinkPad-X1","os":"linux","pid":2488573,"process_rss_bytes":3055616,"uptime_seconds":"894677.25","workspace_root":"/home/guagua/rustclaw"},"text":"{\"arch\":\"x86_64\",\"current_user\":\"guagua\",\"cwd\":\"/home/guagua/rustclaw\",\"hostname\":\"ThinkPad-X1\",\"os\":\"linux\",\"pid\":2488573,\"process_rss_bytes\":3055616,\"uptime_seconds\":\"894677.25\",\"workspace_root\":\"/home/guagua/rustclaw\"}"}"#,
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "show status".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -547,7 +537,6 @@ fn direct_answer_extracts_cwd_from_system_basic_info_for_scalar_path_contract() 
             r#"{"action":"info","hostname":"ThinkPad-X1","os":"linux","arch":"x86_64","cwd":"/home/guagua/rustclaw","workspace_root":"/home/guagua/rustclaw"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "获取当前工作目录的绝对路径".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -590,7 +579,6 @@ fn direct_scalar_extracts_cwd_from_system_basic_info_without_action_field() {
             r#"{"hostname":"ThinkPad-X1","os":"linux","arch":"x86_64","cwd":"/home/guagua/rustclaw","workspace_root":"/home/guagua/rustclaw"}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "获取当前工作目录的绝对路径".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -642,7 +630,6 @@ fn direct_scalar_path_contract_prefers_recorded_write_file_path() {
     loop_state.last_written_file_path =
         Some("/home/guagua/rustclaw/document/pwd_line.txt".to_string());
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "create the file and send me the file path only".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -686,7 +673,6 @@ fn workspace_project_summary_is_not_hard_summarized_by_observed_output() {
             "Cargo.toml\ncrates/\nUI/\nconfigs/\nREADME.md\nREADME.zh-CN.md\nprompts/\nrustclaw.service\ncomponent_start/start-telegramd.sh\ncomponent_start/start-wechatd.sh\ncomponent_start/start-whatsappd.sh\n",
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "用非技术用户能听懂的话，简短解释这个仓库主要是干什么的".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -748,7 +734,6 @@ fn direct_scalar_path_only_uses_auto_locator_full_path_for_unique_list_dir_match
         .executed_step_results
         .push(ok_step("step_1", "list_dir", "Report.MD\n"));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "去 case_only 找 report.md，只输出路径".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -810,7 +795,6 @@ fn direct_scalar_path_only_uses_rooted_full_path_for_unique_find_name_match() {
             ),
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "去 case_only 找 report.md，只输出路径".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -889,7 +873,6 @@ fn direct_scalar_path_only_prefers_resolved_path_from_path_batch_facts() {
             r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/case_only/Report.MD","resolved_path":"/tmp/case_only/Report.MD","size_bytes":33},"path":"/tmp/case_only/report.md","resolved_from_case_insensitive":true}],"include_missing":true}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "去 case_only 目录里找 report.md，只输出路径".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -933,7 +916,6 @@ fn direct_answer_keeps_plain_path_terminal_format_for_observed_path_fact() {
             r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/case_only/Report.MD","resolved_path":"/tmp/case_only/Report.MD","size_bytes":33},"path":"/tmp/case_only/Report.MD"}],"include_missing":true}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "去 case_only 目录里找 report.md，只输出路径".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -986,7 +968,6 @@ fn direct_scalar_counts_multiline_list_dir_when_route_requests_count() {
         .executed_step_results
         .push(ok_step("step_1", "list_dir", "a\nb\nc\n"));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "数一下 scripts 目录直接有多少个子项".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1029,7 +1010,6 @@ fn direct_scalar_uses_inventory_dir_count_for_scalar_count() {
             r#"{"action":"inventory_dir","path":"scripts","resolved_path":"/tmp/scripts","names_only":true,"names":["a","b","c"],"counts":{"total":3}}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "数一下 scripts 目录直接子项有多少个，只输出数字".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1072,7 +1052,6 @@ fn direct_count_uses_inventory_dir_total_for_non_scalar_shape() {
             r#"{"action":"inventory_dir","path":"document","resolved_path":"/tmp/document","names_only":true,"names":["a","b","c","d"],"counts":{"total":4,"files":4,"dirs":0},"recursive":false}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "再数一下 document 目录直接有多少个子项".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1115,7 +1094,6 @@ fn direct_scalar_path_lists_inventory_dir_candidates_without_choosing_first() {
             r#"{"action":"inventory_dir","path":"/tmp/stem_multi","resolved_path":"/tmp/stem_multi","names_only":true,"names":["abcd.cpp","abcd.txt"],"counts":{"total":2}}"#,
         ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "find matching paths".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1159,7 +1137,6 @@ fn direct_scalar_uses_inventory_dir_hidden_count_for_hidden_entries_contract() {
             r#"{"action":"inventory_dir","path":".","resolved_path":"/tmp/workspace","include_hidden":true,"names_only":true,"names":[".git",".env","README.md"],"counts":{"total":3,"hidden":2}}"#,
         ));
     let route_result = crate::RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "数一下当前目录里以点开头的隐藏文件有几个，只输出数字".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1202,7 +1179,6 @@ fn direct_answer_formats_package_manager_detect_summary() {
         "package_manager=brew",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "看看当前机器识别到的包管理器，再一句话说最可能日常会用哪个".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1245,7 +1221,6 @@ fn direct_answer_formats_package_manager_matrix_basis_summary() {
         "package_manager=apt-get",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_with_chat_finalizer(),
         resolved_intent: "检测这台机器可用的包管理器，并说明依据。".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1288,7 +1263,6 @@ fn direct_scalar_extracts_package_manager_detect_value() {
         "package_manager=brew",
     ));
     let route_result = RouteResult {
-        ask_mode: crate::AskMode::act_plain(),
         resolved_intent: "只输出当前机器识别到的包管理器名称".to_string(),
         needs_clarify: false,
         clarify_question: String::new(),

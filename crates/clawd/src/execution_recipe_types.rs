@@ -24,13 +24,6 @@ impl ExecutionRecipeKind {
     }
 }
 
-pub(crate) fn parse_execution_recipe_kind_text(value: &str) -> ExecutionRecipeKind {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "ops_closed_loop" | "ops" | "closed_loop" => ExecutionRecipeKind::OpsClosedLoop,
-        _ => ExecutionRecipeKind::None,
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ExecutionRecipeProfile {
     #[default]
@@ -108,20 +101,6 @@ impl ExecutionRecipeTargetScope {
     }
 }
 
-pub(crate) fn parse_execution_recipe_target_scope_text(value: &str) -> ExecutionRecipeTargetScope {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "system" | "host" => ExecutionRecipeTargetScope::System,
-        "current_repo" | "repo" | "current_workspace" | "workspace" => {
-            ExecutionRecipeTargetScope::CurrentRepo
-        }
-        "external_workspace" | "external" | "other_workspace" => {
-            ExecutionRecipeTargetScope::ExternalWorkspace
-        }
-        "greenfield" | "new_project" | "new_script" => ExecutionRecipeTargetScope::Greenfield,
-        _ => ExecutionRecipeTargetScope::Unknown,
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ExecutionRecipePhase {
     #[default]
@@ -152,25 +131,6 @@ pub(crate) struct ExecutionRecipeSpec {
     pub(crate) inspect_first: bool,
     pub(crate) validation_required: bool,
     pub(crate) max_repairs: usize,
-}
-
-pub(crate) fn explicit_execution_recipe_spec(
-    kind: ExecutionRecipeKind,
-    profile: ExecutionRecipeProfile,
-    target_scope: ExecutionRecipeTargetScope,
-) -> Option<ExecutionRecipeSpec> {
-    if matches!(kind, ExecutionRecipeKind::None) || matches!(profile, ExecutionRecipeProfile::None)
-    {
-        return None;
-    }
-    Some(ExecutionRecipeSpec {
-        kind,
-        profile,
-        target_scope,
-        inspect_first: true,
-        validation_required: true,
-        max_repairs: 2,
-    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

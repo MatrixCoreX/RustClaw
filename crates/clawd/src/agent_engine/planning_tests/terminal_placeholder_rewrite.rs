@@ -68,11 +68,7 @@ fn injection_no_op_when_last_action_is_not_respond() {
 fn normalizer_drops_pre_observation_synthesize_when_concrete_respond_exists() {
     let state = test_state();
     let loop_state = LoopState::new(2);
-    let route = route_result(
-        crate::AskMode::respond_trace(),
-        false,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(false, OutputResponseShape::Free);
     let actions = vec![
         AgentAction::SynthesizeAnswer {
             evidence_refs: vec!["last_output".to_string()],
@@ -105,11 +101,7 @@ fn normalizer_keeps_prior_observation_synthesize_and_placeholders_concrete_respo
     let mut loop_state = LoopState::new(2);
     loop_state.has_tool_or_skill_output = true;
     loop_state.last_output = Some("{\"ports_snapshot\":[\"0.0.0.0:22\"]}".to_string());
-    let route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(true, OutputResponseShape::Free);
     let actions = vec![
         AgentAction::SynthesizeAnswer {
             evidence_refs: vec!["last_output".to_string()],
@@ -189,11 +181,7 @@ fn normalizer_prefers_synthesized_scalar_equality_over_concrete_respond() {
         started_at: 0,
         finished_at: 0,
     });
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     route.output_contract.requires_content_evidence = true;
     let actions = vec![
@@ -230,11 +218,7 @@ fn normalizer_prefers_synthesized_scalar_equality_over_concrete_respond() {
 fn normalizer_rewrites_pwd_to_runtime_status_and_preserves_observation_synthesis() {
     let state = test_state();
     let loop_state = LoopState::new(2);
-    let route = route_result(
-        crate::AskMode::act_plain(),
-        false,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(false, OutputResponseShape::Free);
     let actions = vec![
         AgentAction::CallSkill {
             skill: "run_cmd".to_string(),
@@ -338,7 +322,7 @@ fn rewrite_pre_observation_rewrites_concrete_respond_after_call_skill() {
 #[test]
 fn rewrite_pre_observation_uses_output_contract_without_shape_matching() {
     let loop_state = LoopState::new(2);
-    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let route = route_result(true, OutputResponseShape::Free);
     let actions = vec![
         AgentAction::CallSkill {
             skill: "service_control".to_string(),
@@ -474,11 +458,7 @@ fn rewrite_terminal_placeholder_respond_inserts_synthesize_answer() {
 
 #[test]
 fn normalized_multi_command_failure_summary_preserves_all_observations() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let loop_state = LoopState::new(1);
     let actions = vec![
@@ -576,7 +556,7 @@ fn normalized_multi_command_failure_summary_preserves_all_observations() {
 
 #[test]
 fn normalized_run_cmd_observation_sequence_marks_continue_on_error() {
-    let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
     let loop_state = LoopState::new(1);
     let actions = vec![
@@ -618,11 +598,7 @@ fn normalized_run_cmd_observation_sequence_marks_continue_on_error() {
 
 #[test]
 fn normalized_raw_command_output_sequence_does_not_mark_continue_on_error() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     let loop_state = LoopState::new(1);
     let actions = vec![
@@ -660,7 +636,7 @@ fn normalized_raw_command_output_sequence_does_not_mark_continue_on_error() {
 
 #[test]
 fn normalized_run_cmd_mutation_sequence_does_not_mark_continue_on_error() {
-    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let route = route_result(true, OutputResponseShape::Free);
     let loop_state = LoopState::new(1);
     let actions = vec![
         AgentAction::CallSkill {
@@ -693,7 +669,7 @@ fn normalized_run_cmd_mutation_sequence_does_not_mark_continue_on_error() {
 
 #[test]
 fn planner_introduced_tail_run_cmd_rewrites_to_fs_basic_read_range() {
-    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let route = route_result(true, OutputResponseShape::Free);
     let loop_state = LoopState::new(1);
     let actions = vec![
         AgentAction::CallSkill {
@@ -727,11 +703,7 @@ fn planner_introduced_tail_run_cmd_rewrites_to_fs_basic_read_range() {
 
 #[test]
 fn content_excerpt_summary_tail_run_cmd_does_not_insert_default_head_read() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let mut route = route_result(true, OutputResponseShape::OneSentence);
     route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     let loop_state = LoopState::new(1);
@@ -778,7 +750,7 @@ fn content_excerpt_summary_tail_run_cmd_does_not_insert_default_head_read() {
 
 #[test]
 fn planner_introduced_echo_append_run_cmd_rewrites_to_fs_basic_append_text() {
-    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let route = route_result(true, OutputResponseShape::Free);
     let loop_state = LoopState::new(1);
     let actions = vec![AgentAction::CallTool {
         tool: "run_cmd".to_string(),
@@ -809,11 +781,7 @@ fn planner_introduced_echo_append_run_cmd_rewrites_to_fs_basic_append_text() {
 
 #[test]
 fn planner_introduced_simple_fs_run_cmd_sequence_rewrites_to_fs_basic_lifecycle() {
-    let mut route = route_result(
-        crate::AskMode::act_plain(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.semantic_kind = OutputSemanticKind::ExecutionFailedStep;
     route.output_contract.locator_hint = "tmp/nl_basic_skill_coverage_case".to_string();
     let loop_state = LoopState::new(2);
@@ -905,7 +873,7 @@ fn planner_introduced_simple_fs_run_cmd_sequence_rewrites_to_fs_basic_lifecycle(
 
 #[test]
 fn user_supplied_tail_command_stays_run_cmd() {
-    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let route = route_result(true, OutputResponseShape::Free);
     let loop_state = LoopState::new(1);
     let command = "tail -n 3 logs/clawd.run.log";
     let actions = vec![AgentAction::CallSkill {
@@ -935,11 +903,7 @@ fn user_supplied_tail_command_stays_run_cmd() {
 
 #[test]
 fn planner_introduced_find_extension_dirs_rewrites_to_fs_basic() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
     let loop_state = LoopState::new(1);
@@ -974,11 +938,7 @@ fn planner_introduced_find_extension_dirs_rewrites_to_fs_basic() {
 
 #[test]
 fn recent_artifacts_repaired_shell_listing_keeps_structured_selector() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "logs".to_string();
     route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
@@ -1035,11 +995,7 @@ fn recent_artifacts_repaired_shell_listing_keeps_structured_selector() {
 
 #[test]
 fn planner_introduced_find_sed_parent_dirs_rewrites_to_fs_basic() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
     let loop_state = LoopState::new(1);
@@ -1072,12 +1028,8 @@ fn planner_introduced_find_sed_parent_dirs_rewrites_to_fs_basic() {
 }
 
 #[test]
-fn structured_find_observation_strips_redundant_shell_followup() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+fn structured_find_rewrite_preserves_planner_synthesis() {
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
     let loop_state = LoopState::new(1);
@@ -1118,19 +1070,21 @@ fn structured_find_observation_strips_redundant_shell_followup() {
     ));
     assert!(normalized
         .iter()
-        .all(|action| !matches!(action, AgentAction::SynthesizeAnswer { .. })));
+        .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. })));
     assert!(normalized
         .iter()
+        .filter(|action| {
+            matches!(
+                action,
+                AgentAction::CallSkill { .. } | AgentAction::CallTool { .. }
+            )
+        })
         .all(|action| planned_call_is(action, "fs_basic", "find_entries")));
 }
 
 #[test]
 fn user_supplied_find_extension_command_stays_run_cmd() {
-    let mut route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let mut route = route_result(true, OutputResponseShape::Free);
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
     let loop_state = LoopState::new(1);
@@ -1162,7 +1116,7 @@ fn user_supplied_find_extension_command_stays_run_cmd() {
 
 #[test]
 fn piped_tail_command_is_not_rewritten_to_file_tool() {
-    let route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
+    let route = route_result(true, OutputResponseShape::Free);
     let loop_state = LoopState::new(1);
     let command = "tail -n 3 logs/clawd.run.log | sed -n '1p'";
     let actions = vec![AgentAction::CallSkill {
@@ -1192,11 +1146,7 @@ fn piped_tail_command_is_not_rewritten_to_file_tool() {
 
 #[test]
 fn normalized_single_sequential_run_cmd_splits_for_step_status_evidence() {
-    let route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::Free,
-    );
+    let route = route_result(true, OutputResponseShape::Free);
     let loop_state = LoopState::new(1);
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
@@ -1252,11 +1202,7 @@ fn normalized_single_sequential_run_cmd_splits_for_step_status_evidence() {
 
 #[test]
 fn normalized_planner_introduced_and_sequence_splits_for_step_status_evidence() {
-    let route = route_result(
-        crate::AskMode::act_with_chat_finalizer(),
-        true,
-        OutputResponseShape::OneSentence,
-    );
+    let route = route_result(true, OutputResponseShape::OneSentence);
     let loop_state = LoopState::new(1);
     let actions = vec![AgentAction::CallSkill {
         skill: "run_cmd".to_string(),

@@ -13,11 +13,7 @@ fn existence_summary_explicit_file_targets_allow_metadata_and_content_evidence()
     .expect("write checklist");
     let left = "docs/service_notes.md";
     let right = "docs/release_checklist.md";
-    let mut route = route_result(
-        crate::AskMode::respond_trace(),
-        true,
-        OutputResponseShape::Strict,
-    );
+    let mut route = route_result(true, OutputResponseShape::Strict);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPathSummary;
     route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;

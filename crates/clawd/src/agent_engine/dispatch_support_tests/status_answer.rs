@@ -16,11 +16,10 @@ fn deterministic_status_answer_defers_for_agent_loop_rich_content() {
     };
     let agent_run_context = AgentRunContext {
         route_result: Some(crate::RouteResult {
-            ask_mode: crate::AskMode::act_plain(),
             resolved_intent: "summarize archive and database observations".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "executable_contract_preserved_for_agent_loop".to_string(),
+            route_reason: "".to_string(),
             visible_skill_candidates: Vec::new(),
             risk_ceiling: crate::RiskCeiling::Low,
             resume_behavior: crate::ResumeBehavior::None,

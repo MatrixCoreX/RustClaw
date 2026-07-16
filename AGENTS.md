@@ -47,12 +47,12 @@ This file is for all agents working in this repository. The goal is to standardi
 
 1. 用户请求进入 `clawd`：`POST /v1/tasks`，`kind=ask|run_skill`。
    User requests enter `clawd` via `POST /v1/tasks`, with `kind=ask|run_skill`.
-2. `ask` 任务在 `crates/clawd/src/main.rs` 的 `worker_once()` 中执行：
-   `ask` tasks are handled in `worker_once()` in `crates/clawd/src/main.rs`:
-   - 先做上下文解析与路由（`intent_router`）。
-     First resolve context and route mode (`intent_router`).
-   - `AskMode::Act` / `route_gate_kind=execute` 时进入 `agent_engine::run_agent_with_tools()`；历史 first-layer trace 只能作为隔离兼容日志读取，不得作为新路由或执行决策依据。
-     For `AskMode::Act` / `route_gate_kind=execute`, execution enters `agent_engine::run_agent_with_tools()`; historical first-layer trace may only be read in isolated compatibility logs and must not drive new routing or execution decisions.
+2. `ask` 任务由 `crates/clawd/src/worker/mod.rs` 的 `process_ask_task()` 处理：
+   `ask` tasks are handled by `process_ask_task()` in `crates/clawd/src/worker/mod.rs`:
+   - `ask_planner_frontdoor` 只物化附件/转写输入并构造 `TurnBoundaryEnvelope`；不得决定普通请求是直答、澄清还是执行。
+     `ask_planner_frontdoor` only materializes attachments/transcribed input and builds a `TurnBoundaryEnvelope`; it must not decide whether an ordinary request should respond, clarify, or execute.
+   - `ask_runtime::execute_ask_dispatch()` 对所有普通请求统一进入 `agent_engine::run_agent_with_tools()`。历史 first-layer/route-gate 字段只能由隔离的旧日志读取器展示，不得作为新路由或执行依据。
+     `ask_runtime::execute_ask_dispatch()` sends every ordinary request into `agent_engine::run_agent_with_tools()`. Historical first-layer/route-gate fields may only be displayed by isolated legacy-log readers and must not drive new routing or execution.
 3. `agent_engine` 输出动作 JSON（`call_capability/call_tool/call_skill/synthesize_answer/respond`）；推荐新规划优先输出 `call_capability`，由 runtime resolver 映射到具体 tool/skill。
    `agent_engine` emits action JSON (`call_capability/call_tool/call_skill/synthesize_answer/respond`); new planner-facing flows should prefer `call_capability`, which the runtime resolver maps to concrete tools/skills.
 4. 执行前由 `CapabilityResolver` / `PlanVerifier` 做能力解析、可见性、必填参数、风险/效果与确认/验证检查；不要为了单个自然语言 case 在 `clawd` 主流程加按技能名或固定短语的选择分支。

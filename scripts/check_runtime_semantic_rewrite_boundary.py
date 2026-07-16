@@ -69,6 +69,10 @@ REMOVED_SEMANTIC_RESOURCE_FILES: tuple[Path, ...] = (
     SRC_ROOT / "intent/continuation_resolver.rs",
     SRC_ROOT / "intent/resume_policy.rs",
     SRC_ROOT / "intent/safety_class.rs",
+    SRC_ROOT / "runtime/ask_mode.rs",
+    SRC_ROOT / "runtime/ask_mode_tests.rs",
+    SRC_ROOT / "agent_engine/loop_control_executable_contract_observe.rs",
+    SRC_ROOT / "agent_engine/skill_execution_preflight_executionless_tests.rs",
     ROOT / "prompts/layers/overlays/intent_normalizer_prompt.md",
     ROOT / "prompts/layers/overlays/contract_repair_judge_prompt.md",
     ROOT / "prompts/layers/overlays/resume_continue_execute_prompt.md",
@@ -77,6 +81,21 @@ REMOVED_SEMANTIC_RESOURCE_FILES: tuple[Path, ...] = (
     ROOT / "prompts/schemas/contract_repair_judge.schema.json",
     ROOT / "scripts/check_intent_normalizer_boundary_schema.py",
     ROOT / "scripts/runtime_semantic_rewrite_prompt_schema_guards.py",
+)
+
+REMOVED_SEMANTIC_PRODUCTION_TOKENS: tuple[str, ...] = (
+    "AskMode",
+    "ActFinalizeStyle",
+    "RespondEntryStrategy",
+    "RouteGateKind",
+    "AskRouteTraceDecision",
+    "route_trace_label_for_log",
+    "route_trace_decision_for_journal",
+    "uses_chat_finalizer",
+    "is_execute_gate",
+    "pure_chat_agent_loop_submode",
+    "executionless_finalize_trace_plain",
+    "executable_contract_preserved_for_agent_loop",
 )
 
 REMOVED_SEMANTIC_RESOURCE_TOKENS: tuple[tuple[Path, str], ...] = (
@@ -131,6 +150,24 @@ def scan_removed_semantic_resources() -> list[Finding]:
     return findings
 
 
+def scan_removed_semantic_production_tokens() -> list[Finding]:
+    findings: list[Finding] = []
+    for path in production_rust_files():
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            for token in REMOVED_SEMANTIC_PRODUCTION_TOKENS:
+                if token not in line:
+                    continue
+                findings.append(
+                    Finding(
+                        rel(path),
+                        line_no,
+                        "removed_semantic_production_token",
+                        f"obsolete pre-loop route type must stay deleted: {token}",
+                    )
+                )
+    return findings
+
+
 def scan_planner_frontdoor_terminal_shape() -> list[Finding]:
     findings: list[Finding] = []
     for path in REQUIRED_PLANNER_FRONTDOOR_FILES:
@@ -165,6 +202,7 @@ def scan_repo() -> list[Finding]:
 
     findings.extend(scan_planner_frontdoor_terminal_shape())
     findings.extend(scan_removed_semantic_resources())
+    findings.extend(scan_removed_semantic_production_tokens())
     findings.extend(scan_removed_lightweight_preclassification())
     findings.extend(scan_journal_output_contract_ref_boundary())
     findings.extend(scan_static_capability_compat_boundary())
@@ -209,6 +247,7 @@ def run_self_test() -> int:
 
     assert not scan_planner_frontdoor_terminal_shape()
     assert not scan_removed_semantic_resources()
+    assert not scan_removed_semantic_production_tokens()
     assert not scan_removed_lightweight_preclassification()
     print("SELF_TEST_OK")
     return 0

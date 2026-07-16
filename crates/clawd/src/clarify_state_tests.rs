@@ -13,7 +13,6 @@ fn locator_question_prefers_matching_answer_text() {
 #[test]
 fn derive_locator_clarify_state_from_semantic_clarify() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "看一下那个日志最后 5 行".to_string(),
         needs_clarify: true,
         clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
@@ -53,7 +52,6 @@ fn derive_locator_clarify_state_from_semantic_clarify() {
 #[test]
 fn derive_user_input_clarify_state_for_freeform_waiting_request() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "draft a proposal after the user provides enough details".to_string(),
         needs_clarify: true,
         clarify_question: "QUESTION".to_string(),
@@ -87,7 +85,6 @@ fn derive_user_input_clarify_state_for_freeform_waiting_request() {
 #[test]
 fn derive_locator_clarify_state_preserves_non_free_output_shape() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "看一下那个日志".to_string(),
         needs_clarify: true,
         clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
@@ -128,7 +125,6 @@ fn derive_locator_clarify_state_preserves_non_free_output_shape() {
 #[test]
 fn derive_locator_clarify_state_preserves_resolved_intent_context() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "读取指定文件中的名字字段（name），仅输出该字段的值".to_string(),
         needs_clarify: true,
         clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
@@ -170,7 +166,6 @@ fn derive_locator_clarify_state_preserves_resolved_intent_context() {
 #[test]
 fn derive_locator_clarify_state_preserves_structured_field_selector_token() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "Read the selected structured file field value".to_string(),
         needs_clarify: true,
         clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
@@ -219,7 +214,6 @@ fn derive_locator_clarify_state_preserves_structured_field_selector_token() {
 #[test]
 fn derive_locator_clarify_state_marks_non_content_probe_as_existence_contract() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "Check whether the referenced script exists.".to_string(),
         needs_clarify: true,
         clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
@@ -331,7 +325,6 @@ fn clarify_candidate_targets_fall_back_to_structured_fuzzy_locator_candidates() 
 #[test]
 fn derive_clarify_state_seeds_candidate_targets_from_prior_session() {
     let route = crate::RouteResult {
-        ask_mode: crate::AskMode::clarify_trace(),
         resolved_intent: "把那个文件发给我".to_string(),
         needs_clarify: true,
         clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
