@@ -3,6 +3,7 @@ pub(crate) mod auth;
 pub(crate) mod child_tasks;
 pub(crate) mod submit;
 pub(crate) mod task_admin;
+pub(crate) mod task_approval;
 pub(crate) mod task_goal;
 pub(crate) mod task_resume_execution;
 pub(crate) mod tasks;
@@ -32,6 +33,9 @@ pub(crate) use task_admin::{
     cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,
     get_task_admin_target, pause_task_by_id, resume_task_with_input, TaskAdminTarget,
     TaskResumeControlInput,
+};
+pub(crate) use task_approval::{
+    approve_task_approval_request, consume_task_approval_grant, TaskApprovalConsumeOutcome,
 };
 pub(crate) use task_goal::{update_task_goal_payload, TaskGoalControlOperation};
 pub(crate) use task_resume_execution::record_claimed_paused_checkpoint_resume_dispatch_result_projection_internal;

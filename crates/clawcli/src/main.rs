@@ -290,6 +290,10 @@ enum Command {
         user_message: Option<String>,
         #[arg(long = "constraints-json")]
         constraints_json: Option<String>,
+        #[arg(long, requires = "approval_request_id")]
+        approve: bool,
+        #[arg(long = "approval-request-id", requires = "approve")]
+        approval_request_id: Option<String>,
     },
 
     /// Continue a task by task id, optionally with a user message.
@@ -1164,6 +1168,8 @@ fn main() -> Result<()> {
             resume_reason,
             user_message,
             constraints_json,
+            approve,
+            approval_request_id,
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_resume_task(
@@ -1174,6 +1180,8 @@ fn main() -> Result<()> {
                 resume_reason.as_deref(),
                 user_message.as_deref(),
                 constraints_json.as_deref(),
+                approval_request_id.as_deref(),
+                *approve,
             )
         }
         Command::Continue {

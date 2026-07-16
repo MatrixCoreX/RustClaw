@@ -1,4 +1,4 @@
-import { Loader2, MessageCircle, Pause, Play, RefreshCw, Save, Trash2 } from "lucide-react";
+import { Loader2, MessageCircle, Pause, Play, RefreshCw, Save, ShieldCheck, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -10,6 +10,7 @@ import {
 } from "../lib/task-lifecycle";
 import {
   buildReplaySummary,
+  buildTaskApprovalRequest,
   buildTaskGoalView,
   buildTaskOutcome,
   buildTaskPermissionView,
@@ -45,6 +46,7 @@ export interface TaskResultPanelProps {
   onQueryTaskLlmDebug: (taskId?: string) => unknown | Promise<unknown>;
   onResumeDraftChange: (taskId: string, value: string) => void;
   onSubmitResume: (taskId: string) => unknown | Promise<unknown>;
+  onApproveTask: (taskId: string, approvalRequestId: string) => unknown | Promise<unknown>;
   onControlTask: (control: "pause" | "resume", taskId: string) => unknown | Promise<unknown>;
   onControlTaskGoal: (
     operation: "edit" | "clear",
@@ -79,6 +81,7 @@ export function TaskResultPanel({
   onQueryTaskLlmDebug,
   onResumeDraftChange,
   onSubmitResume,
+  onApproveTask,
   onControlTask,
   onControlTaskGoal,
 }: TaskResultPanelProps) {
@@ -90,6 +93,7 @@ export function TaskResultPanel({
   const taskEvents = taskResult ? taskTraceEvents(taskResult) : [];
   const artifactRefs = taskResult ? taskArtifactRefs(taskResult) : [];
   const replaySummary = taskResult ? buildReplaySummary(taskResult) : null;
+  const approvalRequest = taskResult ? buildTaskApprovalRequest(taskResult) : null;
   const [goalObjectiveDraft, setGoalObjectiveDraft] = useState("");
   useEffect(() => {
     setGoalObjectiveDraft(taskGoalView?.objective ?? "");
@@ -112,6 +116,11 @@ export function TaskResultPanel({
   const goalClearSubmitting = taskResult
     ? taskControlSubmittingId === `goal-clear:${taskResult.task_id}`
     : false;
+  const approvalSubmitting = taskResult
+    ? taskControlSubmittingId === `approve:${taskResult.task_id}`
+    : false;
+  const approvalExpired = approvalRequest ? approvalRequest.expiresAt * 1000 <= Date.now() : false;
+  const approvalPending = approvalRequest?.status === "pending" && !approvalExpired;
 
   return (
     <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
@@ -291,6 +300,69 @@ export function TaskResultPanel({
                   </span>
                 ))}
               </div>
+            </div>
+          ) : null}
+          {approvalRequest ? (
+            <div className="mt-4 rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-3 text-amber-50">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold">
+                    {approvalPending
+                      ? t("需要你的授权", "Your approval is required")
+                      : t("本次授权状态", "One-time approval status")}
+                  </p>
+                  <p className="mt-1 text-sm text-amber-50/80">
+                    {approvalPending
+                      ? t(
+                          `RustClaw 准备执行 ${approvalRequest.actionCount} 项会修改数据或访问外部系统的操作。`,
+                          `RustClaw is ready to run ${approvalRequest.actionCount} action(s) that may change data or access an external system.`,
+                        )
+                      : t(
+                          "这条记录显示当前任务的一次性授权状态。",
+                          "This record shows the task's current one-time approval state.",
+                        )}
+                  </p>
+                </div>
+                <span className="theme-status-pill rounded-md px-2 py-1 font-mono text-xs">
+                  {approvalExpired ? t("已过期", "Expired") : approvalRequest.status}
+                </span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                {approvalRequest.targets.map((target) => (
+                  <span key={target} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 font-mono">
+                    {target}
+                  </span>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-amber-50/70">
+                {approvalRequest.reversible
+                  ? t("这项操作支持恢复。", "This action can be reversed.")
+                  : t("系统不能保证自动恢复这项操作。请确认目标无误。", "Automatic recovery is not guaranteed. Check the targets before approving.")}
+              </p>
+              <p className="mt-1 text-xs text-amber-50/60">
+                {t("授权有效期至", "Approval expires at")}: {new Date(approvalRequest.expiresAt * 1000).toLocaleString(lang === "zh" ? "zh-CN" : "en-US")}
+              </p>
+              {approvalPending ? (
+                <button
+                  type="button"
+                  onClick={() => void onApproveTask(taskResult.task_id, approvalRequest.requestId)}
+                  disabled={approvalSubmitting || approvalExpired}
+                  className="theme-accent-btn mt-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {approvalSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                  {t("仅授权这一次", "Approve once")}
+                </button>
+              ) : null}
+              <details className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
+                <summary className="cursor-pointer text-xs font-medium opacity-75">
+                  {t("技术详情", "Technical details")}
+                </summary>
+                <div className="mt-2 space-y-1 font-mono text-[11px] opacity-70">
+                  <p>request_id={approvalRequest.requestId}</p>
+                  <p>effect={approvalRequest.effect}</p>
+                  <p>reason_code={approvalRequest.reasonCode}</p>
+                </div>
+              </details>
             </div>
           ) : null}
           {taskResult.lifecycle?.state === "needs_user" ? (

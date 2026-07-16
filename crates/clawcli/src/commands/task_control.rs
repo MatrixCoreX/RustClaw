@@ -131,6 +131,8 @@ pub(crate) fn run_resume_task(
     resume_reason: Option<&str>,
     user_message: Option<&str>,
     constraints_json: Option<&str>,
+    approval_request_id: Option<&str>,
+    approve: bool,
 ) -> Result<()> {
     let new_constraints = constraints_json
         .map(|raw| serde_json::from_str::<serde_json::Value>(raw))
@@ -140,10 +142,14 @@ pub(crate) fn run_resume_task(
         base_url,
         key,
         task_id,
-        checkpoint_id,
-        resume_reason,
-        user_message,
-        new_constraints,
+        task::TaskResumeRequest {
+            checkpoint_id,
+            resume_reason,
+            user_message,
+            new_constraints,
+            approval_request_id,
+            approve,
+        },
     )?;
     output::print_json_pretty(&body_with_resume_summary(body, task_id, "resume_task"));
     Ok(())
@@ -160,10 +166,11 @@ pub(crate) fn run_continue_task(
         base_url,
         key,
         task_id,
-        None,
-        Some("user_continue"),
-        user_message,
-        None,
+        task::TaskResumeRequest {
+            resume_reason: Some("user_continue"),
+            user_message,
+            ..Default::default()
+        },
     )?;
     if json_output {
         output::print_json_pretty(&body);

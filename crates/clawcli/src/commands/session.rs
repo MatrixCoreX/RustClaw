@@ -63,10 +63,11 @@ pub(crate) fn run_session_resume(
         base_url,
         key,
         session_id,
-        None,
-        Some("session_resume"),
-        message,
-        None,
+        task::TaskResumeRequest {
+            resume_reason: Some("session_resume"),
+            user_message: message,
+            ..Default::default()
+        },
     )?;
     let summary = session_resume_json(session_id, &body);
     if json_output {

@@ -55,6 +55,17 @@ export interface TaskReplaySummaryView {
   coverage: string[];
 }
 
+export interface TaskApprovalRequestView {
+  requestId: string;
+  status: string;
+  targets: string[];
+  actionCount: number;
+  expiresAt: number;
+  reversible: boolean;
+  effect: string;
+  reasonCode: string;
+}
+
 export interface TaskTraceEventView {
   eventType: string;
   title: string;
@@ -106,6 +117,28 @@ function stringArrayAt(root: unknown, path: string[]): string[] {
 function boolAt(root: unknown, path: string[]): boolean | undefined {
   const value = getPathValue(root, path);
   return typeof value === "boolean" ? value : undefined;
+}
+
+export function buildTaskApprovalRequest(result: TaskQueryResponse): TaskApprovalRequestView | null {
+  const request = asRecord(getPathValue(result.result_json, ["resume_context", "approval_request"]));
+  if (!request || request.schema_version !== 1 || request.task_id !== result.task_id) return null;
+  const requestId = primitiveKeyValue(request.request_id);
+  const status = primitiveKeyValue(request.status);
+  const expiresAt = typeof request.expires_at === "number" ? request.expires_at : 0;
+  if (!requestId || !status || expiresAt <= 0) return null;
+  const targets = Array.isArray(request.targets)
+    ? request.targets.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  return {
+    requestId,
+    status,
+    targets,
+    actionCount: typeof request.action_count === "number" ? request.action_count : targets.length,
+    expiresAt,
+    reversible: request.reversible === true,
+    effect: primitiveKeyValue(request.effect) ?? "unknown",
+    reasonCode: primitiveKeyValue(request.reason_code) ?? "unknown",
+  };
 }
 
 function primitiveKeyValue(value: unknown): string | null {

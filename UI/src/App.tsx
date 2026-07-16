@@ -554,6 +554,7 @@ export default function App() {
     viewTask,
     setResumeDraftValue,
     submitResumeForTask,
+    approveTaskById,
     cancelActiveTask,
     controlTaskById,
     controlTaskGoalById,
@@ -1692,6 +1693,7 @@ export default function App() {
               onControlTaskGoal={controlTaskGoalById}
               onResumeDraftChange={setResumeDraftValue}
               onSubmitResume={submitResumeForTask}
+              onApproveTask={approveTaskById}
               interactionKind={interactionKind}
               interactionChannel={interactionChannel}
               interactionAdapter={interactionAdapter}

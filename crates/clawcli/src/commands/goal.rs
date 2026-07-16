@@ -95,10 +95,13 @@ pub(crate) fn run_goal_resume(
         base_url,
         key,
         task_id,
-        checkpoint_id,
-        Some("goal_resume"),
-        user_message,
-        new_constraints,
+        task::TaskResumeRequest {
+            checkpoint_id,
+            resume_reason: Some("goal_resume"),
+            user_message,
+            new_constraints,
+            ..Default::default()
+        },
     )?;
     output::print_json_pretty(&goal_control_summary_json("goal_resume", task_id, &body));
     Ok(())

@@ -50,6 +50,8 @@ pub(super) struct ResumeTaskByIdRequest {
     resume_reason: Option<String>,
     user_message: Option<String>,
     new_constraints: Option<Value>,
+    approval_request_id: Option<String>,
+    approve: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -333,6 +335,46 @@ pub(super) async fn resume_task_by_id(
         Ok(target) => target,
         Err(resp) => return resp,
     };
+    if target.status == "failed" {
+        let request_id = req
+            .approval_request_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if req.approve != Some(true) || request_id.is_none() {
+            return super::api_err::<serde_json::Value>(
+                StatusCode::CONFLICT,
+                "approval_grant_explicit_decision_required",
+            );
+        }
+        return match crate::repo::approve_task_approval_request(
+            &state,
+            &target.task_id,
+            request_id.unwrap_or_default(),
+        ) {
+            Ok(Some(update)) => super::api_ok(json!({
+                "status": "approval_grant_approved",
+                "task_id": update.task_id,
+                "approval_request_id": update.request_id,
+                "expires_at": update.expires_at,
+                "task_lifecycle": {
+                    "state": "queued",
+                    "reason_code": "approval_grant_approved",
+                },
+            })),
+            Ok(None) => super::api_err::<serde_json::Value>(
+                StatusCode::CONFLICT,
+                "approval_grant_not_approvable",
+            ),
+            Err(err) => {
+                error!("task_approval_grant_failed err={}", err);
+                super::api_err::<serde_json::Value>(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "approval_grant_update_failed",
+                )
+            }
+        };
+    }
     if target.status.as_str() != "running" {
         return super::api_err::<serde_json::Value>(StatusCode::CONFLICT, "task_not_resumable");
     }
