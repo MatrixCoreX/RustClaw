@@ -93,13 +93,6 @@ pub(crate) fn record_schedule_notify_outcome(
     }
 }
 
-pub(crate) fn is_resume_continue_source(raw: &str) -> bool {
-    let source = raw.trim().to_ascii_lowercase();
-    crate::RESUME_CONTINUE_SOURCES
-        .iter()
-        .any(|value| *value == source)
-}
-
 pub(crate) async fn worker_once(state: &AppState) -> anyhow::Result<()> {
     maybe_recover_stale_running_tasks_runtime(state).await?;
 

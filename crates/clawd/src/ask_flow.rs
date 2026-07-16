@@ -6,13 +6,6 @@ const VOICE_CHAT_PROMPT_LOGICAL_PATH: &str = "prompts/voice_chat_prompt.md";
 const DEFAULT_VOICE_CHAT_PROMPT_TEMPLATE: &str =
     include_str!("../../../prompts/layers/overlays/voice_chat_prompt.md");
 
-#[path = "ask_flow_resume.rs"]
-mod resume;
-pub(crate) use resume::{
-    build_resume_continue_execute_prompt, build_resume_continue_execute_prompt_from_context,
-    build_resume_followup_discussion_prompt, build_resume_followup_discussion_prompt_from_context,
-};
-
 pub(crate) async fn analyze_attached_images_for_ask(
     state: &AppState,
     task: &ClaimedTask,

@@ -12,9 +12,6 @@ mod summary;
 pub(crate) struct TaskContextRawSources {
     pub(crate) resume_context: String,
     pub(crate) binding_context: String,
-    pub(crate) now_iso: String,
-    pub(crate) timezone: String,
-    pub(crate) schedule_rules: String,
 }
 
 #[derive(Debug, Clone, Default)]

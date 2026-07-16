@@ -64,8 +64,15 @@ REMOVED_SEMANTIC_FRONTDOOR_GLOBS: tuple[str, ...] = (
 REMOVED_SEMANTIC_RESOURCE_FILES: tuple[Path, ...] = (
     SRC_ROOT / "prompt_utils_contract_repair_judge.rs",
     SRC_ROOT / "prompt_utils_output_contract.rs",
+    SRC_ROOT / "ask_flow_resume.rs",
+    SRC_ROOT / "clarify_followup.rs",
+    SRC_ROOT / "intent/continuation_resolver.rs",
+    SRC_ROOT / "intent/resume_policy.rs",
+    SRC_ROOT / "intent/safety_class.rs",
     ROOT / "prompts/layers/overlays/intent_normalizer_prompt.md",
     ROOT / "prompts/layers/overlays/contract_repair_judge_prompt.md",
+    ROOT / "prompts/layers/overlays/resume_continue_execute_prompt.md",
+    ROOT / "prompts/layers/overlays/resume_followup_discussion_prompt.md",
     ROOT / "prompts/schemas/intent_normalizer.schema.json",
     ROOT / "prompts/schemas/contract_repair_judge.schema.json",
     ROOT / "scripts/check_intent_normalizer_boundary_schema.py",
@@ -79,6 +86,11 @@ REMOVED_SEMANTIC_RESOURCE_TOKENS: tuple[tuple[Path, str], ...] = (
     (ROOT / "crates/clawd/src/bootstrap/prompts.rs", "contract_repair_judge_prompt.md"),
     (ROOT / "prompts/layers/manifest.toml", "intent_normalizer_prompt.md"),
     (ROOT / "prompts/layers/manifest.toml", "contract_repair_judge_prompt.md"),
+    (ROOT / "crates/clawd/src/bootstrap/prompts.rs", "resume_continue_execute_prompt.md"),
+    (ROOT / "crates/clawd/src/bootstrap/prompts.rs", "resume_followup_discussion_prompt.md"),
+    (ROOT / "prompts/layers/manifest.toml", "resume_continue_execute_prompt.md"),
+    (ROOT / "prompts/layers/manifest.toml", "resume_followup_discussion_prompt.md"),
+    (SRC_ROOT / "schedule_service.rs", "schedule_context_for_normalizer"),
 )
 
 
@@ -100,7 +112,7 @@ def scan_removed_semantic_resources() -> list[Finding]:
                     rel(path),
                     1,
                     "removed_semantic_resource_present",
-                    "obsolete normalizer/contract-repair resource must stay deleted",
+                    "obsolete pre-planner semantic resource must stay deleted",
                 )
             )
     for path, token in REMOVED_SEMANTIC_RESOURCE_TOKENS:

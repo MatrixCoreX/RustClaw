@@ -2,40 +2,9 @@ use super::{
     derive_bound_target_from_journal, derive_code_workspace_bound_target_from_journal,
     extract_ordered_entries_from_text, load_active_followup_frame,
     ordered_entries_from_listing_json, persist_frame, replace_active_frame_from_ask_outcome,
-    synthesize_locator_reply_resolved_intent, FollowupFrame, FollowupOpKind, FollowupSliceKind,
-    FollowupSliceSpec, FollowupUnresolvedSlot,
+    FollowupFrame, FollowupOpKind, FollowupSliceKind, FollowupSliceSpec,
 };
 use crate::{runtime::AppState, IntentOutputContract, OutputLocatorKind, RouteResult};
-
-#[test]
-fn locator_reply_resolved_intent_uses_persisted_request() {
-    let frame = FollowupFrame {
-        source_request: "看一下那个 model io log 最后 4 行，再一句话说有什么现象".to_string(),
-        op_kind: FollowupOpKind::ClarifyPending,
-        unresolved_slot: Some(FollowupUnresolvedSlot::Locator),
-        ..FollowupFrame::default()
-    };
-    let rewritten =
-        synthesize_locator_reply_resolved_intent(&frame, "/tmp/device_local/logs/model_io.log")
-            .expect("frame should accept locator reply");
-    assert_eq!(
-        rewritten.1,
-        crate::clarify_followup::ClarifyRewriteReason::ClarifyLocatorReply
-    );
-    assert!(rewritten.0.contains("看一下那个 model io log 最后 4 行"));
-    assert!(rewritten.0.contains("/tmp/device_local/logs/model_io.log"));
-}
-
-#[test]
-fn locator_reply_resolved_intent_rejects_non_locator_new_request() {
-    let frame = FollowupFrame {
-        source_request: "看一下那个 model io log 最后 4 行，再一句话说有什么现象".to_string(),
-        op_kind: FollowupOpKind::ClarifyPending,
-        unresolved_slot: Some(FollowupUnresolvedSlot::Locator),
-        ..FollowupFrame::default()
-    };
-    assert!(synthesize_locator_reply_resolved_intent(&frame, "今天天气怎么样").is_none());
-}
 
 #[test]
 fn extracts_ordered_entries_from_compact_listing_sentence() {

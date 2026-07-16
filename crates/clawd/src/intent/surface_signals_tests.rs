@@ -1,8 +1,30 @@
 use super::{
     analyze_prompt_surface, extract_dotted_field_selector, extract_field_selector_mentions,
-    inline_json_transform_request, prompt_contains_delivery_token_reference, InlineJsonShape,
-    LocatorHintPromptShape, LocatorReplyPromptShape,
+    inline_json_transform_request, prompt_contains_delivery_token_reference,
+    prompt_is_structural_locator_only, InlineJsonShape, LocatorHintPromptShape,
+    LocatorReplyPromptShape,
 };
+
+#[test]
+fn structural_locator_only_accepts_machine_locator_shapes() {
+    assert!(prompt_is_structural_locator_only(
+        "scripts/nl_tests/fixtures/test_contract.sqlite"
+    ));
+    assert!(prompt_is_structural_locator_only(
+        "/home/guagua/rustclaw/Cargo.toml"
+    ));
+    assert!(prompt_is_structural_locator_only("Cargo.toml"));
+    assert!(prompt_is_structural_locator_only("README.md"));
+}
+
+#[test]
+fn structural_locator_only_rejects_natural_language_requests() {
+    assert!(!prompt_is_structural_locator_only(
+        "我现在想知道我们项目里有几个 service 文件，你给我列一下"
+    ));
+    assert!(!prompt_is_structural_locator_only(""));
+    assert!(!prompt_is_structural_locator_only("   "));
+}
 
 #[test]
 fn detects_empty_prompt_as_default_signals() {

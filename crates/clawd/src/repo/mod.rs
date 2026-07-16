@@ -23,11 +23,10 @@ pub(crate) use auth::{
 };
 pub(crate) use submit::{
     build_conversation_chat_id, build_submit_task_payload, check_submit_task_access,
-    check_submit_task_limits, find_active_checkpoint_resume_context,
-    find_recent_failed_resume_context, insert_submitted_task, is_user_allowed,
-    maybe_find_submit_task_dedup, resolve_submit_task_context, stable_i64_from_key,
-    submit_task_audit_detail, task_count_by_status, task_kind_name, SubmitTaskAccessError,
-    SubmitTaskContextError, SubmitTaskLimitError,
+    check_submit_task_limits, insert_submitted_task, is_user_allowed, maybe_find_submit_task_dedup,
+    resolve_submit_task_context, stable_i64_from_key, submit_task_audit_detail,
+    task_count_by_status, task_kind_name, SubmitTaskAccessError, SubmitTaskContextError,
+    SubmitTaskLimitError,
 };
 pub(crate) use task_admin::{
     cancel_one_task_for_user_chat, cancel_task_by_id, cancel_tasks_for_user_chat,

@@ -15,5 +15,4 @@ pub(crate) use prompts::{
     load_persona_prompt, load_prompt_template_for_state, load_required_prompt_template_for_state,
     load_required_prompt_template_for_state_with_meta, log_prompt_validation_report,
     reload_runtime_prompts, strict_prompt_validation_error, validate_core_prompts,
-    RequiredPromptLoadError,
 };

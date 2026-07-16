@@ -62,20 +62,6 @@ impl FollowupFrame {
     fn is_expired(&self, now_ts: u64) -> bool {
         self.expires_at_ts <= now_ts
     }
-
-    fn can_accept_locator_reply(&self) -> bool {
-        (matches!(self.op_kind, FollowupOpKind::ClarifyPending)
-            || self.unresolved_slot == Some(FollowupUnresolvedSlot::Locator))
-            && !self.source_request.trim().is_empty()
-    }
-
-    fn can_reuse_operation_for_locator_reply(&self) -> bool {
-        matches!(
-            self.op_kind,
-            FollowupOpKind::Read | FollowupOpKind::List | FollowupOpKind::Delivery
-        ) && self.unresolved_slot.is_none()
-            && !self.source_request.trim().is_empty()
-    }
 }
 
 fn effective_user_key(task: &ClaimedTask) -> String {
@@ -196,37 +182,6 @@ pub(crate) fn load_active_followup_frame(
         return None;
     }
     Some(frame)
-}
-
-pub(crate) fn synthesize_locator_reply_resolved_intent(
-    frame: &FollowupFrame,
-    locator_reply: &str,
-) -> Option<(String, crate::clarify_followup::ClarifyRewriteReason)> {
-    let locator_reply = locator_reply.trim();
-    if !crate::clarify_followup::prompt_is_structural_locator_only(locator_reply) {
-        return None;
-    }
-    if frame.can_accept_locator_reply() {
-        return Some((
-            format!(
-            "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target or content: {}",
-            frame.source_request.trim(),
-            locator_reply
-        ),
-            crate::clarify_followup::ClarifyRewriteReason::ClarifyLocatorReply,
-        ));
-    }
-    if frame.can_reuse_operation_for_locator_reply() {
-        return Some((
-            format!(
-                "Continue the previous resolved request by applying the same operation to the provided target or content.\nPrevious user request: {}\nProvided target or content: {}",
-                frame.source_request.trim(),
-                locator_reply
-            ),
-            crate::clarify_followup::ClarifyRewriteReason::FollowupLocatorReply,
-        ));
-    }
-    None
 }
 
 fn sanitize_ordered_entry_text(entry: &str) -> String {

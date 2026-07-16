@@ -15,8 +15,6 @@ pub(crate) enum AskState {
     Received,
     /// Boundary context, schedule, safety, and machine contract preparation.
     Routing,
-    /// 路由结论是 schedule 本地短路。
-    ScheduleDirect,
     /// agent loop 执行中（含 plan / execute / verify 子循环，本轮先不细分）。
     Executing,
     /// finalize 阶段（loop_finalize / observed_output）。
@@ -33,7 +31,6 @@ impl AskState {
         match self {
             Self::Received => "received",
             Self::Routing => "routing",
-            Self::ScheduleDirect => "schedule_direct",
             Self::Executing => "executing",
             Self::Finalizing => "finalizing",
             Self::Completed => "completed",
@@ -62,10 +59,7 @@ impl AskState {
         }
         match (self, next) {
             (AskState::Received, AskState::Routing) => true,
-            (AskState::Routing, AskState::ScheduleDirect) => true,
             (AskState::Routing, AskState::Executing) => true,
-
-            (AskState::ScheduleDirect, AskState::Completed) => true,
 
             // agent loop 自循环（next round）
             (AskState::Executing, AskState::Executing) => true,

@@ -30,14 +30,6 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "chat_response (ask_flow)",
     ),
     (
-        "prompts/resume_continue_execute_prompt.md",
-        "resume_continue_execute (ask_flow)",
-    ),
-    (
-        "prompts/resume_followup_discussion_prompt.md",
-        "resume_followup_discussion (ask_flow / worker.ask_pipeline)",
-    ),
-    (
         "prompts/long_term_summary_prompt.md",
         "long_term_summary (memory.service)",
     ),
