@@ -533,7 +533,7 @@ fn finalization_prefers_latest_planner_contract_over_initial_context() {
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
-    loop_state.route_policy_context = Some(scalar_route_result());
+    loop_state.output_contract = Some(scalar_route_result().output_contract);
 
     let effective = effective_agent_run_context_for_finalization(Some(&context), &loop_state)
         .expect("effective finalization context");

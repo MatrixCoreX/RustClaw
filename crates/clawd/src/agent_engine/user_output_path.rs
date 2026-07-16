@@ -96,9 +96,3 @@ pub(crate) fn action_is_user_named_new_workspace_write(
     };
     !candidate.exists() && request_surface_names_user_output_path(request_text, &candidate)
 }
-
-pub(crate) fn action_has_user_named_output_path_marker(args: &Value) -> bool {
-    args.get(CLAWD_USER_NAMED_OUTPUT_PATH_ARG)
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}

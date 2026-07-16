@@ -61,7 +61,7 @@ fn missing_required_arg_forces_clarification_even_in_observe_mode() {
 fn route_clarify_issue_forces_clarification_even_in_observe_mode() {
     let verify_result = verify_result_with_issue(
         crate::verifier::VerifyMode::ObserveOnly,
-        crate::verifier::VerifyIssueKind::RouteClarifyRequired,
+        crate::verifier::VerifyIssueKind::BoundaryClarifyRequired,
     );
 
     assert!(verifier_gate_needs_clarification(&verify_result));

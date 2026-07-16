@@ -150,7 +150,6 @@ pub(super) fn seed_loop_state_from_agent_context(
             route.output_contract.locator_kind.as_str().to_string(),
         );
         loop_state.output_contract = Some(route.effective_output_contract());
-        loop_state.route_policy_context = Some(route.clone());
     }
     if let Some(cross_turn_ctx) = ctx
         .cross_turn_recent_execution_context
