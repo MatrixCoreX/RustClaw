@@ -13,7 +13,7 @@ fn workspace_fs_basic_mutation_does_not_emit_route_ceiling_or_confirmation_noise
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route),
+            output_contract: Some(&route.output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![

@@ -8,7 +8,7 @@ fn destructive_run_cmd_requires_confirmation_without_resume() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: Some("remove temp files"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -101,7 +101,9 @@ fn readonly_cli_help_run_cmd_action_is_low_risk_without_confirmation() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+            output_contract: Some(
+                &route_result_with_risk(false, crate::RiskCeiling::Low).output_contract,
+            ),
             request_text: Some("inspect local cli surface"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -161,7 +163,9 @@ fn workspace_validation_run_cmd_is_low_risk_without_confirmation() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+            output_contract: Some(
+                &route_result_with_risk(false, crate::RiskCeiling::Low).output_contract,
+            ),
             request_text: Some("validate generated code"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -213,7 +217,9 @@ fn workspace_inline_python_probe_run_cmd_is_low_risk_without_confirmation() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+            output_contract: Some(
+                &route_result_with_risk(false, crate::RiskCeiling::Low).output_contract,
+            ),
             request_text: Some("validate generated code"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -273,7 +279,9 @@ fn workspace_inline_python_probe_with_arrow_output_is_low_risk_without_confirmat
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+            output_contract: Some(
+                &route_result_with_risk(false, crate::RiskCeiling::Low).output_contract,
+            ),
             request_text: Some("validate generated code"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -318,7 +326,9 @@ fn external_workspace_validation_run_cmd_keeps_confirmation_boundary() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+            output_contract: Some(
+                &route_result_with_risk(false, crate::RiskCeiling::Low).output_contract,
+            ),
             request_text: Some("validate external code"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -338,7 +348,11 @@ fn external_workspace_validation_run_cmd_keeps_confirmation_boundary() {
         VerifyMode::Enforce,
     );
 
-    assert!(!result.approved, "external validation should stay bounded");
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(
+        result.needs_confirmation,
+        "external validation should stay bounded"
+    );
     assert!(result.issues.iter().any(|issue| {
         matches!(
             issue.kind,
@@ -355,7 +369,7 @@ fn high_risk_external_generation_requires_confirmation_without_dry_run() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: Some("generate media"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -401,7 +415,7 @@ fn high_risk_external_generation_dry_run_skips_confirmation() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: Some("plan media dry run"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -451,7 +465,7 @@ fn non_exempt_invocation_still_requires_confirmation() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: None,
             context_bundle_summary: Some("photo move"),
             plan_result: &plan_result(vec![PlanStep {
@@ -482,7 +496,7 @@ fn ops_recipe_requires_inspect_before_mutate() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -522,7 +536,7 @@ fn ops_recipe_requires_validation_after_mutate() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![

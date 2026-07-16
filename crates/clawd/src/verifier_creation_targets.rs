@@ -205,10 +205,11 @@ pub(super) fn apply_default_creation_targets(
     }
 }
 
-fn route_requires_generated_file_path_write(route: Option<&crate::RouteResult>) -> bool {
-    route.is_some_and(|route| {
-        let contract = route.effective_output_contract();
-        route.output_contract_marker_is(crate::OutputSemanticKind::GeneratedFilePathReport)
+fn output_contract_requires_generated_file_path_write(
+    output_contract: Option<&crate::IntentOutputContract>,
+) -> bool {
+    output_contract.is_some_and(|contract| {
+        contract.semantic_kind == crate::OutputSemanticKind::GeneratedFilePathReport
             && contract.response_shape == crate::OutputResponseShape::Scalar
             && !contract.delivery_required
     })
@@ -261,9 +262,9 @@ fn plan_has_media_artifact_output_step(state: &AppState, plan_result: &PlanResul
 
 fn generated_file_path_report_target_path(
     state: &AppState,
-    route: &crate::RouteResult,
+    output_contract: &crate::IntentOutputContract,
 ) -> Option<String> {
-    let hint = route.output_contract.locator_hint.trim();
+    let hint = output_contract.locator_hint.trim();
     if hint.is_empty() {
         return None;
     }
@@ -310,19 +311,19 @@ fn generated_file_path_report_insert_index(plan_result: &PlanResult) -> Option<(
 
 pub(super) fn apply_generated_file_path_report_write_repair(
     state: &AppState,
-    route: Option<&crate::RouteResult>,
+    output_contract: Option<&crate::IntentOutputContract>,
     plan_result: &mut PlanResult,
 ) {
-    if !route_requires_generated_file_path_write(route)
+    if !output_contract_requires_generated_file_path_write(output_contract)
         || plan_has_generated_file_path_write_step(state, plan_result)
         || plan_has_media_artifact_output_step(state, plan_result)
     {
         return;
     }
-    let Some(route) = route else {
+    let Some(output_contract) = output_contract else {
         return;
     };
-    let Some(target_path) = generated_file_path_report_target_path(state, route) else {
+    let Some(target_path) = generated_file_path_report_target_path(state, output_contract) else {
         return;
     };
     if crate::media_artifact_paths::is_media_artifact_path(&target_path) {

@@ -2,14 +2,17 @@ use crate::{AppState, PlanResult, PlanStep};
 
 use super::{VerifyIssue, VerifyIssueKind};
 
-fn structured_field_target_path(state: &AppState, route: &crate::RouteResult) -> Option<String> {
+fn structured_field_target_path(
+    state: &AppState,
+    output_contract: &crate::IntentOutputContract,
+) -> Option<String> {
     if !matches!(
-        route.output_contract.locator_kind,
+        output_contract.locator_kind,
         crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
     ) {
         return None;
     }
-    let locator = route.output_contract.locator_hint.trim();
+    let locator = output_contract.locator_hint.trim();
     if locator.is_empty() || locator.contains('\n') {
         return None;
     }
@@ -90,11 +93,12 @@ fn plan_has_multiple_explicit_structured_field_reads(
         > 1
 }
 
-fn route_allows_structured_field_selector_repair(route: &crate::RouteResult) -> bool {
-    !route.needs_clarify
-        && route.output_contract.requires_content_evidence
+fn output_contract_allows_structured_field_selector_repair(
+    output_contract: &crate::IntentOutputContract,
+) -> bool {
+    output_contract.requires_content_evidence
         && matches!(
-            route.output_contract.response_shape,
+            output_contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
         )
 }
@@ -193,17 +197,15 @@ fn selector_refines_planned_field(selector: &str, planned_fields: &[String]) -> 
 }
 
 fn inferred_selector_from_planned_field_prefix(
-    route: &crate::RouteResult,
+    output_contract: &crate::IntentOutputContract,
     request_text: Option<&str>,
     plan_result: &PlanResult,
 ) -> Option<String> {
-    if !route_allows_structured_field_selector_repair(route) {
+    if !output_contract_allows_structured_field_selector_repair(output_contract) {
         return None;
     }
-    let sources = [request_text, Some(route.resolved_intent.as_str())];
-    let candidates = sources
+    let candidates = request_text
         .into_iter()
-        .flatten()
         .flat_map(dotted_machine_field_tokens)
         .collect::<Vec<_>>();
     if candidates.is_empty() {
@@ -237,27 +239,28 @@ fn inferred_selector_from_planned_field_prefix(
 
 pub(super) fn apply_structured_field_selector_repair(
     state: &AppState,
-    route_result: Option<&crate::RouteResult>,
+    output_contract: Option<&crate::IntentOutputContract>,
     request_text: Option<&str>,
     plan_result: &mut PlanResult,
     issues: &mut Vec<VerifyIssue>,
 ) {
-    let Some(route) = route_result else {
+    let Some(output_contract) = output_contract else {
         return;
     };
-    let Some(selector) = route
-        .output_contract
+    let Some(selector) = output_contract
         .self_extension
         .structured_field_selector
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .or_else(|| inferred_selector_from_planned_field_prefix(route, request_text, plan_result))
+        .or_else(|| {
+            inferred_selector_from_planned_field_prefix(output_contract, request_text, plan_result)
+        })
     else {
         return;
     };
-    let target_path = structured_field_target_path(state, route);
+    let target_path = structured_field_target_path(state, output_contract);
     let preserve_explicit_multi_target_reads =
         plan_has_multiple_explicit_structured_field_reads(state, plan_result);
     for step in &mut plan_result.steps {
@@ -341,7 +344,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::{PlanKind, RiskCeiling, ScheduleKind};
+    use crate::PlanKind;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -373,41 +376,28 @@ mod tests {
         }
     }
 
-    fn route_structured_scalar() -> crate::RouteResult {
+    fn structured_scalar_contract() -> crate::IntentOutputContract {
         let mut output_contract = crate::IntentOutputContract::default();
         output_contract.response_shape = crate::OutputResponseShape::Scalar;
         output_contract.requires_content_evidence = true;
         output_contract.locator_kind = crate::OutputLocatorKind::Path;
-        crate::RouteResult {
-            resolved_intent: "test".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "test".to_string(),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract,
-        }
+        output_contract
     }
 
-    fn route_with_selector(selector: &str) -> crate::RouteResult {
-        let mut route = route_structured_scalar();
-        route
-            .output_contract
-            .self_extension
-            .structured_field_selector = Some(selector.to_string());
-        route
+    fn contract_with_selector(selector: &str) -> crate::IntentOutputContract {
+        let mut contract = structured_scalar_contract();
+        contract.self_extension.structured_field_selector = Some(selector.to_string());
+        contract
     }
 
-    fn route_with_selector_and_locator(selector: &str, locator: &str) -> crate::RouteResult {
-        let mut route = route_with_selector(selector);
-        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-        route.output_contract.locator_hint = locator.to_string();
-        route
+    fn contract_with_selector_and_locator(
+        selector: &str,
+        locator: &str,
+    ) -> crate::IntentOutputContract {
+        let mut contract = contract_with_selector(selector);
+        contract.locator_kind = crate::OutputLocatorKind::Path;
+        contract.locator_hint = locator.to_string();
+        contract
     }
 
     fn plan_result(steps: Vec<PlanStep>) -> PlanResult {
@@ -426,7 +416,7 @@ mod tests {
     #[test]
     fn repairs_config_read_fields_to_structured_selector() {
         let state = AppState::test_default_with_fixture_provider();
-        let route = route_with_selector("workspace.dependencies.toml");
+        let contract = contract_with_selector("workspace.dependencies.toml");
         let mut plan = plan_result(vec![PlanStep {
             step_id: "s1".to_string(),
             action_type: "call_tool".to_string(),
@@ -441,7 +431,13 @@ mod tests {
         }]);
         let mut issues = Vec::new();
 
-        apply_structured_field_selector_repair(&state, Some(&route), None, &mut plan, &mut issues);
+        apply_structured_field_selector_repair(
+            &state,
+            Some(&contract),
+            None,
+            &mut plan,
+            &mut issues,
+        );
 
         assert_eq!(
             plan.steps[0].args.get("field_paths"),
@@ -455,7 +451,7 @@ mod tests {
     #[test]
     fn infers_structured_selector_from_machine_token_that_refines_planned_parent_field() {
         let state = AppState::test_default_with_fixture_provider();
-        let route = route_structured_scalar();
+        let contract = structured_scalar_contract();
         let mut plan = plan_result(vec![PlanStep {
             step_id: "s1".to_string(),
             action_type: "call_tool".to_string(),
@@ -472,7 +468,7 @@ mod tests {
 
         apply_structured_field_selector_repair(
             &state,
-            Some(&route),
+            Some(&contract),
             Some("Read workspace.dependencies.toml from ./Cargo.toml and output only the value."),
             &mut plan,
             &mut issues,
@@ -490,7 +486,7 @@ mod tests {
     #[test]
     fn does_not_infer_filename_token_without_planned_field_prefix() {
         let state = AppState::test_default_with_fixture_provider();
-        let route = route_structured_scalar();
+        let contract = structured_scalar_contract();
         let mut plan = plan_result(vec![PlanStep {
             step_id: "s1".to_string(),
             action_type: "call_tool".to_string(),
@@ -507,7 +503,7 @@ mod tests {
 
         apply_structured_field_selector_repair(
             &state,
-            Some(&route),
+            Some(&contract),
             Some("Read ./Cargo.toml and output only the value."),
             &mut plan,
             &mut issues,
@@ -523,7 +519,7 @@ mod tests {
     #[test]
     fn keeps_config_read_field_when_selector_already_matches() {
         let state = AppState::test_default_with_fixture_provider();
-        let route = route_with_selector("workspace.dependencies.toml");
+        let contract = contract_with_selector("workspace.dependencies.toml");
         let mut plan = plan_result(vec![PlanStep {
             step_id: "s1".to_string(),
             action_type: "call_tool".to_string(),
@@ -538,7 +534,13 @@ mod tests {
         }]);
         let mut issues = Vec::new();
 
-        apply_structured_field_selector_repair(&state, Some(&route), None, &mut plan, &mut issues);
+        apply_structured_field_selector_repair(
+            &state,
+            Some(&contract),
+            None,
+            &mut plan,
+            &mut issues,
+        );
 
         assert_eq!(
             plan.steps[0].args.get("field_path"),
@@ -554,7 +556,7 @@ mod tests {
         let wrong = TempFileGuard::new("wrong_path");
         let target_path = target.path.display().to_string();
         let wrong_path = wrong.path.display().to_string();
-        let route = route_with_selector_and_locator("package.version", &target_path);
+        let contract = contract_with_selector_and_locator("package.version", &target_path);
         let mut plan = plan_result(vec![PlanStep {
             step_id: "s1".to_string(),
             action_type: "call_tool".to_string(),
@@ -569,7 +571,13 @@ mod tests {
         }]);
         let mut issues = Vec::new();
 
-        apply_structured_field_selector_repair(&state, Some(&route), None, &mut plan, &mut issues);
+        apply_structured_field_selector_repair(
+            &state,
+            Some(&contract),
+            None,
+            &mut plan,
+            &mut issues,
+        );
 
         assert_eq!(plan.steps[0].args.get("path"), Some(&json!(target_path)));
         assert_eq!(
@@ -586,7 +594,7 @@ mod tests {
         let second = TempFileGuard::new("second_target");
         let first_path = first.path.display().to_string();
         let second_path = second.path.display().to_string();
-        let route = route_with_selector_and_locator("package.name", &second_path);
+        let contract = contract_with_selector_and_locator("package.name", &second_path);
         let mut plan = plan_result(vec![
             PlanStep {
                 step_id: "s1".to_string(),
@@ -615,7 +623,13 @@ mod tests {
         ]);
         let mut issues = Vec::new();
 
-        apply_structured_field_selector_repair(&state, Some(&route), None, &mut plan, &mut issues);
+        apply_structured_field_selector_repair(
+            &state,
+            Some(&contract),
+            None,
+            &mut plan,
+            &mut issues,
+        );
 
         assert_eq!(plan.steps[0].args.get("path"), Some(&json!(first_path)));
         assert_eq!(plan.steps[0].args.get("field_path"), Some(&json!("name")));

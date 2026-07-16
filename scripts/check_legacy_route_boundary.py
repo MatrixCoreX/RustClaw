@@ -104,6 +104,23 @@ def scan_text(rel_path: str, text: str) -> list[Finding]:
     return findings
 
 
+def scan_verifier_contract_boundary_text(rel_path: str, text: str) -> list[Finding]:
+    if not Path(rel_path).name.startswith("verifier"):
+        return []
+    findings: list[Finding] = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if re.search(r"\bRouteResult\b|\broute_result\b", line):
+            findings.append(
+                Finding(
+                    rel_path,
+                    line_no,
+                    "verifier_route_result_dependency",
+                    line.strip(),
+                )
+            )
+    return findings
+
+
 def line_number_for_offset(text: str, offset: int) -> int:
     return text.count("\n", 0, max(offset, 0)) + 1
 
@@ -159,6 +176,12 @@ def scan_repo() -> list[Finding]:
                 Finding(rel_path, 1, "legacy_intent_router_file", "legacy intent router file returned")
             )
         findings.extend(scan_text(rel_path, path.read_text(encoding="utf-8")))
+        findings.extend(
+            scan_verifier_contract_boundary_text(
+                rel_path,
+                path.read_text(encoding="utf-8"),
+            )
+        )
     output_types = SOURCE_ROOT / "turn_boundary_envelope.rs"
     findings.extend(
         scan_boundary_envelope_type_contract_text(
@@ -224,6 +247,14 @@ def run_self_test() -> int:
     assert not scan_text(
         "crates/clawd/src/turn_boundary_envelope.rs",
         "raw_chars: self.raw_user_request.chars().count(),",
+    )
+    assert scan_verifier_contract_boundary_text(
+        "crates/clawd/src/verifier.rs",
+        "fn verify(route_result: Option<&RouteResult>) {}",
+    )
+    assert not scan_verifier_contract_boundary_text(
+        "crates/clawd/src/verifier.rs",
+        "fn verify(output_contract: Option<&IntentOutputContract>) {}",
     )
     assert scan_boundary_envelope_type_contract_text(
         "crates/clawd/src/turn_boundary_envelope.rs",

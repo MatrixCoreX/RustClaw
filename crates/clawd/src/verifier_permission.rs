@@ -218,34 +218,6 @@ pub(super) fn validation_run_cmd_can_run_autonomously(
     effect.validates && !effect.mutates
 }
 
-pub(super) fn route_requires_clarify_before_tools(
-    state: &AppState,
-    route_result: Option<&crate::RouteResult>,
-    plan_result: &PlanResult,
-) -> bool {
-    let Some(route) = route_result else {
-        return false;
-    };
-    if !route.needs_clarify {
-        return false;
-    }
-    let has_executable_step = plan_result.steps.iter().any(|step| {
-        matches!(
-            step.action_type.as_str(),
-            "call_skill" | "call_tool" | "call_capability"
-        )
-    });
-    if !has_executable_step {
-        return false;
-    }
-    !route_clarify_can_defer_to_runtime_status_plan(state, route, plan_result)
-        && !route_clarify_can_defer_to_subagent_review_boundary_surface_plan(
-            state,
-            route,
-            plan_result,
-        )
-}
-
 pub(super) fn context_bundle_has_redacted_workspace_child_locator(summary: Option<&str>) -> bool {
     const START: &str = "### AGENT_LOOP_BOUNDARY_OBSERVATIONS";
     const END: &str = "### END_AGENT_LOOP_BOUNDARY_OBSERVATIONS";
@@ -430,136 +402,22 @@ fn action_key_reads_path_content(action_key: &str) -> bool {
     )
 }
 
-pub(super) fn policy_action_reads_path_content_under_unbound_locator(
-    action_key: &str,
-    args: &Value,
-    workspace_root: &Path,
-) -> bool {
-    args_have_untrusted_path_value(args, workspace_root)
-        && action_key_reads_path_content(action_key)
-}
-
-pub(super) fn push_unbound_locator_route_clarify_issue(
+pub(super) fn push_unbound_locator_boundary_clarify_issue(
     issues: &mut Vec<VerifyIssue>,
     step_id: &str,
 ) {
     if issues.iter().any(|issue| {
         issue.step_id == step_id
-            && matches!(issue.kind, VerifyIssueKind::RouteClarifyRequired)
+            && matches!(issue.kind, VerifyIssueKind::BoundaryClarifyRequired)
             && issue.detail.contains("resolved_workspace_child_redacted")
     }) {
         return;
     }
     issues.push(VerifyIssue {
         step_id: step_id.to_string(),
-        kind: VerifyIssueKind::RouteClarifyRequired,
+        kind: VerifyIssueKind::BoundaryClarifyRequired,
         detail: "unbound_locator_requires_clarify; boundary=resolved_workspace_child_redacted"
             .to_string(),
         missing_fields: vec!["execution_target_or_boundary".to_string()],
     });
-}
-
-fn route_clarify_can_defer_to_runtime_status_plan(
-    state: &AppState,
-    route: &crate::RouteResult,
-    plan_result: &PlanResult,
-) -> bool {
-    if !route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
-        || route.wants_file_delivery
-        || route.output_contract.locator_kind != crate::OutputLocatorKind::None
-        || !route.output_contract.locator_hint.trim().is_empty()
-        || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
-    {
-        return false;
-    }
-    let mut saw_runtime_status_observation = false;
-    for step in plan_result.steps.iter().filter(|step| {
-        matches!(
-            step.action_type.as_str(),
-            "call_skill" | "call_tool" | "call_capability"
-        )
-    }) {
-        match step.action_type.as_str() {
-            "call_skill" | "call_tool" => {
-                let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
-                if normalized_skill != "system_basic"
-                    || step.args.get("action").and_then(serde_json::Value::as_str)
-                        != Some("runtime_status")
-                    || step
-                        .args
-                        .get("kind")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::trim)
-                        .is_none_or(str::is_empty)
-                {
-                    return false;
-                }
-                saw_runtime_status_observation = true;
-            }
-            "call_capability" => {
-                if step.skill.trim() != "system.runtime_status"
-                    || step
-                        .args
-                        .get("kind")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::trim)
-                        .is_none_or(str::is_empty)
-                {
-                    return false;
-                }
-                saw_runtime_status_observation = true;
-            }
-            _ => return false,
-        }
-    }
-    saw_runtime_status_observation
-}
-
-fn route_clarify_can_defer_to_subagent_review_boundary_surface_plan(
-    state: &AppState,
-    route: &crate::RouteResult,
-    plan_result: &PlanResult,
-) -> bool {
-    if !is_subagent_review_boundary_surface_plan(plan_result)
-        || !route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
-        || route.wants_file_delivery
-        || !matches!(
-            route.output_contract.locator_kind,
-            crate::OutputLocatorKind::Filename
-                | crate::OutputLocatorKind::Path
-                | crate::OutputLocatorKind::CurrentWorkspace
-        )
-    {
-        return false;
-    }
-
-    let mut saw_subagent = false;
-    let mut saw_read_range = false;
-    for step in plan_result.steps.iter().filter(|step| {
-        matches!(
-            step.action_type.as_str(),
-            "call_skill" | "call_tool" | "call_capability"
-        )
-    }) {
-        if !matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
-            return false;
-        }
-        let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
-        if !subagent_review_boundary_surface_action_allowed(
-            plan_result,
-            &normalized_skill,
-            &step.args,
-        ) {
-            return false;
-        }
-        match normalized_skill.as_str() {
-            "subagent" => saw_subagent = true,
-            "fs_basic" => saw_read_range = true,
-            _ => {}
-        }
-    }
-
-    saw_subagent && saw_read_range
 }

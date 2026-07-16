@@ -22,10 +22,9 @@ use creation_targets::{
 };
 use permission::{
     audit_permission_decision, context_bundle_has_redacted_workspace_child_locator,
-    policy_action_reads_path_content_under_unbound_locator,
-    push_unbound_locator_route_clarify_issue, route_requires_clarify_before_tools,
-    step_reads_path_content_under_unbound_locator, validation_run_cmd_can_run_autonomously,
-    verify_permission_decision_json, workspace_filesystem_mutation_can_run_autonomously,
+    push_unbound_locator_boundary_clarify_issue, step_reads_path_content_under_unbound_locator,
+    validation_run_cmd_can_run_autonomously, verify_permission_decision_json,
+    workspace_filesystem_mutation_can_run_autonomously,
 };
 use risk_policy::high_risk_side_effect_requires_confirmation;
 use templates::{
@@ -65,7 +64,7 @@ pub(crate) enum VerifyIssueKind {
     ConfirmationRequired,
     RiskBudgetExceeded,
     PrimaryFallbackConflict,
-    RouteClarifyRequired,
+    BoundaryClarifyRequired,
     RecipeInspectBeforeMutateRequired,
     RecipeValidationAfterMutateRequired,
     RecipeTargetScopeRequired,
@@ -93,7 +92,7 @@ impl VerifyIssueKind {
             Self::ConfirmationRequired => "ConfirmationRequired",
             Self::RiskBudgetExceeded => "RiskBudgetExceeded",
             Self::PrimaryFallbackConflict => "PrimaryFallbackConflict",
-            Self::RouteClarifyRequired => "RouteClarifyRequired",
+            Self::BoundaryClarifyRequired => "BoundaryClarifyRequired",
             Self::RecipeInspectBeforeMutateRequired => "RecipeInspectBeforeMutateRequired",
             Self::RecipeValidationAfterMutateRequired => "RecipeValidationAfterMutateRequired",
             Self::RecipeTargetScopeRequired => "RecipeTargetScopeRequired",
@@ -111,7 +110,7 @@ impl VerifyIssueKind {
             | Self::UnresolvedTemplateArg
             | Self::InvalidDependsOn
             | Self::PrimaryFallbackConflict
-            | Self::RouteClarifyRequired => FailureAttribution::ModelError,
+            | Self::BoundaryClarifyRequired => FailureAttribution::ModelError,
             Self::DefaultCreationTargetApplied
             | Self::RecipeInspectBeforeMutateRequired
             | Self::RecipeValidationAfterMutateRequired
@@ -137,7 +136,7 @@ impl VerifyIssueKind {
             Self::ConfirmationRequired => "verify_confirmation_required",
             Self::RiskBudgetExceeded => "verify_risk_budget_exceeded",
             Self::PrimaryFallbackConflict => "verify_primary_fallback_conflict",
-            Self::RouteClarifyRequired => "verify_route_clarify_required",
+            Self::BoundaryClarifyRequired => "verify_boundary_clarify_required",
             Self::RecipeInspectBeforeMutateRequired => {
                 "verify_recipe_inspect_before_mutate_required"
             }
@@ -163,7 +162,7 @@ impl VerifyIssueKind {
             Self::ConfirmationRequired => "confirmation_required",
             Self::RiskBudgetExceeded => "risk_budget_exceeded",
             Self::PrimaryFallbackConflict => "primary_fallback_conflict",
-            Self::RouteClarifyRequired => "route_clarify_required",
+            Self::BoundaryClarifyRequired => "boundary_clarify_required",
             Self::RecipeInspectBeforeMutateRequired => "recipe_inspect_before_mutate_required",
             Self::RecipeValidationAfterMutateRequired => "recipe_validation_after_mutate_required",
             Self::RecipeTargetScopeRequired => "recipe_target_scope_required",
@@ -185,7 +184,7 @@ impl VerifyIssueKind {
             Self::ConfirmationRequired => "clawd.verify.confirmation_required",
             Self::RiskBudgetExceeded => "clawd.verify.risk_budget_exceeded",
             Self::PrimaryFallbackConflict => "clawd.verify.primary_fallback_conflict",
-            Self::RouteClarifyRequired => "clawd.verify.route_clarify_required",
+            Self::BoundaryClarifyRequired => "clawd.verify.boundary_clarify_required",
             Self::RecipeInspectBeforeMutateRequired => {
                 "clawd.verify.recipe_inspect_before_mutate_required"
             }
@@ -212,7 +211,7 @@ pub(crate) struct VerifyIssue {
 }
 
 pub(crate) struct VerifyInput<'a> {
-    pub(crate) route_result: Option<&'a crate::RouteResult>,
+    pub(crate) output_contract: Option<&'a crate::IntentOutputContract>,
     pub(crate) request_text: Option<&'a str>,
     pub(crate) context_bundle_summary: Option<&'a str>,
     pub(crate) plan_result: &'a PlanResult,
@@ -248,12 +247,6 @@ fn is_confirmation_like_skill(skill: &str) -> bool {
         skill,
         "run_cmd" | "write_file" | "remove_file" | "make_dir" | "schedule" | "config_edit"
     )
-}
-
-fn route_has_confirmation_resume(route_result: Option<&crate::RouteResult>) -> bool {
-    route_result
-        .map(|route| matches!(route.resume_behavior, crate::ResumeBehavior::ResumeExecute))
-        .unwrap_or(false)
 }
 
 fn manifest_required_args(state: &AppState, normalized_skill: &str) -> Vec<String> {
@@ -366,16 +359,6 @@ fn registry_declares_non_mutating_planner_action(
         })
 }
 
-fn registry_action_can_extend_summary_contract(
-    state: &AppState,
-    normalized_skill: &str,
-    args: &serde_json::Value,
-    contract_match: &str,
-) -> bool {
-    contract_match == "command_output_summary"
-        && registry_declares_non_mutating_planner_action(state, normalized_skill, args)
-}
-
 fn effective_step_risk_level(
     state: &AppState,
     normalized_skill: &str,
@@ -438,21 +421,6 @@ fn first_blocking_issue(issues: &[VerifyIssue]) -> Option<&VerifyIssue> {
         .iter()
         .find(|issue| issue_blocks_in_enforce(issue.kind))
         .or_else(|| issues.first())
-}
-
-fn risk_exceeds_ceiling(risk: SkillRiskLevel, risk_ceiling: crate::RiskCeiling) -> bool {
-    let risk_rank = match risk {
-        SkillRiskLevel::Unknown => 0,
-        SkillRiskLevel::Low => 1,
-        SkillRiskLevel::Medium => 2,
-        SkillRiskLevel::High => 3,
-    };
-    let ceiling_rank = match risk_ceiling {
-        crate::RiskCeiling::Unknown | crate::RiskCeiling::High => return false,
-        crate::RiskCeiling::Low => 1,
-        crate::RiskCeiling::Medium => 2,
-    };
-    risk_rank > ceiling_rank
 }
 
 fn arg_value_is_present(value: &serde_json::Value) -> bool {
@@ -636,7 +604,7 @@ fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
             | VerifyIssueKind::InvalidDependsOn
             | VerifyIssueKind::PrimaryFallbackConflict
             | VerifyIssueKind::RiskBudgetExceeded
-            | VerifyIssueKind::RouteClarifyRequired
+            | VerifyIssueKind::BoundaryClarifyRequired
             | VerifyIssueKind::RecipeInspectBeforeMutateRequired
             | VerifyIssueKind::RecipeValidationAfterMutateRequired
             | VerifyIssueKind::RecipeTargetScopeRequired
@@ -646,11 +614,10 @@ fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
     )
 }
 
-fn route_requires_contract(route_result: Option<&crate::RouteResult>) -> bool {
-    route_result
-        .map(|route| {
-            let contract = route.effective_output_contract();
-            !route.output_contract_is_unclassified()
+fn output_contract_requires_policy(output_contract: Option<&crate::IntentOutputContract>) -> bool {
+    output_contract
+        .map(|contract| {
+            !contract.semantic_kind_is_unclassified()
                 || contract.requires_content_evidence
                 || contract.delivery_required
         })
@@ -830,7 +797,6 @@ fn verify_execution_recipe(
 
 fn rewrite_execution_recipe_steps(
     state: &AppState,
-    _route_result: Option<&crate::RouteResult>,
     _request_text: Option<&str>,
     plan_result: &PlanResult,
     recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
@@ -985,19 +951,17 @@ pub(crate) fn verify_plan(
     apply_default_creation_targets(state, task, &mut effective_plan_result, &mut issues);
     apply_generated_file_path_report_write_repair(
         state,
-        input.route_result,
+        input.output_contract,
         &mut effective_plan_result,
     );
     structured_fields::apply_structured_field_selector_repair(
         state,
-        input.route_result,
+        input.output_contract,
         input.request_text,
         &mut effective_plan_result,
         &mut issues,
     );
 
-    let route_requires_clarify_before_tools =
-        route_requires_clarify_before_tools(state, input.route_result, input.plan_result);
     let visible_skills: HashSet<String> = state
         .planner_available_skills_for_task(task)
         .into_iter()
@@ -1007,31 +971,14 @@ pub(crate) fn verify_plan(
         .iter()
         .map(|step| step.step_id.clone())
         .collect();
-    let confirmation_already_granted = route_has_confirmation_resume(input.route_result);
-    let scratch_filesystem_lifecycle_plan = input.route_result.is_some_and(|route| {
-        crate::agent_engine::route_can_upgrade_scratch_filesystem_lifecycle(route)
-            && crate::agent_engine::scratch_filesystem_lifecycle_plan_steps_match(
-                state,
-                &effective_plan_result.steps,
-            )
-    });
     let mut needs_confirmation = false;
-    if route_requires_clarify_before_tools {
-        issues.push(VerifyIssue {
-            step_id: "route".to_string(),
-            kind: VerifyIssueKind::RouteClarifyRequired,
-            detail: format!(
-                "route requires clarify before execution; context={}",
-                input.context_bundle_summary.unwrap_or("<none>")
-            ),
-            missing_fields: Vec::new(),
+    let output_contract_policy_missing = input
+        .output_contract
+        .filter(|_| output_contract_requires_policy(input.output_contract))
+        .is_some_and(|contract| {
+            crate::evidence_policy::final_answer_shape_for_output_contract(contract).is_none()
         });
-    }
-    let route_contract_missing = input
-        .route_result
-        .filter(|_| route_requires_contract(input.route_result))
-        .is_some_and(|route| crate::evidence_policy::final_answer_shape_for_route(route).is_none());
-    if route_contract_missing {
+    if output_contract_policy_missing {
         issues.push(VerifyIssue {
             step_id: "route".to_string(),
             kind: VerifyIssueKind::ContractMissing,
@@ -1054,7 +1001,7 @@ pub(crate) fn verify_plan(
                     &state.skill_rt.workspace_root,
                 )
             {
-                push_unbound_locator_route_clarify_issue(&mut issues, &step.step_id);
+                push_unbound_locator_boundary_clarify_issue(&mut issues, &step.step_id);
             }
             issues.push(VerifyIssue {
                 step_id: step.step_id.clone(),
@@ -1085,77 +1032,12 @@ pub(crate) fn verify_plan(
                     &state.skill_rt.workspace_root,
                 )
             {
-                push_unbound_locator_route_clarify_issue(&mut issues, &step.step_id);
+                push_unbound_locator_boundary_clarify_issue(&mut issues, &step.step_id);
             }
-            let subagent_review_boundary_surface_action_allowed =
-                subagent_review_boundary_surface_action_allowed(
-                    &effective_plan_result,
-                    &normalized_skill,
-                    &step.args,
-                );
-            if let Some(policy) = crate::evidence_policy::capability_ref_action_policy_for_route(
-                input.route_result,
-                &normalized_skill,
-                &step.args,
-            ) {
-                if unbound_locator_boundary
-                    && policy_action_reads_path_content_under_unbound_locator(
-                        &policy.action_key,
-                        &step.args,
-                        &state.skill_rt.workspace_root,
-                    )
-                {
-                    push_unbound_locator_route_clarify_issue(&mut issues, &step.step_id);
-                }
-                if !policy.is_allowed()
-                    && !crate::agent_engine::action_has_user_named_output_path_marker(&step.args)
-                    && !(scratch_filesystem_lifecycle_plan
-                        && crate::agent_engine::scratch_filesystem_lifecycle_action_allowed(
-                            state,
-                            &normalized_skill,
-                            &step.args,
-                        ))
-                    && !registry_action_can_extend_summary_contract(
-                        state,
-                        &normalized_skill,
-                        &step.args,
-                        &policy.contract_match,
-                    )
-                    && !subagent_review_boundary_surface_action_allowed
-                {
-                    issues.push(VerifyIssue {
-                        step_id: step.step_id.clone(),
-                        kind: VerifyIssueKind::ContractActionRejected,
-                        detail: format!(
-                            "action `{}` is rejected by contract `{}` ({}) with final answer shape `{}`",
-                            policy.action_key,
-                            policy.contract_match,
-                            policy.decision.as_str(),
-                            policy.final_answer_shape
-                        ),
-                        missing_fields: Vec::new(),
-                    });
-                } else if !policy.preferred_actions.is_empty()
-                    && !policy.action_matches_preferred()
-                    && !subagent_review_boundary_surface_action_allowed
-                {
-                    issues.push(VerifyIssue {
-                        step_id: step.step_id.clone(),
-                        kind: VerifyIssueKind::ContractPreferredActionAvailable,
-                        detail: format!(
-                            "action `{}` is allowed by contract `{}` but preferred action(s) are `{}`",
-                            policy.action_key,
-                            policy.contract_match,
-                            policy.preferred_actions.join(",")
-                        ),
-                        missing_fields: Vec::new(),
-                    });
-                }
-            } else if route_requires_contract(input.route_result)
-                && !route_contract_missing
+            if output_contract_requires_policy(input.output_contract)
+                && !output_contract_policy_missing
                 && crate::evidence_policy::ActionRef::from_skill_args(&normalized_skill, &step.args)
                     .is_none()
-                && !subagent_review_boundary_surface_action_allowed
             {
                 issues.push(VerifyIssue {
                     step_id: step.step_id.clone(),
@@ -1183,23 +1065,7 @@ pub(crate) fn verify_plan(
                 &normalized_skill,
                 &step.args,
             );
-            if input
-                .route_result
-                .is_some_and(|route| risk_exceeds_ceiling(step_risk, route.risk_ceiling))
-                && !autonomous_workspace_fs_mutation
-            {
-                issues.push(VerifyIssue {
-                    step_id: step.step_id.clone(),
-                    kind: VerifyIssueKind::RiskBudgetExceeded,
-                    detail: format!(
-                        "skill `{normalized_skill}` action risk `{:?}` exceeds route risk ceiling",
-                        step_risk
-                    ),
-                    missing_fields: Vec::new(),
-                });
-            }
-            if !confirmation_already_granted
-                && !safe_autonomous_creation
+            if !safe_autonomous_creation
                 && !autonomous_workspace_fs_mutation
                 && !autonomous_validation_run_cmd
                 && !registry_declares_non_mutating_planner_action(
@@ -1287,7 +1153,6 @@ pub(crate) fn verify_plan(
     } else {
         rewrite_execution_recipe_steps(
             state,
-            input.route_result,
             input.request_text,
             &effective_plan_result,
             input.execution_recipe,
@@ -1309,36 +1174,6 @@ pub(crate) fn verify_plan(
 
 fn planner_internal_tool_is_visible(normalized_skill: &str) -> bool {
     matches!(normalized_skill, "subagent")
-}
-
-fn is_subagent_review_boundary_surface_plan(plan_result: &PlanResult) -> bool {
-    plan_result.raw_plan_text.trim() == "deterministic:subagent_review_boundary_surface"
-}
-
-fn subagent_review_boundary_surface_action_allowed(
-    plan_result: &PlanResult,
-    normalized_skill: &str,
-    args: &Value,
-) -> bool {
-    if !is_subagent_review_boundary_surface_plan(plan_result) {
-        return false;
-    }
-    match normalized_skill {
-        "subagent" => {
-            args.get("role")
-                .and_then(Value::as_str)
-                .map(normalize_schema_token)
-                .is_some_and(|role| role == "review")
-                && args.get("objective").and_then(Value::as_str).map(str::trim)
-                    == Some("runtime_boundary_alignment_audit")
-        }
-        "fs_basic" => args
-            .get("action")
-            .and_then(Value::as_str)
-            .map(normalize_schema_token)
-            .is_some_and(|action| action == "read_text_range"),
-        _ => false,
-    }
 }
 
 #[cfg(test)]

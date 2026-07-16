@@ -375,7 +375,7 @@ fn inventory_for_reason_alias(reason_code: &str) -> Option<RepairBoundaryInvento
         | "verify_unresolved_template_arg"
         | "verify_invalid_depends_on"
         | "verify_primary_fallback_conflict"
-        | "verify_route_clarify_required"
+        | "verify_boundary_clarify_required"
         | "verify_recipe_inspect_before_mutate_required"
         | "verify_recipe_validation_after_mutate_required"
         | "verify_recipe_target_scope_required" => "plan_verifier_issue_repair",

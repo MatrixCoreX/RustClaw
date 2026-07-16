@@ -12,7 +12,7 @@ fn generated_file_path_report_does_not_repair_media_artifact_output_with_text_wr
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route),
+            output_contract: Some(&route.output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -59,7 +59,7 @@ fn media_generate_dry_run_does_not_exceed_medium_risk_ceiling() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route),
+            output_contract: Some(&route.output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -103,7 +103,7 @@ fn generated_file_path_report_does_not_write_stat_json_over_media_path() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route),
+            output_contract: Some(&route.output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
