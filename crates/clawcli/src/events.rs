@@ -15,6 +15,13 @@ pub(crate) struct TaskEventLine {
     pub(crate) fields: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LiveEventOutputMode {
+    Compact,
+    Jsonl,
+    Quiet,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct EventFilters {
     event_types: Vec<String>,
@@ -145,8 +152,27 @@ pub(crate) fn task_event_lines(data: &serde_json::Value) -> Vec<TaskEventLine> {
     events
 }
 
-pub(crate) fn task_event_line_from_value(event: &serde_json::Value) -> Option<TaskEventLine> {
-    task_event_line(event)
+pub(crate) fn live_task_event_output_line(
+    raw_event: &serde_json::Value,
+    mode: LiveEventOutputMode,
+    filters: &EventFilters,
+) -> Result<Option<String>> {
+    if mode == LiveEventOutputMode::Quiet {
+        return Ok(None);
+    }
+    let event = task_event_line(raw_event);
+    if !filters.is_empty() && !event.as_ref().is_some_and(|event| filters.matches(event)) {
+        return Ok(None);
+    }
+    match mode {
+        LiveEventOutputMode::Compact => Ok(event.map(|event| compact_task_event_line(&event))),
+        LiveEventOutputMode::Jsonl => Ok(Some(serde_json::to_string(raw_event)?)),
+        LiveEventOutputMode::Quiet => Ok(None),
+    }
+}
+
+pub(crate) fn compact_task_event_line(event: &TaskEventLine) -> String {
+    format!("event: {}", event.line)
 }
 
 pub(crate) fn follow_task_events<F>(

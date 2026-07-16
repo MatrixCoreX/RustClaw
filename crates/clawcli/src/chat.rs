@@ -102,10 +102,17 @@ fn follow_and_render_task(
         if let Some(seq) = events::task_event_seq(raw_event) {
             cursor = cursor.max(seq);
         }
-        if jsonl_output {
-            println!("{}", serde_json::to_string(raw_event)?);
-        } else if let Some(event) = events::task_event_line_from_value(raw_event) {
-            println!("event: {}", event.line);
+        let output_mode = if jsonl_output {
+            events::LiveEventOutputMode::Jsonl
+        } else {
+            events::LiveEventOutputMode::Compact
+        };
+        if let Some(line) = events::live_task_event_output_line(
+            raw_event,
+            output_mode,
+            &events::EventFilters::default(),
+        )? {
+            println!("{line}");
         }
         Ok(!events::task_event_is_terminal(raw_event)
             && !events::task_event_is_background(raw_event))
