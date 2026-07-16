@@ -1,8 +1,8 @@
 use super::{
     session_list_json, session_resume_json, session_show_json, session_store_archive_json,
     session_store_delete_json, session_store_fork_json, session_store_record_chat_cursor,
-    session_store_record_chat_task, session_store_select_chat_thread, session_store_upsert_summary,
-    SessionStore,
+    session_store_record_chat_task, session_store_select_chat_thread,
+    session_store_select_latest_chat_thread, session_store_upsert_summary, SessionStore,
 };
 
 #[test]
@@ -155,6 +155,8 @@ fn chat_thread_store_resumes_latest_and_persists_task_cursor() {
     assert_eq!(resumed.thread_id, first.thread_id);
     assert_eq!(resumed.current_task_id, first.current_task_id);
     assert_eq!(resumed.last_event_seq, 17);
+    let latest = session_store_select_latest_chat_thread(&store).expect("select latest thread");
+    assert_eq!(latest, resumed);
 
     let fresh = session_store_select_chat_thread(&mut store, None, true, "cli_thread_generated_3")
         .expect("create fresh thread");
@@ -165,6 +167,7 @@ fn chat_thread_store_resumes_latest_and_persists_task_cursor() {
 #[test]
 fn chat_thread_store_rejects_non_machine_thread_and_task_refs() {
     let mut store = SessionStore::default();
+    assert!(session_store_select_latest_chat_thread(&store).is_err());
     assert!(session_store_select_chat_thread(
         &mut store,
         Some("thread with spaces"),
