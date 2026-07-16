@@ -30,6 +30,7 @@ fn trace_json_includes_round_decision_envelope() {
         goal: "read a field".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps: vec![crate::PlanStep {
             step_id: "step_1".to_string(),
             action_type: "call_capability".to_string(),

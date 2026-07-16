@@ -52,8 +52,20 @@ Repair boundary:
 
 Return exactly one JSON object:
 {
+  "output_contract": {
+    "response_shape": "free|one_sentence|strict|scalar|file_token",
+    "exact_sentence_count": null,
+    "requires_content_evidence": false,
+    "delivery_required": false,
+    "locator_kind": "none|path|current_workspace|url|filename",
+    "delivery_intent": "none|file_single|directory_lookup|directory_batch_files",
+    "result_kind": "<machine result kind or none>"
+  },
   "steps": [ <AgentAction JSON>, ... ]
 }
+
+Preserve or repair the planner-owned `output_contract` using only machine tokens. Do not derive
+contract fields from localized error text or copy user prose into them.
 
 Each step must use one of:
 1) {"type":"call_capability","capability":"<planner_capability_name>","args":{...}}  (preferred when a matching planner capability exists)

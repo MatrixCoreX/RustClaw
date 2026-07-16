@@ -465,6 +465,7 @@ fn local_code_task_projection_includes_failing_command_repair_fields() {
                 goal: "observe failing command, fix code, and validate".to_string(),
                 missing_slots: Vec::new(),
                 needs_confirmation: false,
+                output_contract: None,
                 steps: vec![
                     crate::PlanStep {
                         step_id: "step_1".to_string(),
@@ -569,6 +570,7 @@ fn local_code_task_projection_uses_plan_trace_run_cmd_commands() {
                 goal: "update and validate local code".to_string(),
                 missing_slots: Vec::new(),
                 needs_confirmation: false,
+                output_contract: None,
                 steps: vec![
                     crate::PlanStep {
                         step_id: "step_1".to_string(),
@@ -803,6 +805,7 @@ fn local_code_task_projection_uses_successful_write_plan_content_for_code_fields
                 goal: "write and validate local code".to_string(),
                 missing_slots: Vec::new(),
                 needs_confirmation: false,
+                output_contract: None,
                 steps: vec![
                     crate::PlanStep {
                         step_id: "step_1".to_string(),

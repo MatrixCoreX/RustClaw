@@ -21,6 +21,8 @@ mod planning;
 pub(crate) use planning::explicit_machine_syntax_command_segment;
 mod planning_actions;
 mod planning_followup;
+#[path = "agent_engine/planning_output_contract.rs"]
+mod planning_output_contract;
 mod planning_parse;
 mod planning_path_metadata;
 mod planning_prompt;

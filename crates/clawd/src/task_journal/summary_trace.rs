@@ -243,6 +243,7 @@ pub(super) fn plan_summary_json(plan: &crate::PlanResult) -> Value {
     json!({
         "goal": crate::truncate_for_log(&plan.goal),
         "plan_kind": plan.plan_kind.as_str(),
+        "output_contract": plan.output_contract.as_ref().map(planner_output_contract_json),
         "step_count": plan.steps.len(),
         "missing_slots": plan.missing_slots,
         "needs_confirmation": plan.needs_confirmation,
@@ -258,6 +259,7 @@ pub(super) fn plan_trace_json(
         "plan_kind": plan.plan_kind.as_str(),
         "planner_notes": crate::truncate_for_log(&plan.planner_notes),
         "raw_plan_text": crate::truncate_for_log(&plan.raw_plan_text),
+        "output_contract": plan.output_contract.as_ref().map(planner_output_contract_json),
         "step_count": plan.steps.len(),
         "steps": plan.steps.iter().map(|step| {
             let raw_action_ref = plan_step_raw_action_ref(step);
@@ -273,6 +275,18 @@ pub(super) fn plan_trace_json(
                 "why": crate::truncate_for_log(&step.why),
             })
         }).collect::<Vec<_>>(),
+    })
+}
+
+fn planner_output_contract_json(contract: &crate::IntentOutputContract) -> Value {
+    json!({
+        "response_shape": contract.response_shape.as_str(),
+        "exact_sentence_count": contract.exact_sentence_count,
+        "requires_content_evidence": contract.requires_content_evidence,
+        "delivery_required": contract.delivery_required,
+        "locator_kind": contract.locator_kind.as_str(),
+        "delivery_intent": contract.delivery_intent.as_str(),
+        "result_kind": contract.semantic_kind.as_str(),
     })
 }
 

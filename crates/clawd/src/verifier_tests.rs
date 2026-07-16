@@ -333,6 +333,7 @@ pub(super) fn plan_result(steps: Vec<PlanStep>) -> PlanResult {
         goal: "test".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps,
         planner_notes: String::new(),
         plan_kind: PlanKind::Single,

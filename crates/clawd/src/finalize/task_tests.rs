@@ -1476,6 +1476,7 @@ fn answer_route_result_overrides_initial_chat_when_execution_trace_exists() {
         raw_plan_text: String::new(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps: Vec::new(),
     });
 

@@ -108,6 +108,7 @@ fn deterministic_plan_reason_code_appends_machine_note() {
         goal: "g".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps: Vec::new(),
         planner_notes: "repair_reason_code=existing".to_string(),
         plan_kind: PlanKind::Single,

@@ -27,6 +27,9 @@ pub(super) fn build_plan_result_with_notes(
         goal: goal.to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: super::planning_output_contract::parse_planner_output_contract(
+            raw_plan_text,
+        ),
         steps,
         planner_notes: planner_notes.trim().to_string(),
         plan_kind,

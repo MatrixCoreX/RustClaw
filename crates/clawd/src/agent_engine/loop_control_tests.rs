@@ -172,6 +172,7 @@ fn plan_result_with_raw_and_steps(
         goal: "test".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps,
         planner_notes: String::new(),
         plan_kind: crate::PlanKind::Single,

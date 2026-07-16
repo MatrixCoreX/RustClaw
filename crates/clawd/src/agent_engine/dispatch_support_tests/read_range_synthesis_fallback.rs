@@ -52,6 +52,7 @@ fn synthesize_direct_fallback_blocks_multiline_raw_read_range_when_plan_requests
                 goal: String::new(),
                 missing_slots: Vec::new(),
                 needs_confirmation: false,
+                output_contract: None,
                 steps: vec![crate::plan_step_from_agent_action(
                     &AgentAction::SynthesizeAnswer {
                         evidence_refs: vec!["last_output".to_string()],

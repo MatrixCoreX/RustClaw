@@ -229,6 +229,7 @@ fn names_only_inventory_direct_answer_does_not_need_llm_synthesis() {
                 goal: String::new(),
                 missing_slots: Vec::new(),
                 needs_confirmation: false,
+                output_contract: None,
                 steps: vec![
                     crate::PlanStep {
                         step_id: "step_1".to_string(),
@@ -292,6 +293,7 @@ fn names_only_inventory_free_shape_defers_to_llm_synthesis() {
                 goal: String::new(),
                 missing_slots: Vec::new(),
                 needs_confirmation: false,
+                output_contract: None,
                 steps: vec![
                     crate::PlanStep {
                         step_id: "step_1".to_string(),
@@ -350,6 +352,7 @@ fn dirs_only_inventory_names_by_kind_can_direct_answer_observation_only_plan() {
                 goal: String::new(),
                 missing_slots: Vec::new(),
                 needs_confirmation: false,
+                output_contract: None,
                 steps: vec![crate::PlanStep {
                     step_id: "step_1".to_string(),
                     action_type: "call_capability".to_string(),

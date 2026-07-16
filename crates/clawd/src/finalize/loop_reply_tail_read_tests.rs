@@ -88,6 +88,7 @@ fn tail_read_directory_inventory_projection_uses_planned_tail_count() {
                 goal: String::new(),
                 missing_slots: Vec::new(),
                 needs_confirmation: false,
+                output_contract: None,
                 steps: vec![crate::PlanStep {
                     step_id: "step_1".to_string(),
                     action_type: "call_tool".to_string(),

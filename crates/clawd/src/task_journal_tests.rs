@@ -337,6 +337,7 @@ fn agent_loop_decision_envelope_uses_structured_respond_clarify_intent() {
         goal: "collect missing locator".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps: vec![crate::PlanStep {
             step_id: "step_1".to_string(),
             action_type: "respond".to_string(),
@@ -421,6 +422,7 @@ fn agent_loop_decision_envelope_maps_structured_wait_and_stop_intents() {
         goal: "require confirmation".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: true,
+        output_contract: None,
         steps: vec![crate::PlanStep {
             step_id: "step_1".to_string(),
             action_type: "respond".to_string(),
@@ -459,6 +461,7 @@ fn agent_loop_decision_envelope_maps_structured_wait_and_stop_intents() {
         goal: "cannot continue".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps: vec![crate::PlanStep {
             step_id: "step_1".to_string(),
             action_type: "respond".to_string(),
@@ -709,6 +712,7 @@ fn trace_json_includes_round_source_of_truth_machine_fields() {
         goal: "inspect workspace".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps: vec![crate::PlanStep {
             step_id: "step_1".to_string(),
             action_type: "call_capability".to_string(),
@@ -883,6 +887,7 @@ fn test_plan(kind: crate::PlanKind, steps: Vec<crate::PlanStep>) -> crate::PlanR
         goal: String::new(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps,
         planner_notes: String::new(),
         plan_kind: kind,
@@ -1210,6 +1215,7 @@ fn trace_json_distinguishes_requested_tool_from_executed_skill() {
         goal: "list workspace".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps: vec![crate::PlanStep {
             step_id: "step_1".to_string(),
             action_type: "call_skill".to_string(),
@@ -1540,6 +1546,7 @@ fn trace_json_compacts_plan_action_ref_to_contract_action() {
         goal: "check service".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps: vec![crate::PlanStep {
             step_id: "step_1".to_string(),
             action_type: "call_skill".to_string(),

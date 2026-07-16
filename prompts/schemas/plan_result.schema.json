@@ -12,6 +12,7 @@
       "description": "Ordered list of plan steps. Each item is an `AgentAction` keyed by `type`.",
       "items": {"$ref": "#/$defs/AgentAction"}
     },
+    "output_contract": {"$ref": "#/$defs/OutputContract"},
     "planner_notes": {
       "type": "string",
       "description": "Free-text rationale, surfaced into journal but not consumed by the executor.",
@@ -19,6 +20,20 @@
     }
   },
   "$defs": {
+    "OutputContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["response_shape", "exact_sentence_count", "requires_content_evidence", "delivery_required", "locator_kind", "delivery_intent", "result_kind"],
+      "properties": {
+        "response_shape": {"type": "string", "enum": ["free", "one_sentence", "strict", "scalar", "file_token"]},
+        "exact_sentence_count": {"type": ["integer", "null"], "minimum": 1, "maximum": 20},
+        "requires_content_evidence": {"type": "boolean"},
+        "delivery_required": {"type": "boolean"},
+        "locator_kind": {"type": "string", "enum": ["none", "path", "current_workspace", "url", "filename"]},
+        "delivery_intent": {"type": "string", "enum": ["none", "file_single", "directory_lookup", "directory_batch_files"]},
+        "result_kind": {"type": "string", "enum": ["none", "raw_command_output", "command_output_summary", "service_status", "hidden_entries_check", "file_names", "directory_names", "directory_entry_groups", "file_paths", "directory_purpose_summary", "content_excerpt_summary", "document_heading", "content_excerpt_with_summary", "content_presence_check", "excerpt_kind_judgment", "recent_artifacts_judgment", "workspace_project_summary", "scalar_count", "quantity_comparison", "execution_failed_step", "generated_file_delivery", "generated_file_path_report", "filesystem_mutation_result", "scalar_path_only", "file_basename", "existence_with_path", "existence_with_path_summary", "recent_scalar_equality_check", "git_commit_subject", "git_repository_state", "structured_keys", "config_validation", "config_mutation", "config_risk_assessment", "sqlite_table_listing", "sqlite_table_names_only", "sqlite_database_kind_judgment", "sqlite_schema_version", "rss_news_fetch", "web_page_summary", "web_search_summary", "weather_query", "market_quote", "image_understanding", "photo_organization", "publishing_preview", "package_manager_detection", "tool_discovery", "archive_list", "archive_read", "archive_pack", "archive_unpack", "docker_ps", "docker_images", "docker_logs", "docker_container_lifecycle"]}
+      }
+    },
     "AgentAction": {
       "oneOf": [
         {"$ref": "#/$defs/ActionThink"},
