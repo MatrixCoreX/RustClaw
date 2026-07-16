@@ -208,7 +208,7 @@ fn summary_json_marks_missing_evidence_as_remaining_work() {
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.record_final_status(TaskJournalFinalStatus::Success);
 
     let summary = journal.to_summary_json();

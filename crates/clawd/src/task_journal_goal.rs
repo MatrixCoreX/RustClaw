@@ -216,11 +216,13 @@ fn remaining_work(
 
 fn missing_evidence_for_journal(journal: &TaskJournal) -> Vec<String> {
     journal
-        .route_result
+        .output_contract
         .as_ref()
-        .map(|route| {
-            super::task_journal_evidence_coverage::evidence_coverage_for_route(route, journal)
-                .missing_evidence
+        .map(|contract| {
+            super::task_journal_evidence_coverage::evidence_coverage_for_output_contract(
+                contract, journal,
+            )
+            .missing_evidence
         })
         .unwrap_or_default()
 }

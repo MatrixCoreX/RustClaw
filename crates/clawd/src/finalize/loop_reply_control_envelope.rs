@@ -4,7 +4,6 @@ use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::ClaimedTask;
 
 use super::log_deterministic_delivery_record;
-use super::route_helpers::route_output_contract_machine_json;
 
 pub(super) fn attach_requested_control_machine_envelope(
     task: &ClaimedTask,
@@ -26,8 +25,7 @@ pub(super) fn attach_requested_control_machine_envelope(
     if requested_fields.is_empty() {
         return false;
     }
-    let Some(decision_envelope) =
-        decision_envelope_for_delivery(loop_state, ctx, &requested_fields)
+    let Some(decision_envelope) = decision_envelope_for_delivery(loop_state, &requested_fields)
     else {
         return false;
     };
@@ -48,7 +46,7 @@ pub(super) fn attach_requested_control_machine_envelope(
         } else {
             Value::Object(projected)
         },
-        "output_contract": ctx.route_result.as_ref().map(route_output_contract_machine_json)
+        "output_contract": loop_state.output_contract.as_ref().map(output_contract_machine_json)
     })
     .to_string();
     delivery_messages.push(envelope.clone());
@@ -127,7 +125,6 @@ fn push_unique(mut fields: Vec<String>, field: String) -> Vec<String> {
 
 fn decision_envelope_for_delivery(
     loop_state: &LoopState,
-    ctx: &AgentRunContext,
     requested_fields: &[String],
 ) -> Option<Value> {
     let preferred_key = requested_fields
@@ -141,18 +138,28 @@ fn decision_envelope_for_delivery(
         .or_else(|| loop_state.output_vars.get("agent_loop.decision_envelope"))
         .and_then(|value| serde_json::from_str::<Value>(value).ok())
         .or_else(|| {
-            let route = ctx.route_result.as_ref()?;
             let plan = loop_state
                 .round_traces
                 .iter()
                 .rev()
                 .find_map(|round| round.plan_result.as_ref())?;
-            Some(
-                crate::task_journal::agent_loop_round_plan_decision_envelope_for_runtime(
-                    route, plan,
-                ),
-            )
+            Some(crate::task_journal::agent_loop_round_plan_contract_envelope(plan))
         })
+}
+
+fn output_contract_machine_json(contract: &crate::IntentOutputContract) -> Value {
+    json!({
+        "response_shape": contract.response_shape.as_str(),
+        "exact_sentence_count": contract.exact_sentence_count,
+        "requires_content_evidence": contract.requires_content_evidence,
+        "delivery_required": contract.delivery_required,
+        "locator_kind": contract.locator_kind.as_str(),
+        "delivery_intent": contract.delivery_intent.as_str(),
+        "result_kind": contract.semantic_kind.as_str(),
+        "final_answer_shape": crate::evidence_policy::final_answer_shape_for_output_contract(contract)
+            .map(|shape| shape.as_str())
+            .unwrap_or_else(|| contract.response_shape.as_str()),
+    })
 }
 
 fn projected_decision_envelope(

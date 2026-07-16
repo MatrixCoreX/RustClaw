@@ -85,8 +85,11 @@ pub(in crate::agent_engine::loop_control) async fn try_rewrite_answer_verifier_g
     let Some(journal_snapshot) = reply.task_journal.clone() else {
         return false;
     };
-    let coverage_complete =
-        crate::task_journal::evidence_coverage_for_route(route, &journal_snapshot).is_complete();
+    let coverage_complete = crate::task_journal::evidence_coverage_for_output_contract(
+        &route.effective_output_contract(),
+        &journal_snapshot,
+    )
+    .is_complete();
     let observed_content_rewrite = answer_verifier_gap_requests_observed_content_rewrite(verifier)
         && answer_verifier_gap_has_observed_content_evidence(&journal_snapshot);
     if !coverage_complete && !observed_content_rewrite {

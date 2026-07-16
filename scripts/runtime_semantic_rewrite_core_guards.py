@@ -169,14 +169,21 @@ def scan_journal_output_contract_ref_boundary() -> list[Finding]:
     path = SRC_ROOT / "task_journal_decision_envelope.rs"
     rel_path = rel(path)
     text = path.read_text(encoding="utf-8")
-    if "let contract = route.effective_output_contract();" in text:
+    required = (
+        "fn agent_loop_round_plan_contract_envelope_json(",
+        "let output_contract = plan.output_contract.clone().unwrap_or_default();",
+        "output_contract_ref(&output_contract)",
+    )
+    if all(token in text for token in required) and not any(
+        token in text for token in ("RouteResult", "output_contract_ref_for_route")
+    ):
         return []
     return [
         Finding(
             rel_path,
             1,
-            "journal_output_contract_ref_not_effective",
-            "output_contract_ref_for_route must use route.effective_output_contract()",
+            "journal_output_contract_not_planner_owned",
+            "decision envelopes must consume PlanResult.output_contract without RouteResult compatibility",
         )
     ]
 

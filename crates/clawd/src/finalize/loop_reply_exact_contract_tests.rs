@@ -396,7 +396,7 @@ fn archive_pack_capability_ref_prefers_observed_archive_path_without_semantic_ki
 }
 
 #[test]
-fn archive_pack_exact_contract_keeps_later_terminal_respond() {
+fn archive_pack_exact_contract_prefers_observed_path_over_late_control_token() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(3);
     loop_state.has_tool_or_skill_output = true;
@@ -434,11 +434,15 @@ fn archive_pack_exact_contract_keeps_later_terminal_respond() {
         &mut finalizer_summary,
     );
 
-    assert_eq!(delivery_messages, vec!["needs_user_confirmation"]);
+    assert_eq!(
+        delivery_messages,
+        vec!["/home/guagua/rustclaw/tmp/nl_archive_case.zip"]
+    );
     assert_eq!(
         loop_state.last_user_visible_respond.as_deref(),
-        Some("needs_user_confirmation")
+        Some("/home/guagua/rustclaw/tmp/nl_archive_case.zip")
     );
+    assert!(finalizer_summary.is_some());
 }
 
 #[test]

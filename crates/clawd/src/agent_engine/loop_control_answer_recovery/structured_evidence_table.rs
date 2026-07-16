@@ -29,7 +29,12 @@ pub(in crate::agent_engine::loop_control) fn try_recover_structured_evidence_tab
     {
         return false;
     }
-    if !crate::task_journal::evidence_coverage_for_route(route, journal).is_complete() {
+    if !crate::task_journal::evidence_coverage_for_output_contract(
+        &route.effective_output_contract(),
+        journal,
+    )
+    .is_complete()
+    {
         return false;
     }
     let Some(answer) = structured_evidence_table_from_journal(journal) else {

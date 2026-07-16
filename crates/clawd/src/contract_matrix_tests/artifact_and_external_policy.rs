@@ -622,7 +622,7 @@ fn web_page_summary_allows_browser_open_extract_for_url() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "browser_web.open_extract");
-    assert_eq!(policy.contract_match, "none");
+    assert_eq!(policy.contract_match, "web_page_summary");
 }
 
 #[test]
@@ -645,7 +645,7 @@ fn web_search_summary_allows_web_search_extract() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "web_search_extract.search_extract");
-    assert_eq!(policy.contract_match, "none");
+    assert_eq!(policy.contract_match, "web_search_summary");
 }
 
 #[test]
@@ -666,7 +666,7 @@ fn web_search_summary_allows_followup_browser_extract() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "browser_web.open_extract");
-    assert_eq!(policy.contract_match, "none");
+    assert_eq!(policy.contract_match, "web_search_summary");
 }
 
 #[test]
@@ -686,7 +686,7 @@ fn weather_query_allows_weather_query_without_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "weather.query");
-    assert_eq!(policy.contract_match, "none");
+    assert_eq!(policy.contract_match, "weather_query");
 }
 
 #[test]
@@ -706,7 +706,7 @@ fn market_quote_allows_stock_quote_without_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "stock");
-    assert_eq!(policy.contract_match, "none");
+    assert_eq!(policy.contract_match, "market_quote");
 }
 
 #[test]
@@ -726,7 +726,7 @@ fn market_quote_allows_crypto_quote_without_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "crypto.quote");
-    assert_eq!(policy.contract_match, "none");
+    assert_eq!(policy.contract_match, "market_quote");
 }
 
 #[test]
@@ -746,7 +746,7 @@ fn market_quote_allows_crypto_positions_without_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "crypto.positions");
-    assert_eq!(policy.contract_match, "none");
+    assert_eq!(policy.contract_match, "market_quote");
 }
 
 #[test]
@@ -767,7 +767,7 @@ fn image_understanding_allows_image_vision_describe_with_url_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "image_vision.describe");
-    assert_eq!(policy.contract_match, "none");
+    assert_eq!(policy.contract_match, "image_understanding");
 }
 
 #[test]
@@ -788,7 +788,7 @@ fn image_understanding_allows_image_vision_analyze_alias() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "image_vision.analyze");
-    assert_eq!(policy.contract_match, "none");
+    assert_eq!(policy.contract_match, "image_understanding");
 }
 
 #[test]
@@ -808,5 +808,5 @@ fn photo_organization_allows_prepare_candidate_discovery_without_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "photo_organize.prepare");
-    assert_eq!(policy.contract_match, "none");
+    assert_eq!(policy.contract_match, "photo_organization");
 }

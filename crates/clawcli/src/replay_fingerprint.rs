@@ -7,6 +7,7 @@ pub(crate) fn replay_route_fingerprint(bundle: &Value) -> Vec<Value> {
         &[
             "route_gate_kind",
             "ask_mode",
+            "output_contract",
             "route_result",
             "route_decision",
             "boundary_context",
@@ -19,6 +20,10 @@ pub(crate) fn replay_route_fingerprint(bundle: &Value) -> Vec<Value> {
             "intent_kind",
             "target_kind",
             "operation",
+            "response_shape",
+            "result_kind",
+            "locator_kind",
+            "delivery_intent",
             "decision",
             "decision_envelope",
             "semantic_authority",

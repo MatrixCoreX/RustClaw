@@ -714,7 +714,10 @@ fn observed_execution_has_complete_contract_evidence(
         "",
         crate::task_journal::TaskJournalFinalStatus::Success,
     );
-    let coverage = crate::task_journal::evidence_coverage_for_route(route, &journal);
+    let coverage = crate::task_journal::evidence_coverage_for_output_contract(
+        &route.effective_output_contract(),
+        &journal,
+    );
     let has_contractual_evidence =
         !coverage.required_evidence.is_empty() || coverage.evidence_expression.is_some();
     has_contractual_evidence && coverage.is_complete()

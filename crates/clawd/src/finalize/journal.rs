@@ -128,7 +128,7 @@ fn strict_json_projection_observation(loop_state: &LoopState) -> Option<serde_js
 /// LOOP 层一次性构建 journal（替代原 `loop_reply::build_loop_journal`）。
 ///
 /// 字段写入顺序与值保持原实现一致：
-/// 1. `record_route_result` / `record_context_bundle_summary`（来自 ctx）
+/// 1. `record_output_contract`（来自 loop state）/ `record_context_bundle_summary`（来自 ctx）
 /// 2. `rounds = round_traces.clone()`
 /// 3. 每个 step 走 `push_step_result`
 /// 4. `record_finalizer_summary` 或 `record_used_evidence_ids_count(0)`
@@ -152,9 +152,8 @@ pub(crate) fn build_from_loop_state(
         final_status,
         finalizer_summary.as_ref(),
     );
-    if let Some(route_result) = agent_run_context.and_then(|context| context.route_result.as_ref())
-    {
-        journal.record_route_result(route_result);
+    if let Some(output_contract) = loop_state.output_contract.as_ref() {
+        journal.record_output_contract(output_contract);
     }
     if let Some(ctx) = agent_run_context {
         if let Some(context_summary) = ctx.context_bundle_summary.as_deref() {

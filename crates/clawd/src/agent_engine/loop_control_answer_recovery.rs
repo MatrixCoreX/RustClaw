@@ -686,7 +686,11 @@ pub(super) fn try_recover_rss_news_answer_verifier_gap(
         return false;
     }
     if !reply.task_journal.as_ref().is_some_and(|journal| {
-        crate::task_journal::evidence_coverage_for_route(route, journal).is_complete()
+        crate::task_journal::evidence_coverage_for_output_contract(
+            &route.effective_output_contract(),
+            journal,
+        )
+        .is_complete()
     }) {
         return false;
     }
@@ -717,7 +721,11 @@ pub(super) fn try_preserve_rss_source_hosts_from_structured_evidence(
             .answer_verifier_summary
             .as_ref()
             .is_none_or(|verifier| verifier.pass)
-            && crate::task_journal::evidence_coverage_for_route(route, journal).is_complete()
+            && crate::task_journal::evidence_coverage_for_output_contract(
+                &route.effective_output_contract(),
+                journal,
+            )
+            .is_complete()
     }) {
         return false;
     }
@@ -787,7 +795,11 @@ pub(super) fn try_recover_document_heading_answer_verifier_gap(
     }
     if !reply.task_journal.as_ref().is_some_and(|journal| {
         route_result.is_some_and(|route| {
-            crate::task_journal::evidence_coverage_for_route(route, journal).is_complete()
+            crate::task_journal::evidence_coverage_for_output_contract(
+                &route.effective_output_contract(),
+                journal,
+            )
+            .is_complete()
         })
     }) {
         return false;
@@ -951,7 +963,11 @@ pub(super) fn try_recover_content_excerpt_summary_answer_verifier_gap(
         return false;
     }
     if !reply.task_journal.as_ref().is_some_and(|journal| {
-        crate::task_journal::evidence_coverage_for_route(route, journal).is_complete()
+        crate::task_journal::evidence_coverage_for_output_contract(
+            &route.effective_output_contract(),
+            journal,
+        )
+        .is_complete()
     }) {
         return false;
     }
@@ -1019,7 +1035,12 @@ pub(super) fn try_recover_latest_synthesis_answer_verifier_gap(
     if !verifier.high_confidence_retry_gap() {
         return false;
     }
-    if !crate::task_journal::evidence_coverage_for_route(route, journal).is_complete() {
+    if !crate::task_journal::evidence_coverage_for_output_contract(
+        &route.effective_output_contract(),
+        journal,
+    )
+    .is_complete()
+    {
         return false;
     }
     if verifier_requires_structured_visible_rewrite(verifier) {
@@ -1276,7 +1297,12 @@ fn route_allows_latest_respond_retry_recovery(
     {
         return false;
     }
-    if !crate::task_journal::evidence_coverage_for_route(route, journal).is_complete() {
+    if !crate::task_journal::evidence_coverage_for_output_contract(
+        &route.effective_output_contract(),
+        journal,
+    )
+    .is_complete()
+    {
         return false;
     }
     journal.step_results.iter().any(|step| {

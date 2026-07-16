@@ -127,6 +127,8 @@ REMOVED_SEMANTIC_PRODUCTION_TOKENS: tuple[str, ...] = (
     "pure_chat_agent_loop_submode",
     "executionless_finalize_trace_plain",
     "executable_contract_preserved_for_agent_loop",
+    "is_normalizer_schema_capability_bridge",
+    "is_registry_capability_bridge",
 )
 
 REMOVED_SEMANTIC_RESOURCE_TOKENS: tuple[tuple[Path, str], ...] = (

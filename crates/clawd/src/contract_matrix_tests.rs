@@ -1048,7 +1048,7 @@ fn rss_news_fetch_allows_rss_fetch_without_locator() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "rss_fetch.latest");
-    assert_eq!(policy.contract_match, "none");
+    assert_eq!(policy.contract_match, "rss_news_fetch");
 }
 
 #[test]
@@ -1591,12 +1591,12 @@ fn configured_legacy_text_observation_extractors_are_reflected_in_trace() {
 }
 
 #[test]
-fn normalizer_schema_capability_bridges_fall_back_to_generic_contracts() {
+fn planner_semantic_kinds_directly_match_their_contracts() {
     let matrix = load_workspace_matrix();
 
     for kind in OutputSemanticKind::ALL
         .iter()
-        .filter(|kind| kind.is_normalizer_schema_capability_bridge())
+        .filter(|kind| **kind != OutputSemanticKind::None)
     {
         let output_contract = IntentOutputContract {
             semantic_kind: *kind,
@@ -1606,11 +1606,11 @@ fn normalizer_schema_capability_bridges_fall_back_to_generic_contracts() {
         };
         let matched = matrix
             .match_output_contract(&output_contract)
-            .unwrap_or_else(|| panic!("generic match for {}", kind.as_str()));
-        assert_ne!(
+            .unwrap_or_else(|| panic!("semantic match for {}", kind.as_str()));
+        assert_eq!(
             matched.match_name(),
             kind.as_str(),
-            "{} must not directly own matrix policy after normalizer bridge demotion",
+            "{} must directly own planner contract policy",
             kind.as_str()
         );
     }

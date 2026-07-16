@@ -74,7 +74,7 @@ fn finalization_uses_planner_contract_from_answer_journal() {
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
     route.output_contract.delivery_required = true;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
 
     let selected = planner_route_result_for_finalization(Some(&journal));
 
@@ -560,7 +560,7 @@ fn requested_machine_kv_summary_final_guard_ignores_internal_route_tokens() {
     journal.record_context_bundle_summary(
         "current_workspace_scope_from_current_request=false".to_string(),
     );
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(

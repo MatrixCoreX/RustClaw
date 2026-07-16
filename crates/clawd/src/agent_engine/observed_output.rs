@@ -441,7 +441,7 @@ fn evidence_policy_direct_candidate_satisfies_contract(
         "ask",
         route.resolved_intent.as_str(),
     );
-    journal.record_route_result(route);
+    journal.record_output_contract(&route.effective_output_contract());
     for step in &loop_state.executed_step_results {
         journal.push_step_result(step);
     }

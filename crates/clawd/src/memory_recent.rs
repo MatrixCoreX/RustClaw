@@ -480,14 +480,6 @@ pub(super) fn classify_assistant_context_reply_kind(
     if final_status.eq_ignore_ascii_case("clarify") {
         return AssistantContextReplyKind::ClarifyPlaceholder;
     }
-    let needs_clarify = summary
-        .and_then(|value| value.get("route_result"))
-        .and_then(|value| value.get("needs_clarify"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    if needs_clarify {
-        return AssistantContextReplyKind::ClarifyPlaceholder;
-    }
     AssistantContextReplyKind::Normal
 }
 

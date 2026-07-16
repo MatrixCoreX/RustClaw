@@ -302,6 +302,7 @@ pub(crate) fn trace_snapshot_for_route(route: &RouteResult) -> Option<Value> {
     )
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_contract_snapshot_for_route(route: &RouteResult) -> Option<Value> {
     let matrix = bundled_contract_matrix()?;
     let contract_snapshot = trace_snapshot_for_route(route)?;
@@ -313,7 +314,6 @@ pub(crate) fn runtime_contract_snapshot_for_route(route: &RouteResult) -> Option
     ))
 }
 
-#[cfg(test)]
 pub(crate) fn runtime_contract_snapshot_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<Value> {
@@ -358,7 +358,6 @@ fn runtime_contract_snapshot_value(
     })
 }
 
-#[cfg(test)]
 pub(crate) fn trace_snapshot_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<Value> {
@@ -419,7 +418,6 @@ fn trace_snapshot_for_output_contract_with_route_reason(
     }))
 }
 
-#[cfg(test)]
 pub(crate) fn action_trace_for_output_contract(
     output_contract: &IntentOutputContract,
     action_ref: &str,
@@ -427,6 +425,7 @@ pub(crate) fn action_trace_for_output_contract(
     action_trace_for_output_contract_with_route_reason(output_contract, None, action_ref)
 }
 
+#[cfg(test)]
 pub(crate) fn action_trace_for_route(route: &RouteResult, action_ref: &str) -> Option<Value> {
     let action = ActionRef::parse(action_ref)?;
     if route_capability_ref_allows_action_ref(route, &action) {
@@ -481,6 +480,7 @@ fn action_trace_for_output_contract_with_route_reason(
     }))
 }
 
+#[cfg(test)]
 fn capability_ref_action_trace(route: &RouteResult, action: &ActionRef) -> Value {
     let action_key = action.as_key();
     let final_answer_shape_kind =
@@ -506,35 +506,6 @@ fn capability_ref_action_trace(route: &RouteResult, action: &ActionRef) -> Value
         "allowed_actions": [action_key],
         "forbidden_actions": Vec::<String>::new(),
     })
-}
-
-pub(crate) fn contract_trace_action_key_for_route(
-    route: &RouteResult,
-    action_ref: &str,
-) -> Option<String> {
-    let output_contract = route.effective_output_contract();
-    contract_trace_action_key_for_contract(&output_contract, action_ref)
-}
-
-fn contract_trace_action_key_for_contract(
-    output_contract: &IntentOutputContract,
-    action_ref: &str,
-) -> Option<String> {
-    let matrix = bundled_contract_matrix()?;
-    let matched = matrix.match_output_contract(output_contract)?;
-    let action = ActionRef::parse(action_ref)?;
-    if matched.action_policy(&action) != ActionPolicyDecision::Allowed {
-        return Some(action.as_key());
-    }
-    for raw in matched.allowed_actions() {
-        let Some(policy_ref) = ActionRef::parse(raw) else {
-            continue;
-        };
-        if action_matches_any(&action, std::slice::from_ref(raw)) {
-            return Some(policy_ref.as_key());
-        }
-    }
-    Some(action.as_key())
 }
 
 #[cfg(test)]

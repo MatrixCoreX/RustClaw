@@ -593,6 +593,7 @@ async fn finalize_loop_reply_attaches_requested_control_machine_envelope() {
     let task = claimed_task("task-control-envelope");
     let mut route = scalar_route_result();
     route.output_contract.semantic_kind = OutputSemanticKind::DocumentHeading;
+    let planner_output_contract = route.output_contract.clone();
     let agent_run_context = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         turn_analysis: Some(crate::turn_context::TurnAnalysis {
@@ -610,6 +611,7 @@ async fn finalize_loop_reply_attaches_requested_control_machine_envelope() {
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.output_contract = Some(planner_output_contract);
     loop_state.delivery_messages.push("# RustClaw".to_string());
     loop_state.output_vars.insert(
         "agent_loop.decision_envelope".to_string(),

@@ -436,7 +436,8 @@ fn planner_route_result_for_finalization(
     answer_journal: Option<&crate::task_journal::TaskJournal>,
 ) -> crate::RouteResult {
     answer_journal
-        .and_then(|journal| journal.route_result.clone())
+        .and_then(|journal| journal.output_contract.clone())
+        .map(crate::RouteResult::from_planner_output_contract)
         .unwrap_or_else(crate::RouteResult::planner_output_contract_unavailable)
 }
 
@@ -552,7 +553,7 @@ pub(crate) async fn finalize_ask_result(
             }
             let effective_route_result =
                 planner_route_result_for_finalization(answer.task_journal.as_ref());
-            journal.record_route_result(&effective_route_result);
+            journal.record_output_contract(&effective_route_result.output_contract);
             let route_result = &effective_route_result;
             let mut semantic_clarify = route_result.is_clarify_gate()
                 || answer
@@ -1090,7 +1091,7 @@ pub(crate) async fn finalize_ask_result(
         }
         Err(err_text) => {
             let effective_route_result = crate::RouteResult::planner_output_contract_unavailable();
-            journal.record_route_result(&effective_route_result);
+            journal.record_output_contract(&effective_route_result.output_contract);
             let route_result = &effective_route_result;
             if err_text == crate::agent_engine::TASK_CANCELED_ERR
                 || !repo::is_task_still_running(state, &task.task_id)?

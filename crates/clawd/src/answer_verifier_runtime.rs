@@ -496,7 +496,10 @@ pub(crate) fn local_missing_evidence_verifier_gap(
     if required_evidence_fields.is_empty() {
         return None;
     }
-    let coverage = crate::task_journal::evidence_coverage_for_route(route_result, journal);
+    let coverage = crate::task_journal::evidence_coverage_for_output_contract(
+        &route_result.effective_output_contract(),
+        journal,
+    );
     if coverage.is_complete() {
         return None;
     }
@@ -764,7 +767,11 @@ fn journal_grounded_local_code_strict_json_projection_can_skip_answer_verifier(
         && matches!(contract.response_shape, crate::OutputResponseShape::Strict)
         && (latest_synthesis_step_matches_candidate(journal, candidate_answer)
             || strict_json_projection_observation_matches_candidate(journal, candidate_answer))
-        && crate::task_journal::evidence_coverage_for_route(route_result, journal).is_complete();
+        && crate::task_journal::evidence_coverage_for_output_contract(
+            &route_result.effective_output_contract(),
+            journal,
+        )
+        .is_complete();
     let publishable_projection_matches =
         strict_json_projection_observation_matches_candidate(journal, candidate_answer)
             && (journal_has_code_write_readback_validation_evidence(journal)

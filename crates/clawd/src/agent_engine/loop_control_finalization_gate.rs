@@ -198,6 +198,7 @@ pub(super) fn answer_contract_route_result_for_reply(
     reply
         .task_journal
         .as_ref()
-        .and_then(|journal| journal.route_result.clone())
+        .and_then(|journal| journal.output_contract.clone())
+        .map(RouteResult::from_planner_output_contract)
         .or_else(|| agent_run_context.and_then(|ctx| ctx.route_result.clone()))
 }

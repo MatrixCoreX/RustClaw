@@ -13,7 +13,7 @@ fn generated_file_delivery_wrapped_missing_find_name_supplies_checked_path_evide
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -37,7 +37,8 @@ fn generated_file_delivery_wrapped_missing_find_name_supplies_checked_path_evide
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("path"));
     assert!(coverage.observed_canonical.contains("exists_false"));
@@ -66,7 +67,7 @@ fn docker_success_exit_text_counts_as_field_value_evidence() {
         ..Default::default()
     };
     route.resolved_intent = "capability_ref=docker.version".to_string();
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "docker_basic".to_string(),
@@ -77,7 +78,8 @@ fn docker_success_exit_text_counts_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage.observed_canonical.contains("command_output"));
@@ -119,7 +121,7 @@ fn package_manager_key_value_text_counts_as_field_value_evidence() {
         locator_kind: crate::OutputLocatorKind::None,
         ..Default::default()
     };
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "package_manager".to_string(),
@@ -130,7 +132,8 @@ fn package_manager_key_value_text_counts_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
 
@@ -165,12 +168,11 @@ fn docker_unavailable_text_counts_as_list_candidate_evidence() {
         output_contract: crate::IntentOutputContract::default(),
     };
     route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::None,
+        semantic_kind: crate::OutputSemanticKind::DockerImages,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
-    route.resolved_intent = "capability_ref=docker.list_images".to_string();
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "docker_basic".to_string(),
@@ -181,9 +183,13 @@ fn docker_unavailable_text_counts_as_list_candidate_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
+    assert!(
+        coverage.observed_canonical.contains("candidates"),
+        "coverage: {coverage:?}"
+    );
 
     assert!(coverage.observed_canonical.contains("command_output"));
 }
@@ -192,7 +198,7 @@ fn docker_unavailable_text_counts_as_list_candidate_evidence() {
 fn structured_keys_array_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-structured-keys", "ask", "列出配置键");
     let route = route_for_semantic(crate::OutputSemanticKind::StructuredKeys);
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "config_basic".to_string(),
@@ -211,22 +217,22 @@ fn structured_keys_array_counts_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
 }
 
 #[test]
 fn docker_command_not_found_text_counts_as_docker_contract_evidence() {
-    for (capability_ref, expected_canonical) in [
-        ("capability_ref=docker.version", "field_value"),
-        ("capability_ref=docker.read_logs", "candidates"),
+    for (semantic_kind, expected_canonical) in [
+        (crate::OutputSemanticKind::ServiceStatus, "field_value"),
+        (crate::OutputSemanticKind::DockerLogs, "candidates"),
     ] {
         let mut journal =
             TaskJournal::for_task("task-docker-command-not-found", "ask", "检查 Docker");
-        let mut route = route_for_semantic(crate::OutputSemanticKind::None);
-        route.resolved_intent = capability_ref.to_string();
-        journal.record_route_result(&route);
+        let route = route_for_semantic(semantic_kind);
+        journal.record_output_contract(&route.effective_output_contract());
         journal.push_step_result(&crate::executor::StepExecutionResult {
             step_id: "step_1".to_string(),
             skill: "run_cmd".to_string(),
@@ -237,9 +243,13 @@ fn docker_command_not_found_text_counts_as_docker_contract_evidence() {
             finished_at: 2,
         });
 
-        let coverage = evidence_coverage_for_route(&route, &journal);
+        let coverage =
+            evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
         assert!(coverage.is_complete(), "coverage: {coverage:?}");
-        assert!(coverage.observed_canonical.contains(expected_canonical));
+        assert!(
+            coverage.observed_canonical.contains(expected_canonical),
+            "coverage: {coverage:?}"
+        );
     }
 }
 
@@ -248,7 +258,7 @@ fn scalar_count_json_value_counts_as_count_evidence() {
     let mut journal = TaskJournal::for_task("task-scalar-count", "ask", "输出数量");
     let mut route = route_for_semantic(crate::OutputSemanticKind::ScalarCount);
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "run_cmd".to_string(),
@@ -259,7 +269,8 @@ fn scalar_count_json_value_counts_as_count_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("count"));
 }
@@ -271,7 +282,7 @@ fn log_analyze_output_counts_as_content_excerpt_evidence() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "logs".to_string();
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "log_analyze".to_string(),
@@ -289,7 +300,8 @@ fn log_analyze_output_counts_as_content_excerpt_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
 }
@@ -303,7 +315,7 @@ fn browser_web_output_counts_as_content_excerpt_evidence() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Url;
     route.output_contract.locator_hint = "https://example.com".to_string();
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "browser_web".to_string(),
@@ -324,7 +336,8 @@ fn browser_web_output_counts_as_content_excerpt_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
     assert!(coverage
@@ -360,7 +373,7 @@ fn web_search_extract_output_counts_as_candidates_evidence() {
     let mut journal = TaskJournal::for_task("task-web-search-summary", "ask", "总结搜索结果");
     let mut route = route_for_semantic(crate::OutputSemanticKind::WebSearchSummary);
     route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "web_search_extract".to_string(),
@@ -383,7 +396,8 @@ fn web_search_extract_output_counts_as_candidates_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("candidates"));
     assert!(coverage
@@ -396,7 +410,7 @@ fn web_search_extract_empty_candidates_count_as_candidates_evidence() {
     let mut journal = TaskJournal::for_task("task-web-search-empty", "ask", "总结搜索结果");
     let mut route = route_for_semantic(crate::OutputSemanticKind::WebSearchSummary);
     route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "web_search_extract".to_string(),
@@ -428,7 +442,8 @@ fn web_search_extract_empty_candidates_count_as_candidates_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("candidates"));
     assert!(coverage
@@ -441,7 +456,7 @@ fn weather_output_counts_as_content_excerpt_evidence() {
     let mut journal = TaskJournal::for_task("task-weather-query", "ask", "查天气");
     let mut route = route_for_semantic(crate::OutputSemanticKind::WeatherQuery);
     route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "weather".to_string(),
@@ -460,7 +475,8 @@ fn weather_output_counts_as_content_excerpt_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
     assert!(coverage
@@ -473,7 +489,7 @@ fn market_quote_output_counts_as_content_excerpt_evidence() {
     let mut journal = TaskJournal::for_task("task-market-quote", "ask", "查行情");
     let mut route = route_for_semantic(crate::OutputSemanticKind::MarketQuote);
     route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "stock".to_string(),
@@ -491,7 +507,8 @@ fn market_quote_output_counts_as_content_excerpt_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
     assert!(coverage
@@ -504,7 +521,7 @@ fn crypto_quote_extra_content_excerpt_counts_as_market_quote_evidence() {
     let mut journal = TaskJournal::for_task("task-crypto-quote", "ask", "查 BTCUSDT 价格");
     let mut route = route_for_semantic(crate::OutputSemanticKind::MarketQuote);
     route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "crypto".to_string(),
@@ -530,7 +547,8 @@ fn crypto_quote_extra_content_excerpt_counts_as_market_quote_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
     assert!(coverage
@@ -545,7 +563,7 @@ fn image_vision_output_counts_as_content_excerpt_evidence() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Url;
     route.output_contract.locator_hint = "https://example.com/image.png".to_string();
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "image_vision".to_string(),
@@ -564,7 +582,8 @@ fn image_vision_output_counts_as_content_excerpt_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
     assert!(coverage
@@ -575,11 +594,10 @@ fn image_vision_output_counts_as_content_excerpt_evidence() {
 #[test]
 fn x_preview_output_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-publishing-preview", "ask", "预览发布文案");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
-    route.resolved_intent = "capability_ref=x.draft_preview".to_string();
+    let mut route = route_for_semantic(crate::OutputSemanticKind::PublishingPreview);
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "x".to_string(),
@@ -590,9 +608,13 @@ fn x_preview_output_counts_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
+    assert!(
+        coverage.observed_canonical.contains("field_value"),
+        "coverage: {coverage:?}"
+    );
     assert!(coverage.observed_extractors.contains("x.text_legacy_v1"));
 }
 
@@ -601,7 +623,7 @@ fn scalar_path_only_results_array_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-scalar-path", "ask", "找到路径");
     let mut route = route_for_semantic(crate::OutputSemanticKind::ScalarPathOnly);
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -619,7 +641,8 @@ fn scalar_path_only_results_array_counts_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
 }
@@ -630,7 +653,7 @@ fn scalar_path_only_missing_stat_path_is_negative_evidence() {
     let mut route = route_for_semantic(crate::OutputSemanticKind::ScalarPathOnly);
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -654,7 +677,8 @@ fn scalar_path_only_missing_stat_path_is_negative_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
 
     assert!(!coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
@@ -1064,7 +1088,7 @@ fn recent_artifacts_judgment_content_excerpt_satisfies_field_value_requirement()
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "document".to_string();
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -1105,7 +1129,8 @@ fn recent_artifacts_judgment_content_excerpt_satisfies_field_value_requirement()
         finished_at: 4,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("candidates"));
     assert!(coverage.observed_canonical.contains("content_excerpt"));
@@ -1176,7 +1201,7 @@ fn large_inventory_dir_observed_evidence_preserves_mtime_metadata_when_truncated
     let mut journal = TaskJournal::for_task("task-large-mtime-dir", "ask", "list recent entries");
     let mut route = route_for_semantic(crate::OutputSemanticKind::DirectoryEntryGroups);
     route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -1187,7 +1212,8 @@ fn large_inventory_dir_observed_evidence_preserves_mtime_metadata_when_truncated
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("candidates"));
     assert!(coverage.observed_canonical.contains("modified_ts"));
@@ -1216,7 +1242,7 @@ fn service_status_health_check_fields_count_as_field_value_evidence() {
         locator_kind: crate::OutputLocatorKind::None,
         ..Default::default()
     };
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "health_check".to_string(),
@@ -1227,7 +1253,8 @@ fn service_status_health_check_fields_count_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
 }
@@ -1237,7 +1264,7 @@ fn service_status_wrapped_system_basic_info_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-service-status-info", "ask", "show status");
     let mut route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
     route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -1264,7 +1291,8 @@ fn service_status_wrapped_system_basic_info_counts_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
 
@@ -1283,7 +1311,7 @@ fn doc_parse_metadata_path_counts_as_required_path_before_truncation() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
     route.output_contract.locator_hint = "README.md".to_string();
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     let sections = (0..32)
         .map(|idx| {
             json!({
@@ -1313,7 +1341,8 @@ fn doc_parse_metadata_path_counts_as_required_path_before_truncation() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
 
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("path"));
@@ -1325,7 +1354,7 @@ fn service_status_run_cmd_output_counts_as_field_value_evidence() {
     let mut journal =
         TaskJournal::for_task("task-service-status-run-cmd", "ask", "检查 clawd 服务状态");
     let route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "run_cmd".to_string(),
@@ -1339,7 +1368,8 @@ fn service_status_run_cmd_output_counts_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage.observed_canonical.contains("command_output"));
@@ -1353,7 +1383,7 @@ fn service_status_http_basic_text_counts_as_field_value_evidence() {
         "检查本地 health 接口",
     );
     let route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "http_basic".to_string(),
@@ -1364,7 +1394,8 @@ fn service_status_http_basic_text_counts_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage.observed_canonical.contains("command_output"));
@@ -1378,7 +1409,7 @@ fn service_status_http_basic_json_wrapper_extracts_embedded_body_status_fields()
         "observe local health endpoint",
     );
     let route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     let body = json!({
         "ok": true,
         "data": {
@@ -1423,7 +1454,8 @@ fn service_status_http_basic_json_wrapper_extracts_embedded_body_status_fields()
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage
@@ -1461,7 +1493,7 @@ fn web_page_summary_http_basic_json_wrapper_body_counts_as_content_excerpt_evide
     );
     let mut route = route_for_semantic(crate::OutputSemanticKind::WebPageSummary);
     route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     let body = json!({
         "ok": true,
         "data": {
@@ -1501,7 +1533,8 @@ fn web_page_summary_http_basic_json_wrapper_body_counts_as_content_excerpt_evide
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
     assert!(coverage
@@ -1522,7 +1555,7 @@ fn raw_command_output_http_basic_text_counts_as_command_output_evidence() {
     );
     let mut route = route_for_semantic(crate::OutputSemanticKind::RawCommandOutput);
     route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "http_basic".to_string(),
@@ -1533,7 +1566,8 @@ fn raw_command_output_http_basic_text_counts_as_command_output_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("command_output"));
 }
@@ -1547,7 +1581,7 @@ fn raw_command_output_file_read_excerpt_counts_as_command_output_evidence() {
     );
     let mut route = route_for_semantic(crate::OutputSemanticKind::RawCommandOutput);
     route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -1561,7 +1595,8 @@ fn raw_command_output_file_read_excerpt_counts_as_command_output_evidence() {
         finished_at: 2,
     });
 
-    let coverage = evidence_coverage_for_route(&route, &journal);
+    let coverage =
+        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_excerpt"));
     assert!(coverage.observed_canonical.contains("command_output"));

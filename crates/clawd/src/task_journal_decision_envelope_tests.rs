@@ -30,7 +30,7 @@ fn trace_json_includes_round_decision_envelope() {
         goal: "read a field".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
-        output_contract: None,
+        output_contract: Some(route.output_contract.clone()),
         steps: vec![crate::PlanStep {
             step_id: "step_1".to_string(),
             action_type: "call_capability".to_string(),
@@ -44,7 +44,7 @@ fn trace_json_includes_round_decision_envelope() {
         raw_plan_text: String::new(),
     };
     let mut journal = TaskJournal::for_task("task-round-envelope", "ask", "prompt");
-    journal.record_route_result(&route);
+    journal.record_output_contract(&route.effective_output_contract());
     journal.rounds.push(TaskJournalRoundTrace {
         round_no: 2,
         goal: "read a field".to_string(),
@@ -126,12 +126,25 @@ fn trace_json_includes_round_decision_envelope() {
 }
 
 #[test]
-fn output_contract_ref_for_route_uses_evidence_policy_shape() {
-    let mut route = route_for_round_envelope();
-    route.route_reason = "contract:workspace_project_summary".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-
-    let output_contract_ref = super::decision_envelope::output_contract_ref_for_route(&route);
+fn output_contract_ref_uses_evidence_policy_shape() {
+    let plan = crate::PlanResult {
+        goal: "summarize workspace".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        output_contract: Some(crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::WorkspaceProjectSummary,
+            ..Default::default()
+        }),
+        steps: Vec::new(),
+        planner_notes: String::new(),
+        plan_kind: crate::PlanKind::Single,
+        raw_plan_text: String::new(),
+    };
+    let envelope = super::decision_envelope::agent_loop_round_plan_contract_envelope_json(&plan);
+    let output_contract_ref = envelope
+        .get("output_contract_ref")
+        .and_then(Value::as_str)
+        .expect("output contract ref");
 
     assert!(output_contract_ref.contains("final_answer_shape=project_summary_grounded_in_files"));
     assert!(output_contract_ref.contains("final_answer_shape_class=grounded_summary"));

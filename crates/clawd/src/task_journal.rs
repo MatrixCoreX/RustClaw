@@ -5,7 +5,6 @@ use serde_json::{json, Value};
 #[path = "task_journal_decision_envelope.rs"]
 mod decision_envelope;
 use self::decision_envelope::agent_loop_round_plan_contract_envelope_json;
-use self::decision_envelope::agent_loop_round_plan_decision_envelope_json;
 
 #[path = "task_journal_coding_state.rs"]
 mod task_journal_coding_state;
@@ -44,8 +43,8 @@ use task_journal_event_stream::task_event_stream_json;
 use task_journal_evidence_collect::*;
 use task_journal_evidence_coverage::*;
 pub(crate) use task_journal_evidence_coverage::{
-    evidence_coverage_for_route, failure_attribution_for_error_text, step_reads_text_content,
-    TaskJournalEvidenceCoverage,
+    evidence_coverage_for_output_contract, failure_attribution_for_error_text,
+    step_reads_text_content, TaskJournalEvidenceCoverage,
 };
 use task_journal_evidence_registry::*;
 pub(crate) use task_journal_evidence_registry::{
@@ -56,11 +55,11 @@ use task_journal_goal::task_goal_summary_json;
 use task_journal_summary_trace::{
     answer_verifier_summary_json, ask_transition_json, boundary_context_summary_json,
     budget_profile_json, capability_resolution_source, cost_budget_json, finalizer_summary_json,
-    next_requested_capability, plan_summary_json, plan_trace_json, raw_plan_steps,
-    requested_capability_sequence, rollout_attribution_json,
-    round_capability_resolution_records_json, route_result_json, step_action_kind, step_trace_json,
-    task_metrics_json, turn_analysis_json, verify_repair_signals_json, verify_summary_json,
-    verify_trace_json, RequestedPlanCapability,
+    next_requested_capability, output_contract_json, plan_summary_json, plan_trace_json,
+    raw_plan_steps, requested_capability_sequence, rollout_attribution_json,
+    round_capability_resolution_records_json, step_action_kind, step_trace_json, task_metrics_json,
+    turn_analysis_json, verify_repair_signals_json, verify_summary_json, verify_trace_json,
+    RequestedPlanCapability,
 };
 use task_journal_trace_storage::*;
 use task_journal_validation_result::validation_result_json;
@@ -72,13 +71,6 @@ const MAX_OBSERVED_EVIDENCE_DEPTH: usize = 3;
 const MAX_OBSERVED_MULTILINE_EXCERPT_LINES: usize = 12;
 const MAX_OBSERVED_ARRAY_SAMPLES: usize = 3;
 const MAX_OBSERVED_ARRAY_VALUE_SAMPLES: usize = 48;
-
-pub(crate) fn agent_loop_round_plan_decision_envelope_for_runtime(
-    route: &crate::RouteResult,
-    plan: &crate::PlanResult,
-) -> Value {
-    agent_loop_round_plan_decision_envelope_json(route, plan)
-}
 
 pub(crate) fn agent_loop_round_plan_contract_envelope(plan: &crate::PlanResult) -> Value {
     agent_loop_round_plan_contract_envelope_json(plan)
@@ -497,7 +489,7 @@ pub(crate) struct TaskJournal {
     pub(crate) context_bundle_summary: Option<String>,
     pub(crate) memory_trace: Option<Value>,
     pub(crate) turn_analysis: Option<crate::turn_context::TurnAnalysis>,
-    pub(crate) route_result: Option<crate::RouteResult>,
+    pub(crate) output_contract: Option<crate::IntentOutputContract>,
     pub(crate) plan_result: Option<crate::PlanResult>,
     pub(crate) verify_result: Option<TaskJournalVerifySummary>,
     pub(crate) rounds: Vec<TaskJournalRoundTrace>,
@@ -609,11 +601,14 @@ impl TaskJournal {
         self.turn_analysis = Some(turn_analysis.clone());
     }
 
-    pub(crate) fn record_route_result(&mut self, route_result: &crate::RouteResult) {
-        self.route_result = Some(route_result.clone());
+    pub(crate) fn record_output_contract(&mut self, output_contract: &crate::IntentOutputContract) {
+        self.output_contract = Some(output_contract.clone());
     }
 
     pub(crate) fn record_plan_result(&mut self, plan_result: &crate::PlanResult) {
+        if let Some(output_contract) = plan_result.output_contract.as_ref() {
+            self.record_output_contract(output_contract);
+        }
         self.plan_result = Some(plan_result.clone());
     }
 
@@ -799,8 +794,8 @@ impl TaskJournal {
         if self.turn_analysis.is_none() {
             self.turn_analysis = other.turn_analysis.clone();
         }
-        if self.route_result.is_none() {
-            self.route_result = other.route_result.clone();
+        if self.output_contract.is_none() {
+            self.output_contract = other.output_contract.clone();
         }
         if self.plan_result.is_none() {
             self.plan_result = other.plan_result.clone();
@@ -912,7 +907,7 @@ impl TaskJournal {
             "transcript_compaction_records": task_journal_context_compaction::transcript_compaction_records_json(self.context_bundle_summary.as_deref()),
             "memory_trace": self.memory_trace.clone(),
             "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
-            "route_result": self.route_result.as_ref().map(route_result_json),
+            "output_contract": self.output_contract.as_ref().map(output_contract_json),
             "latest_execution_recipe_summary": self
                 .rounds
                 .last()
@@ -923,7 +918,7 @@ impl TaskJournal {
             "finalizer_summary": self
                 .finalizer_summary
                 .as_ref()
-                .map(|summary| finalizer_summary_json(summary, self.route_result.as_ref(), self)),
+                .map(|summary| finalizer_summary_json(summary, self.output_contract.as_ref(), self)),
             "answer_verifier_summary": self.answer_verifier_summary.as_ref().map(answer_verifier_summary_json),
             "task_lifecycle": self.task_lifecycle.clone(),
             "task_checkpoint": self.task_checkpoint.clone(),
@@ -953,26 +948,24 @@ impl TaskJournal {
             "memory_trace": self.memory_trace.clone(),
             "transcript_compaction_records": task_journal_context_compaction::transcript_compaction_records_json(self.context_bundle_summary.as_deref()),
             "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
-            "route_result": self.route_result.as_ref().map(route_result_json),
+            "output_contract": self.output_contract.as_ref().map(output_contract_json),
             "evidence_policy": self
-                .route_result
+                .output_contract
                 .as_ref()
-                .and_then(crate::evidence_policy::trace_snapshot_for_route),
+                .and_then(crate::evidence_policy::trace_snapshot_for_output_contract),
             "runtime_contract_snapshot": self
-                .route_result
+                .output_contract
                 .as_ref()
-                .and_then(crate::evidence_policy::runtime_contract_snapshot_for_route),
+                .and_then(crate::evidence_policy::runtime_contract_snapshot_for_output_contract),
             "evidence_coverage": self
-                .route_result
+                .output_contract
                 .as_ref()
-                .map(|route| evidence_coverage_trace_json(route, self)),
+                .map(|contract| evidence_coverage_trace_json(contract, self)),
             "rounds": self.rounds.iter().map(|round| {
-                let decision_envelope = self.route_result.as_ref().and_then(|route| {
-                    round
-                        .plan_result
-                        .as_ref()
-                        .map(|plan| agent_loop_round_plan_decision_envelope_json(route, plan))
-                });
+                let decision_envelope = round
+                    .plan_result
+                    .as_ref()
+                    .map(agent_loop_round_plan_contract_envelope_json);
                 let first_action_decision = decision_envelope
                     .as_ref()
                     .and_then(|value| value.get("decision"))
@@ -992,14 +985,10 @@ impl TaskJournal {
                     "stop_signal": self.final_stop_signal.as_deref().map(crate::truncate_for_log),
                     "first_action_decision": first_action_decision,
                     "first_action_capability_ref": first_action_capability_ref,
-                    "capability_resolution_records": round_capability_resolution_records_json(
-                        round,
-                        self.route_result.as_ref(),
-                    ),
+                    "capability_resolution_records": round_capability_resolution_records_json(round),
                     "repair_signals": verify_repair_signals_json(
                         round.verify_result.as_ref(),
                         round.plan_result.as_ref(),
-                        self.route_result.as_ref(),
                     ),
                     "execution_recipe_summary": round
                         .execution_recipe_summary
@@ -1008,27 +997,23 @@ impl TaskJournal {
                     "plan_result": round
                         .plan_result
                         .as_ref()
-                        .map(|plan| plan_trace_json(plan, self.route_result.as_ref())),
+                        .map(plan_trace_json),
                     "verify_result": round.verify_result.as_ref().map(|verify| {
-                        verify_trace_json(
-                            verify,
-                            round.plan_result.as_ref(),
-                            self.route_result.as_ref(),
-                        )
+                        verify_trace_json(verify, round.plan_result.as_ref())
                     }),
                     "decision_envelope": decision_envelope,
                 })
             }).collect::<Vec<_>>(),
             "step_results": self.step_results.iter().map(|step| {
                 let requested = next_requested_capability(&mut requested, step);
-                step_trace_json(step, requested.as_ref(), self.route_result.as_ref())
+                step_trace_json(step, requested.as_ref(), self.output_contract.as_ref())
             }).collect::<Vec<_>>(),
             "task_observations": self.task_observations.clone(),
             "event_stream": task_event_stream_json(self),
             "finalizer_summary": self
                 .finalizer_summary
                 .as_ref()
-                .map(|summary| finalizer_summary_json(summary, self.route_result.as_ref(), self)),
+                .map(|summary| finalizer_summary_json(summary, self.output_contract.as_ref(), self)),
             "answer_verifier_summary": self.answer_verifier_summary.as_ref().map(answer_verifier_summary_json),
             "task_lifecycle": self.task_lifecycle.clone(),
             "task_checkpoint": self.task_checkpoint.clone(),
