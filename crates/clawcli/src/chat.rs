@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use crate::{commands, events, output, task};
 
 const POLL_FALLBACK_INTERVAL_MS: u64 = 800;
+const STREAM_READ_WINDOW_SECONDS: u64 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ChatControl<'a> {
@@ -24,6 +25,7 @@ pub(crate) fn run_chat(
     force_new: bool,
     jsonl_output: bool,
 ) -> Result<()> {
+    crate::interrupt::install()?;
     let mut thread = commands::load_or_create_chat_thread(requested_thread_id, force_new)?;
     print_thread_binding(&thread);
     let mut editor = rustyline::DefaultEditor::new().context("chat_readline_init_failed")?;
@@ -98,41 +100,79 @@ fn follow_and_render_task(
         .clone()
         .ok_or_else(|| anyhow::anyhow!("chat_task_missing"))?;
     let mut cursor = thread.last_event_seq;
-    let followed = events::follow_task_events(base_url, key, &task_id, cursor, |raw_event| {
-        if let Some(seq) = events::task_event_seq(raw_event) {
-            cursor = cursor.max(seq);
+    loop {
+        if crate::interrupt::requested() {
+            return finish_chat_detach(thread, cursor, &task_id);
         }
-        let output_mode = if jsonl_output {
-            events::LiveEventOutputMode::Jsonl
-        } else {
-            events::LiveEventOutputMode::Compact
-        };
-        if let Some(line) = events::live_task_event_output_line(
-            raw_event,
-            output_mode,
-            &events::EventFilters::default(),
-        )? {
-            println!("{line}");
+        let followed = events::follow_task_events_with_timeout(
+            base_url,
+            key,
+            &task_id,
+            cursor,
+            Some(Duration::from_secs(STREAM_READ_WINDOW_SECONDS)),
+            |raw_event| {
+                if let Some(seq) = events::task_event_seq(raw_event) {
+                    cursor = cursor.max(seq);
+                }
+                let output_mode = if jsonl_output {
+                    events::LiveEventOutputMode::Jsonl
+                } else {
+                    events::LiveEventOutputMode::Compact
+                };
+                if let Some(line) = events::live_task_event_output_line(
+                    raw_event,
+                    output_mode,
+                    &events::EventFilters::default(),
+                )? {
+                    println!("{line}");
+                }
+                Ok(!events::task_event_is_terminal(raw_event)
+                    && !events::task_event_is_background(raw_event)
+                    && !crate::interrupt::requested())
+            },
+        );
+        commands::record_chat_cursor(thread, cursor)?;
+        if crate::interrupt::requested() {
+            return finish_chat_detach(thread, cursor, &task_id);
         }
-        Ok(!events::task_event_is_terminal(raw_event)
-            && !events::task_event_is_background(raw_event))
-    });
-    commands::record_chat_cursor(thread, cursor)?;
-
-    if let Err(error) = followed {
-        eprintln!("error_code=chat_event_stream_failed detail={error}");
-        wait_with_poll_fallback(base_url, key, &task_id)?;
+        match followed {
+            Ok(()) => break,
+            Err(error) if events::task_event_stream_timed_out(&error) => continue,
+            Err(error) => {
+                eprintln!("error_code=chat_event_stream_failed detail={error}");
+                if wait_with_poll_fallback(base_url, key, &task_id)? {
+                    return finish_chat_detach(thread, cursor, &task_id);
+                }
+                break;
+            }
+        }
     }
     let status = task::get_task_status(base_url, key, &task_id)?;
     output::print_task_status(&status, false, &events::EventFilters::default());
     Ok(())
 }
 
-fn wait_with_poll_fallback(base_url: &str, key: &str, task_id: &str) -> Result<()> {
+fn finish_chat_detach(
+    thread: &mut commands::ChatThreadState,
+    cursor: u64,
+    task_id: &str,
+) -> Result<()> {
+    commands::record_chat_cursor(thread, cursor)?;
+    println!("task_id={task_id}");
+    println!("chat_outcome=detached");
+    println!("event_cursor={cursor}");
+    crate::interrupt::reset();
+    Ok(())
+}
+
+fn wait_with_poll_fallback(base_url: &str, key: &str, task_id: &str) -> Result<bool> {
     loop {
+        if crate::interrupt::requested() {
+            return Ok(true);
+        }
         let status = task::get_task_status(base_url, key, task_id)?;
         if status.is_terminal() || status.is_background_waiting() {
-            return Ok(());
+            return Ok(false);
         }
         std::thread::sleep(Duration::from_millis(POLL_FALLBACK_INTERVAL_MS));
     }

@@ -75,14 +75,48 @@ fn exec_wait_uses_polling_only_when_event_endpoint_is_unavailable() {
 #[test]
 fn stream_read_window_respects_total_deadline() {
     let now = Instant::now();
-    assert_eq!(stream_read_window(None, now), None);
+    assert_eq!(stream_read_window(None, now), Some(Duration::from_secs(2)));
     assert_eq!(
         stream_read_window(Some(now + Duration::from_secs(30)), now),
-        Some(Duration::from_secs(10))
+        Some(Duration::from_secs(2))
     );
     assert_eq!(
         stream_read_window(Some(now + Duration::from_millis(40)), now),
         Some(Duration::from_millis(100))
+    );
+}
+
+#[test]
+fn exec_interrupt_detaches_without_calling_task_cancel() {
+    let (base_url, server) = spawn_responses(vec![MockResponse::json(
+        "/v1/tasks/task-detach",
+        200,
+        serde_json::json!({
+            "ok": true,
+            "data": {
+                "task_id": "task-detach",
+                "status": "running",
+                "execution_state": "running",
+                "result_json": {"messages": []}
+            }
+        }),
+    )]);
+
+    let (task, outcome) = wait_for_exec_task_with_interrupt(
+        &base_url,
+        "test-key",
+        "task-detach",
+        test_wait_options(),
+        &|| true,
+    )
+    .expect("interrupt detach");
+    server.join().expect("mock server");
+
+    assert_eq!(outcome, ExecWaitOutcome::Detached);
+    assert_eq!(task.status, "running");
+    assert_eq!(
+        exec_exit_class(&task, outcome, false),
+        ExecExitClass::Detached
     );
 }
 
