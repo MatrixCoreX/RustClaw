@@ -5,14 +5,13 @@ async fn finalize_loop_reply_keeps_filesystem_mutation_lifecycle_synthesis_for_s
     let state = test_state();
     let task = claimed_task("task-filesystem-mutation-lifecycle");
     let mut route = free_route_result();
-    route.resolved_intent = "filesystem mutation lifecycle".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "tmp/nl_codex_resume_smoke".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Strict;
+    route.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "tmp/nl_codex_resume_smoke".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let synthesis = serde_json::json!({
@@ -123,14 +122,13 @@ async fn finalize_loop_reply_keeps_generic_lifecycle_shape_synthesis_as_structur
     let state = test_state();
     let task = claimed_task("task-generic-filesystem-lifecycle");
     let mut route = free_route_result();
-    route.resolved_intent = "scratch filesystem lifecycle structured result".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "tmp/nl_codex_resume_smoke".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.semantic_kind = OutputSemanticKind::None;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "tmp/nl_codex_resume_smoke".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let synthesis = serde_json::json!({
@@ -227,11 +225,10 @@ async fn finalize_loop_reply_keeps_generic_lifecycle_shape_synthesis_as_structur
 #[test]
 fn generic_free_execute_route_accepts_complete_lifecycle_synthesis() {
     let mut route = free_route_result();
-    route.resolved_intent = "scratch filesystem lifecycle structured result".to_string();
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.requires_content_evidence = false;
+    route.response_shape = OutputResponseShape::Free;
+    route.semantic_kind = OutputSemanticKind::None;
+    route.locator_kind = OutputLocatorKind::None;
     let synthesis = serde_json::json!({
         "schema_version": 1,
         "final_answer_shape": "lifecycle_result",
@@ -264,13 +261,12 @@ async fn finalize_loop_reply_uses_status_line_for_visible_filesystem_mutation_su
     let state = test_state();
     let task = claimed_task("task-kb-visible-filesystem-mutation");
     let mut route = free_route_result();
-    route.resolved_intent = "kb ingest status".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let synthesis = serde_json::json!({

@@ -35,29 +35,16 @@ fn multiline_read_range_passthrough_guard_ignores_visible_text_json_payload() {
         r#"{"status":"ok","text":"{\"action\":\"read_range\",\"content\":\"first line\\nsecond line\"}"}"#,
     ));
     let ctx = AgentRunContext {
-        route_result: Some(crate::RouteResult {
-            resolved_intent: "summarize the selected file".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "content excerpt summary".to_string(),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Low,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract {
-                exact_sentence_count: None,
-                response_shape: crate::OutputResponseShape::Free,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: crate::OutputLocatorKind::Path,
-                delivery_intent: crate::OutputDeliveryIntent::None,
-                semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
-                locator_hint: "/tmp/notes.md".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
+        output_contract: Some(crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+            locator_hint: "/tmp/notes.md".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
         }),
         ..AgentRunContext::default()
     };

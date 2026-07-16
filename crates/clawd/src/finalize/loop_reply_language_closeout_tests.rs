@@ -77,7 +77,7 @@ fn execution_recipe_closeout_prefixes_greenfield_plain_text_delivery() {
         ..Default::default()
     };
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
     let mut delivery = vec!["Validation passed.".to_string()];
@@ -112,7 +112,7 @@ fn execution_recipe_closeout_does_not_infer_success_marker_from_user_text() {
         ..Default::default()
     };
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         user_request: Some(
             "When it passes, explicitly output VALIDATION_PASSED and stop immediately.".to_string(),
         ),
@@ -151,7 +151,7 @@ fn execution_recipe_closeout_prefixes_current_repo_plain_text_delivery() {
         ..Default::default()
     };
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
     let mut delivery = vec!["修复已经验证通过。".to_string()];
@@ -235,7 +235,7 @@ fn execution_recipe_closeout_skips_file_token_delivery() {
         ..Default::default()
     };
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
     let mut delivery = vec!["FILE:/tmp/report.txt".to_string()];
@@ -265,7 +265,7 @@ fn execution_recipe_closeout_skips_scalar_route_delivery() {
         ..Default::default()
     };
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(scalar_route_result()),
+        output_contract: Some(scalar_route_result()),
         ..Default::default()
     };
     let mut delivery = vec!["42".to_string()];
@@ -297,7 +297,7 @@ fn execution_recipe_closeout_skips_scalar_route_when_marker_is_only_user_text() 
         ..Default::default()
     };
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(scalar_route_result()),
+        output_contract: Some(scalar_route_result()),
         user_request: Some(
             "When it passes, explicitly output VALIDATION_PASSED and stop immediately.".to_string(),
         ),

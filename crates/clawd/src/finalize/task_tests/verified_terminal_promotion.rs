@@ -17,9 +17,9 @@ fn verifier_pass_journal(task_id: &str, prompt: &str) -> crate::task_journal::Ta
 fn verifier_pass_promotes_latest_terminal_text_over_stale_machine_projection() {
     let prompt = "Inspect archive and database fixtures, then return a table.";
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Free;
+    route.locator_kind = crate::OutputLocatorKind::Path;
 
     let mut journal = verifier_pass_journal("task-verified-terminal-promotion", prompt);
     journal
@@ -78,9 +78,9 @@ fn verifier_pass_promotes_latest_terminal_text_over_stale_machine_projection() {
 fn verifier_pass_promotes_terminal_json_over_machine_kv_projection() {
     let prompt = "Return only a JSON object with requested machine fields.";
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Free;
+    route.locator_kind = crate::OutputLocatorKind::Path;
 
     let mut journal = verifier_pass_journal("task-verified-terminal-json-promotion", prompt);
     journal
@@ -119,8 +119,8 @@ fn verifier_pass_promotes_terminal_json_over_machine_kv_projection() {
 fn verifier_pass_does_not_promote_internal_machine_json_payload() {
     let prompt = "Return a natural summary.";
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Free;
 
     let mut journal = verifier_pass_journal("task-verified-terminal-internal-json", prompt);
     journal
@@ -147,9 +147,9 @@ fn verifier_pass_does_not_promote_internal_machine_json_payload() {
 fn verifier_recovered_terminal_answer_is_not_overwritten_by_stale_step_answer() {
     let prompt = "Read the title of ALPHA_DOC. Output only the title.";
     let mut route = route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::OneSentence;
+    route.locator_kind = crate::OutputLocatorKind::Path;
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-verified-retry-stale-step", "ask", prompt);
@@ -184,7 +184,7 @@ fn verifier_recovered_terminal_answer_is_not_overwritten_by_stale_step_answer() 
 fn verifier_pass_does_not_promote_terminal_text_when_machine_summary_is_required() {
     let prompt = "Return branch machine fields.";
     let mut route = route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.response_shape = crate::OutputResponseShape::Free;
     let mut journal = verifier_pass_journal("task-verified-terminal-machine-summary", prompt);
     journal.record_turn_analysis(&crate::turn_context::TurnAnalysis {
         turn_type: Some(crate::turn_context::TurnType::TaskRequest),

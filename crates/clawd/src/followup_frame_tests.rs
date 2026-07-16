@@ -4,7 +4,7 @@ use super::{
     ordered_entries_from_listing_json, persist_frame, replace_active_frame_from_ask_outcome,
     FollowupFrame, FollowupOpKind, FollowupSliceKind, FollowupSliceSpec,
 };
-use crate::{runtime::AppState, IntentOutputContract, OutputLocatorKind, RouteResult};
+use crate::{runtime::AppState, IntentOutputContract, OutputLocatorKind};
 
 #[test]
 fn extracts_ordered_entries_from_compact_listing_sentence() {
@@ -294,25 +294,12 @@ fn workspace_project_summary_evidence_path_does_not_persist_followup_target() {
             })
             .to_string(),
         ));
-    let route_result = RouteResult {
-        resolved_intent: "write a short RustClaw release note".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "contract:workspace_project_summary".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Medium,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: true,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            semantic_kind: crate::OutputSemanticKind::WorkspaceProjectSummary,
-            ..IntentOutputContract::default()
-        },
+    let route_result = IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        semantic_kind: crate::OutputSemanticKind::WorkspaceProjectSummary,
+        ..IntentOutputContract::default()
     };
 
     replace_active_frame_from_ask_outcome(
@@ -385,22 +372,9 @@ fn code_workspace_journal_persists_project_dir_for_followup() {
             })
             .to_string(),
         ));
-    let route_result = RouteResult {
-        resolved_intent: "code workspace update".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            response_shape: crate::OutputResponseShape::Strict,
-            ..IntentOutputContract::default()
-        },
+    let route_result = IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        ..IntentOutputContract::default()
     };
 
     assert_eq!(
@@ -482,22 +456,9 @@ fn readback_validated_code_workspace_persists_project_dir_for_followup() {
             "run_cmd",
             "ALL_TESTS_PASSED",
         ));
-    let route_result = RouteResult {
-        resolved_intent: "code workspace readback validation".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            response_shape: crate::OutputResponseShape::Strict,
-            ..IntentOutputContract::default()
-        },
+    let route_result = IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        ..IntentOutputContract::default()
     };
 
     replace_active_frame_from_ask_outcome(
@@ -575,23 +536,10 @@ fn code_workspace_followup_wins_over_delivery_route_noise() {
             })
             .to_string(),
         ));
-    let route_result = RouteResult {
-        resolved_intent: "code workspace update with delivery noise".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "file_token_delivery_contract_repair".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: true,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            response_shape: crate::OutputResponseShape::Strict,
-            delivery_required: true,
-            ..IntentOutputContract::default()
-        },
+    let route_result = IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        delivery_required: true,
+        ..IntentOutputContract::default()
     };
 
     replace_active_frame_from_ask_outcome(
@@ -675,29 +623,16 @@ fn persisted_followup_frame_round_trips_with_slice_and_entries() {
             ),
             ..Default::default()
         });
-    let route_result = RouteResult {
-        resolved_intent: "看一下那个 model io log 最后 4 行，再一句话说有什么现象".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
-            locator_hint: "model_io.log".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+        locator_hint: "model_io.log".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     replace_active_frame_from_ask_outcome(
         &state,
@@ -766,29 +701,16 @@ fn config_read_field_extra_path_persists_followup_bound_target() {
             ),
             ..Default::default()
         });
-    let route_result = RouteResult {
-        resolved_intent: "read structured field".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: "fallback.toml".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: "fallback.toml".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     replace_active_frame_from_ask_outcome(
         &state,
@@ -820,29 +742,16 @@ fn compact_listing_answer_persists_ordered_entries_for_followup() {
         payload_json: "{}".to_string(),
     };
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
-    let route_result = RouteResult {
-        resolved_intent: "列出 logs 目录下前 5 个文件名".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::FileNames,
-            locator_hint: "logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::FileNames,
+        locator_hint: "logs".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     replace_active_frame_from_ask_outcome(
         &state,
@@ -886,29 +795,16 @@ fn read_answer_with_visible_structural_bullets_persists_ordered_entries_for_foll
     };
     let root = "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3";
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
-    let route_result = RouteResult {
-        resolved_intent: "find matching entries under a known directory".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
-            locator_hint: root.to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
+        locator_hint: root.to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     replace_active_frame_from_ask_outcome(
         &state,
@@ -964,29 +860,16 @@ fn visible_listing_answer_overrides_full_journal_listing_for_followup() {
             ),
             ..Default::default()
         });
-    let route_result = RouteResult {
-        resolved_intent: "列出 logs 目录下前 5 个文件名".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::CurrentWorkspace,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: "logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: "logs".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     replace_active_frame_from_ask_outcome(
         &state,
@@ -1058,29 +941,16 @@ fn fs_basic_inventory_journal_replaces_prior_ordered_entries_for_followup() {
             ),
             ..Default::default()
         });
-    let route_result = RouteResult {
-        resolved_intent: "List first 5 filenames in logs directory".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: false,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::None,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: false,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::None,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     replace_active_frame_from_ask_outcome(
         &state,
@@ -1172,29 +1042,16 @@ fn fs_basic_wrapped_inventory_journal_persists_ordered_entries_for_followup() {
             ),
             ..Default::default()
         });
-    let route_result = RouteResult {
-        resolved_intent: "List first 5 filenames in logs directory".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::FileNames,
-            locator_hint: "/home/guagua/rustclaw/logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::FileNames,
+        locator_hint: "/home/guagua/rustclaw/logs".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     replace_active_frame_from_ask_outcome(
         &state,
@@ -1282,20 +1139,7 @@ fn empty_generic_outcome_preserves_prior_structured_frame() {
         ..FollowupFrame::default()
     };
     persist_frame(&state, &task, &prior_frame).expect("seed prior frame");
-    let route_result = RouteResult {
-        resolved_intent: "plain acknowledgement".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract::default(),
-    };
+    let route_result = IntentOutputContract::default();
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
 
     let active_id = replace_active_frame_from_ask_outcome(
@@ -1364,29 +1208,16 @@ fn selected_target_turn_inherits_prior_ordered_entries_and_index() {
             ),
             ..Default::default()
         });
-    let route_result = RouteResult {
-        resolved_intent: "看第二个最后 2 行".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
-            locator_hint: "logs/clawd.log".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+        locator_hint: "logs/clawd.log".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     replace_active_frame_from_ask_outcome(
         &state,
@@ -1436,29 +1267,16 @@ fn scalar_answer_matching_prior_ordered_entry_persists_selected_index() {
     };
     persist_frame(&state, &task, &prior_frame).expect("persist prior frame");
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
-    let route_result = RouteResult {
-        resolved_intent: "select an observed ordered entry".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Scalar,
-            requires_content_evidence: false,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::None,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Scalar,
+        requires_content_evidence: false,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::None,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
 
     replace_active_frame_from_ask_outcome(
@@ -1512,29 +1330,16 @@ fn scalar_answer_matching_prior_read_candidate_list_keeps_selection_for_next_pos
     persist_frame(&state, &task, &prior_frame).expect("persist prior frame");
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
     let selected = format!("{root}/my_abcd.txt");
-    let route_result = RouteResult {
-        resolved_intent: "select an observed ordered path entry".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
-            locator_hint: selected.clone(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+        locator_hint: selected.clone(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
 
     replace_active_frame_from_ask_outcome(
@@ -1590,29 +1395,16 @@ fn delivery_answer_sets_bound_target_from_file_token_and_inherits_selection() {
     };
     persist_frame(&state, &task, &prior_frame).expect("persist prior frame");
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
-    let route_result = RouteResult {
-        resolved_intent: "把第二个发给我".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: true,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::FileToken,
-            requires_content_evidence: false,
-            delivery_required: true,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::FileSingle,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::FileToken,
+        requires_content_evidence: false,
+        delivery_required: true,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     replace_active_frame_from_ask_outcome(
         &state,
@@ -1661,29 +1453,16 @@ fn delivery_answer_with_absolute_file_token_still_inherits_relative_listing_sele
     };
     persist_frame(&state, &task, &prior_frame).expect("persist prior frame");
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
-    let route_result = RouteResult {
-        resolved_intent: "把第二个发给我".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: true,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::FileToken,
-            requires_content_evidence: false,
-            delivery_required: true,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::FileSingle,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::FileToken,
+        requires_content_evidence: false,
+        delivery_required: true,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     replace_active_frame_from_ask_outcome(
         &state,
@@ -1719,29 +1498,16 @@ fn clarify_outcome_clears_active_followup_frame() {
         payload_json: "{}".to_string(),
     };
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
-    let route_result = RouteResult {
-        resolved_intent: "看一下那个 README 开头，然后一句话总结".to_string(),
-        needs_clarify: true,
-        clarify_question: "请提供具体文件路径".to_string(),
-        route_reason: "fresh_content_deictic_requires_locator".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     replace_active_frame_from_ask_outcome(
         &state,
@@ -1774,29 +1540,16 @@ fn clarify_outcome_with_stale_locator_hint_still_clears_followup_frame() {
         payload_json: "{}".to_string(),
     };
     let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
-    let route_result = RouteResult {
-        resolved_intent: "看一下那个模型日志最后 5 行".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "memory_alias".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
-            locator_hint: "/tmp/rustclaw-workspace/old/logs/model_io.log".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route_result = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+        locator_hint: "/tmp/rustclaw-workspace/old/logs/model_io.log".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     replace_active_frame_from_ask_outcome(
         &state,

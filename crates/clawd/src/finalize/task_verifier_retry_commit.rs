@@ -1,10 +1,10 @@
-use crate::{AppState, ClaimedTask, RouteResult};
+use crate::{AppState, ClaimedTask, IntentOutputContract};
 
 pub(super) async fn try_commit_answer_verifier_retry_answer(
     state: &AppState,
     task: &ClaimedTask,
     prompt: &str,
-    route_result: &RouteResult,
+    route_result: &IntentOutputContract,
     journal: &mut crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,
@@ -21,8 +21,7 @@ pub(super) async fn try_commit_answer_verifier_retry_answer(
         return false;
     }
 
-    let answer_contract =
-        crate::answer_verifier::AnswerContract::new(prompt, route_result.output_contract.clone());
+    let answer_contract = crate::answer_verifier::AnswerContract::new(prompt, route_result.clone());
     let retry_verifier = crate::answer_verifier::verify_answer_observe_only(
         state,
         task,

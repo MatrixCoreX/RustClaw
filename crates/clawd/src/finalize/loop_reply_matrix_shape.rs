@@ -33,16 +33,16 @@ use super::{
 };
 
 fn evidence_policy_final_answer_shape_class(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> Option<crate::evidence_policy::FinalAnswerShapeClass> {
     if route_requests_docker_text_list_projection(route) {
         return Some(crate::evidence_policy::FinalAnswerShapeClass::StrictList);
     }
-    crate::evidence_policy::final_answer_shape_for_route(route).map(|shape| shape.class())
+    crate::evidence_policy::final_answer_shape_for_output_contract(route).map(|shape| shape.class())
 }
 
 pub(super) fn route_requires_evidence_policy_deterministic_final_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> bool {
     evidence_policy_final_answer_shape_class(route)
         .is_some_and(|class| !class.allows_model_language())
@@ -52,7 +52,7 @@ pub(super) fn agent_context_allows_observed_output_language_fallback(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_none_or(|route| !route_requires_evidence_policy_deterministic_final_answer(route))
 }
 
@@ -61,7 +61,7 @@ pub(super) fn should_try_observed_output_language_fallback(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(crate::agent_engine::observed_output::route_requires_synthesized_delivery)
         || agent_context_allows_observed_output_language_fallback(agent_run_context)
         || latest_plan_requested_synthesis(loop_state)
@@ -72,11 +72,13 @@ pub(super) fn should_try_observed_output_language_fallback(
 }
 
 #[cfg(test)]
-pub(super) fn route_has_evidence_policy_final_shape(route: &crate::RouteResult) -> bool {
+pub(super) fn route_has_evidence_policy_final_shape(route: &crate::IntentOutputContract) -> bool {
     evidence_policy_final_answer_shape_class(route).is_some()
 }
 
-pub(super) fn route_requires_observed_output_projection(route: &crate::RouteResult) -> bool {
+pub(super) fn route_requires_observed_output_projection(
+    route: &crate::IntentOutputContract,
+) -> bool {
     if crate::finalize::route_matches_service_status_output_contract(route) {
         return true;
     }
@@ -92,7 +94,7 @@ pub(super) fn route_requires_observed_output_projection(route: &crate::RouteResu
         return true;
     }
     matches!(
-        route.effective_output_contract_semantic_kind(),
+        route.semantic_kind,
         crate::OutputSemanticKind::DirectoryNames | crate::OutputSemanticKind::QuantityComparison
     )
 }
@@ -103,7 +105,7 @@ pub(super) fn evidence_policy_candidate_satisfies_final_shape(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
     finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary>,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     candidate: &str,
 ) -> bool {
     let candidate = candidate.trim();
@@ -126,10 +128,7 @@ pub(super) fn evidence_policy_candidate_satisfies_final_shape(
         candidate,
         crate::task_journal::TaskJournalFinalStatus::Success,
     );
-    let answer_contract = crate::answer_verifier::AnswerContract::new(
-        &route.resolved_intent,
-        route.output_contract.clone(),
-    );
+    let answer_contract = crate::answer_verifier::AnswerContract::new("", route.clone());
     crate::answer_verifier::structurally_satisfies_answer_contract(
         &answer_contract,
         &journal,
@@ -156,7 +155,7 @@ pub(super) fn current_synthesis_satisfies_evidence_policy_shape(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
     finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary>,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     delivery_messages: &[String],
 ) -> bool {
     if !route_requires_evidence_policy_deterministic_final_answer(route) {
@@ -177,7 +176,7 @@ pub(super) fn current_synthesis_satisfies_evidence_policy_shape(
     let task = synthetic_task_for_evidence_policy_shape_check(task_id);
     evidence_policy_candidate_satisfies_final_shape(
         &task,
-        &route.resolved_intent,
+        "",
         loop_state,
         agent_run_context,
         finalizer_summary,
@@ -187,7 +186,7 @@ pub(super) fn current_synthesis_satisfies_evidence_policy_shape(
 }
 
 fn matrix_table_observed_answer(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     if !route_requests_table_listing(route) {
@@ -220,10 +219,10 @@ fn matrix_table_observed_answer(
     None
 }
 
-fn route_requests_table_listing(route: &crate::RouteResult) -> bool {
-    crate::evidence_policy::final_answer_shape_for_route(route)
+fn route_requests_table_listing(route: &crate::IntentOutputContract) -> bool {
+    crate::evidence_policy::final_answer_shape_for_output_contract(route)
         == Some(crate::evidence_policy::FinalAnswerShape::TableListing)
-        || route.output_contract_marker_is(crate::OutputSemanticKind::SqliteTableListing)
+        || route.semantic_kind_is(crate::OutputSemanticKind::SqliteTableListing)
 }
 
 fn matrix_markdown_table_from_json(value: &serde_json::Value) -> Option<String> {
@@ -351,7 +350,7 @@ pub(super) fn replace_delivery_with_matrix_observed_shape_answer(
     if loop_state.pending_user_input_required {
         return false;
     }
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     if !route_requires_evidence_policy_deterministic_final_answer(route) {
@@ -516,7 +515,7 @@ pub(crate) fn deterministic_matrix_observed_shape_answer(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
     if !route_requires_evidence_policy_deterministic_final_answer(route) {
         return None;
     }

@@ -9,11 +9,11 @@ async fn finalize_loop_reply_prefers_observed_raw_scalar_after_synthesis_error()
     let state = test_state();
     let task = claimed_task("task-raw-scalar-synthesis-error");
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -54,12 +54,11 @@ async fn finalize_loop_reply_prefers_observed_raw_scalar_after_synthesis_error()
 fn schema_version_contract_uses_observed_scalar() {
     let state = test_state();
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=database.schema_version".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteSchemaVersion;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::SqliteSchemaVersion;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -83,13 +82,12 @@ async fn finalize_loop_reply_replaces_scalar_machine_assignment_with_observed_va
     let state = test_state();
     let task = claimed_task("task-schema-version-scalar-machine-assignment");
     let mut route = free_route_result();
-    route.route_reason = "scalar_locator_requires_evidence".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -129,13 +127,13 @@ async fn finalize_loop_reply_preserves_publishable_evidence_summary_over_scalar_
     let state = test_state();
     let task = claimed_task("task-generic-evidence-summary-over-scalar");
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Scalar;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let summary = "Working directory: /home/guagua/rustclaw. A clawd process and a listening port are both visible in the current task evidence.";
@@ -220,11 +218,11 @@ async fn finalize_loop_reply_replaces_wrapped_runtime_status_scalar_delivery() {
     let state = test_state();
     let task = claimed_task("task-wrapped-runtime-status-scalar");
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let wrapped = r#"{"extra":{"action":"runtime_status","command_output":"guagua","field_value":"guagua","kind":"current_user","value":"guagua"},"text":"{\"action\":\"runtime_status\",\"command_output\":\"guagua\",\"field_value\":\"guagua\",\"kind\":\"current_user\",\"value\":\"guagua\"}"}"#;
@@ -256,11 +254,11 @@ async fn finalize_loop_reply_replaces_wrapped_scalar_path_delivery() {
     let state = test_state();
     let task = claimed_task("task-wrapped-scalar-path");
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
+    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let wrapped = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"","resolved_path":"/home/guagua/rustclaw","size_bytes":4096},"path":"/home/guagua/rustclaw"}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"dir\",\"path\":\"\",\"resolved_path\":\"/home/guagua/rustclaw\",\"size_bytes\":4096},\"path\":\"/home/guagua/rustclaw\"}],\"include_missing\":true}"}"#;
@@ -292,11 +290,11 @@ async fn finalize_loop_reply_replaces_recoverable_scalar_path_candidate_with_obs
     let state = test_state();
     let task = claimed_task("task-recoverable-scalar-path-dot");
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
+    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let observed = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"","resolved_path":"/home/guagua/rustclaw/.","size_bytes":4096},"path":"."}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"dir\",\"path\":\"\",\"resolved_path\":\"/home/guagua/rustclaw/.\",\"size_bytes\":4096},\"path\":\".\"}],\"include_missing\":true}"}"#;
@@ -333,12 +331,12 @@ async fn finalize_loop_reply_replaces_partial_recent_scalar_delivery_with_observ
     let state = test_state();
     let task = claimed_task("task-recent-scalar-compare-paths-fields");
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
+    route.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(3);
@@ -399,12 +397,12 @@ async fn finalize_loop_reply_restores_recent_scalar_existence_fields_after_late_
     let state = test_state();
     let task = claimed_task("task-recent-scalar-late-existence-restore");
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
+    route.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let richer_answer = "same_path=false\nleft_exists=true\nright_exists=true";
@@ -447,12 +445,12 @@ async fn finalize_loop_reply_preserves_richer_existence_summary_delivery_with_sa
     let state = test_state();
     let task = claimed_task("task-existence-summary-same-path-richer");
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPathSummary;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
+    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPathSummary;
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let richer_answer =
@@ -496,11 +494,11 @@ async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_observed_pat
     let state = test_state();
     let task = claimed_task("task-scalar-path-field-placeholder");
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
+    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let observed = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"","resolved_path":"/home/guagua/rustclaw/.","size_bytes":4096},"path":"."}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"dir\",\"path\":\"\",\"resolved_path\":\"/home/guagua/rustclaw/.\",\"size_bytes\":4096},\"path\":\".\"}],\"include_missing\":true}"}"#;
@@ -532,11 +530,11 @@ async fn finalize_loop_reply_replaces_scalar_field_placeholder_with_terminal_pat
     let state = test_state();
     let task = claimed_task("task-scalar-path-terminal-respond");
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
+    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -574,13 +572,13 @@ async fn finalize_loop_reply_extracts_file_basename_from_path_facts() {
     let state = test_state();
     let task = claimed_task("task-file-basename-path-facts");
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileBasename;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
+    route.semantic_kind = crate::OutputSemanticKind::FileBasename;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
             .to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let wrapped = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/device_local/docs/release_checklist.md","resolved_path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md","size_bytes":120},"path":"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"file\",\"path\":\"scripts/nl_tests/fixtures/device_local/docs/release_checklist.md\",\"resolved_path\":\"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md\",\"size_bytes\":120},\"path\":\"/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/release_checklist.md\"}],\"include_missing\":true}"}"#;
@@ -621,12 +619,11 @@ async fn finalize_loop_reply_replaces_wrapped_market_quote_scalar_delivery() {
     );
     let task = claimed_task("task-wrapped-market-quote-scalar");
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::MarketQuote;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.resolved_intent = "capability_ref=crypto.quote symbol=BTCUSDT".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::MarketQuote;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let wrapped = r#"{"extra":{"action":"quote","content_excerpt":"BTCUSDT | Price sources:\n- BINANCE $67216.010000","quote":{"exchange":"binance","price_usd":67216.01,"source":"binance_api","symbol":"BTCUSDT"}},"text":"BTCUSDT | Price sources:\n- BINANCE $67216.010000"}"#;
@@ -669,7 +666,7 @@ fn direct_scalar_finalize_uses_structured_extract_field_missing_message() {
         finished_at: 0,
     });
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(scalar_route_result()),
+        output_contract: Some(scalar_route_result()),
         ..Default::default()
     };
     let (answer, summary) =
@@ -701,7 +698,7 @@ fn direct_scalar_finalize_uses_structured_read_field_missing_message() {
         finished_at: 0,
     });
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(scalar_route_result()),
+        output_contract: Some(scalar_route_result()),
         ..Default::default()
     };
     let (answer, summary) =
@@ -754,10 +751,10 @@ fn direct_structured_observed_answer_skips_multi_evidence_content_routes() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     assert!(
@@ -790,10 +787,10 @@ fn direct_structured_observed_answer_preserves_publishable_respond_for_content_r
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -817,12 +814,12 @@ fn direct_structured_observed_answer_skips_raw_passthrough_for_strict_exact_sent
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.exact_sentence_count = Some(1);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.response_shape = OutputResponseShape::Strict;
+    route.exact_sentence_count = Some(1);
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -848,12 +845,12 @@ fn direct_non_builtin_raw_answer_skips_synthesized_delivery_contract() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.exact_sentence_count = Some(1);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.response_shape = OutputResponseShape::Strict;
+    route.exact_sentence_count = Some(1);
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -893,10 +890,10 @@ fn direct_structured_observed_answer_skips_ambiguous_multi_structured_scalars() 
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = false;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = false;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     assert!(
@@ -932,10 +929,10 @@ fn direct_structured_observed_answer_formats_scalar_equality_pair() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    route.response_shape = OutputResponseShape::Scalar;
+    route.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let (answer, summary) =
@@ -961,12 +958,11 @@ fn direct_scalar_finalize_uses_hidden_entries_direct_answer() {
         finished_at: 0,
     });
     let mut route = scalar_route_result();
-    route.resolved_intent = "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = ".".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint = ".".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let (answer, summary) =
@@ -995,11 +991,8 @@ fn direct_scalar_finalize_defers_health_check_summary_to_synthesis() {
         finished_at: 0,
     });
     let mut route = scalar_route_result();
-    route.resolved_intent =
-        "执行基础健康检查，仅提取并返回操作系统相关的关键字段，排除 RustClaw 自身的状态摘要"
-            .to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     assert!(
@@ -1025,12 +1018,11 @@ fn direct_scalar_finalize_reports_missing_path_before_extracting_path_field() {
         finished_at: 0,
     });
     let mut route = scalar_route_result();
-    route.resolved_intent = "查一下 configs/config_copy 下面有几个 toml 文件".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "configs/config_copy".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "configs/config_copy".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -1065,12 +1057,11 @@ fn direct_scalar_finalize_does_not_repair_limited_listing_from_drifted_scalar_co
         finished_at: 0,
     });
     let mut route = scalar_route_result();
-    route.resolved_intent = "列出 logs 目录最近修改的 2 个文件名，只输出文件名".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "logs".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let (answer, summary) =
@@ -1113,9 +1104,9 @@ fn direct_scalar_finalize_preserves_planned_count_inventory_breakdown() {
         r#"{"action":"count_inventory","counts":{"total":66,"files":40,"dirs":26}}"#,
     ));
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         original_user_request: Some("帮我检查一下当前目录底下有多少个文件和文件夹。".to_string()),
         ..Default::default()
     };
@@ -1142,9 +1133,9 @@ fn direct_scalar_finalize_uses_total_count_without_component_plan() {
         r#"{"action":"count_inventory","counts":{"total":66,"files":40,"dirs":26}}"#,
     ));
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         original_user_request: Some("当前目录有多少个项目？只回复数字。".to_string()),
         ..Default::default()
     };
@@ -1169,10 +1160,10 @@ fn direct_scalar_finalize_uses_wrapped_count_inventory_total() {
         r#"{"extra":{"action":"count_inventory","counts":{"total":66,"files":40,"dirs":26},"path":"logs"},"text":"{\"action\":\"count_inventory\",\"counts\":{\"total\":66,\"files\":40,\"dirs\":26},\"path\":\"logs\"}"}"#,
     ));
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
-    route.output_contract.locator_hint = "logs".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.locator_hint = "logs".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         original_user_request: Some("count direct entries".to_string()),
         ..Default::default()
     };
@@ -1197,12 +1188,12 @@ fn scalar_count_contract_projects_find_ext_count_from_machine_field() {
         r#"{"extra":{"action":"find_ext","count":1,"ext":"zip","exts":["zip"],"patterns":[],"results":["scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"],"root":"scripts/nl_tests/fixtures/device_local"},"text":"{}"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         original_user_request: Some(
             "count zip files under scripts/nl_tests/fixtures/device_local; output only the number"
                 .to_string(),
@@ -1231,10 +1222,10 @@ fn direct_scalar_finalize_allows_scalar_count_with_one_sentence_shape() {
         r#"{"action":"count_inventory","counts":{"total":34,"files":32,"dirs":2},"path":"document","recursive":false}"#,
     ));
     let mut route = scalar_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.semantic_kind = crate::OutputSemanticKind::ScalarCount;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         original_user_request: Some("再数一下 document 目录直接有多少个子项".to_string()),
         ..Default::default()
     };
@@ -1266,14 +1257,12 @@ fn direct_structured_finalize_answers_existence_with_path_from_single_observatio
         finished_at: 0,
     });
     let mut route = scalar_route_result();
-    route.resolved_intent =
-        "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径".to_string();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
-    route.output_contract.locator_hint = "rustclaw.service".to_string();
+    route.response_shape = OutputResponseShape::Free;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.locator_hint = "rustclaw.service".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let (answer, summary) =
@@ -1309,7 +1298,7 @@ fn direct_non_builtin_finalize_preserves_raw_skill_text() {
         finished_at: 0,
     });
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
 
@@ -1343,7 +1332,7 @@ fn direct_non_builtin_finalize_skips_structured_machine_output() {
         finished_at: 0,
     });
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(free_route_result()),
+        output_contract: Some(free_route_result()),
         ..Default::default()
     };
 
@@ -1369,10 +1358,10 @@ async fn direct_publishable_observed_answer_skips_run_cmd_without_explicit_raw_c
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.response_shape = crate::OutputResponseShape::OneSentence;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -1402,10 +1391,10 @@ async fn direct_publishable_observed_answer_skips_strict_run_cmd_format_contract
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -1422,10 +1411,10 @@ async fn direct_publishable_observed_answer_skips_strict_run_cmd_format_contract
 #[test]
 fn observed_output_language_fallback_skips_matrix_deterministic_shape() {
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.response_shape = crate::OutputResponseShape::Free;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -1451,10 +1440,10 @@ async fn direct_publishable_observed_answer_skips_matrix_deterministic_shape() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.response_shape = crate::OutputResponseShape::Free;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -1482,14 +1471,14 @@ fn direct_scalar_finalize_accepts_strict_single_line_observation() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.exact_sentence_count = Some(1);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.exact_sentence_count = Some(1);
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
+    route.locator_kind = crate::OutputLocatorKind::None;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -1514,12 +1503,12 @@ fn direct_scalar_finalize_skips_strict_raw_command_output_contract() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.exact_sentence_count = Some(1);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.exact_sentence_count = Some(1);
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -1543,7 +1532,7 @@ fn raw_structured_passthrough_is_dropped_for_scalar_contract() {
         finished_at: 0,
     });
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(scalar_route_result()),
+        output_contract: Some(scalar_route_result()),
         ..Default::default()
     };
     assert_eq!(
@@ -1575,7 +1564,7 @@ fn structured_user_input_delivery_is_not_dropped_as_raw_passthrough() {
         finished_at: 0,
     });
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(scalar_route_result()),
+        output_contract: Some(scalar_route_result()),
         ..Default::default()
     };
     assert_eq!(
@@ -1605,7 +1594,7 @@ fn qualified_scalar_passthrough_is_not_dropped() {
         finished_at: 0,
     });
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(scalar_route_result()),
+        output_contract: Some(scalar_route_result()),
         ..Default::default()
     };
     assert_eq!(
@@ -1643,10 +1632,10 @@ fn scalar_path_from_write_file_is_not_dropped_as_meta_placeholder() {
         .written_file_aliases
         .insert("pwd_line.txt".to_string(), path.to_string());
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
-    route.output_contract.locator_hint = "pwd_line.txt".to_string();
+    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.locator_hint = "pwd_line.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -1677,13 +1666,10 @@ fn direct_scalar_finalize_prefers_presence_plus_path_for_fs_search_presence_quer
         finished_at: 0,
     });
     let mut route = scalar_route_result();
-    route.resolved_intent =
-        "检查仓库工作区中是否存在 rustclaw.service 文件，如果存在则返回路径，如果不存在则返回不存在。回答格式只输出有或没有以及路径。"
-            .to_string();
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.requires_content_evidence = false;
+    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let (answer, summary) =
@@ -1714,34 +1700,19 @@ fn archive_exit_zero_passthrough_is_dropped_when_structured_answer_exists() {
         started_at: 0,
         finished_at: 0,
     });
-    let route = crate::RouteResult {
-        resolved_intent:
-            "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功"
-                .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::OneSentence,
-            requires_content_evidence: false,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
-            locator_hint: "scripts/skill_calls -> tmp/nl_archive_case.zip".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: false,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
+        locator_hint: "scripts/skill_calls -> tmp/nl_archive_case.zip".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 

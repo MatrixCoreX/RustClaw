@@ -12,7 +12,7 @@ pub(super) fn replace_delivery_with_weather_query_fields(
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
     delivery_messages: &mut Vec<String>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     if !route_is_weather_query(route) {
@@ -59,10 +59,8 @@ pub(super) fn replace_delivery_with_weather_query_fields(
     true
 }
 
-fn route_is_weather_query(route: &crate::RouteResult) -> bool {
-    route
-        .output_contract
-        .semantic_kind_is(crate::OutputSemanticKind::WeatherQuery)
+fn route_is_weather_query(route: &crate::IntentOutputContract) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::WeatherQuery)
 }
 
 fn latest_weather_query_field_projection(loop_state: &LoopState) -> Option<String> {

@@ -242,7 +242,7 @@ fn inventory_dir_grouped_names_candidate(
 
 pub(super) fn inventory_dir_direct_answer_candidate(
     state: Option<&AppState>,
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     value: &serde_json::Value,
     prefer_english: bool,
 ) -> Option<String> {

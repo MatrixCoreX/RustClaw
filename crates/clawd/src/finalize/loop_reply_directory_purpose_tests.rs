@@ -21,13 +21,13 @@ fn directory_purpose_summary_from_size_facts_picks_largest_file() {
         "prompts/schemas contains JSON Schema contracts; intent_normalizer.schema.json is 13124 bytes and describes the structured intent-normalizer output.",
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "prompts/schemas".to_string();
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "prompts/schemas".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -74,13 +74,13 @@ fn directory_purpose_summary_replaces_wrong_synthesis_largest_file() {
         "contract_repair_judge.schema.json looks like the largest file.",
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "prompts/schemas".to_string();
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "prompts/schemas".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -124,13 +124,13 @@ fn directory_purpose_summary_preserves_latest_publishable_synthesis_delivery() {
     loop_state.last_user_visible_respond = Some(synthesis.to_string());
     loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "prompts/schemas".to_string();
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "prompts/schemas".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -213,13 +213,13 @@ fn directory_purpose_summary_replaces_wrapped_inventory_wrong_synthesis_with_com
         "contract_repair_judge.schema.json looks like the largest file.",
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "prompts/schemas".to_string();
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "prompts/schemas".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -271,13 +271,13 @@ fn directory_purpose_summary_replaces_partial_document_listing_synthesis() {
         "planning_deterministic_guardrails_audit.md is the main document.",
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "docs".to_string();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "docs".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -329,13 +329,13 @@ fn directory_purpose_summary_uses_listing_content_when_synthesis_left_no_deliver
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "docs".to_string();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "docs".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -375,13 +375,13 @@ fn directory_purpose_summary_does_not_finalize_listing_only_intermediate_state()
         "I need to read the largest schema before answering.",
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "prompts/schemas".to_string();
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "prompts/schemas".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -410,11 +410,11 @@ fn current_workspace_dirs_overview_reads_wrapped_inventory_dir_output() {
         r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\",\"counts\":{\"dirs\":2,\"files\":1,\"total\":3},\"names_by_kind\":{\"dirs\":[\"configs\",\"docs\"],\"files\":[\"README.md\"],\"other\":[]},\"path\":\"workspace\"}","error_text":null,"extra":{"action":"inventory_dir","counts":{"dirs":2,"files":1,"total":3},"names_by_kind":{"dirs":["configs","docs"],"files":["README.md"],"other":[]},"path":"workspace"}}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Strict;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -448,11 +448,11 @@ fn current_workspace_inventory_overview_supports_free_listing_contract() {
         r#"{"action":"inventory_dir","counts":{"dirs":2,"files":3,"total":5},"names_by_kind":{"dirs":["configs","docs"],"files":["AGENTS.md","Cargo.toml","README.md"],"other":[]},"path":"."}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -496,11 +496,11 @@ fn current_workspace_dirs_overview_replaces_incomplete_generic_synthesis() {
     loop_state.delivery_messages.push(incomplete.to_string());
     loop_state.last_user_visible_respond = Some(incomplete.to_string());
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Strict;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -545,11 +545,11 @@ fn current_workspace_dirs_overview_preserves_publishable_hidden_entries_answer()
     loop_state.last_user_visible_respond = Some(answer.to_string());
     loop_state.last_publishable_synthesis_output = Some(answer.to_string());
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Strict;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -598,12 +598,12 @@ fn current_workspace_dirs_overview_does_not_replace_after_wrapped_read_range_evi
     loop_state.delivery_messages.push(synthesized.to_string());
     loop_state.last_user_visible_respond = Some(synthesized.to_string());
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Strict;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -638,12 +638,12 @@ fn current_workspace_dirs_overview_does_not_replace_freeform_project_article() {
     loop_state.delivery_messages.push(article.to_string());
     loop_state.last_user_visible_respond = Some(article.to_string());
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -684,14 +684,15 @@ fn recent_artifacts_judgment_replaces_non_answer_with_structured_inventory_verdi
         "read_file failed for /repo/scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip: stream did not contain valid UTF-8",
     ));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local/tmp".to_string();
-    route.route_reason = "selector_limit=3 selector_sort_by=mtime_desc".to_string();
+    route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "scripts/nl_tests/fixtures/device_local/tmp".to_string();
+    route.self_extension.list_selector.limit = Some(3);
+    route.self_extension.list_selector.sort_by = Some("mtime_desc".to_string());
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -736,14 +737,13 @@ fn recent_artifacts_judgment_preserves_one_sentence_synthesis() {
     loop_state.last_user_visible_respond = Some(synthesis.to_string());
     loop_state.delivery_messages.push(synthesis.to_string());
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs".to_string();
-    route.route_reason = "selector_limit=2 selector_sort_by=mtime_desc".to_string();
+    route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "logs".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -785,14 +785,14 @@ fn recent_artifacts_judgment_replaces_count_only_machine_field_synthesis() {
     loop_state.last_user_visible_respond = Some(incomplete.to_string());
     loop_state.delivery_messages.push(incomplete.to_string());
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local/tmp".to_string();
-    route.output_contract.self_extension.list_selector.limit = Some(3);
+    route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "scripts/nl_tests/fixtures/device_local/tmp".to_string();
+    route.self_extension.list_selector.limit = Some(3);
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -850,23 +850,15 @@ fn recent_artifacts_judgment_respects_file_selector_before_limit() {
         r#"{"action":"inventory_dir","entries":[{"kind":"file","modified_ts":9,"name":"config.toml","path":"configs/config.toml","size_bytes":23851},{"kind":"file","modified_ts":8,"name":"task_contract_matrix.toml","path":"configs/task_contract_matrix.toml","size_bytes":28845},{"kind":"dir","modified_ts":7,"name":"i18n","path":"configs/i18n","size_bytes":0},{"kind":"file","modified_ts":6,"name":"agent_guard.toml","path":"configs/agent_guard.toml","size_bytes":17952}],"path":"/repo/configs","sort_by":"mtime_desc"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind = crate::OutputScalarCountTargetKind::File;
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind_specified = true;
-    route.output_contract.self_extension.list_selector.limit = Some(3);
+    route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.self_extension.list_selector.target_kind_specified = true;
+    route.self_extension.list_selector.limit = Some(3);
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -906,23 +898,15 @@ fn recent_artifacts_judgment_classifies_scripts_per_entry() {
         r#"{"action":"inventory_dir","entries":[{"kind":"file","modified_ts":9,"name":"summarize_agent_decides_route_delta.py","path":"scripts/summarize_agent_decides_route_delta.py","size_bytes":42200},{"kind":"file","modified_ts":8,"name":"check_long_files.py","path":"scripts/check_long_files.py","size_bytes":5839},{"kind":"file","modified_ts":7,"name":"sync_registry_governance_fields.py","path":"scripts/sync_registry_governance_fields.py","size_bytes":3531}],"path":"/repo/scripts","sort_by":"mtime_desc"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind = crate::OutputScalarCountTargetKind::File;
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind_specified = true;
-    route.output_contract.self_extension.list_selector.limit = Some(3);
+    route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.self_extension.list_selector.target_kind_specified = true;
+    route.self_extension.list_selector.limit = Some(3);
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -961,23 +945,15 @@ fn recent_artifacts_judgment_classifies_logs_per_entry() {
         r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\"}","error_text":null,"extra":{"action":"inventory_dir","entries":[{"kind":"file","modified_ts":9,"name":"clawd.run.log","path":"logs/clawd.run.log","size_bytes":2300},{"kind":"file","modified_ts":8,"name":"model_io.log","path":"logs/model_io.log","size_bytes":900}],"names":["clawd.run.log","model_io.log"],"path":"/repo/logs","resolved_path":"/repo/logs","sort_by":"mtime_desc"}}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.self_extension.list_selector.limit = Some(2);
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind = crate::OutputScalarCountTargetKind::File;
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind_specified = true;
+    route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.self_extension.list_selector.limit = Some(2);
+    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.self_extension.list_selector.target_kind_specified = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -1013,13 +989,13 @@ fn recent_artifacts_judgment_classifies_docs_markdown_per_entry() {
         r#"{"action":"inventory_dir","entries":[{"kind":"file","modified_ts":9,"name":"planning_full_test_failure_inventory.md","path":"docs/planning_full_test_failure_inventory.md","size_bytes":9320},{"kind":"file","modified_ts":8,"name":"long_file_split_inventory.md","path":"docs/long_file_split_inventory.md","size_bytes":13375},{"kind":"file","modified_ts":7,"name":"legacy_semantic_route_inventory.md","path":"docs/legacy_semantic_route_inventory.md","size_bytes":6072}],"path":"/repo/docs","sort_by":"mtime_desc"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.self_extension.list_selector.limit = Some(3);
+    route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.self_extension.list_selector.limit = Some(3);
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -1059,12 +1035,12 @@ fn recent_artifacts_judgment_replaces_unqualified_delivery_even_when_entries_are
         r#"{"action":"inventory_dir","entries":[{"kind":"dir","modified_ts":3,"name":"clarify_unpack_case","path":"tmp/clarify_unpack_case"},{"kind":"dir","modified_ts":2,"name":"manual_dynamic_guard_unpack","path":"tmp/manual_dynamic_guard_unpack"},{"kind":"dir","modified_ts":1,"name":"dynamic_guard_unpack_case","path":"tmp/dynamic_guard_unpack_case"}],"path":"tmp","sort_by":"mtime_desc"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.locator_kind = OutputLocatorKind::Path;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;

@@ -9,7 +9,7 @@ pub(super) fn replace_delivery_with_service_status_observed_answer(
     agent_run_context: Option<&AgentRunContext>,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     let Some(answer) =
@@ -61,7 +61,7 @@ pub(super) fn replace_raw_passthrough_delivery_with_publishable_synthesis(
     agent_run_context: Option<&AgentRunContext>,
     delivery_messages: &mut Vec<String>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     if !super::delivery_backfill::route_expects_synthesis_over_raw_observation(route) {
@@ -124,16 +124,16 @@ pub(super) fn prefer_latest_synthesis_for_compound_observation_delivery(
     delivery_messages: &mut Vec<String>,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    let contract = route.effective_output_contract();
+    let contract = route.clone();
     if contract.delivery_required
         || matches!(
             contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
         )
-        || route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+        || route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
     {
         return false;
     }
@@ -220,7 +220,7 @@ pub(super) fn prefer_content_evidence_synthesis_for_final_delivery(
     delivery_messages: &mut Vec<String>,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     let Some(synthesis) = super::delivery_backfill::valid_publishable_synthesis_output(loop_state)
@@ -267,17 +267,17 @@ pub(super) fn prefer_content_evidence_synthesis_for_final_delivery(
 }
 
 fn route_allows_grounded_compound_terminal_delivery(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
-    let contract = route.effective_output_contract();
+    let contract = route.clone();
     if contract.delivery_required
         || !matches!(contract.response_shape, crate::OutputResponseShape::Free)
         || super::raw_command::output_contract_requests_exact_delivery(route)
     {
         return false;
     }
-    let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route) else {
+    let Some(shape) = crate::evidence_policy::final_answer_shape_for_output_contract(route) else {
         return false;
     };
     if !matches!(
@@ -291,7 +291,7 @@ fn route_allows_grounded_compound_terminal_delivery(
 }
 
 pub(super) fn structured_compound_synthesis_can_replace_current_delivery(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
     current: &str,
     synthesis: &str,
@@ -307,12 +307,12 @@ pub(super) fn structured_compound_synthesis_can_replace_current_delivery(
         || crate::finalize::looks_like_internal_trace_artifact(synthesis)
         || (crate::finalize::is_execution_summary_message(synthesis) && !agent_hook_policy_surface)
         || super::raw_command::output_contract_requests_exact_delivery(route)
-        || route.output_contract.delivery_required
+        || route.delivery_required
     {
         return false;
     }
     if matches!(
-        route.output_contract.response_shape,
+        route.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
     ) {
         return false;

@@ -368,13 +368,13 @@ impl IntentOutputContract {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RouteReasonMarkers<'a> {
-    route_reason: &'a str,
+pub(crate) struct MachineTokenMarkers<'a> {
+    machine_text: &'a str,
 }
 
-impl<'a> RouteReasonMarkers<'a> {
-    pub(crate) fn new(route_reason: &'a str) -> Self {
-        Self { route_reason }
+impl<'a> MachineTokenMarkers<'a> {
+    pub(crate) fn new(machine_text: &'a str) -> Self {
+        Self { machine_text }
     }
 
     pub(crate) fn has_machine_marker(self, marker: &str) -> bool {
@@ -407,136 +407,12 @@ impl<'a> RouteReasonMarkers<'a> {
     }
 
     fn tokens(self) -> impl Iterator<Item = &'a str> {
-        self.route_reason
+        self.machine_text
             .split(|ch: char| {
                 ch.is_whitespace() || matches!(ch, ';' | ',' | '|' | '[' | ']' | '(' | ')')
             })
             .map(str::trim)
             .filter(|part| !part.is_empty())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ResumeBehavior {
-    None,
-    ResumeExecute,
-    ResumeDiscuss,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ScheduleKind {
-    None,
-    Create,
-    Update,
-    Delete,
-    Query,
-}
-
-impl ScheduleKind {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Create => "create",
-            Self::Update => "update",
-            Self::Delete => "delete",
-            Self::Query => "query",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum RiskCeiling {
-    #[default]
-    Unknown,
-    Low,
-    Medium,
-    High,
-}
-
-impl RiskCeiling {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Unknown => "Unknown",
-            Self::Low => "Low",
-            Self::Medium => "Medium",
-            Self::High => "High",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct RouteResult {
-    /// Runtime mode for ask-flow dispatch. Legacy route labels for logs and
-    /// journals are derived from this field.
-    pub(crate) resolved_intent: String,
-    pub(crate) needs_clarify: bool,
-    pub(crate) clarify_question: String,
-    pub(crate) route_reason: String,
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) visible_skill_candidates: Vec<String>,
-    pub(crate) risk_ceiling: RiskCeiling,
-    pub(crate) resume_behavior: ResumeBehavior,
-    pub(crate) schedule_kind: ScheduleKind,
-    pub(crate) wants_file_delivery: bool,
-    pub(crate) should_refresh_long_term_memory: bool,
-    pub(crate) agent_display_name_hint: String,
-    pub(crate) output_contract: IntentOutputContract,
-}
-
-impl RouteResult {
-    pub(crate) fn from_planner_output_contract(output_contract: IntentOutputContract) -> Self {
-        Self {
-            resolved_intent: String::new(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "planner_output_contract_v1".to_string(),
-            #[cfg(test)]
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            wants_file_delivery: output_contract.delivery_required,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract,
-        }
-    }
-
-    pub(crate) fn planner_output_contract_unavailable() -> Self {
-        let mut route = Self::from_planner_output_contract(IntentOutputContract::default());
-        route.route_reason = "planner_output_contract_unavailable".to_string();
-        route
-    }
-
-    pub(crate) fn output_contract_marker_is(&self, semantic_kind: OutputSemanticKind) -> bool {
-        self.output_contract.semantic_kind_is(semantic_kind)
-    }
-
-    pub(crate) fn output_contract_marker_is_any(
-        &self,
-        semantic_kinds: &[OutputSemanticKind],
-    ) -> bool {
-        semantic_kinds
-            .iter()
-            .copied()
-            .any(|semantic_kind| self.output_contract_marker_is(semantic_kind))
-    }
-
-    pub(crate) fn effective_output_contract_semantic_kind(&self) -> OutputSemanticKind {
-        self.output_contract.semantic_kind
-    }
-
-    pub(crate) fn effective_output_contract(&self) -> IntentOutputContract {
-        self.output_contract.clone()
-    }
-
-    pub(crate) fn output_contract_is_unclassified(&self) -> bool {
-        self.output_contract.semantic_kind_is_unclassified()
-    }
-
-    pub(crate) fn is_clarify_gate(&self) -> bool {
-        false
     }
 }
 

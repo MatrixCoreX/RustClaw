@@ -1,37 +1,21 @@
 use super::*;
 
 fn answer_contract_from_route(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> crate::answer_verifier::AnswerContract {
-    crate::answer_verifier::AnswerContract::new(
-        &route.resolved_intent,
-        route.output_contract.clone(),
-    )
+    crate::answer_verifier::AnswerContract::new("test request", route.clone())
 }
 
 #[test]
 fn git_status_text_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-git-state", "ask", "检查仓库状态");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::GitRepositoryState,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "git_basic".to_string(),
@@ -44,8 +28,7 @@ fn git_status_text_counts_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
 
@@ -67,26 +50,13 @@ fn git_status_text_counts_as_field_value_evidence() {
 #[test]
 fn git_subject_plain_text_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-git-subject", "ask", "最近一次 git 提交标题");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::GitCommitSubject,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "run_cmd".to_string(),
@@ -97,8 +67,7 @@ fn git_subject_plain_text_counts_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
 }
@@ -116,28 +85,15 @@ fn git_status_text_ignores_non_ascii_summary_without_panic() {
 #[test]
 fn config_validation_evidence_coverage_accepts_valid_flag() {
     let mut journal = TaskJournal::for_task("task-config-validation", "ask", "验证配置");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::ConfigValidation,
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::Path,
         locator_hint: "configs/config.toml".to_string(),
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "config_basic".to_string(),
@@ -157,8 +113,7 @@ fn config_validation_evidence_coverage_accepts_valid_flag() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
 }
@@ -167,10 +122,10 @@ fn config_validation_evidence_coverage_accepts_valid_flag() {
 fn config_mutation_plan_change_evidence_counts_as_valid_plan_proof() {
     let mut journal = TaskJournal::for_task("task-config-plan", "ask", "preview config change");
     let mut route = route_for_semantic(crate::OutputSemanticKind::ConfigMutation);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "configs/config.toml".to_string();
-    journal.record_output_contract(&route.effective_output_contract());
+    route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "configs/config.toml".to_string();
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "config_edit".to_string(),
@@ -196,8 +151,7 @@ fn config_mutation_plan_change_evidence_counts_as_valid_plan_proof() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage.observed_canonical.contains("path"));
@@ -208,10 +162,10 @@ fn config_mutation_plan_change_evidence_counts_as_valid_plan_proof() {
 fn config_mutation_apply_validated_flag_counts_as_valid_evidence() {
     let mut journal = TaskJournal::for_task("task-config-apply", "ask", "apply config change");
     let mut route = route_for_semantic(crate::OutputSemanticKind::ConfigMutation);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "configs/config.toml".to_string();
-    journal.record_output_contract(&route.effective_output_contract());
+    route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "configs/config.toml".to_string();
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "config_edit".to_string(),
@@ -234,8 +188,7 @@ fn config_mutation_apply_validated_flag_counts_as_valid_evidence() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage.observed_canonical.contains("path"));
@@ -245,28 +198,15 @@ fn config_mutation_apply_validated_flag_counts_as_valid_evidence() {
 #[test]
 fn sqlite_database_kind_uses_db_structure_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-sqlite-kind", "ask", "判断 sqlite 数据库类型");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::Path,
         locator_hint: "data/test_contract.sqlite".to_string(),
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "db_basic".to_string(),
@@ -287,8 +227,7 @@ fn sqlite_database_kind_uses_db_structure_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("candidates"));
     assert!(coverage.observed_canonical.contains("field_value"));
@@ -297,26 +236,13 @@ fn sqlite_database_kind_uses_db_structure_as_field_value_evidence() {
 #[test]
 fn quantity_comparison_size_bytes_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-quantity-comparison", "ask", "比较两个文件大小");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::QuantityComparison,
         locator_kind: crate::OutputLocatorKind::Path,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -350,8 +276,7 @@ fn quantity_comparison_size_bytes_counts_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage.observed_canonical.contains("size_bytes"));
@@ -365,8 +290,8 @@ fn quantity_comparison_inventory_dir_entry_keys_count_as_size_evidence() {
         "find largest file by size",
     );
     let mut route = route_for_semantic(crate::OutputSemanticKind::QuantityComparison);
-    route.output_contract.requires_content_evidence = true;
-    journal.record_output_contract(&route.effective_output_contract());
+    route.requires_content_evidence = true;
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -406,8 +331,7 @@ fn quantity_comparison_inventory_dir_entry_keys_count_as_size_evidence() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage.observed_canonical.contains("size_bytes"));
@@ -420,26 +344,13 @@ fn quantity_comparison_text_size_bytes_counts_as_field_value_evidence() {
         "ask",
         "compare two file sizes",
     );
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::QuantityComparison,
         locator_kind: crate::OutputLocatorKind::Path,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "run_cmd".to_string(),
@@ -453,8 +364,7 @@ fn quantity_comparison_text_size_bytes_counts_as_field_value_evidence() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage.observed_canonical.contains("size_bytes"));
@@ -467,26 +377,13 @@ fn quantity_comparison_count_inventory_total_size_counts_as_size_evidence() {
         "ask",
         "check directory size",
     );
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::QuantityComparison,
         locator_kind: crate::OutputLocatorKind::Path,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -511,8 +408,7 @@ fn quantity_comparison_count_inventory_total_size_counts_as_size_evidence() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage.observed_canonical.contains("size_bytes"));
@@ -521,26 +417,13 @@ fn quantity_comparison_count_inventory_total_size_counts_as_size_evidence() {
 #[test]
 fn trace_json_reports_required_vs_observed_evidence_coverage() {
     let mut journal = TaskJournal::for_task("task-evidence-coverage", "ask", "列出文件名");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::FileNames,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -614,28 +497,15 @@ fn trace_json_reports_required_vs_observed_evidence_coverage() {
 #[test]
 fn config_risk_evidence_coverage_accepts_guard_findings() {
     let mut journal = TaskJournal::for_task("task-config-risk-evidence", "ask", "检查配置风险");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "capability_ref=config.guard".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::ConfigRiskAssessment,
         locator_kind: crate::OutputLocatorKind::Path,
         locator_hint: "configs/config.toml".to_string(),
         requires_content_evidence: true,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "config_edit".to_string(),
@@ -659,8 +529,7 @@ fn config_risk_evidence_coverage_accepts_guard_findings() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     let trace = journal.to_trace_json();
     let items = trace
         .get("step_results")
@@ -690,28 +559,15 @@ fn filesystem_mutation_result_accepts_kb_ingest_path_evidence() {
         "ask",
         "ingest README into demo_docs_nl",
     );
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::FilesystemMutationResult,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         locator_hint: "README.md".to_string(),
         requires_content_evidence: true,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "kb".to_string(),
@@ -736,8 +592,7 @@ fn filesystem_mutation_result_accepts_kb_ingest_path_evidence() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     let trace = journal.to_trace_json();
 
     assert!(coverage.is_complete());
@@ -756,28 +611,15 @@ fn evidence_coverage_ignores_failed_and_synthesis_outputs() {
         "ask",
         "summarize file content",
     );
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         requires_content_evidence: true,
         semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
         locator_kind: crate::OutputLocatorKind::Path,
         locator_hint: "README.md".to_string(),
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_failed".to_string(),
         skill: "fs_basic".to_string(),
@@ -799,8 +641,7 @@ fn evidence_coverage_ignores_failed_and_synthesis_outputs() {
         finished_at: 4,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
 
     assert!(!coverage.is_complete(), "coverage: {coverage:?}");
     assert_eq!(
@@ -849,26 +690,13 @@ fn raw_command_output_error_step_supplies_command_output_evidence() {
         "ask",
         "cat /definitely_missing_rustclaw_contract_case",
     );
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::ExecutionFailedStep,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "run_cmd".to_string(),
@@ -890,8 +718,7 @@ fn raw_command_output_error_step_supplies_command_output_evidence() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
 
@@ -933,26 +760,13 @@ fn raw_command_output_error_step_supplies_command_output_evidence() {
 #[test]
 fn summary_json_includes_machine_readable_task_outcome() {
     let mut journal = TaskJournal::for_task("task-outcome", "ask", "列出文件名");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::FileNames,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.record_final_status(TaskJournalFinalStatus::Success);
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -1003,26 +817,13 @@ fn summary_json_includes_machine_readable_task_outcome() {
 #[test]
 fn trace_json_reports_missing_required_evidence() {
     let mut journal = TaskJournal::for_task("task-evidence-missing", "ask", "这个路径是否存在");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
         locator_kind: crate::OutputLocatorKind::Path,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -1057,26 +858,13 @@ fn trace_json_reports_missing_required_evidence() {
 #[test]
 fn trace_json_uses_evidence_expression_for_confirmed_absence() {
     let mut journal = TaskJournal::for_task("task-evidence-absence", "ask", "这个路径是否存在");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
         locator_kind: crate::OutputLocatorKind::Path,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -1094,8 +882,7 @@ fn trace_json_uses_evidence_expression_for_confirmed_absence() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete());
     assert!(coverage.observed_canonical.contains("exists_false"));
 
@@ -1123,26 +910,13 @@ fn trace_json_uses_evidence_expression_for_confirmed_absence() {
 #[test]
 fn trace_json_reports_missing_evidence_expression_alternative() {
     let mut journal = TaskJournal::for_task("task-evidence-missing-alt", "ask", "这个路径是否存在");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
         locator_kind: crate::OutputLocatorKind::Path,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -1153,8 +927,7 @@ fn trace_json_reports_missing_evidence_expression_alternative() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert_eq!(
         coverage.missing_evidence,
         vec!["one_of(exists_false|exists_true)"]
@@ -1168,27 +941,14 @@ fn content_presence_accepts_excerpt_evidence_alternative() {
         "ask",
         "check whether the file mentions release",
     );
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::ContentPresenceCheck,
         locator_kind: crate::OutputLocatorKind::Path,
         requires_content_evidence: true,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.step_results.push(TaskJournalStepTrace::ok(
         "step_1",
         "fs_basic",
@@ -1200,8 +960,7 @@ fn content_presence_accepts_excerpt_evidence_alternative() {
         .to_string(),
     ));
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete());
     assert!(coverage.observed_canonical.contains("content_excerpt"));
     assert_eq!(
@@ -1223,9 +982,9 @@ fn content_presence_accepts_structured_not_found_as_negative_match_evidence() {
         "read /tmp/definitely_missing.md; if missing, say it is missing",
     );
     let mut route = route_for_semantic(crate::OutputSemanticKind::ContentPresenceCheck);
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.requires_content_evidence = true;
-    journal.record_output_contract(&route.effective_output_contract());
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.requires_content_evidence = true;
+    journal.record_output_contract(&route.clone());
     journal.step_results.push(TaskJournalStepTrace::new(
         "step_1",
         "fs_basic",
@@ -1245,8 +1004,7 @@ fn content_presence_accepts_structured_not_found_as_negative_match_evidence() {
         )),
     ));
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("content_match"));
     assert!(coverage.observed_canonical.contains("exists"));
@@ -1261,8 +1019,8 @@ fn git_subject_contract_ignores_read_text_observation_as_field_value_evidence() 
         "current git commit subject",
     );
     let mut route = route_for_semantic(crate::OutputSemanticKind::GitCommitSubject);
-    route.output_contract.requires_content_evidence = false;
-    journal.record_output_contract(&route.effective_output_contract());
+    route.requires_content_evidence = false;
+    journal.record_output_contract(&route.clone());
     journal.step_results.push(TaskJournalStepTrace::ok(
         "step_read",
         "fs_basic",
@@ -1274,8 +1032,7 @@ fn git_subject_contract_ignores_read_text_observation_as_field_value_evidence() 
         .to_string(),
     ));
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
 
     assert!(!coverage.is_complete(), "coverage: {coverage:?}");
     assert_eq!(coverage.missing_evidence, vec!["field_value"]);
@@ -1291,8 +1048,8 @@ fn non_content_route_ignores_doc_parse_observation_as_structured_evidence() {
         "service status",
     );
     let mut route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
-    route.output_contract.requires_content_evidence = false;
-    journal.record_output_contract(&route.effective_output_contract());
+    route.requires_content_evidence = false;
+    journal.record_output_contract(&route.clone());
     journal.step_results.push(TaskJournalStepTrace::ok(
         "step_parse",
         "doc_parse",
@@ -1305,8 +1062,7 @@ fn non_content_route_ignores_doc_parse_observation_as_structured_evidence() {
         .to_string(),
     ));
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
 
     assert!(!coverage.is_complete());
     assert_eq!(coverage.missing_evidence, vec!["field_value"]);
@@ -1316,26 +1072,13 @@ fn non_content_route_ignores_doc_parse_observation_as_structured_evidence() {
 #[test]
 fn trace_json_counts_nested_builtin_tool_evidence() {
     let mut journal = TaskJournal::for_task("task-nested-evidence", "ask", "这个路径是否存在");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
         locator_kind: crate::OutputLocatorKind::Path,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -1378,27 +1121,14 @@ fn trace_json_counts_nested_builtin_tool_evidence() {
 #[test]
 fn trace_json_includes_task_level_evidence_policy_snapshot() {
     let mut journal = TaskJournal::for_task("task-contract-snapshot", "ask", "列出文件名");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::FileNames,
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
 
     let trace = journal.to_trace_json();
     let snapshot = trace
@@ -1444,27 +1174,14 @@ fn trace_json_includes_task_level_evidence_policy_snapshot() {
 #[test]
 fn step_trace_includes_contract_and_action_policy_for_success() {
     let mut journal = TaskJournal::for_task("task-step-contract", "ask", "列出文件名");
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route = crate::IntentOutputContract {
         semantic_kind: crate::OutputSemanticKind::FileNames,
         requires_content_evidence: true,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.record_plan_result(&crate::PlanResult {
         goal: "list file names".to_string(),
         missing_slots: Vec::new(),
@@ -1536,30 +1253,16 @@ fn db_schema_version_action_evidence_overrides_stale_existence_route_contract() 
         "ask",
         "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite",
     );
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "active_clarify_locator_reply_fast_path; contract:existence_with_path"
+    let mut route = crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
+        response_shape: crate::OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::Path,
+        locator_hint: "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
             .to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
-            response_shape: crate::OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            locator_kind: crate::OutputLocatorKind::Path,
-            locator_hint: "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
-                .to_string(),
-            ..Default::default()
-        },
+        ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.record_plan_result(&crate::PlanResult {
         goal: "read sqlite schema version".to_string(),
         missing_slots: Vec::new(),
@@ -1601,8 +1304,7 @@ fn db_schema_version_action_evidence_overrides_stale_existence_route_contract() 
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
 
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert_eq!(coverage.required_evidence, vec!["field_value"]);
@@ -1610,7 +1312,7 @@ fn db_schema_version_action_evidence_overrides_stale_existence_route_contract() 
     assert!(coverage.observed_canonical.contains("schema_version"));
     assert!(coverage.evidence_expression.is_none());
 
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+    route.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
     assert!(
         crate::answer_verifier::local_missing_evidence_verifier_gap(
             &answer_contract_from_route(&route),
@@ -1628,27 +1330,14 @@ fn runtime_status_action_evidence_overrides_generic_path_route_contract() {
         "ask",
         "current working directory",
     );
-    let route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            semantic_kind: crate::OutputSemanticKind::None,
-            response_shape: crate::OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-            ..Default::default()
-        },
+    let route = crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::None,
+        response_shape: crate::OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        ..Default::default()
     };
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.record_plan_result(&crate::PlanResult {
         goal: "return cwd".to_string(),
         missing_slots: Vec::new(),
@@ -1691,8 +1380,7 @@ fn runtime_status_action_evidence_overrides_generic_path_route_contract() {
         finished_at: 2,
     });
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
 
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert_eq!(coverage.required_evidence, vec!["field_value"]);

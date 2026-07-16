@@ -8,10 +8,10 @@ use super::task_content_evidence_delivery::{
 use super::task_resume::text_looks_like_missing_file_target;
 
 pub(super) fn should_reinsert_execution_summaries_for_delivery(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer_text: &str,
 ) -> bool {
-    let output_contract = route_result.effective_output_contract();
+    let output_contract = route_result.clone();
     if (output_contract.response_shape == crate::OutputResponseShape::Scalar
         || route_requests_config_validation(route_result))
         && !answer_text.trim().is_empty()
@@ -25,12 +25,12 @@ pub(super) fn should_reinsert_execution_summaries_for_delivery(
     true
 }
 
-fn route_requests_config_validation(route_result: &crate::RouteResult) -> bool {
+fn route_requests_config_validation(route_result: &crate::IntentOutputContract) -> bool {
     crate::finalize::route_matches_validation_verdict_output_contract(route_result)
 }
 
 pub(super) fn drop_execution_summaries_when_delivery_is_scalar(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer_text: &str,
     answer_messages: &mut Vec<String>,
 ) {
@@ -41,10 +41,10 @@ pub(super) fn drop_execution_summaries_when_delivery_is_scalar(
 }
 
 fn strict_structured_final_answer_suppresses_execution_summary(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer_text: &str,
 ) -> bool {
-    route_result.output_contract.response_shape == crate::OutputResponseShape::Strict
+    route_result.response_shape == crate::OutputResponseShape::Strict
         && !route_has_file_delivery_contract(route_result)
         && structured_machine_final_answer(answer_text)
 }
@@ -106,7 +106,7 @@ fn journal_has_non_control_step(journal: &crate::task_journal::TaskJournal) -> b
 }
 
 pub(super) fn delivery_path_gap_should_finalize_as_clarify(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer_text: &str,
     answer_messages: &[String],
     journal: &crate::task_journal::TaskJournal,
@@ -127,7 +127,7 @@ pub(super) fn delivery_path_gap_should_finalize_as_clarify(
 }
 
 pub(super) fn should_use_missing_file_delivery_reply(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer: &crate::AskReply,
 ) -> bool {
     route_has_file_delivery_contract(route_result)
@@ -140,24 +140,23 @@ pub(super) async fn missing_file_delivery_reply_text(
     state: &AppState,
     task: &crate::ClaimedTask,
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer: &crate::AskReply,
 ) -> Option<String> {
     if !should_use_missing_file_delivery_reply(route_result, answer) {
         return None;
     }
-    let language_hint = crate::language_policy::first_clear_request_language_hint([
-        prompt,
-        route_result.resolved_intent.as_str(),
-    ])
-    .unwrap_or_else(|| crate::language_policy::task_response_language_hint(state, task, prompt));
+    let language_hint = crate::language_policy::first_clear_request_language_hint([prompt, ""])
+        .unwrap_or_else(|| {
+            crate::language_policy::task_response_language_hint(state, task, prompt)
+        });
     Some(
         crate::fallback::compose_missing_file_delivery_response(
             state,
             task,
             prompt,
-            &route_result.resolved_intent,
-            Some(route_result.output_contract.locator_hint.as_str()),
+            "",
+            Some(route_result.locator_hint.as_str()),
             &language_hint,
         )
         .await,

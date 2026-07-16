@@ -26,14 +26,13 @@ fn direct_quantity_compare_paths_preserves_existence_fields_when_contract_requir
         r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false,"same_size":false,"size_delta_bytes":119},"field_value":{"left_exists":true,"right_exists":true,"same_path":false,"same_size":false,"size_delta_bytes":119},"left":{"exists":true,"kind":"file","path":"service_notes.md","size_bytes":272},"right":{"exists":true,"kind":"file","path":"release_checklist.md","size_bytes":153}},"text":"{}"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "service_notes.md | release_checklist.md".to_string();
-    route.route_reason = "required_evidence_fields=exists,field_value,kind,size_bytes".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "service_notes.md | release_checklist.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -62,14 +61,13 @@ fn direct_quantity_compare_paths_uses_output_contract_required_metadata_without_
         r#"{"extra":{"action":"compare_paths","comparison":{"same_path":false,"same_size":false,"size_delta_bytes":119},"field_value":{"left_exists":true,"right_exists":true,"same_path":false,"same_size":false,"size_delta_bytes":119},"left":{"exists":true,"kind":"file","path":"service_notes.md","size_bytes":272},"right":{"exists":true,"kind":"file","path":"release_checklist.md","size_bytes":153}},"text":"{\"action\":\"compare_paths\",\"comparison\":{\"same_path\":false,\"same_size\":false,\"size_delta_bytes\":119},\"field_value\":{\"left_exists\":true,\"right_exists\":true,\"same_path\":false,\"same_size\":false,\"size_delta_bytes\":119},\"left\":{\"exists\":true,\"kind\":\"file\",\"path\":\"service_notes.md\",\"size_bytes\":272},\"right\":{\"exists\":true,\"kind\":\"file\",\"path\":\"release_checklist.md\",\"size_bytes\":153}}"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.route_reason = "quantity_comparison".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -92,15 +90,14 @@ async fn finalize_quantity_compare_paths_preserves_required_existence_fields() {
     let state = test_state();
     let task = claimed_task("task-quantity-compare-paths-existence-fields");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "service_notes.md | release_checklist.md".to_string();
-    route.route_reason = "required_evidence_fields=exists,field_value,kind,size_bytes".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "service_notes.md | release_checklist.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(4);
@@ -146,14 +143,13 @@ async fn finalize_one_sentence_quantity_compare_paths_projects_required_metadata
     let state = test_state();
     let task = claimed_task("task-one-sentence-quantity-compare-paths-metadata");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.route_reason = "quantity_comparison".to_string();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -213,13 +209,13 @@ fn direct_quantity_comparison_from_count_inventory_prefers_total_size() {
         r#"{"action":"count_inventory","path":"target","resolved_path":"/tmp/repo/target","recursive":true,"counts":{"total":129116,"files":100000,"dirs":29116,"total_size_bytes":57268736832}}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = "target".to_string();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint = "target".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -251,13 +247,13 @@ fn scalar_quantity_count_inventory_prefers_total_count_over_total_size_bytes() {
         r#"{"extra":{"action":"count_inventory","path":"document","recursive":false,"counts":{"total":47,"files":36,"dirs":11,"total_size_bytes":1190520}},"text":"{\"action\":\"count_inventory\",\"path\":\"document\",\"recursive\":false,\"counts\":{\"total\":47,\"files\":36,\"dirs\":11,\"total_size_bytes\":1190520}}"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "document".to_string();
+    route.response_shape = OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "document".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -284,12 +280,12 @@ fn direct_quantity_comparison_defers_two_count_inventory_totals_to_synthesis() {
         r#"{"extra":{"action":"count_inventory","path":"scripts/nl_tests/fixtures/device_local/logs","recursive":false,"counts":{"total":2,"files":2,"dirs":0,"total_size_bytes":2698}},"text":"{\"action\":\"count_inventory\",\"path\":\"scripts/nl_tests/fixtures/device_local/logs\",\"recursive\":false,\"counts\":{\"total\":2,\"files\":2,\"dirs\":0,\"total_size_bytes\":2698}}"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -317,13 +313,13 @@ fn direct_quantity_comparison_from_ranked_inventory_outputs_name_size_lines() {
         r#"{"action":"inventory_dir","path":"logs","resolved_path":"/tmp/repo/logs","sort_by":"size_desc","entries":[{"kind":"file","name":"large.log","size_bytes":900},{"kind":"file","name":"small.log","size_bytes":12}],"counts":{"files":2,"total":2}}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "logs".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -349,11 +345,11 @@ fn matrix_strict_file_names_ranked_inventory_outputs_name_size_lines() {
         r#"{"action":"inventory_dir","path":"logs","resolved_path":"/tmp/repo/logs","sort_by":"size_desc","entries":[{"kind":"file","name":"large.log","size_bytes":900},{"kind":"file","name":"small.log","size_bytes":12}],"counts":{"files":2,"total":2}}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "logs".to_string();
 
     let (answer, summary) = matrix_strict_list_observed_answer(&route, &loop_state)
         .expect("ranked file-name inventory answer");
@@ -372,23 +368,15 @@ fn matrix_strict_file_names_ranked_inventory_applies_selector_limit() {
         r#"{"action":"inventory_dir","path":"logs","resolved_path":"/tmp/repo/logs","sort_by":"size_desc","entries":[{"kind":"file","name":"large.log","size_bytes":900},{"kind":"file","name":"medium.log","size_bytes":120},{"kind":"file","name":"small.log","size_bytes":12}],"counts":{"files":3,"total":3}}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs".to_string();
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind = crate::OutputScalarCountTargetKind::File;
-    route.output_contract.self_extension.list_selector.limit = Some(2);
-    route.output_contract.self_extension.list_selector.sort_by = Some("size_desc".to_string());
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .include_metadata = Some(true);
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "logs".to_string();
+    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.self_extension.list_selector.limit = Some(2);
+    route.self_extension.list_selector.sort_by = Some("size_desc".to_string());
+    route.self_extension.list_selector.include_metadata = Some(true);
 
     let (answer, summary) = matrix_strict_list_observed_answer(&route, &loop_state)
         .expect("ranked file-name inventory answer");
@@ -414,13 +402,13 @@ fn quantity_comparison_replaces_synthesis_count_with_total_size_answer() {
         r#"{"action":"count_inventory","path":"target","resolved_path":"/tmp/repo/target","recursive":true,"counts":{"total":129116,"files":100000,"dirs":29116,"total_size_bytes":57268736832}}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint = "target".to_string();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint = "target".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -464,13 +452,13 @@ fn quantity_comparison_preserves_synthesis_with_both_path_sizes() {
         synthesized,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "README.md|README.zh-CN.md".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "README.md|README.zh-CN.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -515,13 +503,13 @@ fn direct_quantity_comparison_from_compare_paths_recovers_after_synthesis_failur
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "Cargo.lock|Cargo.toml".to_string();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "Cargo.lock|Cargo.toml".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -561,13 +549,13 @@ fn direct_quantity_comparison_from_path_batch_facts_recovers_after_synthesis_fai
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "Cargo.toml|Cargo.lock".to_string();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "Cargo.toml|Cargo.lock".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -599,13 +587,13 @@ fn direct_quantity_comparison_scalar_shape_returns_ratio_not_byte_delta() {
         r#"{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","path":"Cargo.lock","resolved_path":"/tmp/Cargo.lock","size_bytes":121800},"path":"Cargo.lock"},{"exists":true,"fact":{"kind":"file","path":"Cargo.toml","resolved_path":"/tmp/Cargo.toml","size_bytes":2639},"path":"Cargo.toml"}],"include_missing":true}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "Cargo.lock|Cargo.toml".to_string();
+    route.response_shape = OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "Cargo.lock|Cargo.toml".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -640,13 +628,13 @@ fn direct_quantity_comparison_unwraps_skill_success_envelope() {
         r#"{"extra":{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","path":"Cargo.lock","resolved_path":"/tmp/Cargo.lock","size_bytes":121800},"path":"Cargo.lock"},{"exists":true,"fact":{"kind":"file","path":"Cargo.toml","resolved_path":"/tmp/Cargo.toml","size_bytes":2639},"path":"Cargo.toml"}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":2,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"file\",\"path\":\"Cargo.lock\",\"resolved_path\":\"/tmp/Cargo.lock\",\"size_bytes\":121800},\"path\":\"Cargo.lock\"},{\"exists\":true,\"fact\":{\"kind\":\"file\",\"path\":\"Cargo.toml\",\"resolved_path\":\"/tmp/Cargo.toml\",\"size_bytes\":2639},\"path\":\"Cargo.toml\"}],\"include_missing\":true}"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "Cargo.lock|Cargo.toml".to_string();
+    route.response_shape = OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "Cargo.lock|Cargo.toml".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -674,13 +662,13 @@ fn direct_quantity_comparison_uses_original_request_language_over_scaffold() {
         r#"{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","path":"Cargo.lock","resolved_path":"/tmp/Cargo.lock","size_bytes":121800},"path":"Cargo.lock"},{"exists":true,"fact":{"kind":"file","path":"Cargo.toml","resolved_path":"/tmp/Cargo.toml","size_bytes":2639},"path":"Cargo.toml"}],"include_missing":true}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "Cargo.lock|Cargo.toml".to_string();
+    route.response_shape = OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "Cargo.lock|Cargo.toml".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         original_user_request: Some(
             "比较 Cargo.lock 和 Cargo.toml 的大小，告诉我 lock 大概是 toml 的几倍".to_string(),
         ),
@@ -722,13 +710,13 @@ fn direct_quantity_comparison_strict_shape_returns_byte_delta() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "README.md|AGENTS.md".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "README.md|AGENTS.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -763,12 +751,12 @@ fn direct_quantity_comparison_strict_shape_returns_json_by_default() {
         r#"{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","path":"README.md","resolved_path":"/tmp/README.md","size_bytes":29191},"path":"README.md"},{"exists":true,"fact":{"kind":"file","path":"AGENTS.md","resolved_path":"/tmp/AGENTS.md","size_bytes":20744},"path":"AGENTS.md"}],"include_missing":true}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -805,12 +793,12 @@ fn strict_quantity_comparison_replacement_does_not_preserve_prose_delivery() {
         .delivery_messages
         .push("README.md is larger: 29191 bytes; AGENTS.md is 20744 bytes.".to_string());
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -849,13 +837,12 @@ fn free_quantity_comparison_replacement_waits_for_model_language_synthesis() {
         r#"{"action":"compare_paths","left":{"kind":"file","path":"README.md","resolved_path":"/repo/README.md","size_bytes":46905},"right":{"kind":"file","path":"README.zh-CN.md","resolved_path":"/repo/README.zh-CN.md","size_bytes":40250},"comparison":{"same_kind":true,"same_name":false,"same_size":false,"size_delta_bytes":6655,"left_newer":false,"same_content":false}}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.route_reason = "quantity_comparison_requires_model_language_synthesis".to_string();
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -891,12 +878,12 @@ fn strict_quantity_comparison_preserves_grounded_synthesis_with_grouped_sizes() 
     loop_state.last_publishable_synthesis_output = Some(answer.clone());
     loop_state.delivery_messages.push(answer.clone());
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -935,13 +922,13 @@ fn quantity_comparison_preserves_grounded_respond_from_wrapped_compare_paths() {
     loop_state.delivery_messages.push(answer.clone());
     loop_state.last_user_visible_respond = Some(answer.clone());
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.exact_sentence_count = Some(1);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.exact_sentence_count = Some(1);
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -980,12 +967,12 @@ fn quantity_comparison_preserves_model_answer_with_rounded_size_units() {
     loop_state.delivery_messages.push(answer.to_string());
     loop_state.last_user_visible_respond = Some(answer.to_string());
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut summary = None;
@@ -1057,11 +1044,11 @@ fn direct_quantity_comparison_contract_selector_returns_larger_with_sizes() {
         r#"{"action":"compare_paths","left":{"path":"release_checklist.md","resolved_path":"/tmp/release_checklist.md","kind":"file","size_bytes":153},"right":{"path":"package.json","resolved_path":"/tmp/package.json","kind":"file","size_bytes":246},"comparison":{"same_kind":true,"same_name":false,"same_size":false,"size_delta_bytes":-93,"left_newer":false,"same_content":false}}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 

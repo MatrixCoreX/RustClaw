@@ -1,7 +1,7 @@
 use crate::agent_engine::LoopState;
 
 pub(super) fn direct_observed_count_answer_for_scalar_contract(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     if !route_prefers_observed_count(route, loop_state) {
@@ -50,12 +50,15 @@ pub(super) fn direct_observed_count_answer_for_scalar_contract(
     ))
 }
 
-fn route_prefers_observed_count(route: &crate::RouteResult, loop_state: &LoopState) -> bool {
-    let contract = route.effective_output_contract();
+fn route_prefers_observed_count(
+    route: &crate::IntentOutputContract,
+    loop_state: &LoopState,
+) -> bool {
+    let contract = route.clone();
     if contract.delivery_required {
         return false;
     }
-    route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount)
+    route.semantic_kind_is(crate::OutputSemanticKind::ScalarCount)
         && !plan_requests_count_inventory_file_dir_breakdown(loop_state)
 }
 

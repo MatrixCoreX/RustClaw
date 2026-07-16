@@ -46,8 +46,7 @@ use crate::{
     },
     executor::{StepExecutionResult, StepExecutionStatus},
     AgentAction, AskReply, ClaimedTask, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ResumeBehavior, RiskCeiling,
-    RouteResult, ScheduleKind,
+    OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
 };
 use serde_json::json;
 
@@ -63,38 +62,22 @@ fn success_marker_matching_requires_exact_line() {
     ));
 }
 
-fn route_result(shape: OutputResponseShape) -> RouteResult {
-    RouteResult {
-        resolved_intent: "test".to_string(),
-        needs_clarify: false,
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        clarify_question: String::new(),
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: shape,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: Default::default(),
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+fn route_result(shape: OutputResponseShape) -> IntentOutputContract {
+    IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: shape,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: Default::default(),
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     }
 }
 
-fn answer_contract(route: &RouteResult) -> crate::answer_verifier::AnswerContract {
-    crate::answer_verifier::AnswerContract::new(
-        &route.resolved_intent,
-        route.output_contract.clone(),
-    )
+fn answer_contract(route: &IntentOutputContract) -> crate::answer_verifier::AnswerContract {
+    crate::answer_verifier::AnswerContract::new("test request", route.clone())
 }
 
 #[test]
@@ -281,7 +264,7 @@ fn structured_search_verifier_exhaustion_recovers_with_full_candidate_list() {
         ])
         .with_task_journal(journal);
     let mut route = route_result(OutputResponseShape::Strict);
-    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+    route.semantic_kind = OutputSemanticKind::FilePaths;
 
     assert!(try_recover_structured_search_answer_verifier_gap(
         Some(&answer_contract(&route)),
@@ -333,7 +316,7 @@ fn structured_search_recovery_does_not_override_directory_purpose_summary() {
     let mut reply =
         AskReply::non_llm("Found 50 candidates.".to_string()).with_task_journal(journal);
     let mut route = route_result(OutputResponseShape::Strict);
-    route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
+    route.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
 
     assert!(!try_recover_structured_search_answer_verifier_gap(
         Some(&answer_contract(&route)),
@@ -375,7 +358,7 @@ fn structured_count_verifier_exhaustion_recovers_with_count_inventory() {
         finished_at: 0,
     });
     let mut route = route_result(OutputResponseShape::OneSentence);
-    route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+    route.semantic_kind = OutputSemanticKind::ScalarCount;
     let mut reply = AskReply::non_llm("需要重新触发计数任务。".to_string())
         .with_messages(vec![
             "**执行过程**\n1. 调用工具 `fs_basic`。".to_string(),
@@ -404,11 +387,10 @@ fn structured_count_verifier_exhaustion_recovers_with_count_inventory() {
 #[test]
 fn rss_news_verifier_exhaustion_recovers_with_structured_sources() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::RssNewsFetch;
-    route.resolved_intent = "capability_ref=rss.latest_news category=general".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.semantic_kind = OutputSemanticKind::RssNewsFetch;
+    route.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-rss", "ask", "prompt");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,
@@ -454,11 +436,10 @@ fn rss_news_verifier_exhaustion_recovers_with_structured_sources() {
 #[test]
 fn rss_news_passed_verifier_preserves_observed_source_hosts() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::RssNewsFetch;
-    route.resolved_intent = "capability_ref=rss.latest_news category=general".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.semantic_kind = OutputSemanticKind::RssNewsFetch;
+    route.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-rss", "ask", "prompt");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: true,
@@ -502,9 +483,9 @@ fn rss_news_passed_verifier_preserves_observed_source_hosts() {
 #[test]
 fn content_excerpt_summary_verifier_exhaustion_recovers_with_synthesis_output() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,
@@ -566,10 +547,10 @@ fn content_excerpt_summary_verifier_exhaustion_recovers_with_synthesis_output() 
 #[test]
 fn workspace_project_summary_verifier_exhaustion_recovers_with_synthesis_output() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-workspace", "ask", "prompt");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,
@@ -615,10 +596,10 @@ fn workspace_project_summary_verifier_exhaustion_recovers_with_synthesis_output(
 #[test]
 fn workspace_project_summary_verifier_exhaustion_does_not_recover_unsupported_claims() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-workspace", "ask", "prompt");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,
@@ -657,7 +638,7 @@ fn generic_path_content_verifier_exhaustion_does_not_recover_raw_read_range_exce
     let route = route_result(OutputResponseShape::Free);
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-read-range", "ask", "tail log");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,
@@ -722,12 +703,12 @@ fn generic_path_content_verifier_exhaustion_does_not_recover_raw_read_range_exce
 #[test]
 fn structured_scalar_output_format_gap_recovers_quoted_observed_value() {
     let mut route = route_result(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.output_contract.locator_kind = OutputLocatorKind::Filename;
-    route.output_contract.locator_hint = "package.json".to_string();
+    route.semantic_kind = OutputSemanticKind::None;
+    route.locator_kind = OutputLocatorKind::Filename;
+    route.locator_hint = "package.json".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-scalar-recovery", "ask", "field value");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
         pass: false,
@@ -874,8 +855,8 @@ fn machine_kv_summary_output_format_gap_requires_observed_non_flag_value() {
 #[test]
 fn document_heading_verifier_gap_recovers_heading_scalar_from_read_range_evidence() {
     let mut route = route_result(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::DocumentHeading;
-    route.output_contract.locator_hint = "docs/service_notes.md".to_string();
+    route.semantic_kind = OutputSemanticKind::DocumentHeading;
+    route.locator_hint = "docs/service_notes.md".to_string();
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-1", "ask", "read the document heading");
@@ -939,9 +920,9 @@ fn document_heading_verifier_gap_recovers_heading_scalar_from_read_range_evidenc
 #[test]
 fn planner_document_heading_contract_recovers_markdown_heading() {
     let mut route = route_result(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::DocumentHeading;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint = "docs/release_checklist.md".to_string();
+    route.semantic_kind = OutputSemanticKind::DocumentHeading;
+    route.requires_content_evidence = true;
+    route.locator_hint = "docs/release_checklist.md".to_string();
 
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-1",
@@ -1013,10 +994,10 @@ fn planner_document_heading_contract_recovers_markdown_heading() {
 #[test]
 fn language_only_output_format_gap_keeps_best_model_answer_success() {
     let mut route = route_result(OutputResponseShape::OneSentence);
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.requires_content_evidence = false;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
+    route.semantic_kind = OutputSemanticKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
     journal.record_final_answer("best model answer");
@@ -1052,10 +1033,10 @@ fn language_only_output_format_gap_keeps_best_model_answer_success() {
 #[test]
 fn language_only_output_format_gap_prefers_latest_terminal_answer_over_stale_text() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.requires_content_evidence = false;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
+    route.semantic_kind = OutputSemanticKind::None;
     let table_only = "| name | score |\n| --- | --- |\n| beta | 12 |";
     let full_answer = "**1. log evidence**\n- WARN=2, ERROR=1\n\n**2. doc summary**\n- service notes\n\n**3. table**\n\n| name | score |\n| --- | --- |\n| beta | 12 |";
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
@@ -1101,11 +1082,11 @@ fn language_only_output_format_gap_prefers_latest_terminal_answer_over_stale_tex
 #[test]
 fn latest_terminal_recovery_rejects_structured_visible_rewrite_gap() {
     let mut route = route_result(OutputResponseShape::Strict);
-    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
+    route.semantic_kind = OutputSemanticKind::FilePaths;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
-    route.output_contract.self_extension.list_selector.limit = Some(3);
+    route.self_extension.list_selector.limit = Some(3);
     let first_three = "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md";
     let all_four =
         format!("{first_three}\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt");
@@ -1182,9 +1163,9 @@ fn latest_terminal_recovery_rejects_structured_visible_rewrite_gap() {
 #[test]
 fn latest_terminal_recovery_uses_latest_terminal_for_non_structured_gap() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
             .to_string();
     let first_answer = "# Service Notes\n\nRustClaw test fixture service notes.";
@@ -1256,11 +1237,9 @@ fn latest_terminal_recovery_uses_latest_terminal_for_non_structured_gap() {
 #[test]
 fn http_health_service_status_contract_recovers_with_structured_status_line() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
-    route.output_contract.locator_kind = OutputLocatorKind::Url;
-    route.output_contract.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
-    route.resolved_intent =
-        "capability_ref=browser.open_extract url=http://127.0.0.1:8787/v1/health".to_string();
+    route.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.locator_kind = OutputLocatorKind::Url;
+    route.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
 
     let body = json!({
         "ok": true,
@@ -1338,9 +1317,9 @@ fn http_health_service_status_contract_recovers_with_structured_status_line() {
 #[test]
 fn http_health_command_summary_gap_recovers_with_structured_status_line() {
     let mut route = route_result(OutputResponseShape::OneSentence);
-    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Url;
-    route.output_contract.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
+    route.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.locator_kind = OutputLocatorKind::Url;
+    route.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
 
     let body = json!({
         "ok": true,
@@ -1431,9 +1410,9 @@ fn http_health_command_summary_gap_recovers_with_structured_status_line() {
 #[test]
 fn http_health_command_summary_gap_prefers_latest_language_synthesis() {
     let mut route = route_result(OutputResponseShape::OneSentence);
-    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Url;
-    route.output_contract.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
+    route.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.locator_kind = OutputLocatorKind::Url;
+    route.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
 
     let body = json!({
         "ok": true,

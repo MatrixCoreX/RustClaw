@@ -149,21 +149,14 @@ fn inconsistent_locator_clarify_without_route_boundary_replans_then_finishes_as_
     );
     let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
     let mut route = route_result(OutputResponseShape::OneSentence);
-    route.risk_ceiling = RiskCeiling::Medium;
-    route.needs_clarify = false;
-    route.wants_file_delivery = false;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.delivery_required = false;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    route.requires_content_evidence = false;
+    route.locator_kind = OutputLocatorKind::None;
+    route.delivery_required = false;
+    route.delivery_intent = OutputDeliveryIntent::None;
     let mut loop_state = LoopState::new(2);
 
-    let first = try_recover_inconsistent_boundary_clarify(
-        &mut loop_state,
-        Some(&route.output_contract),
-        &intent,
-    )
-    .expect("inconsistent boundary clarify should be recoverable");
+    let first = try_recover_inconsistent_boundary_clarify(&mut loop_state, Some(&route), &intent)
+        .expect("inconsistent boundary clarify should be recoverable");
     assert_eq!(
         first.stop_signal.as_deref(),
         Some("recoverable_failure_continue_round")
@@ -174,12 +167,8 @@ fn inconsistent_locator_clarify_without_route_boundary_replans_then_finishes_as_
     assert_eq!(loop_state.attempt_ledger_entries.len(), 1);
 
     loop_state.round_no = 2;
-    let second = try_recover_inconsistent_boundary_clarify(
-        &mut loop_state,
-        Some(&route.output_contract),
-        &intent,
-    )
-    .expect("repeated inconsistent boundary clarify should finish nonblocking");
+    let second = try_recover_inconsistent_boundary_clarify(&mut loop_state, Some(&route), &intent)
+        .expect("repeated inconsistent boundary clarify should finish nonblocking");
     assert_eq!(
         second.stop_signal.as_deref(),
         Some("structured_respond_nonblocking_clarify_answer")
@@ -240,19 +229,16 @@ fn planner_locator_contract_does_not_recover_clarify_into_plan_file_read() {
     );
     let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
     let mut route = route_result(OutputResponseShape::OneSentence);
-    route.risk_ceiling = RiskCeiling::Low;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.delivery_required = false;
-    route.output_contract.delivery_intent = OutputDeliveryIntent::None;
+    route.requires_content_evidence = false;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.delivery_required = false;
+    route.delivery_intent = OutputDeliveryIntent::None;
     let mut loop_state = LoopState::new(2);
 
-    assert!(try_recover_inconsistent_boundary_clarify(
-        &mut loop_state,
-        Some(&route.output_contract),
-        &intent,
-    )
-    .is_none());
+    assert!(
+        try_recover_inconsistent_boundary_clarify(&mut loop_state, Some(&route), &intent,)
+            .is_none()
+    );
 
     let outcome = apply_structured_respond_clarify_to_loop_state(&mut loop_state, &intent);
     assert_eq!(

@@ -19,12 +19,12 @@ fn observed_markdown_heading_scalar_ignores_markdown_json_hidden_in_visible_text
         .to_string(),
     ));
     let mut route = scalar_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "release_checklist.md".to_string();
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "release_checklist.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let mut delivery =

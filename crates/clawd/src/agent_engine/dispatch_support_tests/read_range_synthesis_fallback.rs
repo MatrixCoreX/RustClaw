@@ -9,32 +9,19 @@ fn synthesize_direct_fallback_blocks_multiline_raw_read_range_when_plan_requests
         "fs_basic",
         r#"{"action":"read_range","mode":"tail","excerpt":"1|WARN cache miss ratio above baseline\n2|ERROR provider timeout\n3|INFO provider retry succeeded","path":"/tmp/app.log"}"#,
     ));
-    let route = crate::RouteResult {
-        resolved_intent: "tail a log slice and provide a takeaway".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "raw route but plan requested synthesis".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
-            locator_hint: "/tmp/app.log".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
+        locator_hint: "/tmp/app.log".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -81,32 +68,19 @@ fn synthesize_direct_fallback_blocks_multiline_read_range_for_scalar_extraction(
         "fs_basic",
         r##"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|Operators should check the app log first when requests fail, then verify the config file and database tables.","path":"/tmp/service_notes.md"}"##,
     ));
-    let route = crate::RouteResult {
-        resolved_intent: "extract one scalar from a markdown file".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "scalar locator requires evidence".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Scalar,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: "/tmp/service_notes.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: "/tmp/service_notes.md".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -124,32 +98,19 @@ fn synthesize_direct_fallback_blocks_nested_extra_multiline_read_range() {
         "fs_basic",
         r##"{"extra":{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|Operators should check the app log first when requests fail, then verify the config file and database tables.","path":"/tmp/service_notes.md"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|# Service Notes\\n2|\\n3|Operators should check the app log first when requests fail, then verify the config file and database tables.\",\"path\":\"/tmp/service_notes.md\"}"}"##,
     ));
-    let route = crate::RouteResult {
-        resolved_intent: "summarize a markdown document from observed content".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "content excerpt summary".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
-            locator_hint: "/tmp/service_notes.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+        locator_hint: "/tmp/service_notes.md".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -166,32 +127,19 @@ fn deterministic_scalar_markdown_heading_uses_title_field_selector_for_free_rout
         "fs_basic",
         r##"{"extra":{"action":"read_range","field_selector":"title","field_value":"Service Notes","value_text":"Service Notes","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"/tmp/service_notes.md"}}"##,
     ));
-    let route = crate::RouteResult {
-        resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "agent_loop_execution".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::None,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::None,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -209,32 +157,19 @@ fn deterministic_scalar_markdown_heading_keeps_free_route_without_title_selector
         "fs_basic",
         r##"{"extra":{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"/tmp/service_notes.md"}}"##,
     ));
-    let route = crate::RouteResult {
-        resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "agent_loop_execution".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::None,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::None,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -249,32 +184,19 @@ fn bounded_read_range_direct_answer_allows_unclassified_free_path_route() {
         "fs_basic",
         r##"{"extra":{"action":"read_range","mode":"head","requested_n":4,"start_line":1,"end_line":4,"excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for RustClaw NL regression tests.\n4|","path":"/tmp/README.md"}}"##,
     ));
-    let route = crate::RouteResult {
-        resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: false,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::None,
-            locator_hint: "/tmp/README.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: false,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::None,
+        locator_hint: "/tmp/README.md".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let ctx = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -294,41 +216,28 @@ fn bounded_read_range_direct_answer_blocks_summary_and_scalar_routes() {
         "fs_basic",
         r##"{"extra":{"action":"read_range","mode":"head","requested_n":3,"excerpt":"1|# Service Notes\n2|\n3|Operators should check logs first.","path":"/tmp/service_notes.md"}}"##,
     ));
-    let base_route = crate::RouteResult {
-        resolved_intent: "capability_ref=filesystem.read_text_range".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "agent_loop_execution".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: crate::OutputResponseShape::Free,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: crate::OutputLocatorKind::Path,
-            delivery_intent: crate::OutputDeliveryIntent::None,
-            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
-            locator_hint: "/tmp/service_notes.md".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+    let base_route = crate::IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: crate::OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: crate::OutputLocatorKind::Path,
+        delivery_intent: crate::OutputDeliveryIntent::None,
+        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+        locator_hint: "/tmp/service_notes.md".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
     };
     let summary_ctx = AgentRunContext {
-        route_result: Some(base_route.clone()),
+        output_contract: Some(base_route.clone()),
         ..AgentRunContext::default()
     };
     assert!(synthesize_bounded_read_range_direct_answer(&loop_state, Some(&summary_ctx)).is_none());
 
     let mut scalar_route = base_route;
-    scalar_route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    scalar_route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    scalar_route.semantic_kind = crate::OutputSemanticKind::None;
+    scalar_route.response_shape = crate::OutputResponseShape::Scalar;
     let scalar_ctx = AgentRunContext {
-        route_result: Some(scalar_route),
+        output_contract: Some(scalar_route.clone()),
         ..AgentRunContext::default()
     };
     assert!(synthesize_bounded_read_range_direct_answer(&loop_state, Some(&scalar_ctx)).is_none());

@@ -9,7 +9,7 @@ use super::{
     execute_actions_once, load_agent_loop_guard_policy, prepare_round_actions, push_round_trace,
     AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome,
 };
-use crate::{AgentAction, AppState, AskReply, ClaimedTask, RouteResult};
+use crate::{AgentAction, AppState, AskReply, ClaimedTask, IntentOutputContract};
 
 #[path = "loop_control_answer_recovery.rs"]
 mod loop_control_answer_recovery;
@@ -145,19 +145,19 @@ fn reply_final_status_is_clarify(reply: &AskReply) -> bool {
         })
 }
 
-fn route_expects_terminal_user_answer(route_result: &RouteResult) -> bool {
-    if route_result.output_contract.delivery_required {
+fn route_expects_terminal_user_answer(route_result: &IntentOutputContract) -> bool {
+    if route_result.delivery_required {
         return false;
     }
     !matches!(
-        route_result.output_contract.response_shape,
+        route_result.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
     )
 }
 
-fn route_requires_direct_candidate_for_observed_stop(route_result: &RouteResult) -> bool {
-    route_result.output_contract_marker_is(crate::OutputSemanticKind::ServiceStatus)
-        && crate::evidence_policy::final_answer_shape_for_route(route_result)
+fn route_requires_direct_candidate_for_observed_stop(route_result: &IntentOutputContract) -> bool {
+    route_result.semantic_kind_is(crate::OutputSemanticKind::ServiceStatus)
+        && crate::evidence_policy::final_answer_shape_for_output_contract(route_result)
             .is_some_and(|shape| shape.allows_model_language())
 }
 
@@ -214,22 +214,24 @@ fn action_reads_text_content(action: &AgentAction) -> bool {
             .unwrap_or(false)
 }
 
-fn route_needs_workspace_text_evidence_before_observed_finalize(route: &RouteResult) -> bool {
-    route.output_contract.requires_content_evidence
-        && !route.output_contract.delivery_required
-        && route.output_contract.response_shape == crate::OutputResponseShape::Free
-        && route.output_contract_is_unclassified()
-        && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
-        && route.output_contract.locator_hint.trim().is_empty()
+fn route_needs_workspace_text_evidence_before_observed_finalize(
+    route: &IntentOutputContract,
+) -> bool {
+    route.requires_content_evidence
+        && !route.delivery_required
+        && route.response_shape == crate::OutputResponseShape::Free
+        && route.semantic_kind_is_unclassified()
+        && route.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && route.locator_hint.trim().is_empty()
 }
 
 fn structured_scalar_equality_observation_can_finalize(
-    route_result: &RouteResult,
+    route_result: &IntentOutputContract,
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
-    route_result.output_contract_marker_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
-        && !route_result.output_contract.delivery_required
+    route_result.semantic_kind_is(crate::OutputSemanticKind::RecentScalarEqualityCheck)
+        && !route_result.delivery_required
         && has_executable_observation_or_action(actions)
         && !has_discussion_followup_action(actions)
         && super::observed_output::structured_scalar_equality_direct_answer(
@@ -309,15 +311,12 @@ fn should_stop_for_observed_finalize(
     if loop_state.execution_recipe.needs_validation() {
         return false;
     }
-    let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let route_result = agent_run_context.and_then(|ctx| ctx.output_contract());
     let Some(route_result) = route_result else {
         return false;
     };
-    let output_contract = route_result.effective_output_contract();
-    if route_result.needs_clarify
-        || !loop_state.has_tool_or_skill_output
-        || has_authoritative_delivery(loop_state)
-    {
+    let output_contract = route_result.clone();
+    if false || !loop_state.has_tool_or_skill_output || has_authoritative_delivery(loop_state) {
         return false;
     }
     if route_needs_workspace_text_evidence_before_observed_finalize(route_result)
@@ -349,7 +348,7 @@ fn should_stop_for_observed_finalize(
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
         });
     }
-    if route_result.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath)
+    if route_result.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
         && has_direct_observed_answer
     {
         return required_success_marker.is_none_or(|marker| {
@@ -364,7 +363,7 @@ fn should_stop_for_observed_finalize(
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
         });
     }
-    if route_result.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
+    if route_result.semantic_kind_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
         && !has_discussion_followup_action(actions)
     {
         return false;
@@ -379,7 +378,7 @@ fn should_stop_for_observed_finalize(
     {
         return false;
     }
-    if route_result.output_contract.response_shape != crate::OutputResponseShape::Scalar
+    if route_result.response_shape != crate::OutputResponseShape::Scalar
         && loop_state.round_no < loop_state.max_rounds
         && latest_path_batch_facts_all_missing(loop_state)
         && !has_discussion_followup_action(actions)
@@ -387,13 +386,13 @@ fn should_stop_for_observed_finalize(
         return false;
     }
     if has_direct_observed_answer
-        && route_result.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        && route_result.response_shape != crate::OutputResponseShape::Scalar
     {
         return required_success_marker.is_none_or(|marker| {
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
         });
     }
-    if route_result.output_contract.response_shape == crate::OutputResponseShape::Scalar {
+    if route_result.response_shape == crate::OutputResponseShape::Scalar {
         if super::observed_output::extract_direct_scalar_from_generic_output(
             loop_state,
             agent_run_context,
@@ -437,11 +436,11 @@ fn should_stop_for_observed_finalize(
 }
 
 fn quantity_comparison_one_sentence_needs_model_language_before_stop(
-    route_result: &RouteResult,
+    route_result: &IntentOutputContract,
 ) -> bool {
-    route_result.output_contract_marker_is(crate::OutputSemanticKind::QuantityComparison)
-        && route_result.output_contract.response_shape == crate::OutputResponseShape::OneSentence
-        && crate::evidence_policy::final_answer_shape_for_route(route_result)
+    route_result.semantic_kind_is(crate::OutputSemanticKind::QuantityComparison)
+        && route_result.response_shape == crate::OutputResponseShape::OneSentence
+        && crate::evidence_policy::final_answer_shape_for_output_contract(route_result)
             .is_some_and(|shape| shape.allows_model_language())
 }
 
@@ -805,7 +804,7 @@ fn initial_execution_recipe_spec(
     warn!(
         "execution_recipe_no_hint_bypass_local_detector route_available={} user_request_available={}",
         agent_run_context
-            .and_then(|ctx| ctx.route_result.as_ref())
+            .and_then(|ctx| ctx.output_contract())
             .is_some(),
         agent_run_context
             .and_then(|ctx| ctx.user_request.as_deref())

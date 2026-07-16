@@ -948,14 +948,14 @@ fn process_basic_no_match_filter(body: &str) -> Option<String> {
 }
 
 pub(super) fn process_basic_port_list_should_use_llm_synthesis(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     body: &str,
 ) -> bool {
     super::output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::ServiceStatus,
     ) && route_allows_model_language_direct_candidate(route)
-        && route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        && route.response_shape != crate::OutputResponseShape::Scalar
         && body_has_process_basic_port_list_observation(body)
 }
 

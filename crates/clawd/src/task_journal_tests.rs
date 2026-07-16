@@ -28,24 +28,11 @@ mod failure_attribution;
 #[path = "task_journal_tests/frontdoor_llm_metrics.rs"]
 mod frontdoor_llm_metrics;
 
-fn route_for_semantic(semantic_kind: crate::OutputSemanticKind) -> crate::RouteResult {
-    crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            semantic_kind,
-            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-            ..Default::default()
-        },
+fn route_for_semantic(semantic_kind: crate::OutputSemanticKind) -> crate::IntentOutputContract {
+    crate::IntentOutputContract {
+        semantic_kind,
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        ..Default::default()
     }
 }
 
@@ -674,7 +661,7 @@ fn trace_json_includes_round_source_of_truth_machine_fields() {
         }],
     };
     let mut journal = TaskJournal::for_task("task-round-source", "ask", "inspect");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.record_rollout_attribution(TaskJournalRolloutAttribution {
         switch_name: "agent_loop_round_context".to_string(),
         event: "round_context_recorded".to_string(),
@@ -972,9 +959,8 @@ fn trace_json_includes_memory_trace() {
 #[test]
 fn attach_to_result_caps_large_trace_and_preserves_contract_summary_fields() {
     let mut journal = TaskJournal::for_task("task-large-trace", "ask", "列出文件名");
-    journal.record_output_contract(
-        &route_for_semantic(crate::OutputSemanticKind::FileNames).effective_output_contract(),
-    );
+    journal
+        .record_output_contract(&route_for_semantic(crate::OutputSemanticKind::FileNames).clone());
     for idx in 0..300 {
         journal.push_task_observation(json!({
             "idx": idx,

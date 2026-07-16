@@ -567,10 +567,6 @@ fn local_code_validation_fields_requested_for_reserve(
         for value in [
             context.original_user_request.as_deref(),
             context.user_request.as_deref(),
-            context
-                .route_result
-                .as_ref()
-                .map(|route| route.resolved_intent.as_str()),
         ]
         .into_iter()
         .flatten()

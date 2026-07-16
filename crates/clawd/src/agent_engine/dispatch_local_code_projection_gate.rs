@@ -25,10 +25,8 @@ pub(super) fn local_code_strict_json_projection_should_defer_observed_synthesis(
         return false;
     }
     if !agent_run_context
-        .and_then(|context| context.route_result.as_ref())
-        .is_none_or(|route| {
-            route.output_contract.response_shape != crate::OutputResponseShape::FileToken
-        })
+        .and_then(|context| context.output_contract())
+        .is_none_or(|route| route.response_shape != crate::OutputResponseShape::FileToken)
     {
         return false;
     }
@@ -54,10 +52,8 @@ pub(super) fn local_code_strict_json_projection_should_defer_until_validation(
         return false;
     }
     if !agent_run_context
-        .and_then(|context| context.route_result.as_ref())
-        .is_none_or(|route| {
-            route.output_contract.response_shape != crate::OutputResponseShape::FileToken
-        })
+        .and_then(|context| context.output_contract())
+        .is_none_or(|route| route.response_shape != crate::OutputResponseShape::FileToken)
     {
         return false;
     }
@@ -103,10 +99,6 @@ fn local_code_requested_fields(
         for value in [
             context.original_user_request.as_deref(),
             context.user_request.as_deref(),
-            context
-                .route_result
-                .as_ref()
-                .map(|route| route.resolved_intent.as_str()),
         ]
         .into_iter()
         .flatten()

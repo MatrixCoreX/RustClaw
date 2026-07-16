@@ -61,10 +61,10 @@ fn answer_verifier_exhaustion_marks_reply_failure() {
 #[test]
 fn answer_verifier_exhaustion_recovers_latest_contractual_synthesis() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
     let answer =
         "Log evidence reports warn=2 and error=1. Document evidence reports Service Notes.";
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
@@ -136,9 +136,9 @@ fn answer_verifier_exhaustion_recovers_latest_contractual_synthesis() {
 #[test]
 fn latest_synthesis_recovery_rejects_post_write_failed_validation() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/workspace/test_calc_core.py".to_string();
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "/workspace/test_calc_core.py".to_string();
     let stale_answer = r#"{"created_files":["calc_core.py","test_calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"not_observed"}"#;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-post-write-failed-validation",
@@ -196,9 +196,9 @@ fn latest_synthesis_recovery_rejects_post_write_failed_validation() {
 #[test]
 fn answer_verifier_exhaustion_recovers_multi_source_terminal_answer_for_free_route() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
+    route.requires_content_evidence = false;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
     let terminal_answer = concat!(
         "Log analysis:\n",
         "error=1 warn=2\n",
@@ -271,7 +271,7 @@ fn answer_verifier_exhaustion_recovers_multi_source_terminal_answer_for_free_rou
 #[test]
 fn structured_count_recovery_returns_machine_fields_without_language_template() {
     let mut route = route_result(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+    route.semantic_kind = OutputSemanticKind::ScalarCount;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-count-recovery", "ask", "prompt");
     journal.step_results.push(
@@ -305,7 +305,7 @@ fn structured_count_recovery_returns_machine_fields_without_language_template() 
 #[test]
 fn structured_search_recovery_returns_machine_candidates_without_language_template() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+    route.semantic_kind = OutputSemanticKind::FileNames;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-search-recovery", "ask", "prompt");
     journal
@@ -349,9 +349,9 @@ fn structured_search_recovery_returns_machine_candidates_without_language_templa
 #[test]
 fn answer_verifier_exhaustion_recovers_filesystem_mutation_success_payload() {
     let mut route = route_result(OutputResponseShape::OneSentence);
-    route.output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_hint = "README.md".to_string();
+    route.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
+    route.requires_content_evidence = false;
+    route.locator_hint = "README.md".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-filesystem-mutation-success",
         "ask",
@@ -400,10 +400,10 @@ fn answer_verifier_exhaustion_recovers_filesystem_mutation_success_payload() {
 #[test]
 fn answer_verifier_exhaustion_recovers_latest_terminal_respond_after_retry() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
     let corrected_answer =
         "Log evidence reports warn=2 and error=1. Document evidence reports Service Notes.";
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
@@ -465,10 +465,9 @@ fn answer_verifier_exhaustion_recovers_latest_terminal_respond_after_retry() {
 #[test]
 fn answer_verifier_exhaustion_recovers_structured_archive_db_table() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
-        "tmp/test_bundle.zip | data/test_contract.sqlite".to_string();
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "tmp/test_bundle.zip | data/test_contract.sqlite".to_string();
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-archive-db", "ask", "prompt");
@@ -545,10 +544,9 @@ fn answer_verifier_exhaustion_recovers_structured_archive_db_table() {
 #[test]
 fn answer_verifier_exhaustion_does_not_recover_unstructured_terminal_for_field_value_gap() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
-        "tmp/test_bundle.zip | data/test_contract.sqlite".to_string();
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "tmp/test_bundle.zip | data/test_contract.sqlite".to_string();
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-archive-db", "ask", "prompt");
@@ -607,10 +605,10 @@ fn answer_verifier_exhaustion_does_not_recover_unstructured_terminal_for_field_v
 #[test]
 fn answer_verifier_exhaustion_does_not_recover_same_rejected_terminal_respond() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "docs/service_notes.md".to_string();
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "docs/service_notes.md".to_string();
     let rejected_answer = "Candidate includes an unsupported section.";
     let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
     journal

@@ -1,24 +1,8 @@
-use super::{
-    plan_step_from_agent_action, AgentAction, IntentOutputContract, PlanStep, ResumeBehavior,
-    RiskCeiling, RouteResult, ScheduleKind,
-};
+use super::{plan_step_from_agent_action, AgentAction, IntentOutputContract, PlanStep};
 use serde_json::json;
 
-fn route_result() -> RouteResult {
-    RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract::default(),
-    }
+fn output_contract() -> IntentOutputContract {
+    IntentOutputContract::default()
 }
 
 #[test]
@@ -122,43 +106,29 @@ fn plan_step_round_trips_call_capability() {
 }
 
 #[test]
-fn route_result_output_contract_methods_use_direct_contract() {
-    let mut route = route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
-    route.route_reason = "contract:file_paths; contract:service_status".to_string();
+fn output_contract_semantic_methods_use_direct_contract() {
+    let mut contract = output_contract();
+    contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
 
-    assert!(route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths));
-    assert!(!route.output_contract_marker_is_any(&[
+    assert!(contract.semantic_kind_is(crate::OutputSemanticKind::FilePaths));
+    assert!(!contract.semantic_kind_is_any(&[
         crate::OutputSemanticKind::DirectoryNames,
         crate::OutputSemanticKind::ServiceStatus,
     ]));
-    assert!(!route.output_contract_is_unclassified());
+    assert!(!contract.semantic_kind_is_unclassified());
 }
 
 #[test]
-fn route_result_route_reason_does_not_supply_output_contract() {
-    let mut route = route_result();
-    route.route_reason = "contract:workspace_project_summary".to_string();
+fn default_output_contract_is_unclassified() {
+    let contract = output_contract();
 
-    assert_eq!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::None
-    );
-    assert_eq!(
-        route.effective_output_contract_semantic_kind(),
-        crate::OutputSemanticKind::None
-    );
-    assert_eq!(
-        route.effective_output_contract().semantic_kind,
-        crate::OutputSemanticKind::None
-    );
-    assert!(!route.output_contract_marker_is(crate::OutputSemanticKind::FilePaths));
-    assert!(!route.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary));
+    assert_eq!(contract.semantic_kind, crate::OutputSemanticKind::None);
+    assert!(contract.semantic_kind_is_unclassified());
 }
 
 #[test]
-fn route_reason_marker_facade_reads_machine_values_with_shared_tokenization() {
-    let markers = crate::RouteReasonMarkers::new(
+fn machine_token_markers_read_values_with_shared_tokenization() {
+    let markers = crate::MachineTokenMarkers::new(
         "first_token, clarify_reason_code:missing_locator | clarify_reason_code=missing_target",
     );
 
@@ -166,21 +136,5 @@ fn route_reason_marker_facade_reads_machine_values_with_shared_tokenization() {
     assert_eq!(
         markers.machine_value("clarify_reason_code"),
         Some("missing_target")
-    );
-}
-
-#[test]
-fn route_result_route_reason_cannot_override_direct_semantic_kind() {
-    let mut route = route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
-    route.route_reason = "contract:workspace_project_summary".to_string();
-
-    assert_eq!(
-        route.effective_output_contract_semantic_kind(),
-        crate::OutputSemanticKind::FilePaths
-    );
-    assert_eq!(
-        route.effective_output_contract().semantic_kind,
-        crate::OutputSemanticKind::FilePaths
     );
 }

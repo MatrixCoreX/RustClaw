@@ -141,7 +141,7 @@ pub(super) fn observed_output_entries(loop_state: &LoopState) -> Vec<String> {
 
 pub(super) fn git_repository_state_facts_entry(
     loop_state: &LoopState,
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
 ) -> Option<String> {
     let route = route?;
     if !super::output_route_policy::route_contract_marker_is(
@@ -187,10 +187,10 @@ pub(super) fn git_repository_state_facts_entry(
 
 pub(super) fn compound_listing_content_delivery_guard_entry(
     loop_state: &LoopState,
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
 ) -> Option<String> {
     let route = route?;
-    if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
+    if !route.requires_content_evidence || route.delivery_required {
         return None;
     }
     let names = latest_inventory_dir_names(loop_state)?;
@@ -205,7 +205,7 @@ pub(super) fn compound_listing_content_delivery_guard_entry(
 
 pub(super) fn execution_failed_step_guard_entry(
     loop_state: &LoopState,
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
 ) -> Option<String> {
     let route = route?;
     if !super::output_route_policy::route_contract_marker_is(
@@ -217,7 +217,7 @@ pub(super) fn execution_failed_step_guard_entry(
     let mut lines = vec![
         format!(
             "final_answer_shape={}",
-            crate::evidence_policy::final_answer_shape_for_route(route)
+            crate::evidence_policy::final_answer_shape_for_output_contract(route)
                 .map(crate::evidence_policy::FinalAnswerShape::as_str)
                 .unwrap_or("failed_step_with_evidence")
         ),
@@ -515,7 +515,7 @@ pub(super) fn route_observation_facts_entry(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     let ctx = agent_run_context?;
-    let route = ctx.route_result.as_ref()?;
+    let route = ctx.output_contract()?;
     if !super::output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::ExistenceWithPathSummary,
@@ -528,7 +528,7 @@ pub(super) fn route_observation_facts_entry(
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .or_else(|| {
-            let hint = route.output_contract.locator_hint.trim();
+            let hint = route.locator_hint.trim();
             (!hint.is_empty()).then_some(hint)
         })?;
     Some(format!(

@@ -14,10 +14,10 @@ fn backfill_delivery_prefers_contractual_last_respond_over_synthesis() {
         "/home/guagua/rustclaw\n",
     ));
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
-    route.output_contract.locator_hint.clear();
+    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.locator_hint.clear();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -40,11 +40,11 @@ fn backfill_delivery_accepts_exact_multiline_raw_command_respond() {
         .executed_step_results
         .push(ok_step_result("step_1", "run_cmd", observed));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -68,12 +68,12 @@ fn backfill_delivery_uses_free_answer_respond_step() {
         .executed_step_results
         .push(ok_step_result("step_1", "respond", answer));
     let mut route = free_route_result();
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.delivery_required = false;
+    route.requires_content_evidence = false;
+    route.response_shape = OutputResponseShape::Free;
+    route.semantic_kind = OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -106,11 +106,11 @@ fn backfill_delivery_defers_structured_dry_run_payload_to_finalizer_projection()
         "Dry-run summary: provider minimax, model speech-2.8-turbo, output path present.",
     ));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.delivery_required = false;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Strict;
+    route.delivery_required = false;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -178,12 +178,12 @@ fn backfill_delivery_uses_terminal_contract_respond_without_observed_execution()
         .executed_step_results
         .push(ok_step_result("step_1", "respond", answer));
     let mut route = free_route_result();
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.delivery_required = false;
+    route.requires_content_evidence = false;
+    route.response_shape = OutputResponseShape::Free;
+    route.semantic_kind = OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -207,12 +207,12 @@ fn backfill_delivery_does_not_use_respond_step_for_content_evidence_route() {
         .executed_step_results
         .push(ok_step_result("step_1", "respond", answer));
     let mut route = free_route_result();
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.delivery_required = false;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Strict;
+    route.semantic_kind = OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -237,12 +237,12 @@ fn backfill_delivery_prefers_content_evidence_synthesis_over_locator_respond() {
         .executed_step_results
         .push(ok_step_result("step_2", "synthesize_answer", synthesis));
     let mut route = free_route_result();
-    route.output_contract.delivery_required = false;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.delivery_required = false;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -275,9 +275,9 @@ async fn finalize_loop_reply_keeps_exact_single_line_observed_respond() {
         "synthesis failed",
     ));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -316,12 +316,11 @@ async fn finalize_loop_reply_keeps_exact_multiline_raw_command_observed_respond(
         .executed_step_results
         .push(ok_step_result("step_1", "run_cmd", observed));
     let mut route = free_route_result();
-    route.resolved_intent = "raw command output".to_string();
-    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -368,7 +367,7 @@ async fn finalize_loop_reply_uses_publishable_synthesis_output() {
     loop_state.last_publishable_synthesis_output =
         Some("有，路径：/tmp/rustclaw.service".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(scalar_route_result()),
+        output_contract: Some(scalar_route_result()),
         ..Default::default()
     };
 
@@ -418,11 +417,11 @@ async fn finalize_loop_reply_prefers_synthesis_over_raw_delivery_listing() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -469,11 +468,11 @@ async fn finalize_loop_reply_prefers_latest_synthesis_for_compound_observations(
         .executed_step_results
         .push(ok_step_result("step_4", "respond", partial_table));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
+    route.response_shape = OutputResponseShape::Strict;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -511,12 +510,12 @@ async fn finalize_loop_reply_prefers_content_excerpt_synthesis_over_title_delive
         .executed_step_results
         .push(ok_step_result("step_2", "synthesize_answer", synthesis));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.delivery_required = false;
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.response_shape = OutputResponseShape::Strict;
+    route.delivery_required = false;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     assert_eq!(
@@ -525,7 +524,7 @@ async fn finalize_loop_reply_prefers_content_excerpt_synthesis_over_title_delive
     );
     assert!(
         crate::finalize::loop_reply::route_expects_synthesis_over_raw_observation(
-            ctx.route_result.as_ref().expect("route")
+            ctx.output_contract.as_ref().expect("output contract")
         )
     );
 
@@ -563,12 +562,12 @@ async fn finalize_loop_reply_prefers_content_excerpt_respond_synthesis_over_titl
         .executed_step_results
         .push(ok_step_result("step_2", "respond", synthesis));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.delivery_required = false;
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
+    route.response_shape = OutputResponseShape::Strict;
+    route.delivery_required = false;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -615,16 +614,16 @@ async fn finalize_loop_reply_prefers_db_rows_synthesis_over_locator_title_delive
         .executed_step_results
         .push(ok_step_result("step_4", "respond", synthesis));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.response_shape = OutputResponseShape::Free;
+    route.delivery_required = false;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
             .to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -671,11 +670,11 @@ async fn finalize_loop_reply_prefers_structured_json_synthesis_for_compound_obse
         .executed_step_results
         .push(ok_step_result("step_5", "respond", raw_archive_listing));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ArchiveList;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ArchiveList;
+    route.response_shape = OutputResponseShape::Strict;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -717,12 +716,12 @@ async fn finalize_loop_reply_uses_multi_locator_route_for_compound_synthesis() {
         .executed_step_results
         .push(ok_step_result("step_3", "respond", partial_table));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.response_shape = OutputResponseShape::Free;
+    route.locator_hint = "logs/app.log | docs/service_notes.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -760,9 +759,9 @@ async fn finalize_loop_reply_replaces_raw_read_delivery_with_latest_synthesis() 
     loop_state.last_user_visible_respond = Some(raw_read.to_string());
     loop_state.last_publishable_synthesis_output = Some("검색 결과 없음".to_string());
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -807,12 +806,12 @@ async fn finalize_loop_reply_prefers_exact_sentence_synthesis_over_raw_read() {
         .push(ok_step_result("step_2", "synthesize_answer", synthesis));
     loop_state.delivery_messages.push(raw_read);
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.exact_sentence_count = Some(3);
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Strict;
+    route.exact_sentence_count = Some(3);
+    route.semantic_kind = OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -866,11 +865,11 @@ async fn finalize_loop_reply_keeps_strict_raw_tail_read_delivery_over_synthesis(
     loop_state.last_user_visible_respond = Some(observed.to_string());
     loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.response_shape = OutputResponseShape::Strict;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -907,14 +906,13 @@ async fn finalize_loop_reply_uses_latest_fs_basic_path_fact_after_repair() {
         r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"configs/channels","resolved_path":"/tmp/repo/configs/channels","size_bytes":4096},"path":"/tmp/repo/configs/channels"}],"include_missing":true}"#,
     ));
     let mut route = free_route_result();
-    route.resolved_intent = "查看 configs 目录下最后一个条目的路径和类型信息".to_string();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/repo/configs/channels".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/repo/configs/channels".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -980,9 +978,9 @@ async fn finalize_loop_reply_prefers_synthesis_over_raw_last_respond() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -1049,9 +1047,9 @@ async fn finalize_loop_reply_keeps_article_synthesis_after_repair_success() {
     loop_state.last_user_visible_respond = Some(article.clone());
     loop_state.last_publishable_synthesis_output = Some(article.clone());
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -1108,9 +1106,9 @@ async fn finalize_loop_reply_replaces_template_placeholder_with_synthesis() {
         finished_at: 0,
     });
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 

@@ -5,11 +5,11 @@ pub(super) fn extract_answer_from_observed_output_impl(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
-    let response_shape = route.map(|route| route.output_contract.response_shape);
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract());
+    let response_shape = route.map(|route| route.response_shape);
     let has_route_contract = route.is_some();
     let locator_hint = route
-        .map(|route| route.output_contract.locator_hint.as_str())
+        .map(|route| route.locator_hint.as_str())
         .filter(|hint| !hint.trim().is_empty());
     let auto_locator_path = agent_run_context
         .and_then(|ctx| ctx.auto_locator_path.as_deref())
@@ -34,7 +34,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
         );
     let hidden_entries_should_use_llm_synthesis = route.is_some_and(|route| {
         route_requests_hidden_entries_check(route)
-            && route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+            && route.response_shape != crate::OutputResponseShape::Scalar
     });
     let allow_raw_listing_direct_answer = route_allows_raw_listing_direct_answer(route)
         && !existence_with_path_should_use_llm_synthesis
@@ -588,7 +588,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
                     } else if action == Some("path_batch_facts")
                         && !existence_with_path_should_use_llm_synthesis
                         && !matches!(response_shape, Some(crate::OutputResponseShape::FileToken))
-                        && route.is_none_or(|route| !route.output_contract.delivery_required)
+                        && route.is_none_or(|route| !route.delivery_required)
                     {
                         system_basic_existence_with_path_candidate(
                             state,
@@ -607,6 +607,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
                 structured_scalar_candidate(
                     state,
                     route,
+                    current_turn_request_text(route, agent_run_context),
                     &observed_output.skill,
                     &observed_output.body,
                     locator_hint,
@@ -637,7 +638,7 @@ pub(super) fn extract_answer_from_observed_output_impl(
 
 pub(super) fn fs_search_output_direct_answer_candidate(
     state: Option<&AppState>,
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     value: &serde_json::Value,
     locator_hint: Option<&str>,
     prefer_english: bool,
@@ -648,7 +649,7 @@ pub(super) fn fs_search_output_direct_answer_candidate(
         super::output_route_policy::route_contract_marker_is(
             route,
             crate::OutputSemanticKind::DirectoryPurposeSummary,
-        ) && route.output_contract.requires_content_evidence
+        ) && route.requires_content_evidence
     }) {
         return None;
     }
@@ -696,7 +697,7 @@ pub(super) fn fs_search_output_direct_answer_candidate(
 }
 
 pub(super) fn route_allows_tail_read_range_direct_passthrough(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     response_shape: Option<crate::OutputResponseShape>,
     value: &serde_json::Value,
 ) -> bool {
@@ -709,7 +710,7 @@ pub(super) fn route_allows_tail_read_range_direct_passthrough(
     let Some(route) = route else {
         return false;
     };
-    if route.output_contract.delivery_required {
+    if route.delivery_required {
         return false;
     }
     if value.get("mode").and_then(|v| v.as_str()) != Some("tail") {
@@ -721,7 +722,7 @@ pub(super) fn route_allows_tail_read_range_direct_passthrough(
     if requested_n == 0 || requested_n > 50 {
         return false;
     }
-    route.output_contract.requires_content_evidence
+    route.requires_content_evidence
         && super::output_route_policy::route_contract_marker_is_any(
             route,
             &[
@@ -732,7 +733,7 @@ pub(super) fn route_allows_tail_read_range_direct_passthrough(
 }
 
 pub(super) fn route_allows_read_range_direct_passthrough(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     response_shape: Option<crate::OutputResponseShape>,
 ) -> bool {
     if matches!(
@@ -751,7 +752,7 @@ pub(super) fn route_allows_read_range_direct_passthrough(
 }
 
 pub(super) fn route_allows_raw_read_range_direct_passthrough(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     response_shape: Option<crate::OutputResponseShape>,
 ) -> bool {
     if matches!(
@@ -766,13 +767,13 @@ pub(super) fn route_allows_raw_read_range_direct_passthrough(
     super::output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::RawCommandOutput,
-    ) && route.output_contract.requires_content_evidence
-        && !route.output_contract.delivery_required
+    ) && route.requires_content_evidence
+        && !route.delivery_required
 }
 
 pub(super) fn allows_normalized_scalar_direct_fallback(
     skill: &str,
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     response_shape: Option<crate::OutputResponseShape>,
 ) -> bool {
     match skill {
@@ -789,17 +790,19 @@ pub(super) fn allows_normalized_scalar_direct_fallback(
     }
 }
 
-pub(super) fn route_requires_http_body_synthesis(route: Option<&crate::RouteResult>) -> bool {
+pub(super) fn route_requires_http_body_synthesis(
+    route: Option<&crate::IntentOutputContract>,
+) -> bool {
     let Some(route) = route else {
         return false;
     };
-    if !route.output_contract.requires_content_evidence {
+    if !route.requires_content_evidence {
         return false;
     }
     if route_requests_browser_page_body(route) {
         return true;
     }
-    let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route) else {
+    let Some(shape) = crate::evidence_policy::final_answer_shape_for_output_contract(route) else {
         return false;
     };
     if super::output_route_policy::route_contract_marker_is(
@@ -811,14 +814,12 @@ pub(super) fn route_requires_http_body_synthesis(route: Option<&crate::RouteResu
     false
 }
 
-fn route_requests_browser_page_body(route: &crate::RouteResult) -> bool {
-    route
-        .output_contract
-        .semantic_kind_is(crate::OutputSemanticKind::WebPageSummary)
+fn route_requests_browser_page_body(route: &crate::IntentOutputContract) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::WebPageSummary)
 }
 
 fn inventory_dir_can_use_direct_names(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     value: &serde_json::Value,
     loop_state: &LoopState,
     has_route_contract: bool,
@@ -866,12 +867,12 @@ fn value_requests_terminal_inventory_names(value: &serde_json::Value) -> bool {
         .any(|key| value.get(key).and_then(|v| v.as_bool()).unwrap_or(false))
 }
 
-fn route_allows_latest_plan_names_direct(route: Option<&crate::RouteResult>) -> bool {
+fn route_allows_latest_plan_names_direct(route: Option<&crate::IntentOutputContract>) -> bool {
     let Some(route) = route else {
         return false;
     };
     matches!(
-        route.output_contract.response_shape,
+        route.response_shape,
         crate::OutputResponseShape::Strict | crate::OutputResponseShape::Scalar
     )
 }

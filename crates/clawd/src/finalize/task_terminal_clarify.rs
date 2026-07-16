@@ -172,7 +172,7 @@ fn has_terminal_clarify_machine_fields(raw: &str) -> bool {
             return true;
         }
     }
-    let markers = crate::RouteReasonMarkers::new(trimmed);
+    let markers = crate::MachineTokenMarkers::new(trimmed);
     markers.machine_value("terminal_intent") == Some("clarify")
         || markers.machine_value("agent_loop.terminal_intent") == Some("clarify")
 }

@@ -3,9 +3,9 @@ use super::*;
 #[test]
 fn recent_artifacts_verifier_gap_recovers_from_inventory_metadata() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.requires_content_evidence = true;
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-recent-artifacts", "ask", "judge tmp");
@@ -64,9 +64,9 @@ fn recent_artifacts_verifier_gap_recovers_from_inventory_metadata() {
 #[test]
 fn recent_artifacts_verifier_gap_ignores_visible_text_inventory_metadata() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.requires_content_evidence = true;
 
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-recent-artifacts-text-only",
@@ -117,20 +117,12 @@ fn recent_artifacts_verifier_gap_ignores_visible_text_inventory_metadata() {
 #[test]
 fn recent_artifacts_verifier_gap_recovery_respects_selector_limit_and_target_kind() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.requires_content_evidence = true;
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind = crate::OutputScalarCountTargetKind::File;
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind_specified = true;
-    route.output_contract.self_extension.list_selector.limit = Some(1);
+    route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.requires_content_evidence = true;
+    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.self_extension.list_selector.target_kind_specified = true;
+    route.self_extension.list_selector.limit = Some(1);
 
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-recent-artifacts-limit",

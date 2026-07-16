@@ -3,7 +3,6 @@ use crate::agent_engine::{AgentRunContext, LoopState};
 use crate::executor::{StepExecutionResult, StepExecutionStatus};
 use crate::{
     IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, PlanKind,
-    ResumeBehavior, RiskCeiling, ScheduleKind,
 };
 use serde_json::json;
 
@@ -22,40 +21,27 @@ fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
 fn route_result_with_contract(
     response_shape: OutputResponseShape,
     delivery_required: bool,
-) -> crate::RouteResult {
-    crate::RouteResult {
-        resolved_intent: "local code strict json".to_string(),
-        needs_clarify: false,
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        clarify_question: String::new(),
-        wants_file_delivery: delivery_required,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape,
-            requires_content_evidence: true,
-            delivery_required,
-            locator_kind: OutputLocatorKind::Path,
-            delivery_intent: if delivery_required {
-                OutputDeliveryIntent::DirectoryBatchFiles
-            } else {
-                OutputDeliveryIntent::None
-            },
-            semantic_kind: Default::default(),
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
+) -> crate::IntentOutputContract {
+    IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape,
+        requires_content_evidence: true,
+        delivery_required,
+        locator_kind: OutputLocatorKind::Path,
+        delivery_intent: if delivery_required {
+            OutputDeliveryIntent::DirectoryBatchFiles
+        } else {
+            OutputDeliveryIntent::None
         },
+        semantic_kind: Default::default(),
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     }
 }
 
-fn agent_context_for_route(route_result: crate::RouteResult) -> AgentRunContext {
+fn agent_context_for_route(route_result: crate::IntentOutputContract) -> AgentRunContext {
     AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         execution_recipe_hint: None,
         execution_recipe_plan_hint: None,
         turn_analysis: None,
@@ -705,8 +691,7 @@ fn local_code_task_projection_allows_strict_json_despite_delivery_hint() {
 
     let mut executable_file_token_route =
         route_result_with_contract(OutputResponseShape::FileToken, true);
-    executable_file_token_route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    executable_file_token_route.route_reason = "".to_string();
+    executable_file_token_route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let executable_file_token_context = agent_context_for_route(executable_file_token_route);
     let answer = local_code_task_strict_json_projection(
         "最后只输出 JSON，包含 created_files、test_command、test_status。",
@@ -744,8 +729,7 @@ fn local_code_task_projection_uses_current_request_fields_before_context_blocks(
         "Ran 5 tests in 0.001s\nOK\n",
     ));
     let mut route = route_result_with_contract(OutputResponseShape::FileToken, true);
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.route_reason = "".to_string();
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
     let context = agent_context_for_route(route);
     let augmented_user_text = "读取刚才项目的 calc_core.py 和 test_calc_core.py，确认当前有哪些函数、safe_div 的除零错误码是什么，并重新运行 python3 test_calc_core.py。最后只输出 JSON，包含 project_dir、functions、error_codes、test_status、evidence_files。\n\n### ACTIVE_TASK_CONTEXT\nlast_primary_task_output:\n{\"changed_files\":[\"/workspace/project/calc_core.py\"],\"test_command\":\"python3 test_calc_core.py\",\"test_status\":\"passed\"}";
 

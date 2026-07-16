@@ -47,7 +47,7 @@ pub(super) fn run_cmd_directory_entry_list_candidate(
 }
 
 pub(super) fn run_cmd_contract_listing_text_candidate(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     body: &str,
 ) -> Option<String> {
     if !super::output_route_policy::route_contract_marker_is_any(
@@ -62,7 +62,7 @@ pub(super) fn run_cmd_contract_listing_text_candidate(
         return None;
     }
     if matches!(
-        route.output_contract.response_shape,
+        route.response_shape,
         crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar
     ) {
         return None;
@@ -423,22 +423,21 @@ pub(super) fn system_basic_path_batch_file_basename_candidate(
     Some(basename.to_string())
 }
 
-pub(super) fn route_requires_single_file_delivery(route: &crate::RouteResult) -> bool {
-    matches!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::FileToken
-    ) || matches!(
-        route.output_contract.delivery_intent,
-        crate::OutputDeliveryIntent::FileSingle
-    ) || (route.wants_file_delivery
-        && !matches!(
-            route.output_contract.delivery_intent,
-            crate::OutputDeliveryIntent::DirectoryBatchFiles
-        ))
+pub(super) fn route_requires_single_file_delivery(route: &crate::IntentOutputContract) -> bool {
+    matches!(route.response_shape, crate::OutputResponseShape::FileToken)
+        || matches!(
+            route.delivery_intent,
+            crate::OutputDeliveryIntent::FileSingle
+        )
+        || (route.delivery_required
+            && !matches!(
+                route.delivery_intent,
+                crate::OutputDeliveryIntent::DirectoryBatchFiles
+            ))
 }
 
 pub(super) fn path_batch_file_delivery_token_candidate(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     value: &serde_json::Value,
 ) -> Option<String> {
     let route = route?;
@@ -501,9 +500,9 @@ pub(super) fn path_batch_fact_size_bytes(
         .or_else(|| entry.get("size_bytes").and_then(|v| v.as_u64()))
 }
 
-pub(super) fn route_prefers_path_kind_fact_answer(route: &crate::RouteResult) -> bool {
-    route.output_contract.response_shape == crate::OutputResponseShape::Strict
-        && !route.output_contract.delivery_required
+pub(super) fn route_prefers_path_kind_fact_answer(route: &crate::IntentOutputContract) -> bool {
+    route.response_shape == crate::OutputResponseShape::Strict
+        && !route.delivery_required
         && super::output_route_policy::route_contract_marker_is(
             route,
             crate::OutputSemanticKind::ExistenceWithPath,

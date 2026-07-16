@@ -69,7 +69,7 @@ pub(super) fn archive_list_summary_from_body(body: &str) -> Option<ArchiveListSu
 }
 
 pub(super) fn archive_read_direct_answer_candidate(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     body: &str,
 ) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
@@ -95,13 +95,7 @@ pub(super) fn archive_read_direct_answer_candidate(
                 .and_then(archive_read_first_content_line)
         });
     let project_structured_fields = route
-        .and_then(|route| {
-            route
-                .output_contract
-                .self_extension
-                .structured_field_selector
-                .as_deref()
-        })
+        .and_then(|route| route.self_extension.structured_field_selector.as_deref())
         .is_some_and(archive_read_selector_requests_member_and_excerpt);
     match (member_path, content_excerpt) {
         (Some(member_path), Some(content_excerpt)) if project_structured_fields => Some(
@@ -278,7 +272,7 @@ pub(super) fn archive_list_summary_direct_answer(
 
 pub(super) fn archive_entry_existence_direct_answer(
     _state: Option<&AppState>,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     request_text: Option<&str>,
     summary: &ArchiveListSummary,
     archive_hint: Option<&str>,
@@ -295,10 +289,10 @@ pub(super) fn archive_entry_existence_direct_answer(
         .filter(|path| !path.is_empty())
         .or(summary.archive.as_deref())
         .or_else(|| {
-            let hint = route.output_contract.locator_hint.trim();
+            let hint = route.locator_hint.trim();
             (!hint.is_empty()).then_some(hint)
         });
-    let target = archive_entry_target_for_observed_route(route, request_text, archive_path)?;
+    let target = archive_entry_target_for_observed_route(request_text, archive_path)?;
     let exists = archive_list_contains_requested_entry(summary, &target)?;
     Some(archive_entry_presence_machine_answer(
         archive_path,
@@ -379,16 +373,12 @@ fn push_archive_machine_line(lines: &mut Vec<String>, key: &str, value: &str) {
 }
 
 pub(super) fn archive_entry_target_for_observed_route(
-    route: &crate::RouteResult,
     request_text: Option<&str>,
     archive_path: Option<&str>,
 ) -> Option<String> {
     let mut path_candidates = Vec::new();
     let mut filename_candidates = Vec::new();
-    for text in request_text
-        .into_iter()
-        .chain(std::iter::once(route.resolved_intent.as_str()))
-    {
+    for text in request_text.into_iter() {
         for locator in
             crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(text)
         {
@@ -652,7 +642,7 @@ pub(super) fn archive_basic_observed_candidate(value: &serde_json::Value) -> Opt
 }
 
 pub(super) fn archive_unpack_direct_answer_candidate(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     body: &str,
     _prefer_english: bool,
 ) -> Option<String> {

@@ -115,7 +115,7 @@ pub(crate) fn direct_answer_from_referenced_observation_i18n(
     {
         return None;
     }
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract());
     let auto_locator_path = agent_run_context
         .and_then(|ctx| ctx.auto_locator_path.as_deref())
         .filter(|path| !path.trim().is_empty());

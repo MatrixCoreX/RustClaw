@@ -3,9 +3,9 @@ use super::*;
 #[test]
 fn local_health_verifier_gap_recovers_with_machine_fields() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.locator_kind = OutputLocatorKind::None;
+    route.requires_content_evidence = true;
 
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-health", "ask", "health summary");
@@ -67,9 +67,9 @@ fn local_health_verifier_gap_recovers_with_machine_fields() {
 #[test]
 fn local_health_verifier_gap_recovers_from_loop_state_raw_outputs() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.requires_content_evidence = true;
 
     let mut loop_state = LoopState::new(2);
     loop_state
@@ -186,9 +186,9 @@ fn local_health_verifier_gap_recovers_from_loop_state_raw_outputs() {
 #[test]
 fn local_health_recovery_ignores_user_visible_json_text() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    route.locator_kind = OutputLocatorKind::None;
+    route.requires_content_evidence = true;
 
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-health-json-text",

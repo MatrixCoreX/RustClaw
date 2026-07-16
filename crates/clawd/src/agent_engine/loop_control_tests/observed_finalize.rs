@@ -15,7 +15,7 @@ fn observed_scalar_output_can_stop_loop_without_second_round() {
     }];
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route_result(OutputResponseShape::Scalar)),
+            output_contract: Some(route_result(OutputResponseShape::Scalar)),
             ..Default::default()
         }),
         &loop_state,
@@ -38,7 +38,7 @@ fn observed_config_basic_scalar_output_can_stop_loop_without_second_round() {
     }];
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route_result(OutputResponseShape::Strict)),
+            output_contract: Some(route_result(OutputResponseShape::Strict)),
             ..Default::default()
         }),
         &loop_state,
@@ -62,7 +62,7 @@ fn observed_call_capability_inventory_names_can_stop_loop_without_second_round()
 
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route_result(OutputResponseShape::Strict)),
+            output_contract: Some(route_result(OutputResponseShape::Strict)),
             ..Default::default()
         }),
         &loop_state,
@@ -85,11 +85,10 @@ fn capability_inventory_names_can_stop_without_incremental_planner() {
         args: json!({"path":"/workspace/document","files_only":true,"names_only":true,"max_entries":5}),
     }];
     let mut route = route_result(OutputResponseShape::Strict);
-    route.route_reason = "".to_string();
 
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -111,7 +110,7 @@ fn observed_wrapped_empty_config_basic_scalar_output_can_stop_loop_without_secon
         args: json!({"action":"read_field","path":"Cargo.toml","field_path":"workspace.package.repository"}),
     }];
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result(OutputResponseShape::Scalar)),
+        output_contract: Some(route_result(OutputResponseShape::Scalar)),
         ..Default::default()
     };
     assert_eq!(
@@ -138,12 +137,12 @@ fn observed_wrapped_empty_config_basic_scalar_output_can_stop_loop_without_secon
     ));
 
     let mut path_route = route_result(OutputResponseShape::Scalar);
-    path_route.output_contract.requires_content_evidence = true;
-    path_route.output_contract.delivery_required = false;
-    path_route.output_contract.locator_kind = OutputLocatorKind::Path;
-    path_route.output_contract.locator_hint = "Cargo.toml".to_string();
+    path_route.requires_content_evidence = true;
+    path_route.delivery_required = false;
+    path_route.locator_kind = OutputLocatorKind::Path;
+    path_route.locator_hint = "Cargo.toml".to_string();
     let path_agent_run_context = AgentRunContext {
-        route_result: Some(path_route),
+        output_contract: Some(path_route.clone()),
         ..Default::default()
     };
     assert_eq!(
@@ -171,19 +170,18 @@ fn bounded_read_range_observe_only_round_does_not_force_incremental_planner() {
         args: json!({"action":"read_text_range","path":"/tmp/README.md","mode":"head","n":4}),
     }];
     let mut route = route_result(OutputResponseShape::Free);
-    route.route_reason = "".to_string();
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.requires_content_evidence = false;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.semantic_kind = OutputSemanticKind::None;
 
     assert!(!observe_only_round_should_continue(
-        &route.output_contract,
+        &route,
         &loop_state,
         &actions,
     ));
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -205,11 +203,10 @@ fn summary_read_range_observe_only_round_still_uses_incremental_planner() {
         args: json!({"action":"read_text_range","path":"/tmp/service_notes.md","mode":"head","n":3}),
     }];
     let mut route = route_result(OutputResponseShape::Free);
-    route.route_reason = "".to_string();
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
 
     assert!(observe_only_round_should_continue(
-        &route.output_contract,
+        &route,
         &loop_state,
         &actions,
     ));
@@ -244,15 +241,15 @@ fn service_control_status_protocol_output_can_stop_strict_loop_without_synthesis
         .push(ok_step("step_1", "service_control", &protocol_output));
 
     let mut route = route_result(OutputResponseShape::Strict);
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.locator_kind = OutputLocatorKind::None;
+    route.semantic_kind = OutputSemanticKind::ServiceStatus;
     let actions = vec![AgentAction::CallSkill {
         skill: "service_control".to_string(),
         args: json!({"action":"status","target":"clawd","manager_type":"rustclaw"}),
     }];
 
     let context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let direct_answer =
@@ -283,12 +280,12 @@ fn raw_strict_model_language_output_does_not_stop_on_bare_observation() {
         args: json!({"command":"pwd"}),
     }];
     let mut route = route_result(OutputResponseShape::Strict);
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.locator_kind = OutputLocatorKind::None;
+    route.semantic_kind = OutputSemanticKind::RawCommandOutput;
 
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -311,7 +308,7 @@ fn observed_structured_scalar_equality_pair_can_stop_without_synthesis_round() {
         r#"{"action":"read_field","path":"crates/clawd/Cargo.toml","resolved_path":"/repo/crates/clawd/Cargo.toml","field_path":"package.name","exists":true,"value_text":"clawd","value":"clawd","value_type":"string"}"#,
     ));
     let mut route = route_result(OutputResponseShape::Strict);
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
+    route.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
     let actions = vec![
         AgentAction::CallTool {
             tool: "config_basic".to_string(),
@@ -325,7 +322,7 @@ fn observed_structured_scalar_equality_pair_can_stop_without_synthesis_round() {
 
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -348,7 +345,7 @@ fn observation_only_freeform_round_can_stop_for_observed_fallback() {
     }];
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route_result(OutputResponseShape::Free)),
+            output_contract: Some(route_result(OutputResponseShape::Free)),
             ..Default::default()
         }),
         &loop_state,
@@ -366,8 +363,8 @@ fn one_sentence_quantity_comparison_waits_for_model_language_followup() {
         r#"{"action":"compare_paths","comparison":{"same_size":false,"size_delta_bytes":21724},"left":{"kind":"file","path":"README.md","resolved_path":"/repo/README.md","size_bytes":46905},"right":{"kind":"file","path":"AGENTS.md","resolved_path":"/repo/AGENTS.md","size_bytes":25181}}"#,
     ));
     let mut route = route_result(OutputResponseShape::OneSentence);
-    route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.semantic_kind = OutputSemanticKind::QuantityComparison;
+    route.locator_kind = OutputLocatorKind::Path;
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
         args: json!({"action":"compare_paths","left_path":"README.md","right_path":"AGENTS.md"}),
@@ -375,7 +372,7 @@ fn one_sentence_quantity_comparison_waits_for_model_language_followup() {
 
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -393,8 +390,8 @@ fn service_status_port_observation_without_direct_candidate_does_not_stop() {
         "exit=0\nState  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787       0.0.0.0:*    users:((\"clawd\",pid=706551,fd=31))\nLISTEN 0      4096         0.0.0.0:22         0.0.0.0:*\n",
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.locator_kind = OutputLocatorKind::None;
+    route.semantic_kind = OutputSemanticKind::ServiceStatus;
     let actions = vec![AgentAction::CallSkill {
         skill: "process_basic".to_string(),
         args: json!({"action":"port_list"}),
@@ -402,7 +399,7 @@ fn service_status_port_observation_without_direct_candidate_does_not_stop() {
 
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -420,18 +417,16 @@ fn unscoped_workspace_evidence_drafting_does_not_stop_on_search_only() {
         r#"{"action":"find_name","count":2,"results":["README.md","USAGE.md"]}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.resolved_intent =
-        "Write a short setup note grounded in the current workspace docs".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint.clear();
+    route.semantic_kind = OutputSemanticKind::None;
     let actions = vec![AgentAction::CallSkill {
         skill: "fs_search".to_string(),
         args: json!({"action":"find_name","pattern":"README"}),
     }];
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -449,18 +444,16 @@ fn unscoped_workspace_evidence_drafting_can_stop_after_doc_read() {
         r#"{"action":"read_range","path":"README.md","excerpt":"1|# RustClaw\n2|## Setup"}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.resolved_intent =
-        "Write a short setup note grounded in the current workspace docs".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.locator_hint.clear();
+    route.semantic_kind = OutputSemanticKind::None;
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
         args: json!({"action":"read_range","path":"README.md","mode":"head","n":120}),
     }];
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -478,10 +471,9 @@ fn hidden_entries_scalar_output_can_stop_before_synthesis_followup() {
         ".git\nREADME.md\n.env\nsrc\n",
     ));
     let mut route = route_result(OutputResponseShape::Scalar);
-    route.resolved_intent = "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = OutputSemanticKind::HiddenEntriesCheck;
-    route.output_contract.locator_hint = ".".to_string();
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = OutputSemanticKind::HiddenEntriesCheck;
+    route.locator_hint = ".".to_string();
     let actions = vec![
         AgentAction::CallSkill {
             skill: "list_dir".to_string(),
@@ -493,7 +485,7 @@ fn hidden_entries_scalar_output_can_stop_before_synthesis_followup() {
     ];
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -511,10 +503,9 @@ fn fs_basic_inventory_names_can_stop_before_synthesis_followup() {
         r#"{"action":"inventory_dir","path":"/tmp/document","resolved_path":"/tmp/document","files_only":true,"names_only":true,"names":["a.txt","b.md","c.png"]}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.resolved_intent = "List file names from a known directory.".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
-    route.output_contract.locator_hint = "document".to_string();
+    route.locator_kind = OutputLocatorKind::Path;
+    route.semantic_kind = OutputSemanticKind::FileNames;
+    route.locator_hint = "document".to_string();
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -526,7 +517,7 @@ fn fs_basic_inventory_names_can_stop_before_synthesis_followup() {
     ];
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -545,20 +536,12 @@ fn recent_artifacts_inventory_can_stop_before_content_read_round() {
         r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\"}","error_text":null,"extra":{"action":"inventory_dir","entries":[{"kind":"file","modified_ts":9,"name":"clawd.run.log","path":"logs/clawd.run.log","size_bytes":2300},{"kind":"file","modified_ts":8,"name":"model_io.log","path":"logs/model_io.log","size_bytes":900},{"kind":"file","modified_ts":7,"name":"act_plan.log","path":"logs/act_plan.log","size_bytes":300}],"names":["clawd.run.log","model_io.log","act_plan.log"],"path":"/repo/logs","resolved_path":"/repo/logs","sort_by":"mtime_desc"}}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs".to_string();
-    route.output_contract.self_extension.list_selector.limit = Some(2);
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind = crate::OutputScalarCountTargetKind::File;
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind_specified = true;
+    route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "logs".to_string();
+    route.self_extension.list_selector.limit = Some(2);
+    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.self_extension.list_selector.target_kind_specified = true;
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
         args: json!({"action":"list_dir","path":"logs","sort_by":"mtime_desc","files_only":true,"max_entries":2}),
@@ -566,7 +549,7 @@ fn recent_artifacts_inventory_can_stop_before_content_read_round() {
 
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -585,19 +568,11 @@ fn recent_artifacts_inventory_stop_respects_file_selector() {
         r#"{"action":"inventory_dir","entries":[{"kind":"dir","modified_ts":9,"name":"bundle_unpack","path":"tmp/bundle_unpack"},{"kind":"dir","modified_ts":8,"name":"manual_unpack","path":"tmp/manual_unpack"}],"path":"/repo/tmp","sort_by":"mtime_desc"}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "tmp".to_string();
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind = crate::OutputScalarCountTargetKind::File;
-    route
-        .output_contract
-        .self_extension
-        .list_selector
-        .target_kind_specified = true;
+    route.semantic_kind = OutputSemanticKind::RecentArtifactsJudgment;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "tmp".to_string();
+    route.self_extension.list_selector.target_kind = crate::OutputScalarCountTargetKind::File;
+    route.self_extension.list_selector.target_kind_specified = true;
     let actions = vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
         args: json!({"action":"list_dir","path":"tmp","sort_by":"mtime_desc","files_only":true}),
@@ -605,7 +580,7 @@ fn recent_artifacts_inventory_stop_respects_file_selector() {
 
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -624,18 +599,16 @@ fn existence_with_path_free_output_can_stop_before_second_round() {
         r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/home/guagua/rustclaw/rustclaw.service","size_bytes":1190},"path":"/home/guagua/rustclaw/rustclaw.service"}],"include_missing":true}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.resolved_intent =
-        "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
-    route.output_contract.locator_hint = "rustclaw.service".to_string();
+    route.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route.locator_hint = "rustclaw.service".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
         args: json!({"action":"path_batch_facts","paths":["/home/guagua/rustclaw/rustclaw.service"]}),
     }];
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -654,18 +627,16 @@ fn missing_path_batch_facts_existence_contract_stops_before_second_round() {
         r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"path":"plan/missing.md"}],"include_missing":true}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.resolved_intent =
-        "Read plan/missing.md; if it is absent, search plan for related markdown files".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
-    route.output_contract.locator_hint = "plan/missing.md".to_string();
+    route.locator_kind = OutputLocatorKind::Path;
+    route.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route.locator_hint = "plan/missing.md".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
         args: json!({"action":"path_batch_facts","paths":["plan/missing.md"]}),
     }];
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -684,18 +655,16 @@ fn missing_path_batch_facts_content_contract_continues_for_possible_fallback() {
         r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"path":"plan/missing.md"}],"include_missing":true}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.resolved_intent =
-        "Read plan/missing.md; if it is absent, search plan for related markdown files".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_hint = "plan/missing.md".to_string();
+    route.locator_kind = OutputLocatorKind::Path;
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.locator_hint = "plan/missing.md".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
         args: json!({"action":"path_batch_facts","paths":["plan/missing.md"]}),
     }];
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -713,16 +682,15 @@ fn structured_keys_free_output_can_stop_before_second_round() {
         r#"{"action":"structured_keys","path":"/tmp/package.json","resolved_path":"/tmp/package.json","field_path":"scripts","exists":true,"container_type":"object","count":3,"keys":["build","dev","lint"]}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.route_reason = "llm_contract:generic_explicit_path_structured_keys".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/package.json".to_string();
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/package.json".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
         args: json!({"action":"structured_keys","path":"/tmp/package.json","field_path":"scripts"}),
     }];
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -740,16 +708,15 @@ fn extract_fields_free_output_can_stop_before_second_round() {
         r#"{"action":"extract_fields","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","count":2,"results":[{"field_path":"database.sqlite_path","exists":true,"value_type":"string","value_text":"data/rustclaw.db","value":"data/rustclaw.db"},{"field_path":"tools.allow_sudo","exists":true,"value_type":"bool","value_text":"true","value":true}]}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.route_reason = "llm_contract:generic_explicit_path_extract_fields".to_string();
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/config.toml".to_string();
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/config.toml".to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
         args: json!({"action":"extract_fields","path":"/tmp/config.toml","field_paths":["database.sqlite_path","tools.allow_sudo"]}),
     }];
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -767,16 +734,13 @@ fn health_check_scalar_summary_continues_to_synthesis() {
         r#"{"clawd_process_count":1,"telegramd_process_count":0,"clawd_health_port_open":true,"clawd_log":{"exists":true,"keyword_error_count":0},"telegramd_log":{"exists":false},"system_health":{"os_family":"macos","warnings":[]}}"#,
     ));
     let mut route = route_result(OutputResponseShape::Scalar);
-    route.resolved_intent =
-        "执行基础健康检查，仅提取并返回操作系统相关的关键字段，排除 RustClaw 自身的状态摘要"
-            .to_string();
     let actions = vec![AgentAction::CallSkill {
         skill: "health_check".to_string(),
         args: json!({}),
     }];
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -803,7 +767,7 @@ fn recipe_waiting_for_validation_does_not_stop_on_observed_output() {
     }];
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route_result(OutputResponseShape::Free)),
+            output_contract: Some(route_result(OutputResponseShape::Free)),
             ..Default::default()
         }),
         &loop_state,
@@ -831,7 +795,7 @@ fn recipe_inspect_stage_does_not_stop_on_observed_output() {
     }];
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route_result(OutputResponseShape::Scalar)),
+            output_contract: Some(route_result(OutputResponseShape::Scalar)),
             ..Default::default()
         }),
         &loop_state,
@@ -850,7 +814,6 @@ fn read_only_round_continues_planner_without_runtime_recipe() {
         r#"{"extra":{"action":"list_dir","path":"/tmp/demo","entries":["calc_core.py"]}}"#,
     ));
     let mut route = route_result(OutputResponseShape::Free);
-    route.route_reason = "boundary_only".to_string();
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -864,7 +827,7 @@ fn read_only_round_continues_planner_without_runtime_recipe() {
 
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -893,7 +856,6 @@ fn strict_json_read_only_round_continues_planner_for_live_code_workspace() {
         r#"{"extra":{"action":"read_text_range","path":"/workspace/project/test_calc_core.py","excerpt":"1|from calc_core import add, sub"}}"#,
     ));
     let mut route = route_result(OutputResponseShape::Strict);
-    route.route_reason = "execution_recipe_target_locator_preserved_for_agent_loop; command_payload_preserved_for_agent_loop; current_turn_locator_overrides_contextual_path".to_string();
     let actions = vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -911,7 +873,7 @@ fn strict_json_read_only_round_continues_planner_for_live_code_workspace() {
 
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -936,13 +898,13 @@ fn bounded_capability_observation_can_finalize_at_round_cap() {
     }];
 
     assert!(!observe_only_round_should_continue(
-        &route.output_contract,
+        &route,
         &loop_state,
         &actions,
     ));
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -961,22 +923,19 @@ fn fs_basic_capability_read_only_round_continues_planner() {
         r#"{"extra":{"action":"read_text_range","path":"/workspace/project/calc_core.py","resolved_path":"/workspace/project/calc_core.py","excerpt":"1|def add(a,b): return a+b\n2|def sub(a,b): return a-b"}}"#,
     ));
     let mut route = route_result(OutputResponseShape::FileToken);
-    route.route_reason =
-        "command_payload_preserved_for_agent_loop; current_turn_locator_overrides_contextual_path"
-            .to_string();
     let actions = vec![AgentAction::CallCapability {
         capability: "fs_basic.read_text_range".to_string(),
         args: json!({"path":"/workspace/project/calc_core.py"}),
     }];
 
     assert!(observe_only_round_should_continue(
-        &route.output_contract,
+        &route,
         &loop_state,
         &actions,
     ));
     assert!(!should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route),
+            output_contract: Some(route.clone()),
             ..Default::default()
         }),
         &loop_state,
@@ -1007,7 +966,7 @@ fn recipe_done_does_not_scan_user_text_for_success_marker() {
     }];
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
-            route_result: Some(route_result(OutputResponseShape::Scalar)),
+            output_contract: Some(route_result(OutputResponseShape::Scalar)),
             user_request: Some(
                 "验证通过时请明确输出 VALIDATION_PASSED，然后直接结束。".to_string()
             ),
@@ -1162,7 +1121,7 @@ fn explicit_execution_recipe_hint_takes_priority_over_local_detection() {
                 validation_required: true,
                 max_repairs: 2,
             }),
-            route_result: Some(route_result(OutputResponseShape::Free)),
+            output_contract: Some(route_result(OutputResponseShape::Free)),
             user_request: Some("configure sing-box and verify the proxy works".to_string()),
             ..Default::default()
         }),

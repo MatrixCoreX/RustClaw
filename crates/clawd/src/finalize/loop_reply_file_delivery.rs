@@ -452,9 +452,6 @@ fn active_anchor_bound_targets(agent_run_context: Option<&AgentRunContext>) -> V
     };
     let mut targets = Vec::new();
     let sources = [
-        ctx.route_result
-            .as_ref()
-            .map(|route| route.resolved_intent.as_str()),
         ctx.context_bundle_summary.as_deref(),
         ctx.cross_turn_recent_execution_context.as_deref(),
         ctx.user_request.as_deref(),
@@ -610,13 +607,12 @@ pub(super) fn direct_path_from_active_bound_inventory(
 
 fn route_requests_generated_file_path_report(agent_run_context: Option<&AgentRunContext>) -> bool {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
-            let contract = route.effective_output_contract();
+            let contract = route.clone();
             !contract.delivery_required
                 && contract.response_shape == crate::OutputResponseShape::Scalar
-                && route
-                    .output_contract_marker_is(crate::OutputSemanticKind::GeneratedFilePathReport)
+                && route.semantic_kind_is(crate::OutputSemanticKind::GeneratedFilePathReport)
                 && crate::evidence_policy::final_answer_shape_for_output_contract(&contract)
                     == Some(crate::evidence_policy::FinalAnswerShape::SinglePath)
         })
@@ -660,14 +656,6 @@ pub(super) fn direct_generated_file_path_report_from_written_path(
         .and_then(|path| clean_machine_path_payload(path))
         .or_else(|| single_written_file_alias_path(loop_state))?;
     Some((path, matrix_observed_shape_summary(loop_state)))
-}
-
-fn route_allows_dry_run_generated_file_path_report_payload(
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .is_none_or(|route| !route.needs_clarify)
 }
 
 fn compact_machine_json(value: &serde_json::Value) -> Option<String> {
@@ -846,11 +834,8 @@ fn async_adapter_result_field(
 
 pub(super) fn direct_async_poll_result_report_from_payload(
     loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
+    _agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route_allows_dry_run_generated_file_path_report_payload(agent_run_context) {
-        return None;
-    }
     for step in loop_state.executed_step_results.iter().rev() {
         if !step.is_ok()
             || matches!(
@@ -880,11 +865,8 @@ pub(super) fn direct_async_poll_result_report_from_payload(
 
 pub(super) fn direct_generated_file_path_report_from_dry_run_payload(
     loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
+    _agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route_allows_dry_run_generated_file_path_report_payload(agent_run_context) {
-        return None;
-    }
     for step in loop_state.executed_step_results.iter().rev() {
         if !step.is_ok()
             || matches!(
@@ -916,15 +898,12 @@ pub(super) fn direct_created_archive_path_from_observed_archive_pack(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
     if !route_requests_archive_pack(route) {
         return None;
     }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::ArchivePack)
-        && crate::evidence_policy::final_answer_shape_for_output_contract(
-            &route.effective_output_contract(),
-        )?
-        .as_str()
+    if route.semantic_kind_is(crate::OutputSemanticKind::ArchivePack)
+        && crate::evidence_policy::final_answer_shape_for_output_contract(&route.clone())?.as_str()
             != "created_archive_path"
     {
         return None;
@@ -948,9 +927,9 @@ pub(super) fn direct_created_archive_path_from_observed_archive_pack(
     None
 }
 
-fn route_requests_archive_pack(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::ArchivePack)
-        || crate::evidence_policy::final_answer_shape_for_route(route)
+fn route_requests_archive_pack(route: &crate::IntentOutputContract) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::ArchivePack)
+        || crate::evidence_policy::final_answer_shape_for_output_contract(route)
             == Some(crate::evidence_policy::FinalAnswerShape::CreatedArchivePath)
 }
 
@@ -1091,9 +1070,9 @@ fn route_requests_scalar_path_candidate_projection(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
-            let contract = route.effective_output_contract();
+            let contract = route.clone();
             !contract.delivery_required
                 && contract.response_shape == crate::OutputResponseShape::Scalar
                 && crate::finalize::route_matches_single_path_output_contract(route)

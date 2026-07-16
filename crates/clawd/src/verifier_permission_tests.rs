@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::tests::{plan_result, route_result_with_risk, test_state, test_task};
+use super::tests::{plan_result, route_result, test_state, test_task};
 use super::{verify_plan, VerifyInput, VerifyIssueKind, VerifyMode};
 use crate::PlanStep;
 
@@ -8,12 +8,12 @@ use crate::PlanStep;
 fn workspace_fs_basic_mutation_does_not_emit_route_ceiling_or_confirmation_noise() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_risk(false, crate::RiskCeiling::Low);
+    let route = route_result();
     let result = verify_plan(
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![

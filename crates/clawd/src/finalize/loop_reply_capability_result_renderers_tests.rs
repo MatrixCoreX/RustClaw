@@ -533,11 +533,8 @@ fn scalar_replacement_prefers_config_payload_over_field_path_marker() {
     let state = test_state();
     let task = claimed_task("task-config-edit-scalar-marker-replace");
     let mut route = scalar_route_result();
-    route.resolved_intent =
-        "preview configs/config.toml llm.selected_vendor, read current value and guard risks"
-            .to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);

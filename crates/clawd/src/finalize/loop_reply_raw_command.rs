@@ -135,15 +135,12 @@ pub(super) fn looks_like_raw_command_snapshot(answer: &str) -> bool {
 
 pub(super) fn direct_raw_command_output_projection(
     state: &AppState,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
-        || route.output_contract.delivery_required
-        || matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::FileToken
-        )
+    if !route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+        || route.delivery_required
+        || matches!(route.response_shape, crate::OutputResponseShape::FileToken)
     {
         return None;
     }
@@ -247,7 +244,7 @@ pub(super) fn direct_raw_command_output_projection(
 }
 
 pub(super) fn raw_command_machine_field_delivery_satisfies_request(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     delivery: &str,
 ) -> bool {
     let fields = requested_raw_command_machine_fields(route);
@@ -260,15 +257,12 @@ pub(super) fn raw_command_machine_field_delivery_satisfies_request(
 }
 
 pub(crate) fn raw_command_machine_field_projection_from_journal(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<String> {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
-        || route.output_contract.delivery_required
-        || matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::FileToken
-        )
+    if !route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+        || route.delivery_required
+        || matches!(route.response_shape, crate::OutputResponseShape::FileToken)
     {
         return None;
     }
@@ -289,7 +283,7 @@ pub(super) fn replace_final_delivery_with_raw_command_machine_field_projection(
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
     delivery_messages: &mut Vec<String>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     let projected = direct_raw_command_output_projection(state, route, loop_state);
@@ -330,7 +324,7 @@ pub(super) fn replace_final_delivery_with_raw_command_machine_field_projection(
 }
 
 fn normalize_raw_command_machine_field_delivery(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     delivery: &str,
 ) -> Option<String> {
     let fields = requested_raw_command_machine_fields(route);
@@ -413,7 +407,7 @@ fn raw_command_machine_field_value<'a>(delivery: &'a str, field: &str) -> Option
 
 fn direct_read_range_raw_command_projection(
     state: &AppState,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<(String, usize)> {
     if !loop_state.executed_step_results.iter().rev().any(|step| {
@@ -427,7 +421,7 @@ fn direct_read_range_raw_command_projection(
         return None;
     }
     let agent_run_context = AgentRunContext {
-        route_result: Some(route.clone()),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let answer = crate::agent_engine::observed_output::extract_answer_from_observed_output_i18n(
@@ -611,14 +605,10 @@ fn requested_raw_command_machine_field_projection_for_fields(
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
-fn requested_raw_command_machine_fields(route: &crate::RouteResult) -> Vec<String> {
+fn requested_raw_command_machine_fields(route: &crate::IntentOutputContract) -> Vec<String> {
     let mut fields = Vec::new();
-    for surface in [
-        route.resolved_intent.as_str(),
-        route.route_reason.as_str(),
-        route.output_contract.locator_hint.as_str(),
-    ] {
-        for token in surface.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_')) {
+    if let Some(selector) = route.self_extension.structured_field_selector.as_deref() {
+        for token in selector.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_')) {
             if matches!(token, "exit_code" | "stdout" | "stdout_path")
                 && !fields.iter().any(|field| field == token)
             {
@@ -877,16 +867,18 @@ fn apply_raw_command_structural_projection(
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
-pub(super) fn route_explicitly_requests_command_result(route: &crate::RouteResult) -> bool {
-    route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
-        && route.output_contract.response_shape != crate::OutputResponseShape::Strict
+pub(super) fn route_explicitly_requests_command_result(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
+        && route.response_shape != crate::OutputResponseShape::Strict
 }
 
 pub(super) fn raw_command_output_needs_structural_projection(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
-    if !route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput) {
+    if !route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput) {
         return false;
     }
     let latest_is_run_cmd = loop_state
@@ -981,11 +973,11 @@ fn json_value_is_non_empty(value: &serde_json::Value) -> bool {
     }
 }
 
-pub(super) fn output_contract_requests_exact_delivery(route: &crate::RouteResult) -> bool {
+pub(super) fn output_contract_requests_exact_delivery(route: &crate::IntentOutputContract) -> bool {
     matches!(
-        route.output_contract.response_shape,
+        route.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
-    ) || route.output_contract_marker_is_any(&[
+    ) || route.semantic_kind_is_any(&[
         crate::OutputSemanticKind::RawCommandOutput,
         crate::OutputSemanticKind::FileNames,
         crate::OutputSemanticKind::DirectoryNames,
@@ -994,6 +986,6 @@ pub(super) fn output_contract_requests_exact_delivery(route: &crate::RouteResult
         crate::OutputSemanticKind::GitCommitSubject,
         crate::OutputSemanticKind::GitRepositoryState,
         crate::OutputSemanticKind::StructuredKeys,
-    ]) || (route.output_contract_marker_is(crate::OutputSemanticKind::CommandOutputSummary)
-        && route.output_contract.response_shape == crate::OutputResponseShape::Strict)
+    ]) || (route.semantic_kind_is(crate::OutputSemanticKind::CommandOutputSummary)
+        && route.response_shape == crate::OutputResponseShape::Strict)
 }

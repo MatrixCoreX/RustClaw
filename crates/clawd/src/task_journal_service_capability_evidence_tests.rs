@@ -1,25 +1,12 @@
 use super::*;
 use serde_json::json;
 
-fn route_with_capability_ref(capability_ref: &str) -> crate::RouteResult {
-    crate::RouteResult {
-        resolved_intent: capability_ref.to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: capability_ref.to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            response_shape: crate::OutputResponseShape::Strict,
-            requires_content_evidence: true,
-            semantic_kind: crate::OutputSemanticKind::None,
-            ..Default::default()
-        },
+fn unclassified_service_evidence_contract() -> crate::IntentOutputContract {
+    crate::IntentOutputContract {
+        response_shape: crate::OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        semantic_kind: crate::OutputSemanticKind::None,
+        ..Default::default()
     }
 }
 
@@ -31,9 +18,9 @@ fn service_status_capability_refs_complete_field_value_evidence_without_semantic
         "capability_ref=system.runtime_status",
         "capability_ref=system.health_check",
     ] {
-        let route = route_with_capability_ref(capability_ref);
+        let route = unclassified_service_evidence_contract();
         let mut journal = TaskJournal::for_task("task-service-evidence", "ask", capability_ref);
-        journal.record_output_contract(&route.effective_output_contract());
+        journal.record_output_contract(&route.clone());
         journal.push_task_observation(json!({
             "observed_evidence": {
                 "extractor": {
@@ -48,8 +35,7 @@ fn service_status_capability_refs_complete_field_value_evidence_without_semantic
             }
         }));
 
-        let coverage =
-            evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+        let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
 
         assert!(coverage.is_complete(), "{capability_ref}: {coverage:?}");
         assert!(

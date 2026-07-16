@@ -187,17 +187,13 @@ fn local_code_task_projection_allowed(
     agent_run_context: Option<&AgentRunContext>,
     requested_fields: &[String],
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|context| context.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|context| context.output_contract()) else {
         return true;
     };
-    if !matches!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::FileToken
-    ) {
+    if !matches!(route.response_shape, crate::OutputResponseShape::FileToken) {
         return true;
     }
-    let local_code_route =
-        route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace;
+    let local_code_route = route.locator_kind == crate::OutputLocatorKind::CurrentWorkspace;
     local_code_route
         && requested_fields
             .iter()
@@ -237,10 +233,6 @@ fn requested_local_code_json_fields(
         for value in [
             context.original_user_request.as_deref(),
             context.user_request.as_deref(),
-            context
-                .route_result
-                .as_ref()
-                .map(|route| route.resolved_intent.as_str()),
         ]
         .into_iter()
         .flatten()

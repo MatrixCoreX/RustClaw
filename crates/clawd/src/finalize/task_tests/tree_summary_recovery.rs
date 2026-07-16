@@ -8,7 +8,7 @@ fn raw_tail_recovery_fixture(
 ) -> (
     crate::AppState,
     crate::ClaimedTask,
-    crate::RouteResult,
+    crate::IntentOutputContract,
     crate::task_journal::TaskJournal,
 ) {
     let state = crate::AppState::test_default_with_fixture_provider();
@@ -24,12 +24,12 @@ fn raw_tail_recovery_fixture(
         payload_json: "{}".to_string(),
     };
     let mut route = super::route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/workspace/logs/clawd-dev.log".to_string();
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "/workspace/logs/clawd-dev.log".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-raw-tail-text-boundary", "ask", "prompt");
     journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {

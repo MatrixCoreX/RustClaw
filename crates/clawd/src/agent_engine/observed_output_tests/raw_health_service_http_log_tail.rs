@@ -6,20 +6,7 @@ fn direct_answer_defers_http_basic_one_sentence_summary_to_llm() {
         "http_basic",
         "status=200\n{\"ok\":true}\n",
     ));
-    let route_result = RouteResult {
-        resolved_intent: "请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果"
-            .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::OneSentence,
             requires_content_evidence: true,
@@ -29,10 +16,9 @@ fn direct_answer_defers_http_basic_one_sentence_summary_to_llm() {
             semantic_kind: Default::default(),
             locator_hint: "http://127.0.0.1:8787/v1/health".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert_eq!(
@@ -48,19 +34,7 @@ fn direct_answer_preserves_http_basic_raw_scalar_for_free_shape() {
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "http_basic", body));
-    let route_result = RouteResult {
-        resolved_intent: "请求接口并返回原始结果".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
@@ -70,10 +44,9 @@ fn direct_answer_preserves_http_basic_raw_scalar_for_free_shape() {
             semantic_kind: Default::default(),
             locator_hint: "http://127.0.0.1:8787/v1/health".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert_eq!(
@@ -90,19 +63,7 @@ fn direct_answer_defers_http_basic_web_page_summary_to_observed_synthesis() {
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "http_basic", body));
-    let route_result = RouteResult {
-        resolved_intent: "capability_ref=browser.open_extract".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
@@ -112,10 +73,9 @@ fn direct_answer_defers_http_basic_web_page_summary_to_observed_synthesis() {
             semantic_kind: OutputSemanticKind::WebPageSummary,
             locator_hint: "http://127.0.0.1:8787/v1/health".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -136,19 +96,7 @@ fn direct_answer_defers_http_basic_url_service_status_to_observed_synthesis() {
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "http_basic", body));
-    let route_result = RouteResult {
-        resolved_intent: "service_status".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
@@ -158,10 +106,9 @@ fn direct_answer_defers_http_basic_url_service_status_to_observed_synthesis() {
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: String::new(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -183,19 +130,7 @@ fn direct_answer_defers_service_control_status_summary_for_chinese_request() {
             "service_control",
             r#"{"status":"ok","service_name":"telegramd","manager_type":"rustclaw","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=stopped","post_state":"telegramd=stopped","verified":true,"key_evidence":["telegramd process_count=0 memory_rss_bytes=Some(0)"],"failure_reason":"","next_step":"","summary":"Status: telegramd=stopped"}"#,
         ));
-    let route_result = RouteResult {
-        resolved_intent: "帮我检查 telegramd 现在是不是在运行，顺手简短解释状态".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::OneSentence,
             requires_content_evidence: false,
@@ -205,10 +140,9 @@ fn direct_answer_defers_service_control_status_summary_for_chinese_request() {
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: "telegramd".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert_eq!(
@@ -225,21 +159,7 @@ fn direct_answer_defers_service_control_status_summary_for_english_request() {
             "service_control",
             r#"{"status":"ok","service_name":"telegramd","manager_type":"rustclaw","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=running","post_state":"telegramd=running","verified":true,"key_evidence":["telegramd process_count=1 memory_rss_bytes=Some(1024)"],"failure_reason":"","next_step":"","summary":"Status: telegramd=running"}"#,
         ));
-    let route_result = RouteResult {
-        resolved_intent:
-            "check whether telegramd is running right now and briefly explain the status"
-                .to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::OneSentence,
             requires_content_evidence: false,
@@ -249,10 +169,9 @@ fn direct_answer_defers_service_control_status_summary_for_english_request() {
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: "telegramd".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert_eq!(
@@ -269,19 +188,7 @@ fn direct_answer_keeps_service_control_scalar_status_as_machine_value() {
             "service_control",
             r#"{"status":"ok","service_name":"telegramd","manager_type":"rustclaw","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=running","post_state":"telegramd=running","verified":true,"summary":"Status: telegramd=running"}"#,
         ));
-    let route_result = RouteResult {
-        resolved_intent: "check telegramd status".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             requires_content_evidence: false,
@@ -291,10 +198,9 @@ fn direct_answer_keeps_service_control_scalar_status_as_machine_value() {
             semantic_kind: OutputSemanticKind::ServiceStatus,
             locator_hint: "telegramd".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert_eq!(

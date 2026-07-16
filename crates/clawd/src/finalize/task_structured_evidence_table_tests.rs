@@ -1,21 +1,8 @@
 use super::*;
 
-fn route_result() -> crate::RouteResult {
-    let mut route = crate::RouteResult {
-        resolved_intent: "test".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract.requires_content_evidence = true;
+fn route_result() -> crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route.requires_content_evidence = true;
     route
 }
 

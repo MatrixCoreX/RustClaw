@@ -1,10 +1,10 @@
 use super::*;
 
-fn service_status_route() -> RouteResult {
+fn service_status_route() -> IntentOutputContract {
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
     route
 }
 

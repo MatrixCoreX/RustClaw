@@ -18,11 +18,11 @@ fn scalar_path_only_matrix_answer_projects_ambiguous_find_name_candidates() {
         r#"{"action":"path_batch_facts","count":4,"facts":[{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md","resolved_path":"/repo/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md"},"path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md"},{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt","resolved_path":"/repo/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt"},"path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt"},{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt","resolved_path":"/repo/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt"},"path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt"},{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log","resolved_path":"/repo/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"},"path":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log"}],"include_missing":true}"#,
     ));
     let mut route = scalar_route_result();
-    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "abcd".to_string();
+    route.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "abcd".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route.clone()),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -50,10 +50,7 @@ fn scalar_path_only_matrix_answer_projects_ambiguous_find_name_candidates() {
         &answer,
         crate::task_journal::TaskJournalFinalStatus::Success,
     );
-    let answer_contract = crate::answer_verifier::AnswerContract::new(
-        &route.resolved_intent,
-        route.output_contract.clone(),
-    );
+    let answer_contract = crate::answer_verifier::AnswerContract::new("find abcd", route.clone());
     assert!(
         crate::answer_verifier::structurally_satisfies_answer_contract(
             &answer_contract,
@@ -74,13 +71,13 @@ fn direct_structured_observed_answer_defers_implicit_metadata_path_facts() {
         r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"tmp/test_bundle.zip","resolved_path":"/tmp/test_bundle.zip","size_bytes":272,"modified_ts":1776352013},"path":"/tmp/test_bundle.zip"}],"include_missing":true}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/test_bundle.zip".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/test_bundle.zip".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -115,13 +112,13 @@ fn direct_db_basic_observed_answer_uses_latest_rows_after_synthesis_failure() {
     ));
 
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint =
         "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
 
@@ -155,14 +152,14 @@ fn direct_db_basic_observed_answer_counts_rows_for_scalar_count_contract() {
     ));
 
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Scalar;
+    route.semantic_kind = OutputSemanticKind::ScalarCount;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint =
         "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
 
@@ -188,10 +185,10 @@ fn structured_container_summary_returns_machine_fields_for_empty_object() {
         r#"{"action":"extract_field","exists":true,"field_path":"metadata","format":"json","path":"package.json","resolved_field_path":"metadata","value":{},"value_text":"{}","value_type":"object"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -221,10 +218,10 @@ fn structured_container_summary_returns_machine_fields_for_empty_array() {
         r#"{"action":"extract_field","exists":true,"field_path":"scripts.test","format":"json","path":"package.json","resolved_field_path":"scripts.test","value":[],"value_text":"[]","value_type":"array"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -255,13 +252,13 @@ fn direct_db_basic_observed_answer_returns_machine_fields_for_empty_rows() {
     ));
 
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Free;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint =
         "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
 
@@ -289,11 +286,11 @@ fn direct_db_basic_observed_answer_handles_planner_selected_list_tables_without_
     ));
 
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.requires_content_evidence = false;
+    route.response_shape = OutputResponseShape::Free;
+    route.locator_kind = OutputLocatorKind::None;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..crate::agent_engine::AgentRunContext::default()
     };
 
@@ -330,11 +327,11 @@ fn direct_structured_observed_answer_defers_when_plan_requested_synthesis() {
             verify_result: None,
         });
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/README.md".to_string();
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/README.md".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -361,11 +358,11 @@ fn direct_structured_observed_answer_uses_names_only_inventory_despite_synthesis
             verify_result: None,
         });
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/docs".to_string();
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/docs".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -396,12 +393,12 @@ fn direct_structured_observed_answer_uses_dirs_only_inventory_despite_synthesis_
             verify_result: None,
         });
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/device".to_string();
+    route.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::Strict;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/device".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -421,11 +418,11 @@ fn direct_structured_observed_answer_keeps_passthrough_without_synthesis_plan() 
         r#"{"action":"read_range","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","excerpt":"1|[app]\n2|name = \"fixture\""}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/config.toml".to_string();
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/config.toml".to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -474,9 +471,9 @@ fn broad_structured_read_drops_separator_and_validates_file() {
     assert!(loop_state.last_user_visible_respond.is_none());
 
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
+    route.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let (answer, summary) = deterministic_structured_file_validation_from_read_range(
@@ -496,10 +493,9 @@ fn broad_structured_read_drops_separator_and_validates_file() {
     );
 
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=config.validate".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
+    route.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let (answer, _) = deterministic_structured_file_validation_from_read_range(
@@ -528,9 +524,9 @@ fn broad_structured_read_validation_does_not_replace_directory_summary() {
         r#"{"action":"read_range","mode":"head","path":"UI/package.json","resolved_path":"UI/package.json","excerpt":"1|{\n2|  \"name\": \"react-example\"\n3|}"}"#,
     ));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 

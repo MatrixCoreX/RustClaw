@@ -35,7 +35,7 @@ fn numeric_scalar_text(text: &str) -> bool {
 
 pub(super) fn scalar_count_diagnostic_line_for_answer(
     answer: &str,
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     loop_state: &LoopState,
 ) -> Option<String> {
     let route = route?;

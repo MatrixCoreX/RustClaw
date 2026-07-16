@@ -46,8 +46,10 @@ pub(super) fn latest_path_batch_facts_has_implicit_metadata_fields(loop_state: &
         })
 }
 
-pub(super) fn route_allows_latest_tail_read_range_delivery(route: &crate::RouteResult) -> bool {
-    let contract = route.effective_output_contract();
+pub(super) fn route_allows_latest_tail_read_range_delivery(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    let contract = route.clone();
     if matches!(
         contract.response_shape,
         crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
@@ -56,8 +58,8 @@ pub(super) fn route_allows_latest_tail_read_range_delivery(route: &crate::RouteR
     }
     !contract.delivery_required
         && contract.requires_content_evidence
-        && (route.output_contract_is_unclassified()
-            || route.output_contract_marker_is_any(&[
+        && (route.semantic_kind_is_unclassified()
+            || route.semantic_kind_is_any(&[
                 crate::OutputSemanticKind::ContentExcerptSummary,
                 crate::OutputSemanticKind::ExcerptKindJudgment,
                 crate::OutputSemanticKind::RawCommandOutput,
@@ -71,7 +73,7 @@ pub(super) fn latest_tail_read_range_observed_answer(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
     if !route_allows_latest_tail_read_range_delivery(route) {
         return None;
     }
@@ -107,8 +109,8 @@ fn latest_bounded_read_range_failure_recovery_answer(
     if !finalizer_summary_rejects_current_delivery(finalizer_summary) {
         return None;
     }
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    let contract = route.effective_output_contract();
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
+    let contract = route.clone();
     if contract.delivery_required
         || matches!(
             contract.response_shape,
@@ -174,10 +176,10 @@ pub(super) fn tail_read_directory_inventory_projection_available(
 fn route_allows_tail_read_directory_inventory_projection(
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return true;
     };
-    let contract = route.effective_output_contract();
+    let contract = route.clone();
     !contract.delivery_required
         && !matches!(
             contract.response_shape,
@@ -735,10 +737,10 @@ fn latest_publishable_terminal_summary_output(loop_state: &LoopState) -> Option<
 }
 
 fn route_prefers_publishable_summary_over_tail_read(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> Option<String> {
-    let contract = route.effective_output_contract();
+    let contract = route.clone();
     if !contract.requires_content_evidence
         || contract.delivery_required
         || matches!(
@@ -748,7 +750,7 @@ fn route_prefers_publishable_summary_over_tail_read(
         || route_requires_raw_tail_read_passthrough(Some(route))
         || route_prefers_deterministic_tail_line(Some(route))
         || !matches!(
-            crate::evidence_policy::final_answer_shape_for_route(route),
+            crate::evidence_policy::final_answer_shape_for_output_contract(route),
             Some(crate::evidence_policy::FinalAnswerShape::SummaryWithEvidence)
         )
     {
@@ -817,7 +819,7 @@ fn latest_tail_replacement_was_synthesized_after_tail(
 }
 
 fn latest_tail_read_range_should_preserve_current_delivery(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     loop_state: &LoopState,
     replacement_answer: &str,
     finalizer_summary: Option<&crate::task_journal::TaskJournalFinalizerSummary>,
@@ -853,9 +855,7 @@ fn latest_tail_read_range_should_preserve_current_delivery(
         return true;
     }
     route
-        .map(|route| {
-            route.output_contract_marker_is(crate::OutputSemanticKind::ContentExcerptSummary)
-        })
+        .map(|route| route.semantic_kind_is(crate::OutputSemanticKind::ContentExcerptSummary))
         .unwrap_or(false)
 }
 
@@ -881,25 +881,25 @@ fn semantic_kind_prefers_deterministic_tail_line(kind: crate::OutputSemanticKind
     )
 }
 
-fn route_prefers_deterministic_tail_line(route: Option<&crate::RouteResult>) -> bool {
+fn route_prefers_deterministic_tail_line(route: Option<&crate::IntentOutputContract>) -> bool {
     route
         .map(|route| {
-            let contract = route.effective_output_contract();
+            let contract = route.clone();
             contract.response_shape == crate::OutputResponseShape::OneSentence
-                && semantic_kind_prefers_deterministic_tail_line(
-                    route.effective_output_contract_semantic_kind(),
-                )
+                && semantic_kind_prefers_deterministic_tail_line(route.semantic_kind)
                 && contract.requires_content_evidence
                 && !contract.delivery_required
         })
         .unwrap_or(false)
 }
 
-pub(super) fn route_requires_raw_tail_read_passthrough(route: Option<&crate::RouteResult>) -> bool {
+pub(super) fn route_requires_raw_tail_read_passthrough(
+    route: Option<&crate::IntentOutputContract>,
+) -> bool {
     route
         .map(|route| {
-            let contract = route.effective_output_contract();
-            route.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+            let contract = route.clone();
+            route.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
                 && contract.response_shape == crate::OutputResponseShape::Strict
                 && contract.requires_content_evidence
                 && !contract.delivery_required
@@ -951,7 +951,7 @@ pub(super) fn replace_delivery_with_latest_tail_read_range_answer(
     }) else {
         return false;
     };
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract());
     if let Some(summary) = route
         .and_then(|route| route_prefers_publishable_summary_over_tail_read(route, loop_state))
         .filter(|summary| summary.trim() != answer.trim())

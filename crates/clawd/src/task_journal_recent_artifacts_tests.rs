@@ -2,25 +2,12 @@ use serde_json::json;
 
 use super::{evidence_coverage_for_output_contract, TaskJournal, TaskJournalStepTrace};
 
-fn recent_artifacts_route() -> crate::RouteResult {
-    crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract {
-            semantic_kind: crate::OutputSemanticKind::RecentArtifactsJudgment,
-            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-            requires_content_evidence: true,
-            ..Default::default()
-        },
+fn recent_artifacts_route() -> crate::IntentOutputContract {
+    crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::RecentArtifactsJudgment,
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        requires_content_evidence: true,
+        ..Default::default()
     }
 }
 
@@ -32,7 +19,7 @@ fn recent_artifacts_directory_structure_satisfies_directory_judgment_evidence() 
         "ask",
         "judge recent workspace directories",
     );
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal.step_results.push(TaskJournalStepTrace::ok(
         "step_1",
         "fs_basic",
@@ -68,8 +55,7 @@ fn recent_artifacts_directory_structure_satisfies_directory_judgment_evidence() 
             .to_string(),
         ));
 
-    let coverage =
-        evidence_coverage_for_output_contract(&route.effective_output_contract(), &journal);
+    let coverage = evidence_coverage_for_output_contract(&route.clone(), &journal);
     assert!(coverage.observed_canonical.contains("candidates"));
     assert!(coverage.observed_canonical.contains("directory_structure"));
     assert!(

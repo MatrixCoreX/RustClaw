@@ -18,9 +18,9 @@ fn direct_scalar_reads_count_inventory_single_dimension_from_structured_output()
             r#"{"action":"count_inventory","kind_filter":"file","counts":{"total":12,"files":9,"dirs":3}}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+    route.semantic_kind = OutputSemanticKind::ScalarCount;
     let agent_run_context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     assert_eq!(
@@ -75,7 +75,7 @@ fn inventory_dir_grouped_contract_uses_names_by_kind() {
         "counts": {"files": 2, "dirs": 1, "total": 3}
     });
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
+    route.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
 
     let answer = inventory_dir_direct_answer_candidate(None, Some(&route), &value, false)
         .expect("grouped inventory answer");
@@ -101,7 +101,7 @@ fn inventory_dir_file_names_contract_filters_names_by_kind() {
         "counts": {"files": 2, "dirs": 1, "total": 3}
     });
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+    route.semantic_kind = OutputSemanticKind::FileNames;
 
     let answer = inventory_dir_direct_answer_candidate(None, Some(&route), &value, false)
         .expect("file names answer");
@@ -125,7 +125,7 @@ fn inventory_dir_file_names_contract_uses_direct_semantic_kind() {
         "counts": {"files": 2, "dirs": 1, "total": 3}
     });
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+    route.semantic_kind = OutputSemanticKind::FileNames;
 
     let answer = inventory_dir_direct_answer_candidate(None, Some(&route), &value, false)
         .expect("file names contract answer");
@@ -144,11 +144,11 @@ fn direct_answer_groups_inventory_dir_for_chat_wrapped_directory_entry_contract(
             r#"{"action":"inventory_dir","path":"/tmp/root","names_only":false,"names":["docs","README.md"],"names_by_kind":{"files":["README.md"],"dirs":["docs"],"other":[]},"counts":{"files":1,"dirs":1,"total":2}}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
     let context = AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..AgentRunContext::default()
     };
 
@@ -276,19 +276,7 @@ fn direct_count_inventory_answer_uses_file_count_and_explanation_for_one_sentenc
             "system_basic",
             r#"{"action":"count_inventory","counts":{"total":53,"files":53,"dirs":0},"kind_filter":"file","path":".","recursive":false}"#,
         ));
-    let route_result = RouteResult {
-        resolved_intent: "数一下当前目录一级有多少个普通文件，只告诉我数字和一句解释".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "scalar_count".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Low,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::OneSentence,
             requires_content_evidence: true,
@@ -298,10 +286,9 @@ fn direct_count_inventory_answer_uses_file_count_and_explanation_for_one_sentenc
             semantic_kind: OutputSemanticKind::ScalarCount,
             locator_hint: ".".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         original_user_request: Some(
             "数一下当前目录一级有多少个普通文件，只告诉我数字和一句解释".to_string(),
         ),

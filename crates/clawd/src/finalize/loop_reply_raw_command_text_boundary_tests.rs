@@ -22,9 +22,9 @@ fn raw_command_projection_ignores_read_range_json_hidden_in_visible_text() {
         .executed_step_results
         .push(ok_step_result("step_1", "fs_basic", &read_range_output));
     let mut route = free_route_result();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
-    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.response_shape = crate::OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
 
     assert!(direct_raw_command_output_projection(&state, &route, &loop_state).is_none());
 }

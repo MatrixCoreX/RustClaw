@@ -142,7 +142,7 @@ fn sanitize_machine_line_value(value: &str) -> String {
 #[cfg(test)]
 pub(super) fn requested_machine_kv_summary_from_task_final_answer(
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &str,
     answer_messages: &[String],
@@ -159,7 +159,7 @@ pub(super) fn requested_machine_kv_summary_from_task_final_answer(
 
 pub(super) fn requested_machine_kv_summary_from_task_final_answer_with_surfaces(
     request_surfaces: &[String],
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &str,
     answer_messages: &[String],
@@ -215,7 +215,7 @@ pub(super) fn request_surfaces_explicitly_request_kv_summary(
         })
 }
 
-fn route_requests_service_status_machine_kv_summary(route: &crate::RouteResult) -> bool {
+fn route_requests_service_status_machine_kv_summary(route: &crate::IntentOutputContract) -> bool {
     crate::finalize::route_matches_service_control_machine_summary(route)
 }
 
@@ -243,14 +243,17 @@ fn observed_machine_text_fragments_from_journal_skill(
 
 pub(super) fn task_machine_kv_request_surfaces(
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> Vec<String> {
     let mut surfaces = Vec::new();
     for value in [
         Some(prompt),
         Some(journal.input_text.as_str()),
-        Some(route_result.resolved_intent.as_str()),
+        route_result
+            .self_extension
+            .structured_field_selector
+            .as_deref(),
     ]
     .into_iter()
     .flatten()
@@ -297,14 +300,13 @@ pub(super) fn text_has_compare_paths_existence_fields(text: &str) -> bool {
 }
 
 pub(super) fn route_preserves_generated_file_machine_report(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer_text: &str,
     answer_messages: &[String],
 ) -> bool {
-    let contract = route_result.effective_output_contract();
+    let contract = route_result.clone();
     if contract.delivery_required
-        || !route_result
-            .output_contract_marker_is(crate::OutputSemanticKind::GeneratedFilePathReport)
+        || !route_result.semantic_kind_is(crate::OutputSemanticKind::GeneratedFilePathReport)
     {
         return false;
     }

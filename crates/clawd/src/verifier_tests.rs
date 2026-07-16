@@ -8,8 +8,8 @@ use serde_json::json;
 
 use super::{verify_plan, VerifyInput, VerifyIssueKind, VerifyMode};
 use crate::{
-    evidence_policy::FailureAttribution, AgentRuntimeConfig, AppState, ClaimedTask, PlanKind,
-    PlanResult, PlanStep, RouteResult, ScheduleKind, SkillViewsSnapshot, ToolsPolicy,
+    evidence_policy::FailureAttribution, AgentRuntimeConfig, AppState, ClaimedTask,
+    IntentOutputContract, PlanKind, PlanResult, PlanStep, SkillViewsSnapshot, ToolsPolicy,
 };
 
 fn test_registry() -> SkillsRegistry {
@@ -294,38 +294,20 @@ pub(super) fn test_task() -> ClaimedTask {
     }
 }
 
-pub(super) fn route_result(needs_clarify: bool) -> RouteResult {
-    route_result_with_risk(needs_clarify, crate::RiskCeiling::Unknown)
+pub(super) fn route_result() -> IntentOutputContract {
+    crate::IntentOutputContract::default()
 }
 
-pub(super) fn route_result_with_semantic(semantic_kind: crate::OutputSemanticKind) -> RouteResult {
-    let mut route = route_result(false);
-    route.output_contract = crate::IntentOutputContract {
+pub(super) fn route_result_with_semantic(
+    semantic_kind: crate::OutputSemanticKind,
+) -> IntentOutputContract {
+    let mut route = route_result();
+    route = crate::IntentOutputContract {
         semantic_kind,
         locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
         ..Default::default()
     };
     route
-}
-
-pub(super) fn route_result_with_risk(
-    needs_clarify: bool,
-    risk_ceiling: crate::RiskCeiling,
-) -> RouteResult {
-    RouteResult {
-        resolved_intent: "test".to_string(),
-        needs_clarify,
-        route_reason: "test".to_string(),
-        visible_skill_candidates: vec!["read_file".to_string()],
-        risk_ceiling,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        clarify_question: String::new(),
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    }
 }
 
 pub(super) fn plan_result(steps: Vec<PlanStep>) -> PlanResult {
@@ -368,7 +350,7 @@ fn output_contract_does_not_reintroduce_pre_planner_clarify_state() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(true).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: Some("need more info"),
             plan_result: &plan_result(vec![PlanStep {
@@ -401,7 +383,7 @@ fn redacted_workspace_child_boundary_blocks_path_content_read_plan() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("read that README"),
             context_bundle_summary: Some(&context),
             plan_result: &plan_result(vec![PlanStep {
@@ -436,7 +418,7 @@ fn redacted_workspace_child_boundary_allows_workspace_relative_content_read_plan
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("summarize workspace README"),
             context_bundle_summary: Some(&context),
             plan_result: &plan_result(vec![PlanStep {
@@ -470,7 +452,7 @@ fn redacted_workspace_child_boundary_allows_workspace_absolute_content_read_plan
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("summarize workspace README"),
             context_bundle_summary: Some(&context),
             plan_result: &plan_result(vec![PlanStep {
@@ -512,7 +494,7 @@ fn redacted_workspace_child_boundary_in_plan_goal_blocks_path_content_read_plan(
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("read that README"),
             context_bundle_summary: None,
             plan_result: &plan,
@@ -535,17 +517,16 @@ fn redacted_workspace_child_boundary_in_plan_goal_blocks_path_content_read_plan(
 fn locatorless_runtime_status_plan_does_not_trip_route_clarify_block() {
     let state = test_state();
     let task = test_task();
-    let mut route = route_result(true);
-    route.route_reason = "locatorless_observation_requires_clarify".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    let mut route = route_result();
+    route.requires_content_evidence = true;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.locator_kind = crate::OutputLocatorKind::None;
 
     let result = verify_plan(
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: Some("runtime status scalar"),
             plan_result: &plan_result(vec![PlanStep {
@@ -576,7 +557,7 @@ fn observe_mode_rewrites_unresolved_template_args_to_response() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(true).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("帮我转成表格"),
             context_bundle_summary: Some("needs concrete JSON array"),
             plan_result: &plan_result(vec![PlanStep {
@@ -631,7 +612,7 @@ fn observe_mode_rewrites_unresolved_call_capability_to_response() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("帮我查一下"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -683,7 +664,7 @@ fn enforce_mode_blocks_unresolved_call_capability() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -719,7 +700,7 @@ fn observe_mode_allows_prior_output_template_in_later_args() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(true).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some(
                 "查看 logs 目录，把里面的日志文件名整理到 logs_inventory.txt，然后把文件发给我。",
             ),
@@ -766,7 +747,7 @@ fn enforce_mode_blocks_missing_required_arg() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -805,7 +786,7 @@ fn enforce_mode_blocks_action_scoped_required_arg() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -835,7 +816,7 @@ fn enforce_mode_accepts_action_scoped_alternative_arg() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -865,9 +846,7 @@ fn workspace_creation_uses_registry_policy_without_route_risk_ceiling() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(
-                &route_result_with_risk(false, crate::RiskCeiling::Low).output_contract,
-            ),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -921,12 +900,12 @@ fn workspace_creation_uses_registry_policy_without_route_risk_ceiling() {
 fn external_fs_basic_mutation_requires_registry_confirmation() {
     let state = test_state();
     let task = test_task();
-    let route = route_result_with_risk(false, crate::RiskCeiling::Low);
+    let route = route_result();
     let result = verify_plan(
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -967,7 +946,7 @@ fn observe_mode_does_not_reject_actions_from_semantic_matrix_only() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -996,13 +975,13 @@ fn observe_mode_allows_user_named_output_path_marker_without_contract_rejection(
     let state = test_state();
     let task = test_task();
     let mut route = route_result_with_semantic(crate::OutputSemanticKind::RawCommandOutput);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::None;
     let result = verify_plan(
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -1038,7 +1017,7 @@ fn summary_contract_allows_registry_observe_config_preview_without_confirmation(
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -1080,7 +1059,7 @@ fn summary_contract_does_not_reject_registry_config_apply_by_semantic_matrix() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -1192,7 +1171,7 @@ fn observe_mode_no_longer_records_semantic_matrix_preferred_action_hint() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -1221,14 +1200,14 @@ fn generated_file_path_report_repairs_plan_with_missing_write_step() {
     let state = test_state();
     let task = test_task();
     let mut route = route_result_with_semantic(crate::OutputSemanticKind::GeneratedFilePathReport);
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_hint = "pwd_line_abs.txt".to_string();
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.delivery_required = false;
+    route.locator_hint = "pwd_line_abs.txt".to_string();
     let result = verify_plan(
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -1311,7 +1290,7 @@ fn enforce_mode_blocks_skill_switch_disabled_even_when_contract_allows_action() 
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -1350,9 +1329,7 @@ fn enforce_mode_allows_low_risk_action_under_low_risk_ceiling() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(
-                &route_result_with_risk(false, crate::RiskCeiling::Low).output_contract,
-            ),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -1382,7 +1359,7 @@ fn enforce_mode_blocks_skill_not_visible() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -1412,7 +1389,7 @@ fn enforce_mode_allows_internal_subagent_tool_visibility() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -1501,7 +1478,7 @@ fn deterministic_subagent_boundary_plan_bypasses_misclassified_contract_rejectio
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan,
@@ -1530,9 +1507,8 @@ fn deterministic_subagent_boundary_plan_defers_clarify_when_locator_is_structure
     let state = test_state();
     let task = test_task();
     let mut route = route_result_with_semantic(crate::OutputSemanticKind::ConfigValidation);
-    route.needs_clarify = true;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
 
     let mut plan = plan_result(vec![
         PlanStep {
@@ -1568,7 +1544,7 @@ fn deterministic_subagent_boundary_plan_defers_clarify_when_locator_is_structure
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route.output_contract),
+            output_contract: Some(&route),
             request_text: None,
             context_bundle_summary: Some("structured_current_plan_locator"),
             plan_result: &plan,
@@ -1592,7 +1568,7 @@ fn enforce_mode_blocks_primary_fallback_conflict() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -1632,7 +1608,7 @@ fn verifier_allows_repeated_steps_from_same_primary_group_skill() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -1668,13 +1644,12 @@ fn verifier_allows_repeated_steps_from_same_primary_group_skill() {
 fn legacy_resume_route_does_not_bypass_confirmation_policy() {
     let state = test_state();
     let task = test_task();
-    let mut resumed_route = route_result(false);
-    resumed_route.resume_behavior = crate::ResumeBehavior::ResumeExecute;
+    let mut resumed_route = route_result();
     let result = verify_plan(
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&resumed_route.output_contract),
+            output_contract: Some(&resumed_route),
             request_text: None,
             context_bundle_summary: Some("resume"),
             plan_result: &plan_result(vec![PlanStep {
@@ -1705,7 +1680,7 @@ fn confirmation_exempt_invocation_skips_confirmation_requirement() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: None,
             context_bundle_summary: Some("photo preview"),
             plan_result: &plan_result(vec![PlanStep {
@@ -1736,7 +1711,7 @@ fn safe_make_dir_missing_path_defaults_under_workspace_without_confirmation() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("帮我创建一个文件夹"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -1780,7 +1755,7 @@ fn safe_write_file_relative_path_anchors_under_workspace_without_confirmation() 
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("把结果写到文件"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -1823,7 +1798,7 @@ fn dangerous_remove_file_missing_path_blocks_without_default_target() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("delete it"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -1858,7 +1833,7 @@ fn dangerous_fs_basic_remove_path_missing_path_blocks_without_default_target() {
         &state,
         &task,
         VerifyInput {
-            output_contract: Some(&route_result(false).output_contract),
+            output_contract: Some(&route_result()),
             request_text: Some("remove that path"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {

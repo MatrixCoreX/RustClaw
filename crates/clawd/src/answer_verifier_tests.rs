@@ -458,7 +458,7 @@ fn local_missing_evidence_gap_does_not_block_on_negative_evidence_only() {
     });
 
     let coverage = crate::task_journal::evidence_coverage_for_output_contract(
-        &route.effective_output_contract(),
+        &route.output_contract,
         &journal,
     );
     assert_eq!(
@@ -477,7 +477,7 @@ fn local_missing_evidence_gap_skips_structured_not_found_terminal_finalizer() {
     route.output_contract.locator_hint = "definitely_missing_dir_rustclaw_xyz/".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-local-gap-not-found", "ask", "list");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.output_contract);
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -524,7 +524,7 @@ fn structural_satisfaction_skips_latest_not_found_answer_with_same_path() {
         "ask",
         "read missing path",
     );
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.output_contract);
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -555,7 +555,7 @@ fn structural_satisfaction_skips_successful_stat_missing_answer_with_same_path()
         "ask",
         "stat missing path and summarize readme",
     );
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.output_contract);
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -600,7 +600,7 @@ fn structural_satisfaction_keeps_verifier_when_not_found_answer_omits_path() {
         "ask",
         "read missing path",
     );
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.output_contract);
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),
@@ -626,7 +626,7 @@ fn should_verify_answer_skips_permission_denied_terminal_finalizer() {
     route.output_contract.locator_hint = "/etc/shadow".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-terminal-permission", "ask", "read");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.output_contract);
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "system_basic".to_string(),
@@ -714,7 +714,7 @@ fn local_missing_evidence_gap_skips_crypto_account_access_terminal_finalizer() {
     route.output_contract.requires_content_evidence = true;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-local-gap-crypto", "ask", "positions");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.output_contract);
     let marker = r#"__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:{"exchange":"binance","detail":"binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"}"#;
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
@@ -757,7 +757,7 @@ fn local_missing_evidence_gap_keeps_gap_for_non_missing_terminal_error() {
     route.output_contract.locator_hint = "maybe_dir/".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-local-gap-error", "ask", "list");
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.output_contract);
     journal.push_step_result(&crate::executor::StepExecutionResult {
         step_id: "step_1".to_string(),
         skill: "fs_basic".to_string(),

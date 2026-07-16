@@ -3,7 +3,7 @@ use crate::ClaimedTask;
 use serde_json::{json, Value};
 
 use super::log_deterministic_delivery_record;
-use super::route_helpers::{route_clarify_reason_code, route_output_contract_machine_json};
+use super::route_helpers::route_output_contract_machine_json;
 
 pub(super) fn attach_agent_loop_clarify_machine_line(
     task: &ClaimedTask,
@@ -53,11 +53,11 @@ pub(super) fn attach_route_clarify_machine_envelope(
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
     agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
     let agent_loop_terminal_clarify = loop_state_agent_loop_terminal_clarify(loop_state);
-    if !route.needs_clarify && !agent_loop_terminal_clarify {
+    if !agent_loop_terminal_clarify {
         return false;
     }
     if !route_allows_terminal_clarify_envelope(route, loop_state) {
@@ -75,14 +75,13 @@ pub(super) fn attach_route_clarify_machine_envelope(
     }
 
     let reason_code = output_var(loop_state, "agent_loop.clarify_reason_code")
-        .or_else(|| route_clarify_reason_code(&route.route_reason).map(str::to_string))
         .unwrap_or_else(|| derived_missing_reason_code(route));
     let missing_slot = output_var(loop_state, "agent_loop.missing_slot")
         .unwrap_or_else(|| missing_slot_for_reason_code(&reason_code).to_string());
     let field_path = output_var(loop_state, "agent_loop.field_path")
         .or_else(|| derived_missing_field_path(&missing_slot).map(str::to_string));
     let locator_kind = output_var(loop_state, "agent_loop.locator_kind")
-        .unwrap_or_else(|| route.output_contract.locator_kind.as_str().to_string());
+        .unwrap_or_else(|| route.locator_kind.as_str().to_string());
     let message_key = output_var(loop_state, "agent_loop.message_key")
         .unwrap_or_else(|| message_key_for_missing_slot(&missing_slot).to_string());
 
@@ -164,7 +163,7 @@ fn is_clarify_machine_field(raw: &str) -> bool {
 }
 
 fn route_allows_terminal_clarify_envelope(
-    _route: &crate::RouteResult,
+    _route: &crate::IntentOutputContract,
     loop_state: &LoopState,
 ) -> bool {
     loop_state.pending_user_input_required
@@ -194,8 +193,8 @@ fn completed_act_delivery_should_own_terminal_state(
             .any(|message| !delivery_has_terminal_clarify_machine_fields(message))
 }
 
-fn route_reason_has_machine_token(route_reason: &str, expected: &str) -> bool {
-    crate::RouteReasonMarkers::new(route_reason).has_machine_marker(expected)
+fn machine_text_has_token(machine_text: &str, expected: &str) -> bool {
+    crate::MachineTokenMarkers::new(machine_text).has_machine_marker(expected)
 }
 
 pub(super) fn delivery_has_terminal_clarify_machine_fields(message: &str) -> bool {
@@ -215,8 +214,8 @@ pub(super) fn delivery_has_terminal_clarify_machine_fields(message: &str) -> boo
             return true;
         }
     }
-    let markers = crate::RouteReasonMarkers::new(message);
-    route_reason_has_machine_token(message, "agent_loop.terminal_intent=clarify")
+    let markers = crate::MachineTokenMarkers::new(message);
+    machine_text_has_token(message, "agent_loop.terminal_intent=clarify")
         || markers.machine_value("agent_loop.terminal_intent") == Some("clarify")
         || markers.machine_value("terminal_intent") == Some("clarify")
 }
@@ -335,10 +334,9 @@ fn ensure_output_var(loop_state: &mut LoopState, key: &str, value: &str) {
         .or_insert_with(|| value.to_string());
 }
 
-fn derived_missing_reason_code(route: &crate::RouteResult) -> String {
-    if route.output_contract.locator_hint.trim().is_empty()
-        && (route.output_contract.requires_content_evidence
-            || route.output_contract.delivery_required)
+fn derived_missing_reason_code(route: &crate::IntentOutputContract) -> String {
+    if route.locator_hint.trim().is_empty()
+        && (route.requires_content_evidence || route.delivery_required)
     {
         "missing_locator".to_string()
     } else {

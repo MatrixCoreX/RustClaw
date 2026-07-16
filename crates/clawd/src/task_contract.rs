@@ -2,9 +2,7 @@ use std::collections::BTreeSet;
 
 use serde_json::json;
 
-use crate::{
-    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
-};
+use crate::{OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskTargetObject {
@@ -386,10 +384,6 @@ fn target_object_for_locator_kind(locator_kind: OutputLocatorKind) -> TaskTarget
     }
 }
 
-pub(crate) fn operation_for_route(route: &RouteResult) -> TaskOperation {
-    operation_for_output_contract(&route.effective_output_contract())
-}
-
 pub(crate) fn operation_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> TaskOperation {
@@ -449,11 +443,7 @@ fn operation_for_unclassified_output_contract(
     }
 }
 
-pub(crate) fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape {
-    delivery_shape_for_output_contract(&route.effective_output_contract())
-}
-
-fn delivery_shape_for_output_contract(
+pub(crate) fn delivery_shape_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> TaskDeliveryShape {
     matrix_contract_for_output_contract(output_contract)
@@ -468,11 +458,6 @@ fn delivery_shape_for_response_shape(response_shape: OutputResponseShape) -> Tas
         OutputResponseShape::FileToken => TaskDeliveryShape::File,
         OutputResponseShape::Free => TaskDeliveryShape::Summary,
     }
-}
-
-pub(crate) fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<String> {
-    let output_contract = route.effective_output_contract();
-    required_evidence_fields_for_output_contract(&output_contract)
 }
 
 fn matrix_contract_for_output_contract(

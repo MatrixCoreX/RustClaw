@@ -432,13 +432,12 @@ fn answer_verifier_recovery_already_terminal(journal: &crate::task_journal::Task
             .is_some_and(crate::task_journal::is_answer_verifier_recovered_terminal_stop_signal)
 }
 
-fn planner_route_result_for_finalization(
+fn planner_output_contract_for_finalization(
     answer_journal: Option<&crate::task_journal::TaskJournal>,
-) -> crate::RouteResult {
+) -> crate::IntentOutputContract {
     answer_journal
         .and_then(|journal| journal.output_contract.clone())
-        .map(crate::RouteResult::from_planner_output_contract)
-        .unwrap_or_else(crate::RouteResult::planner_output_contract_unavailable)
+        .unwrap_or_default()
 }
 
 fn turn_analysis_requires_machine_summary(
@@ -455,29 +454,29 @@ fn turn_analysis_requires_machine_summary(
 }
 
 fn route_allows_verified_terminal_answer_promotion(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    if route_result.wants_file_delivery
-        || route_result.output_contract.delivery_required
+    if route_result.delivery_required
+        || route_result.delivery_required
         || matches!(
-            route_result.output_contract.response_shape,
+            route_result.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
         )
         || turn_analysis_requires_machine_summary(journal.turn_analysis.as_ref())
     {
         return false;
     }
-    crate::evidence_policy::final_answer_shape_for_route(route_result)
+    crate::evidence_policy::final_answer_shape_for_output_contract(route_result)
         .is_some_and(|shape| shape.allows_model_language())
         || matches!(
-            route_result.output_contract.response_shape,
+            route_result.response_shape,
             crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
         )
 }
 
 pub(super) fn promote_verified_terminal_answer_after_verifier_pass(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &mut crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,
@@ -551,24 +550,21 @@ pub(crate) async fn finalize_ask_result(
             if let Some(answer_journal) = answer.task_journal.as_ref() {
                 journal.merge_from(answer_journal);
             }
-            let effective_route_result =
-                planner_route_result_for_finalization(answer.task_journal.as_ref());
-            journal.record_output_contract(&effective_route_result.output_contract);
-            let route_result = &effective_route_result;
-            let mut semantic_clarify = route_result.is_clarify_gate()
-                || answer
-                    .task_journal
-                    .as_ref()
-                    .and_then(|journal| journal.final_status)
-                    .is_some_and(|status| {
-                        matches!(status, crate::task_journal::TaskJournalFinalStatus::Clarify)
-                    });
+            let effective_output_contract =
+                planner_output_contract_for_finalization(answer.task_journal.as_ref());
+            journal.record_output_contract(&effective_output_contract);
+            let route_result = &effective_output_contract;
+            let mut semantic_clarify = answer
+                .task_journal
+                .as_ref()
+                .and_then(|journal| journal.final_status)
+                .is_some_and(|status| {
+                    matches!(status, crate::task_journal::TaskJournalFinalStatus::Clarify)
+                });
             let mut failure_reply = answer.should_fail_task;
             let missing_file_delivery_reply =
                 missing_file_delivery_reply_text(state, task, prompt, route_result, &answer).await;
-            let (mut answer_text, mut answer_messages) = if failure_reply
-                || route_result.is_clarify_gate()
-            {
+            let (mut answer_text, mut answer_messages) = if failure_reply {
                 (
                     crate::intercept_response_text_for_delivery(&answer.text),
                     answer
@@ -597,8 +593,8 @@ pub(crate) async fn finalize_ask_result(
                         // reinterpreted as fresh user-provided locator input during final delivery
                         // normalization.
                         prompt,
-                        route_result.wants_file_delivery,
-                        &route_result.output_contract,
+                        route_result.delivery_required,
+                        route_result,
                         answer.text,
                         original_messages,
                     );
@@ -691,10 +687,8 @@ pub(crate) async fn finalize_ask_result(
                 let answer_verifier = if answer_is_existing_file_delivery_token {
                     None
                 } else {
-                    let answer_contract = crate::answer_verifier::AnswerContract::new(
-                        prompt,
-                        route_result.output_contract.clone(),
-                    );
+                    let answer_contract =
+                        crate::answer_verifier::AnswerContract::new(prompt, route_result.clone());
                     crate::answer_verifier::verify_answer_observe_only(
                         state,
                         task,
@@ -1050,8 +1044,8 @@ pub(crate) async fn finalize_ask_result(
                     &answer_text,
                     &answer_messages,
                     answer.is_llm_reply,
-                    route_result.should_refresh_long_term_memory,
-                    &route_result.agent_display_name_hint,
+                    false,
+                    "",
                     &mut journal,
                 )
                 .await?;
@@ -1094,9 +1088,9 @@ pub(crate) async fn finalize_ask_result(
             state.clear_task_llm_call_count(&task.task_id);
         }
         Err(err_text) => {
-            let effective_route_result = crate::RouteResult::planner_output_contract_unavailable();
-            journal.record_output_contract(&effective_route_result.output_contract);
-            let route_result = &effective_route_result;
+            let effective_output_contract = crate::IntentOutputContract::default();
+            journal.record_output_contract(&effective_output_contract);
+            let route_result = &effective_output_contract;
             if err_text == crate::agent_engine::TASK_CANCELED_ERR
                 || !repo::is_task_still_running(state, &task.task_id)?
             {
@@ -1137,8 +1131,8 @@ pub(crate) async fn finalize_ask_result(
                         &user_error,
                         &[],
                         false,
-                        route_result.should_refresh_long_term_memory,
-                        &route_result.agent_display_name_hint,
+                        false,
+                        "",
                         &mut journal,
                     )
                     .await?;
@@ -1217,8 +1211,8 @@ pub(crate) async fn finalize_ask_result(
                         &qualified_answer,
                         &answer_messages,
                         false,
-                        route_result.should_refresh_long_term_memory,
-                        &route_result.agent_display_name_hint,
+                        false,
+                        "",
                         &mut journal,
                     )
                     .await?;

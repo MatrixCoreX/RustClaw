@@ -678,19 +678,15 @@ fn observed_execution_has_complete_contract_evidence(
     agent_run_context: Option<&AgentRunContext>,
     finalizer_summary: Option<&crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
-    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.output_contract()) else {
         return false;
     };
-    if route.output_contract_is_unclassified()
-        && !route.output_contract.delivery_required
-        && !route.wants_file_delivery
-    {
+    if route.semantic_kind_is_unclassified() && !route.delivery_required {
         return false;
     }
-    if route.needs_clarify
-        || finalizer_summary
-            .and_then(|summary| summary.needs_clarify)
-            .unwrap_or(false)
+    if finalizer_summary
+        .and_then(|summary| summary.needs_clarify)
+        .unwrap_or(false)
     {
         return false;
     }
@@ -714,10 +710,8 @@ fn observed_execution_has_complete_contract_evidence(
         "",
         crate::task_journal::TaskJournalFinalStatus::Success,
     );
-    let coverage = crate::task_journal::evidence_coverage_for_output_contract(
-        &route.effective_output_contract(),
-        &journal,
-    );
+    let coverage =
+        crate::task_journal::evidence_coverage_for_output_contract(&route.clone(), &journal);
     let has_contractual_evidence =
         !coverage.required_evidence.is_empty() || coverage.evidence_expression.is_some();
     has_contractual_evidence && coverage.is_complete()

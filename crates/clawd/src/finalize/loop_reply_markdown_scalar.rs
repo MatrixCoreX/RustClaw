@@ -11,10 +11,10 @@ pub(super) fn deterministic_scalar_markdown_heading_answer_from_loop(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.output_contract.delivery_required
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
+    if route.delivery_required
         || matches!(
-            route.effective_output_contract_semantic_kind(),
+            route.semantic_kind,
             crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames
                 | crate::OutputSemanticKind::FilePaths
@@ -51,46 +51,36 @@ pub(super) fn deterministic_scalar_markdown_heading_answer_from_loop(
 }
 
 pub(super) fn route_allows_observed_markdown_heading_scalar_delivery(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
 ) -> bool {
     if route_allows_direct_scalar_observed_answer(route) {
         return true;
     }
-    route.output_contract.requires_content_evidence
-        && !route.output_contract.delivery_required
+    route.requires_content_evidence
+        && !route.delivery_required
         && matches!(
-            route.output_contract.response_shape,
+            route.response_shape,
             crate::OutputResponseShape::Free
                 | crate::OutputResponseShape::Strict
                 | crate::OutputResponseShape::OneSentence
         )
-        && matches!(
-            route.effective_output_contract_semantic_kind(),
-            crate::OutputSemanticKind::None
-        )
-        && !matches!(
-            route.output_contract.locator_kind,
-            crate::OutputLocatorKind::None
-        )
+        && matches!(route.semantic_kind, crate::OutputSemanticKind::None)
+        && !matches!(route.locator_kind, crate::OutputLocatorKind::None)
 }
 
-fn route_allows_observed_markdown_heading_body_reduction(route: &crate::RouteResult) -> bool {
-    route.output_contract.requires_content_evidence
-        && !route.output_contract.delivery_required
+fn route_allows_observed_markdown_heading_body_reduction(
+    route: &crate::IntentOutputContract,
+) -> bool {
+    route.requires_content_evidence
+        && !route.delivery_required
         && matches!(
-            route.output_contract.response_shape,
+            route.response_shape,
             crate::OutputResponseShape::Scalar
                 | crate::OutputResponseShape::Strict
                 | crate::OutputResponseShape::OneSentence
         )
-        && matches!(
-            route.effective_output_contract_semantic_kind(),
-            crate::OutputSemanticKind::None
-        )
-        && !matches!(
-            route.output_contract.locator_kind,
-            crate::OutputLocatorKind::None
-        )
+        && matches!(route.semantic_kind, crate::OutputSemanticKind::None)
+        && !matches!(route.locator_kind, crate::OutputLocatorKind::None)
 }
 
 pub(super) fn observed_markdown_heading_scalar_answer_for_delivery(
@@ -98,11 +88,11 @@ pub(super) fn observed_markdown_heading_scalar_answer_for_delivery(
     agent_run_context: Option<&AgentRunContext>,
     delivery: &str,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
     if !route_allows_observed_markdown_heading_scalar_delivery(route)
-        || route.output_contract.delivery_required
+        || route.delivery_required
         || matches!(
-            route.effective_output_contract_semantic_kind(),
+            route.semantic_kind,
             crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames
                 | crate::OutputSemanticKind::FilePaths
@@ -130,7 +120,7 @@ pub(super) fn observed_markdown_heading_scalar_answer_for_delivery(
             output.contains("\"read_range\"") || output.contains("\"read_text_range\"")
         })?;
     if trimmed_delivery.contains('\n') {
-        if route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+        if route.response_shape == crate::OutputResponseShape::Scalar
             && route_allows_observed_markdown_heading_body_reduction(route)
             && markdown_read_body_matches_delivery(observed_output, trimmed_delivery)
         {
@@ -168,10 +158,9 @@ pub(super) fn observed_markdown_heading_scalar_answer_for_delivery(
     (delivery_heading.trim() == observed_heading.trim()).then_some(observed_heading)
 }
 
-fn route_requests_title_scalar_selector(route: &crate::RouteResult) -> bool {
-    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+fn route_requests_title_scalar_selector(route: &crate::IntentOutputContract) -> bool {
+    route.response_shape == crate::OutputResponseShape::Scalar
         && route
-            .output_contract
             .self_extension
             .structured_field_selector
             .as_deref()

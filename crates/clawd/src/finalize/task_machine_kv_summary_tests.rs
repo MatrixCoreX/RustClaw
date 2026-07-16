@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
+    OutputSemanticKind,
 };
 use serde_json::json;
 
@@ -23,8 +23,7 @@ fn web_search_candidate_sources_ignore_visible_text_payload() {
 #[test]
 fn service_status_final_guard_preserves_observed_one_sentence_status_summary() {
     let mut route = service_status_one_sentence_route();
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.route_reason = "agent_loop_default_entry".to_string();
+    route.semantic_kind = OutputSemanticKind::None;
     let prompt = ["check", "ssh", "service", "status"].join(" ");
     let service_name = "sshd";
     let observed_state = "active";
@@ -33,7 +32,7 @@ fn service_status_final_guard_preserves_observed_one_sentence_status_summary() {
         "ask",
         &prompt,
     );
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     journal
         .step_results
         .push(crate::task_journal::TaskJournalStepTrace::ok(
@@ -72,13 +71,13 @@ fn service_status_final_guard_preserves_observed_one_sentence_status_summary() {
 #[test]
 fn generic_route_preserves_structured_media_dry_run_report_over_short_machine_summary() {
     let prompt = "return dry_run=true provider/model planned_outputs and output_path";
-    let route = generic_free_route(prompt);
+    let route = generic_free_route();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-generic-media-dry-run-kv-preserve",
         "ask",
         prompt,
     );
-    journal.record_output_contract(&route.effective_output_contract());
+    journal.record_output_contract(&route.clone());
     let expected_answer = concat!(
         "dry_run=true\n",
         "provider=minimax\n",
@@ -105,7 +104,7 @@ fn generic_route_preserves_structured_media_dry_run_report_over_short_machine_su
 #[test]
 fn generic_route_preserves_requested_token_json_over_machine_summary() {
     let prompt = "最终仅输出 JSON，包含 created_files、test_command、test_status。";
-    let route = generic_free_route(prompt);
+    let route = generic_free_route();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-finalize-required-json", "ask", prompt);
     let expected_answer = r#"{"created_files":["calc_core.py","test_calc_core.py"],"test_command":"python3 test_calc_core.py","test_status":"passed"}"#;
@@ -126,7 +125,7 @@ fn generic_route_preserves_requested_token_json_over_machine_summary() {
 #[test]
 fn generic_route_restores_journal_requested_token_json_over_machine_summary() {
     let prompt = "最后只输出 JSON，包含 changed_files、test_command、test_status、functions。";
-    let route = generic_free_route(prompt);
+    let route = generic_free_route();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-finalize-restore-requested-json",
         "ask",
@@ -156,56 +155,30 @@ fn generic_route_restores_journal_requested_token_json_over_machine_summary() {
     assert_eq!(answer_messages, vec![expected_answer.to_string()]);
 }
 
-fn generic_free_route(prompt: &str) -> RouteResult {
-    RouteResult {
-        resolved_intent: prompt.to_string(),
-        needs_clarify: false,
-        route_reason: "agent_loop_default_entry".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Medium,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        clarify_question: String::new(),
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::Free,
-            requires_content_evidence: false,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::None,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::None,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+fn generic_free_route() -> IntentOutputContract {
+    IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: false,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::None,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::None,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     }
 }
 
-fn service_status_one_sentence_route() -> RouteResult {
-    RouteResult {
-        resolved_intent: ["check", "service", "status"].join(" "),
-        needs_clarify: false,
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        clarify_question: String::new(),
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
-            exact_sentence_count: None,
-            response_shape: OutputResponseShape::OneSentence,
-            requires_content_evidence: true,
-            delivery_required: false,
-            locator_kind: OutputLocatorKind::None,
-            delivery_intent: OutputDeliveryIntent::None,
-            semantic_kind: OutputSemanticKind::ServiceStatus,
-            locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-        },
+fn service_status_one_sentence_route() -> IntentOutputContract {
+    IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::None,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::ServiceStatus,
+        locator_hint: String::new(),
+        self_extension: crate::SelfExtensionContract::default(),
     }
 }

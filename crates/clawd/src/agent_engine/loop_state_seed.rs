@@ -144,12 +144,12 @@ pub(super) fn seed_loop_state_from_agent_context(
             .output_vars
             .insert("auto_locator_path".to_string(), path.to_string());
     }
-    if let Some(route) = ctx.route_result.as_ref() {
+    if let Some(route) = ctx.output_contract() {
         loop_state.output_vars.insert(
             "route_locator_kind".to_string(),
-            route.output_contract.locator_kind.as_str().to_string(),
+            route.locator_kind.as_str().to_string(),
         );
-        loop_state.output_contract = Some(route.effective_output_contract());
+        loop_state.output_contract = Some(route.clone());
     }
     if let Some(cross_turn_ctx) = ctx
         .cross_turn_recent_execution_context

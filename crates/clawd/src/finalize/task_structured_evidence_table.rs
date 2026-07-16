@@ -58,11 +58,11 @@ fn terminal_answer_is_internal_machine_payload(answer: &str) -> bool {
 }
 
 pub(super) fn deterministic_structured_evidence_table_recovery(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     current_failure_reply: bool,
 ) -> Option<String> {
-    if route.output_contract.delivery_required || route.wants_file_delivery {
+    if route.delivery_required || route.delivery_required {
         return None;
     }
     let verifier = journal.answer_verifier_summary.as_ref()?;
@@ -83,11 +83,8 @@ pub(super) fn deterministic_structured_evidence_table_recovery(
     if !verifier_requested_structured_rewrite && !stale_failure_after_verifier_pass {
         return None;
     }
-    if !crate::task_journal::evidence_coverage_for_output_contract(
-        &route.effective_output_contract(),
-        journal,
-    )
-    .is_complete()
+    if !crate::task_journal::evidence_coverage_for_output_contract(&route.clone(), journal)
+        .is_complete()
     {
         return None;
     }

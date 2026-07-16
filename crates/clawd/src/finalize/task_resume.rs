@@ -174,10 +174,10 @@ pub(super) fn resume_context_has_directory_lookup_failure(resume_ctx: &Value) ->
 }
 
 pub(super) fn resume_failure_is_unbound_path_lookup_clarify_result(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     resume_ctx: &Value,
 ) -> bool {
-    let contract = route_result.effective_output_contract();
+    let contract = route_result.clone();
     contract.requires_content_evidence
         && !route_has_file_delivery_contract(route_result)
         && !resume_context_has_remaining_actions(resume_ctx)
@@ -185,8 +185,8 @@ pub(super) fn resume_failure_is_unbound_path_lookup_clarify_result(
             contract.response_shape,
             crate::OutputResponseShape::FileToken
         )
-        && (route_result.output_contract_is_unclassified()
-            || route_result.output_contract_marker_is_any(&[
+        && (route_result.semantic_kind_is_unclassified()
+            || route_result.semantic_kind_is_any(&[
                 crate::OutputSemanticKind::ScalarPathOnly,
                 crate::OutputSemanticKind::ExistenceWithPath,
                 crate::OutputSemanticKind::ExistenceWithPathSummary,
@@ -198,7 +198,7 @@ pub(super) fn resume_failure_is_unbound_path_lookup_clarify_result(
 }
 
 pub(super) fn resume_failure_is_missing_file_delivery_result(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     resume_ctx: &Value,
 ) -> bool {
     route_has_file_delivery_contract(route_result)
@@ -219,21 +219,17 @@ fn resume_context_failed_structured_skill_error(
 }
 
 pub(super) fn answer_verifier_retry_applicable(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
     verifier: &crate::answer_verifier::AnswerVerifierOut,
 ) -> bool {
     if !verifier.high_confidence_gap() || !verifier.should_retry {
         return false;
     }
-    let direct_answer_without_tool_observation =
-        !route_result.output_contract.requires_content_evidence
-            && !route_result.output_contract.delivery_required
-            && !route_result.wants_file_delivery
-            && journal.step_results.is_empty();
-    let observed_tool_evidence = !route_result.needs_clarify
-        && !route_result.wants_file_delivery
-        && !route_result.output_contract.delivery_required
+    let direct_answer_without_tool_observation = !route_result.requires_content_evidence
+        && !route_result.delivery_required
+        && journal.step_results.is_empty();
+    let observed_tool_evidence = !route_result.delivery_required
         && journal_has_successful_non_terminal_step(journal)
         && !journal_has_failed_non_terminal_step(journal);
     direct_answer_without_tool_observation || observed_tool_evidence
@@ -637,7 +633,7 @@ fn structured_service_status_error_is_answerable(
 }
 
 pub(super) fn resume_failure_is_structured_service_status_result(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     resume_ctx: &Value,
 ) -> bool {
     crate::finalize::route_matches_service_control_machine_summary(route_result)
@@ -687,11 +683,11 @@ fn structured_error_detail(error: &crate::skills::StructuredSkillError) -> Optio
 }
 
 pub(super) fn resume_failure_execution_failed_step_answer(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     resume_ctx: &Value,
     _prefer_english: bool,
 ) -> Option<String> {
-    if !route_result.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep) {
+    if !route_result.semantic_kind_is(crate::OutputSemanticKind::ExecutionFailedStep) {
         return None;
     }
     let body = resume_context_body(resume_ctx);

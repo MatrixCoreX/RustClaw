@@ -44,13 +44,10 @@ fn machine_kv_renderer_restores_http_status_output_path_over_file_token() {
         "Make a GET request and save the response body to {output_path}. Reply with the HTTP status and saved output_path exactly."
     );
     let mut route = free_route_result();
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.resolved_intent = format!(
-        "download response body output_path={output_path}; required_machine_fields=status,output_path"
-    );
+    route.delivery_required = true;
+    route.response_shape = crate::OutputResponseShape::FileToken;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         original_user_request: Some(prompt.clone()),
         user_request: Some(prompt.clone()),
         ..crate::agent_engine::AgentRunContext::default()

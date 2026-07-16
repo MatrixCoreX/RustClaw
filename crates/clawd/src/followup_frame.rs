@@ -481,7 +481,7 @@ fn absolute_path_has_suffix(absolute: &Path, suffix: &Path) -> bool {
 }
 
 fn op_kind_from_route(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     unresolved_locator: bool,
     journal: &crate::task_journal::TaskJournal,
 ) -> FollowupOpKind {
@@ -491,7 +491,7 @@ fn op_kind_from_route(
     if derive_code_workspace_bound_target_from_route_and_journal(route_result, journal).is_some() {
         return FollowupOpKind::CodeWorkspace;
     }
-    if route_result.wants_file_delivery || route_result.output_contract.delivery_required {
+    if route_result.delivery_required || route_result.delivery_required {
         return FollowupOpKind::Delivery;
     }
     if output_contract_prefers_listing_followup(route_result)
@@ -502,27 +502,27 @@ fn op_kind_from_route(
     if !crate::observed_facts::route_allows_observed_bound_target(route_result) {
         return FollowupOpKind::Generic;
     }
-    if route_result.output_contract.requires_content_evidence
+    if route_result.requires_content_evidence
         && (matches!(
-            route_result.output_contract.locator_kind,
+            route_result.locator_kind,
             crate::OutputLocatorKind::Path
                 | crate::OutputLocatorKind::Filename
                 | crate::OutputLocatorKind::Url
-        ) || route_result.output_contract_marker_is_any(&[
+        ) || route_result.semantic_kind_is_any(&[
             crate::OutputSemanticKind::ContentExcerptSummary,
             crate::OutputSemanticKind::ContentExcerptWithSummary,
         ]))
     {
         return FollowupOpKind::Read;
     }
-    if route_result.output_contract.requires_content_evidence {
+    if route_result.requires_content_evidence {
         return FollowupOpKind::Read;
     }
     FollowupOpKind::Generic
 }
 
-fn output_contract_prefers_listing_followup(route_result: &crate::RouteResult) -> bool {
-    route_result.output_contract_marker_is_any(&[
+fn output_contract_prefers_listing_followup(route_result: &crate::IntentOutputContract) -> bool {
+    route_result.semantic_kind_is_any(&[
         crate::OutputSemanticKind::FileNames,
         crate::OutputSemanticKind::DirectoryNames,
         crate::OutputSemanticKind::DirectoryEntryGroups,
@@ -530,7 +530,7 @@ fn output_contract_prefers_listing_followup(route_result: &crate::RouteResult) -
         crate::OutputSemanticKind::SqliteTableListing,
         crate::OutputSemanticKind::SqliteTableNamesOnly,
     ]) || matches!(
-        route_result.output_contract.delivery_intent,
+        route_result.delivery_intent,
         crate::OutputDeliveryIntent::DirectoryLookup
             | crate::OutputDeliveryIntent::DirectoryBatchFiles
     )
@@ -816,7 +816,7 @@ pub(crate) fn derive_code_workspace_bound_target_from_journal(
 }
 
 pub(crate) fn derive_code_workspace_bound_target_from_route_and_journal(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<String> {
     let _ = route_result;
@@ -1256,7 +1256,7 @@ fn derive_frame_for_ask_outcome(
     prior_frame: Option<&FollowupFrame>,
     task_id: &str,
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer_text: &str,
     answer_messages: &[String],
     semantic_clarify: bool,
@@ -1271,15 +1271,14 @@ fn derive_frame_for_ask_outcome(
     );
     let unresolved_locator = semantic_clarify
         && matches!(
-            route_result.output_contract.locator_kind,
+            route_result.locator_kind,
             crate::OutputLocatorKind::Path
                 | crate::OutputLocatorKind::Filename
                 | crate::OutputLocatorKind::Url
                 | crate::OutputLocatorKind::CurrentWorkspace
                 | crate::OutputLocatorKind::None
         )
-        && (route_result.needs_clarify
-            || route_result.output_contract.locator_hint.trim().is_empty());
+        && (false || route_result.locator_hint.trim().is_empty());
     let op_kind = op_kind_from_route(route_result, unresolved_locator, journal);
     let code_workspace_bound_target = matches!(op_kind, FollowupOpKind::CodeWorkspace)
         .then(|| derive_code_workspace_bound_target_from_route_and_journal(route_result, journal))
@@ -1309,7 +1308,7 @@ fn derive_frame_for_ask_outcome(
                     return None;
                 }
                 observed_facts.bound_target.clone().or_else(|| {
-                    let hint = route_result.output_contract.locator_hint.trim();
+                    let hint = route_result.locator_hint.trim();
                     (!hint.is_empty()).then(|| hint.to_string())
                 })
             })
@@ -1317,13 +1316,7 @@ fn derive_frame_for_ask_outcome(
         ordered_entries,
         selected_entry_index,
         slice_spec: observed_facts.slice_spec.clone(),
-        output_shape: Some(
-            route_result
-                .output_contract
-                .response_shape
-                .as_str()
-                .to_string(),
-        ),
+        output_shape: Some(route_result.response_shape.as_str().to_string()),
         unresolved_slot: unresolved_locator.then_some(FollowupUnresolvedSlot::Locator),
         source_task_id: task_id.to_string(),
         updated_at_ts: now_ts,
@@ -1337,7 +1330,7 @@ pub(crate) fn replace_active_frame_from_ask_outcome(
     state: &AppState,
     task: &ClaimedTask,
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer_text: &str,
     answer_messages: &[String],
     semantic_clarify: bool,
@@ -1393,7 +1386,7 @@ pub(crate) fn sync_active_frame_from_ask_outcome_tx(
     tx: &rusqlite::Transaction<'_>,
     task: &ClaimedTask,
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     answer_text: &str,
     answer_messages: &[String],
     semantic_clarify: bool,

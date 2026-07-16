@@ -21,8 +21,8 @@ struct ConfigGuardObservation {
     candidates: Vec<String>,
 }
 
-fn config_guard_route_allows_failure_recovery(route_result: &crate::RouteResult) -> bool {
-    if route_result.output_contract.delivery_required {
+fn config_guard_route_allows_failure_recovery(route_result: &crate::IntentOutputContract) -> bool {
+    if route_result.delivery_required {
         return false;
     }
     crate::finalize::route_matches_validation_verdict_output_contract(route_result)
@@ -176,7 +176,7 @@ fn config_guard_observation_answer(observation: ConfigGuardObservation) -> Strin
 }
 
 pub(super) fn deterministic_config_guard_candidates_recovery(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<String> {
     if !config_guard_route_allows_failure_recovery(route_result)

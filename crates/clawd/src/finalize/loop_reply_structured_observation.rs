@@ -150,18 +150,18 @@ pub(super) fn deterministic_structured_container_summary_answer(
     loop_state: &crate::agent_engine::LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
+    if !route.requires_content_evidence || route.delivery_required {
         return None;
     }
     if !matches!(
-        route.output_contract.response_shape,
+        route.response_shape,
         crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
     ) {
         return None;
     }
     if !matches!(
-        route.effective_output_contract_semantic_kind(),
+        route.semantic_kind,
         crate::OutputSemanticKind::None | crate::OutputSemanticKind::ContentExcerptSummary
     ) {
         return None;
@@ -186,14 +186,11 @@ pub(super) fn direct_db_basic_observed_answer(
     loop_state: &crate::agent_engine::LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.output_contract.delivery_required {
+    let route = agent_run_context.and_then(|ctx| ctx.output_contract())?;
+    if route.delivery_required {
         return None;
     }
-    if matches!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::FileToken
-    ) {
+    if matches!(route.response_shape, crate::OutputResponseShape::FileToken) {
         return None;
     }
     let _ = state;
@@ -234,13 +231,13 @@ pub(super) fn direct_db_basic_observed_answer(
 }
 
 fn db_basic_rows_answer_from_output_for_route(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     output: &str,
 ) -> Option<String> {
     db_basic_rows_answer_from_output_with_scalar_count(
         output,
-        route.effective_output_contract().response_shape == crate::OutputResponseShape::Scalar
-            && route.output_contract_marker_is(crate::OutputSemanticKind::ScalarCount),
+        route.clone().response_shape == crate::OutputResponseShape::Scalar
+            && route.semantic_kind_is(crate::OutputSemanticKind::ScalarCount),
     )
 }
 
@@ -455,7 +452,7 @@ pub(super) fn deterministic_structured_file_validation_from_read_range(
     loop_state: &crate::agent_engine::LoopState,
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    let route = agent_run_context.and_then(|context| context.route_result.as_ref())?;
+    let route = agent_run_context.and_then(|context| context.output_contract())?;
     if !route_requests_config_validation(route) {
         return None;
     }
@@ -492,7 +489,7 @@ pub(super) fn deterministic_structured_file_validation_from_read_range(
     ))
 }
 
-fn route_requests_config_validation(route: &crate::RouteResult) -> bool {
+fn route_requests_config_validation(route: &crate::IntentOutputContract) -> bool {
     crate::finalize::route_matches_validation_verdict_output_contract(route)
 }
 

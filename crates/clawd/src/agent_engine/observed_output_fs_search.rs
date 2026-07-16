@@ -568,7 +568,7 @@ fn fs_search_grep_text_direct_answer_candidate(
 
 pub(super) fn fs_search_content_presence_direct_answer_candidate(
     _state: Option<&AppState>,
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
     _prefer_english: bool,
 ) -> Option<String> {
@@ -596,7 +596,7 @@ pub(super) fn fs_search_content_presence_direct_answer_candidate(
             .and_then(|value| value.as_str())
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .unwrap_or(route.output_contract.locator_hint.trim());
+            .unwrap_or(route.locator_hint.trim());
         return Some(fs_search_content_presence_machine_answer(
             &query,
             path,
@@ -811,7 +811,7 @@ fn structured_fs_search_score(path: &str, tokens: &[String]) -> usize {
 }
 
 pub(super) fn fs_search_route_filtered_listing_candidate(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
     allow_multi_result_list: bool,
 ) -> Option<String> {
@@ -839,7 +839,7 @@ pub(super) fn fs_search_route_filtered_listing_candidate(
         return Some(results[0].clone());
     }
 
-    let locator_hint = route.output_contract.locator_hint.trim();
+    let locator_hint = route.locator_hint.trim();
     if !locator_hint.is_empty() {
         let scoped = results
             .iter()
@@ -936,7 +936,7 @@ pub(super) fn fs_search_route_filtered_listing_candidate(
     allow_multi_result_list.then(|| filtered.join("\n"))
 }
 
-fn fs_search_result_list_limit(route: &crate::RouteResult) -> usize {
+fn fs_search_result_list_limit(route: &crate::IntentOutputContract) -> usize {
     if super::output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::FilePaths,
@@ -947,17 +947,17 @@ fn fs_search_result_list_limit(route: &crate::RouteResult) -> usize {
     }
 }
 
-fn route_prefers_absolute_fs_search_file_paths(route: &crate::RouteResult) -> bool {
+fn route_prefers_absolute_fs_search_file_paths(route: &crate::IntentOutputContract) -> bool {
     super::output_route_policy::route_contract_marker_is(
         route,
         crate::OutputSemanticKind::FilePaths,
-    ) && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
-        && route.output_contract.locator_hint.trim().is_empty()
+    ) && route.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && route.locator_hint.trim().is_empty()
 }
 
 pub(super) fn absolutize_fs_search_answer_paths(
     state: Option<&AppState>,
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     value: &serde_json::Value,
     answer: String,
     prefer_full_path: bool,
@@ -1043,7 +1043,7 @@ fn parent_directory_listing_from_paths(paths: &[String]) -> Option<String> {
 }
 
 pub(super) fn fs_search_contract_listing_candidate(
-    route: &crate::RouteResult,
+    route: &crate::IntentOutputContract,
     value: &serde_json::Value,
 ) -> Option<String> {
     if !super::output_route_policy::route_contract_marker_is(

@@ -61,11 +61,10 @@ pub(super) fn replace_final_delivery_with_recent_scalar_compare_paths_required_m
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
     if !agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
-            route.effective_output_contract_semantic_kind()
-                == crate::OutputSemanticKind::RecentScalarEqualityCheck
-                && !route.output_contract.delivery_required
+            route.semantic_kind == crate::OutputSemanticKind::RecentScalarEqualityCheck
+                && !route.delivery_required
         })
     {
         return false;

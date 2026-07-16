@@ -6,19 +6,7 @@ fn direct_answer_can_passthrough_listing_when_planner_does_not_request_synthesis
         "list_dir",
         "base_skill_response_contract.md\nskill_integration_guide.md\n",
     ));
-    let route_result = RouteResult {
-        resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
@@ -28,10 +16,9 @@ fn direct_answer_can_passthrough_listing_when_planner_does_not_request_synthesis
             semantic_kind: Default::default(),
             locator_hint: "docs".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert_eq!(
@@ -48,19 +35,7 @@ fn direct_answer_can_passthrough_inventory_when_planner_does_not_request_synthes
             "system_basic",
             r#"{"action":"inventory_dir","path":"/tmp/docs","resolved_path":"/tmp/docs","names_only":true,"names":["base_skill_response_contract.md","skill_integration_guide.md"]}"#,
         ));
-    let route_result = RouteResult {
-        resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
@@ -70,10 +45,9 @@ fn direct_answer_can_passthrough_inventory_when_planner_does_not_request_synthes
             semantic_kind: Default::default(),
             locator_hint: "docs".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert_eq!(
@@ -95,19 +69,7 @@ fn direct_answer_does_not_passthrough_run_cmd_listing_when_content_evidence_is_r
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "a.md\nb.md\n"));
-    let route_result = RouteResult {
-        resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
@@ -117,10 +79,9 @@ fn direct_answer_does_not_passthrough_run_cmd_listing_when_content_evidence_is_r
             semantic_kind: Default::default(),
             locator_hint: "docs".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
         ..AgentRunContext::default()
     };
@@ -136,19 +97,7 @@ fn direct_answer_blocks_contract_forbidden_observation_action() {
     loop_state
         .executed_step_results
         .push(ok_step("step_1", "run_cmd", "hello from shell"));
-    let route_result = RouteResult {
-        resolved_intent: "读取 docs/guide.md 并总结".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
@@ -158,10 +107,9 @@ fn direct_answer_blocks_contract_forbidden_observation_action() {
             semantic_kind: OutputSemanticKind::None,
             locator_hint: "docs/guide.md".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -179,19 +127,7 @@ fn directory_purpose_summary_is_not_hard_classified_by_observed_output() {
             "system_basic",
             r#"{"action":"inventory_dir","path":"/tmp/docs","resolved_path":"/tmp/docs","names_only":true,"names":["release_checklist.md","operator-guide.md","rollout-summary.pdf"]}"#,
         ));
-    let route_result = RouteResult {
-        resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
@@ -201,10 +137,9 @@ fn directory_purpose_summary_is_not_hard_classified_by_observed_output() {
             semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
             locator_hint: "docs".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
     assert_eq!(
@@ -215,19 +150,7 @@ fn directory_purpose_summary_is_not_hard_classified_by_observed_output() {
 
 #[test]
 fn directory_purpose_summary_style_hint_uses_listing_evidence() {
-    let route_result = RouteResult {
-        resolved_intent: "list recent docs and summarize their role".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
             requires_content_evidence: true,
@@ -237,10 +160,9 @@ fn directory_purpose_summary_style_hint_uses_listing_evidence() {
             semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
             locator_hint: "docs".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 
@@ -253,19 +175,7 @@ fn directory_purpose_summary_style_hint_uses_listing_evidence() {
 
 #[test]
 fn excerpt_kind_judgment_style_hint_preserves_listing_and_excerpt_deliverables() {
-    let route_result = RouteResult {
-        resolved_intent: "list files and classify the selected excerpt".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: RiskCeiling::Unknown,
-        resume_behavior: ResumeBehavior::None,
-        schedule_kind: ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: IntentOutputContract {
+    let route_result = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::OneSentence,
             requires_content_evidence: true,
@@ -275,10 +185,9 @@ fn excerpt_kind_judgment_style_hint_preserves_listing_and_excerpt_deliverables()
             semantic_kind: OutputSemanticKind::ExcerptKindJudgment,
             locator_hint: "docs/release_checklist.md".to_string(),
             self_extension: crate::SelfExtensionContract::default(),
-        },
-    };
+        };
     let agent_run_context = AgentRunContext {
-        route_result: Some(route_result),
+        output_contract: Some(route_result.clone()),
         ..AgentRunContext::default()
     };
 

@@ -1,29 +1,15 @@
 use super::{derive_observed_facts_from_ask_outcome, ObservedFacts};
 
-fn dummy_route_result() -> crate::RouteResult {
-    crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    }
+fn dummy_route_result() -> crate::IntentOutputContract {
+    crate::IntentOutputContract::default()
 }
 
 #[test]
 fn derives_ordered_entries_from_numbered_answer_text() {
     let journal = crate::task_journal::TaskJournal::new("list");
     let mut route = dummy_route_result();
-    route.route_reason = "file_names".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
     let facts = derive_observed_facts_from_ask_outcome(
         "1. README.md\n2. Cargo.toml\n3. configs",
         &[],
@@ -75,11 +61,11 @@ fn ignores_plain_chat_bullet_text_as_ordered_entries() {
 fn derives_structural_bullet_entries_from_generic_visible_candidate_answer() {
     let journal = crate::task_journal::TaskJournal::new("find");
     let mut route = dummy_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint =
+    route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
     let facts = derive_observed_facts_from_ask_outcome(
         "在 `fuzzy_top3` 目录下找到4个文件名包含 \"abcd\" 的文件：\n- `abcd_report.md`\n- `my_abcd.txt`\n- `x_abcd_log.txt`\n- `zz_abcd_backup.log`\n这些都是模糊匹配测试的 fixture 文件。",
         &[],
@@ -157,8 +143,8 @@ fn derives_selected_entry_index_from_bound_target_and_ordered_entries() {
             ..Default::default()
         });
     let mut route = dummy_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
     let facts = derive_observed_facts_from_ask_outcome(
         "1. act_plan.log\n2. clawd.log\n3. clawd.run.log",
         &[],
@@ -205,12 +191,9 @@ fn derives_slice_spec_from_requested_n_when_range_output_omits_n() {
 fn does_not_infer_slice_spec_from_request_text_when_journal_has_no_range_step() {
     let journal = crate::task_journal::TaskJournal::new("clarify_rewrite");
     let mut route = dummy_route_result();
-    route.resolved_intent =
-        "Continue the previous request that was waiting for clarification: 看看那个模型日志最后 5 行\nUser now provides the missing target or content: /tmp/model_io.log"
-            .to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "/tmp/model_io.log".to_string();
+    route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.locator_hint = "/tmp/model_io.log".to_string();
 
     let facts = derive_observed_facts_from_ask_outcome(
         "line1\nline2\nline3\nline4\nline5",
@@ -227,11 +210,9 @@ fn does_not_infer_slice_spec_from_request_text_when_journal_has_no_range_step() 
 fn uses_route_locator_hint_and_observed_entry_count_when_journal_lacks_scope() {
     let journal = crate::task_journal::TaskJournal::new("list");
     let mut route = dummy_route_result();
-    route.resolved_intent = "先列出 logs 目录下前 5 个文件名".to_string();
-    route.route_reason = "file_names".to_string();
-    route.output_contract.locator_hint = "logs".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.locator_hint = "logs".to_string();
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
     let facts = derive_observed_facts_from_ask_outcome(
         "1. act_plan.log\n2. clawd.log\n3. clawd.run.log",
         &[],
@@ -246,11 +227,10 @@ fn uses_route_locator_hint_and_observed_entry_count_when_journal_lacks_scope() {
 fn derives_bound_target_from_scalar_path_answer_contract() {
     let journal = crate::task_journal::TaskJournal::new("find_path");
     let mut route = dummy_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    route.route_reason = "scalar_path_only".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.response_shape = crate::OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::Path;
+    route.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
     let target =
         "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/case_only/Report.MD";
 
@@ -263,7 +243,7 @@ fn derives_bound_target_from_scalar_path_answer_contract() {
 fn ignores_plain_scalar_answer_as_bound_target_without_path_contract() {
     let journal = crate::task_journal::TaskJournal::new("chat");
     let mut route = dummy_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.response_shape = crate::OutputResponseShape::Scalar;
     let facts = derive_observed_facts_from_ask_outcome(
         "/home/guagua/rustclaw/README.md",
         &[],
@@ -296,10 +276,9 @@ fn workspace_project_summary_does_not_bind_evidence_file_path() {
             ..Default::default()
         });
     let mut route = dummy_route_result();
-    route.route_reason = "contract:workspace_project_summary".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+    route.requires_content_evidence = true;
+    route.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
 
     let facts = derive_observed_facts_from_ask_outcome(
         "RustClaw release note draft.",
@@ -315,7 +294,7 @@ fn workspace_project_summary_does_not_bind_evidence_file_path() {
 fn derives_output_shape_hint_from_output_contract() {
     let journal = crate::task_journal::TaskJournal::new("send");
     let mut route = dummy_route_result();
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.response_shape = crate::OutputResponseShape::FileToken;
     let facts = derive_observed_facts_from_ask_outcome("FILE:/tmp/a.log", &[], &journal, &route);
     assert_eq!(facts.output_shape.as_deref(), Some("file_token"));
 }
@@ -334,9 +313,8 @@ fn empty_observed_facts_reports_empty() {
 fn observed_entry_count_is_derived_from_visible_entries_not_request_text() {
     let journal = crate::task_journal::TaskJournal::new("list");
     let mut route = dummy_route_result();
-    route.resolved_intent = "先列出 logs 目录下前 5 个文件名".to_string();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::FileNames;
     let facts = derive_observed_facts_from_ask_outcome(
         "1. act_plan.log\n2. clawd.log\n3. clawd.run.log",
         &[],

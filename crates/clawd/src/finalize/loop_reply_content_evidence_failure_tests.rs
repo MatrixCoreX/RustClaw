@@ -1,21 +1,8 @@
 use super::*;
 
-fn service_capability_route() -> crate::RouteResult {
-    let mut route = crate::RouteResult {
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "capability_ref=service_control.status".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+fn service_capability_route() -> crate::IntentOutputContract {
+    let mut route = crate::IntentOutputContract::default();
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
     route
 }
 
@@ -24,7 +11,7 @@ fn service_capability_failure_answer_returns_structured_envelope() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let route = service_capability_route();
     let context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let error = format!(

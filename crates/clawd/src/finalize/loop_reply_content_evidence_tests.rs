@@ -5,10 +5,10 @@ async fn content_evidence_step_failure_answer_reports_real_error() {
     let state = test_state();
     let task = claimed_task("task-content-error-direct");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint = "/etc/shadow".to_string();
+    route.requires_content_evidence = true;
+    route.locator_hint = "/etc/shadow".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -61,10 +61,10 @@ async fn content_evidence_step_failure_answer_preserves_plan_path_without_locato
     let state = test_state();
     let task = claimed_task("task-content-error-plan-target");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint.clear();
+    route.requires_content_evidence = true;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         original_user_request: Some("读 /etc/shadow 第一行".to_string()),
         ..Default::default()
     };
@@ -132,9 +132,9 @@ async fn content_evidence_recoverable_crypto_account_error_is_completion() {
     let state = test_state();
     let task = claimed_task("task-crypto-account-error");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let err = r#"__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:{"exchange":"binance","detail":"binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"}"#;
@@ -170,9 +170,9 @@ async fn content_evidence_wrapped_crypto_account_error_is_completion() {
     let state = test_state();
     let task = claimed_task("task-wrapped-crypto-account-error");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let marker = r#"__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:{"exchange":"binance","detail":"binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"}"#;
@@ -221,9 +221,9 @@ async fn content_evidence_crypto_credential_error_is_completion() {
     );
     let task = claimed_task("task-crypto-credential-error");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let err = format!(
@@ -273,10 +273,10 @@ async fn finalize_loop_reply_treats_wrapped_crypto_account_error_as_success() {
     let state = test_state();
     let task = claimed_task("task-finalize-wrapped-crypto-account-error");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = OutputSemanticKind::MarketQuote;
+    route.requires_content_evidence = true;
+    route.semantic_kind = OutputSemanticKind::MarketQuote;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let marker = r#"__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:{"exchange":"binance","detail":"binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"}"#;
@@ -330,11 +330,11 @@ async fn content_evidence_db_query_error_is_completion() {
     let state = test_state();
     let task = claimed_task("task-db-query-error");
     let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint =
+    route.requires_content_evidence = true;
+    route.locator_hint =
         "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -398,12 +398,12 @@ async fn finalize_loop_reply_treats_missing_read_target_as_user_result() {
     let state = test_state();
     let task = claimed_task("task-missing-read-target");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_hint = "document/missing.txt".to_string();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.locator_hint = "document/missing.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -481,11 +481,11 @@ async fn missing_read_target_reply_prefers_original_user_language() {
     })
     .to_string();
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_hint = "./NO_SUCH_RUSTCLAW_TEST_987654.txt".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.locator_hint = "./NO_SUCH_RUSTCLAW_TEST_987654.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -539,14 +539,12 @@ async fn missing_read_target_scalar_contract_keeps_failure_answer_not_path_only(
     })
     .to_string();
     let mut route = scalar_route_result();
-    route.resolved_intent =
-        "用户请求读取文件 ./NO_SUCH_RUSTCLAW_TEST_987654.txt 的第一行内容。".to_string();
-    route.output_contract.response_shape = OutputResponseShape::Scalar;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "./NO_SUCH_RUSTCLAW_TEST_987654.txt".to_string();
+    route.response_shape = OutputResponseShape::Scalar;
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "./NO_SUCH_RUSTCLAW_TEST_987654.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -601,12 +599,12 @@ async fn finalize_loop_reply_treats_read_file_not_found_marker_as_user_result() 
     let state = test_state();
     let task = claimed_task("task-missing-read-target-marker");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_hint = "/tmp/missing.txt".to_string();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.locator_hint = "/tmp/missing.txt".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);

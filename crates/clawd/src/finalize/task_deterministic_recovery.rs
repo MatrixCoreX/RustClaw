@@ -17,7 +17,7 @@ pub(super) fn mark_answer_verifier_recovered_by_deterministic_observed_evidence(
 
 pub(super) fn recover_answer_verifier_gap_with_deterministic_machine_evidence(
     prompt: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &mut crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,
@@ -51,7 +51,7 @@ pub(super) fn recover_answer_verifier_gap_with_deterministic_machine_evidence(
 }
 
 pub(super) fn recover_raw_command_machine_field_final_answer(
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &mut crate::task_journal::TaskJournal,
     answer_text: &mut String,
     answer_messages: &mut Vec<String>,

@@ -143,14 +143,16 @@ pub(super) fn deterministic_filtered_log_entry_recovery(
     })
 }
 
-fn content_tail_read_route_allows_failure_recovery(route_result: &crate::RouteResult) -> bool {
-    let contract = route_result.effective_output_contract();
+fn content_tail_read_route_allows_failure_recovery(
+    route_result: &crate::IntentOutputContract,
+) -> bool {
+    let contract = route_result.clone();
     !matches!(
         contract.response_shape,
         crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
     ) && contract.requires_content_evidence
         && !contract.delivery_required
-        && route_result.output_contract_marker_is_any(&[
+        && route_result.semantic_kind_is_any(&[
             crate::OutputSemanticKind::ContentExcerptSummary,
             crate::OutputSemanticKind::ExcerptKindJudgment,
         ])
@@ -167,7 +169,7 @@ pub(super) fn deterministic_content_tail_read_failure_recovery(
     state: &AppState,
     task: &crate::ClaimedTask,
     user_request: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<String> {
     if !content_tail_read_route_allows_failure_recovery(route_result)
@@ -191,9 +193,9 @@ pub(super) fn deterministic_content_tail_read_failure_recovery(
     })
 }
 
-fn raw_tail_read_route_allows_failure_recovery(route_result: &crate::RouteResult) -> bool {
-    let contract = route_result.effective_output_contract();
-    route_result.output_contract_marker_is(crate::OutputSemanticKind::RawCommandOutput)
+fn raw_tail_read_route_allows_failure_recovery(route_result: &crate::IntentOutputContract) -> bool {
+    let contract = route_result.clone();
+    route_result.semantic_kind_is(crate::OutputSemanticKind::RawCommandOutput)
         && contract.response_shape == crate::OutputResponseShape::Strict
         && contract.requires_content_evidence
         && !contract.delivery_required
@@ -268,7 +270,7 @@ pub(super) fn deterministic_raw_tail_read_failure_recovery(
     state: &AppState,
     task: &crate::ClaimedTask,
     user_request: &str,
-    route_result: &crate::RouteResult,
+    route_result: &crate::IntentOutputContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<String> {
     if !raw_tail_read_route_allows_failure_recovery(route_result)

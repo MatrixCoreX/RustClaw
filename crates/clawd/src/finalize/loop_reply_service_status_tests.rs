@@ -7,14 +7,13 @@ async fn finalize_loop_reply_preserves_health_check_summary_synthesis() {
     let state = test_state();
     let task = claimed_task("task-service-status-wrapped-health-check");
     let mut route = free_route_result();
-    route.resolved_intent = "Show system/service status".to_string();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         user_request: Some("show status".to_string()),
         ..Default::default()
     };
@@ -120,19 +119,14 @@ async fn finalize_loop_reply_honors_system_health_selector() {
     let state = test_state();
     let task = claimed_task("task-service-status-system-health-selector");
     let mut route = free_route_result();
-    route.resolved_intent =
-        "Run a basic health check with system_health field selector".to_string();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route
-        .output_contract
-        .self_extension
-        .structured_field_selector = Some("system_health.*".to_string());
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
+    route.self_extension.structured_field_selector = Some("system_health.*".to_string());
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         user_request: Some("show host OS health fields only".to_string()),
         ..Default::default()
     };
@@ -231,14 +225,13 @@ async fn finalize_loop_reply_uses_machine_closeout_when_recipe_done_and_synthesi
     let state = test_state();
     let task = claimed_task("task-ops-validated-closeout");
     let mut route = free_route_result();
-    route.resolved_intent = "Start local service and validate it".to_string();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "document/nl_ops_http_demo".to_string();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "document/nl_ops_http_demo".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         user_request: Some(
             "When validation passes, explicitly output VALIDATION_PASSED and stop.".to_string(),
         ),
@@ -298,15 +291,13 @@ async fn finalize_loop_reply_preserves_process_basic_status_summary_synthesis() 
     let state = test_state();
     let task = claimed_task("task-service-status-process-basic-json-synthesis");
     let mut route = free_route_result();
-    route.resolved_intent =
-        "检查 telegramd 服务进程当前是否仍在运行，并用一句话解释其状态".to_string();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         user_request: Some(
             "我想确认 telegramd 现在还活着没，你帮我看一下，顺便用一句话解释状态".to_string(),
         ),
@@ -378,14 +369,13 @@ async fn finalize_loop_reply_prefers_service_control_status_over_health_check_du
     let state = test_state();
     let task = claimed_task("task-service-status-service-control-priority");
     let mut route = free_route_result();
-    route.resolved_intent = "check ssh service active status in one sentence".to_string();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         user_request: Some("一句话告诉我 ssh 服务现在是不是 active".to_string()),
         ..Default::default()
     };
@@ -484,15 +474,13 @@ async fn finalize_loop_reply_projects_service_control_target_status_fields() {
     let state = test_state();
     let task = claimed_task("task-service-status-service-control-target-fields");
     let mut route = free_route_result();
-    route.resolved_intent =
-        "return target, status, manager_type for clawd service status".to_string();
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
+    route.response_shape = OutputResponseShape::Strict;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         user_request: Some(
             "Check clawd service/process status only; return target, status, manager_type."
                 .to_string(),
@@ -549,13 +537,13 @@ async fn finalize_loop_reply_does_not_infer_service_status_from_raw_systemd_text
     let state = test_state();
     let task = claimed_task("task-service-status-raw-systemd-text");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    route.output_contract.locator_hint.clear();
-    route.output_contract.locator_hint = "telegramd.service".to_string();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.locator_hint.clear();
+    route.locator_hint = "telegramd.service".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -599,12 +587,12 @@ async fn finalize_loop_reply_uses_structured_service_error_kind() {
     let state = test_state();
     let task = claimed_task("task-service-status-structured-missing");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    route.output_contract.locator_hint.clear();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let structured_error = serde_json::json!({
@@ -664,11 +652,11 @@ async fn finalize_loop_reply_uses_wrapped_system_basic_info_for_service_status()
     let state = test_state();
     let task = claimed_task("task-service-status-system-info");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let info = serde_json::json!({
@@ -721,13 +709,12 @@ async fn finalize_loop_reply_uses_wrapped_system_basic_info_for_service_status()
 #[test]
 fn direct_structured_service_status_uses_output_contract() {
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=service.status".to_string();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    route.output_contract.locator_hint.clear();
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -758,13 +745,12 @@ fn replace_delivery_with_structured_service_status_uses_output_contract() {
     let state = test_state();
     let task = claimed_task("task-service-status-capability-shape-replace");
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=service.status".to_string();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-    route.output_contract.locator_hint.clear();
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -810,13 +796,11 @@ async fn finalize_loop_reply_projects_service_control_summary_without_route_mark
     let state = test_state();
     let task = claimed_task("task-service-status-planner-observed-summary");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.route_reason.clear();
-    route.resolved_intent.clear();
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -831,7 +815,7 @@ async fn finalize_loop_reply_projects_service_control_summary_without_route_mark
         .push("Status: telegramd=running".to_string());
     loop_state.last_user_visible_respond = Some("Status: telegramd=running".to_string());
     let projected = service_status_system_basic_info_answer(
-        agent_run_context.route_result.as_ref().unwrap(),
+        agent_run_context.output_contract.as_ref().unwrap(),
         &loop_state,
     )
     .expect("service_control observation should project without route marker");
@@ -899,16 +883,13 @@ async fn finalize_loop_reply_projects_service_control_fields_when_short_synthesi
     let state = test_state();
     let task = claimed_task("task-service-status-short-synthesis-fields");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "service/process".to_string();
-    route.route_reason = "structured_locator_contract_repair".to_string();
-    route.resolved_intent =
-        "Read-only status check of the clawd service/process on the local system".to_string();
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = "service/process".to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         user_request: Some(
             "Check clawd service/process status only; return target, status, manager_type."
                 .to_string(),
@@ -1003,20 +984,13 @@ async fn finalize_loop_reply_expands_service_control_summary_for_free_status_rou
     let state = test_state();
     let task = claimed_task("task-service-status-free-route-summary-expand");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
-    route.output_contract.locator_hint.clear();
-    route.route_reason = concat!(
-        "",
-        "untrusted_normalizer_locator_completion_removed_from_execution_context"
-    )
-    .to_string();
-    route.resolved_intent =
-        "check whether telegramd is running right now and briefly explain the status".to_string();
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = false;
+    route.semantic_kind = crate::OutputSemanticKind::None;
+    route.locator_kind = OutputLocatorKind::None;
+    route.locator_hint.clear();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         user_request: Some(
             "check whether telegramd is running right now and briefly explain the status"
                 .to_string(),
@@ -1109,13 +1083,11 @@ async fn finalize_loop_reply_preserves_richer_service_control_synthesis_without_
     let state = test_state();
     let task = claimed_task("task-service-status-planner-observed-synthesis");
     let mut route = free_route_result();
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.route_reason.clear();
-    route.resolved_intent.clear();
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
+    route.semantic_kind = crate::OutputSemanticKind::None;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -1162,14 +1134,10 @@ fn package_manager_summary_uses_structured_detect_answer() {
     });
 
     let mut route = free_route_result();
-    route.resolved_intent =
-        "check which package manager is recognized and briefly say the everyday default"
-            .to_string();
-    route.route_reason = "llm_contract:package_manager_detect_summary".to_string();
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.requires_content_evidence = true;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.requires_content_evidence = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 

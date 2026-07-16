@@ -75,7 +75,7 @@ pub(super) fn observed_answer_language_compatible(
 }
 
 pub(super) fn observed_answer_language_compatible_for_route(
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
     loop_state: &LoopState,
     auto_locator_path: Option<&str>,
     candidate: &str,
@@ -422,7 +422,7 @@ fn count_inventory_observation_row(
 
 pub(super) fn multi_count_quantity_comparison_guard_entry(
     loop_state: &LoopState,
-    route: Option<&crate::RouteResult>,
+    route: Option<&crate::IntentOutputContract>,
 ) -> Option<String> {
     let route = route?;
     if !output_route_policy::route_contract_marker_is(

@@ -2,7 +2,7 @@ use super::MatchedContract;
 use super::{
     ActionPolicyDecision, ActionRef, ContractMatrix, EvidenceExpression, FinalAnswerShape,
     FinalAnswerShapeClass, IntentOutputContract, ObservationExtractor, OutputResponseShape,
-    OutputSemanticKind, RouteResult, BUNDLED_CONTRACT_MATRIX,
+    OutputSemanticKind, BUNDLED_CONTRACT_MATRIX,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -152,11 +152,6 @@ pub(crate) fn final_answer_shape_for_output_contract(
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
     matched.final_answer_shape_kind()
-}
-
-pub(crate) fn final_answer_shape_for_route(route: &RouteResult) -> Option<FinalAnswerShape> {
-    let output_contract = route.effective_output_contract();
-    final_answer_shape_for_output_contract(&output_contract)
 }
 
 fn final_answer_shape_override_for_output_contract(

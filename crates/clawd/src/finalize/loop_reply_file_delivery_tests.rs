@@ -58,14 +58,13 @@ fn file_delivery_fallback_uses_ranked_inventory_after_placeholder_plan() {
         .to_string(),
     ));
     let mut route = scalar_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = dir.path().display().to_string();
+    route.delivery_required = true;
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = dir.path().display().to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -103,12 +102,11 @@ fn file_delivery_fallback_uses_single_find_entries_result() {
         .to_string(),
     ));
     let mut route = scalar_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.delivery_required = true;
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -140,15 +138,15 @@ fn compound_content_file_delivery_appends_token_after_summary() {
         .push("observed summary".to_string());
     loop_state.last_user_visible_respond = Some("observed summary".to_string());
     let mut route = scalar_route_result();
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.response_shape = OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = file.display().to_string();
+    route.delivery_required = true;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.response_shape = OutputResponseShape::Strict;
+    route.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = file.display().to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -181,15 +179,15 @@ fn unclassified_content_evidence_file_delivery_appends_token_after_summary() {
         .push("observed summary".to_string());
     loop_state.last_user_visible_respond = Some("observed summary".to_string());
     let mut route = scalar_route_result();
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = file.display().to_string();
+    route.delivery_required = true;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.response_shape = OutputResponseShape::Free;
+    route.semantic_kind = OutputSemanticKind::None;
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = file.display().to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -221,12 +219,12 @@ fn compound_content_file_delivery_preserves_summary_after_existing_token() {
         .executed_step_results
         .push(ok_step_result("step_2", "respond", summary));
     let mut route = scalar_route_result();
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.requires_content_evidence = true;
+    route.delivery_required = true;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.response_shape = OutputResponseShape::FileToken;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut delivery = loop_state.delivery_messages.clone();
@@ -257,12 +255,12 @@ fn compound_content_file_delivery_preserves_summary_without_delivery_intent() {
         .executed_step_results
         .push(ok_step_result("step_2", "respond", summary));
     let mut route = scalar_route_result();
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
-    route.output_contract.response_shape = OutputResponseShape::Free;
-    route.output_contract.requires_content_evidence = true;
+    route.delivery_required = true;
+    route.delivery_intent = crate::OutputDeliveryIntent::None;
+    route.response_shape = OutputResponseShape::Free;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut delivery = loop_state.delivery_messages.clone();
@@ -296,12 +294,12 @@ fn compound_content_file_delivery_backfills_bounded_read_content_before_token() 
         .executed_step_results
         .push(ok_step_result("step_3", "respond", file_token));
     let mut route = scalar_route_result();
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.requires_content_evidence = true;
+    route.delivery_required = true;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.response_shape = OutputResponseShape::FileToken;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
     let mut delivery = loop_state.delivery_messages.clone();
@@ -325,12 +323,12 @@ fn compound_content_file_delivery_backfills_bounded_read_content_before_token() 
 #[test]
 fn file_token_only_fallback_rejects_content_evidence_file_delivery() {
     let mut route = scalar_route_result();
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.requires_content_evidence = true;
+    route.delivery_required = true;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.response_shape = OutputResponseShape::FileToken;
+    route.requires_content_evidence = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -356,15 +354,15 @@ async fn compound_content_file_delivery_enforce_preserves_synthesis_before_token
         .executed_step_results
         .push(ok_step_result("step_1", "synthesize_answer", synthesis));
     let mut route = scalar_route_result();
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = file.display().to_string();
+    route.delivery_required = true;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.response_shape = OutputResponseShape::OneSentence;
+    route.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = file.display().to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -417,16 +415,15 @@ async fn generated_delivery_existing_file_content_synthesis_enforce_preserves_su
         .push(ok_step_result("step_2", "synthesize_answer", summary));
 
     let mut route = scalar_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = canonical_text.clone();
+    route.delivery_required = true;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.response_shape = OutputResponseShape::FileToken;
+    route.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = canonical_text.clone();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -489,16 +486,15 @@ fn generated_delivery_existing_file_content_synthesis_ignores_write_plans() {
         .push(ok_step_result("step_3", "synthesize_answer", summary));
 
     let mut route = scalar_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = canonical_text;
+    route.delivery_required = true;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.response_shape = OutputResponseShape::FileToken;
+    route.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
+    route.requires_content_evidence = true;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = canonical_text;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -569,14 +565,13 @@ fn file_delivery_fallback_uses_last_inventory_selection_from_placeholder_plan() 
         .to_string(),
     ));
     let mut route = scalar_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = dir.path().display().to_string();
+    route.delivery_required = true;
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = dir.path().display().to_string();
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -611,12 +606,11 @@ fn file_delivery_fallback_defers_ambiguous_unranked_inventory() {
         .to_string(),
     ));
     let mut route = scalar_route_result();
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.delivery_required = true;
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -662,10 +656,10 @@ fn file_token_auto_locator_normalizes_delivery_messages() {
     loop_state.delivery_messages.push("report.txt".to_string());
 
     let mut route = scalar_route_result();
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_required = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         auto_locator_path: Some(temp.path().to_string_lossy().to_string()),
         ..Default::default()
     };
@@ -697,10 +691,10 @@ fn file_token_auto_locator_recovers_from_observed_bare_filename() {
         .push(ok_step_result("step_1", "run_cmd", "report.txt\n"));
 
     let mut route = scalar_route_result();
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_required = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         auto_locator_path: Some(temp.path().to_string_lossy().to_string()),
         ..Default::default()
     };
@@ -758,10 +752,10 @@ fn file_token_observed_path_normalizes_bare_filename_delivery() {
     });
 
     let mut route = scalar_route_result();
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_required = true;
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 
@@ -787,15 +781,14 @@ async fn finalize_loop_reply_returns_file_token_from_path_batch_after_read_rejec
     std::fs::write(&file, "release checklist").expect("write temp file");
 
     let mut route = scalar_route_result();
-    route.wants_file_delivery = false;
-    route.output_contract.response_shape = OutputResponseShape::FileToken;
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = file.display().to_string();
+    route.response_shape = OutputResponseShape::FileToken;
+    route.delivery_required = true;
+    route.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route.requires_content_evidence = false;
+    route.locator_kind = OutputLocatorKind::Path;
+    route.locator_hint = file.display().to_string();
     let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
+        output_contract: Some(route.clone()),
         ..Default::default()
     };
 

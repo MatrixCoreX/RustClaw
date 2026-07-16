@@ -25,9 +25,9 @@ pub(super) fn latest_path_batch_fact_delivery_for_requested_summary(
 
 fn route_requests_scalar_path_only(agent_run_context: Option<&AgentRunContext>) -> bool {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
-            route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+            route.response_shape == crate::OutputResponseShape::Scalar
                 && crate::finalize::route_matches_single_path_output_contract(route)
         })
 }
@@ -134,11 +134,10 @@ fn requested_summary_refs_path_fact(
 
 fn route_requests_existence_with_path(agent_run_context: Option<&AgentRunContext>) -> bool {
     agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|ctx| ctx.output_contract())
         .is_some_and(|route| {
-            route.output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPath)
-                || route
-                    .output_contract_marker_is(crate::OutputSemanticKind::ExistenceWithPathSummary)
+            route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPath)
+                || route.semantic_kind_is(crate::OutputSemanticKind::ExistenceWithPathSummary)
         })
 }
 

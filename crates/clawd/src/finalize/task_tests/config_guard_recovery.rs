@@ -3,10 +3,9 @@ use super::{deterministic_config_guard_candidates_recovery, route_result};
 #[test]
 fn config_guard_recovery_uses_validation_contract() {
     let mut route = route_result();
-    route.route_reason = "capability_ref=config.guard_config".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
+    route.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-config-guard-capability-ref", "ask", "");
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
@@ -39,10 +38,9 @@ fn config_guard_recovery_uses_validation_contract() {
 #[test]
 fn config_guard_recovery_uses_risk_assessment_contract() {
     let mut route = route_result();
-    route.route_reason = "capability_ref=config.risk".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
+    route.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
+    route.requires_content_evidence = true;
+    route.delivery_required = false;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-config-risk-capability-shape", "ask", "");
     journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
