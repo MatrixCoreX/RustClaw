@@ -45,6 +45,20 @@ impl TaskStatusView {
         })
     }
 
+    pub(crate) fn pending_approval_request_id(&self) -> Option<&str> {
+        let request = self
+            .raw_data
+            .pointer("/result_json/resume_context/approval_request")?;
+        if request.get("status").and_then(Value::as_str) != Some("pending") {
+            return None;
+        }
+        request
+            .get("request_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
     pub(crate) fn lifecycle(&self) -> Option<&Value> {
         self.raw_data
             .get("task_lifecycle")
