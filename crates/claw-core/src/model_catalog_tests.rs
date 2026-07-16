@@ -77,7 +77,7 @@ output_modalities = ["text"]
 timeout_seconds = 30
 
 [llm.mimo]
-base_url = "https://api.xiaomimimo.com/v1"
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
 api_key = ""
 model = "mimo-v2.5-pro"
 models = ["mimo-v2.5-pro"]

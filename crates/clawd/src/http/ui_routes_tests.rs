@@ -223,12 +223,12 @@ fn llm_runtime_differs_when_only_mimo_provider_type_changes() {
         "mimo",
         "mimo-v2.5-pro",
         "anthropic_claude",
-        "https://token-plan-sgp.xiaomimimo.com/v1",
+        "https://token-plan-cn.xiaomimimo.com/v1",
         "same-key",
         "mimo",
         "mimo-v2.5-pro",
         "openai_compat",
-        "https://token-plan-sgp.xiaomimimo.com/v1",
+        "https://token-plan-cn.xiaomimimo.com/v1",
         "same-key",
     ));
 }
@@ -272,7 +272,7 @@ selected_model = "mimo-v2.5-pro"
 
 [llm.mimo]
 api_key = ""
-base_url = "https://token-plan-sgp.xiaomimimo.com/v1"
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
 model = "mimo-v2.5-pro"
 models = ["mimo-v2.5-pro"]
 "#,
