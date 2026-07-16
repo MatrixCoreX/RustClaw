@@ -189,7 +189,6 @@ pub(super) async fn prepare_round_actions(
         loop_state,
         agent_run_context.and_then(|ctx| ctx.turn_analysis.as_ref()),
         agent_run_context.and_then(|ctx| ctx.boundary_envelope.as_ref()),
-        None,
         agent_run_context.and_then(|ctx| ctx.auto_locator_path.as_deref()),
     )
     .await?;

@@ -1217,7 +1217,6 @@ reqwest = { version = "0.12" }
         &loop_state,
         None,
         None,
-        Some(&route),
         None,
     )
     .await
@@ -1293,7 +1292,6 @@ reqwest = { version = "0.12" }
         &loop_state,
         None,
         None,
-        Some(&route),
         Some(cargo_auto.as_str()),
     )
     .await

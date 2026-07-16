@@ -254,7 +254,6 @@ async fn inline_json_transform_reaches_planner_path() {
         &loop_state,
         None,
         None,
-        Some(&route),
         None,
     )
     .await

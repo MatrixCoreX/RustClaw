@@ -54,8 +54,8 @@ __REQUEST_LANGUAGE_HINT__
 Turn analysis:
 __TURN_ANALYSIS__
 
-Route and output-contract machine summary:
-__ROUTE_CONTRACT_SUMMARY__
+Planner output-contract machine summary:
+__PLANNER_CONTRACT_SUMMARY__
 
 Allowed tools and skills contract:
 __TOOL_SPEC__

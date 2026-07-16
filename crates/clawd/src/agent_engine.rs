@@ -197,7 +197,6 @@ fn build_single_plan_prompt(
 fn build_turn_analysis_prompt_block(
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     boundary_envelope: Option<&crate::turn_boundary_envelope::TurnBoundaryEnvelope>,
-    route_result: Option<&crate::RouteResult>,
 ) -> String {
     let mut lines = Vec::new();
     if let Some(envelope) = boundary_envelope {
@@ -228,14 +227,6 @@ fn build_turn_analysis_prompt_block(
             analysis.attachment_processing_required
         ));
         lines.push(format!("- state_patch={state_patch}"));
-    }
-    if let Some(route) = route_result {
-        lines.push(crate::evidence_policy::evidence_policy_context_prompt_line_for_route(route));
-        if let Some(evidence_policy_line) =
-            crate::evidence_policy::compact_prompt_line_for_route(route)
-        {
-            lines.push(evidence_policy_line);
-        }
     }
     if lines.is_empty() {
         "<none>".to_string()
