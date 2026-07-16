@@ -5,6 +5,9 @@ use std::{
 
 use serde_json::json;
 
+#[path = "ask_planner_frontdoor_tests.rs"]
+mod ask_planner_frontdoor_tests;
+
 struct TempDirGuard {
     path: PathBuf,
 }
