@@ -35,7 +35,17 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Interactive chat mode.
-    Chat,
+    Chat {
+        /// Start a new persisted thread instead of continuing the latest one.
+        #[arg(long = "new", conflicts_with = "thread_id")]
+        new_thread: bool,
+        /// Continue a specific persisted thread.
+        #[arg(long)]
+        thread_id: Option<String>,
+        /// Print raw task events as JSONL.
+        #[arg(long)]
+        jsonl: bool,
+    },
 
     /// GET /v1/health
     Health,
@@ -677,12 +687,20 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| cli.base_url.clone());
     let base_url = base_url.trim_end_matches('/');
     let key: Option<String> = cli.key.or_else(auth::default_admin_key);
-    let cmd = cli.cmd.unwrap_or(Command::Chat);
+    let cmd = cli.cmd.unwrap_or(Command::Chat {
+        new_thread: false,
+        thread_id: None,
+        jsonl: false,
+    });
 
     match &cmd {
-        Command::Chat => {
+        Command::Chat {
+            new_thread,
+            thread_id,
+            jsonl,
+        } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
-            chat::run_chat(base_url, k)
+            chat::run_chat(base_url, k, thread_id.as_deref(), *new_thread, *jsonl)
         }
         Command::Health => commands::run_health(base_url, key.as_deref()),
         Command::Submit {
@@ -1416,6 +1434,39 @@ mod tests {
         for required in ["export", "run", "diff"] {
             assert!(replay_names.contains(required), "missing {required}");
         }
+    }
+
+    #[test]
+    fn clawcli_parses_persisted_chat_thread_options() {
+        match Cli::try_parse_from(["clawcli", "chat", "--thread-id", "thread_01", "--jsonl"])
+            .expect("parse chat thread options")
+            .cmd
+        {
+            Some(Command::Chat {
+                new_thread,
+                thread_id,
+                jsonl,
+            }) => {
+                assert!(!new_thread);
+                assert_eq!(thread_id.as_deref(), Some("thread_01"));
+                assert!(jsonl);
+            }
+            _ => panic!("expected chat command"),
+        }
+
+        assert!(matches!(
+            Cli::try_parse_from(["clawcli", "chat", "--new"])
+                .expect("parse new chat thread")
+                .cmd,
+            Some(Command::Chat {
+                new_thread: true,
+                thread_id: None,
+                jsonl: false,
+            })
+        ));
+        assert!(
+            Cli::try_parse_from(["clawcli", "chat", "--new", "--thread-id", "thread_01"]).is_err()
+        );
     }
 
     #[test]

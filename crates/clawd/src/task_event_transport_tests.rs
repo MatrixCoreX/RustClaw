@@ -117,6 +117,64 @@ fn event_context_projects_thread_and_child_refs() {
 }
 
 #[test]
+fn event_context_falls_back_to_persisted_task_thread_binding() {
+    let state = state();
+    let db = state.core.db.get().unwrap();
+    db.execute_batch(
+        "CREATE TABLE tasks (
+            task_id TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL
+        );",
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO tasks (task_id, payload_json) VALUES (?1, ?2)",
+        rusqlite::params![
+            "task-thread-context",
+            json!({
+                "text": "inspect",
+                "thread_id": "cli_thread_a",
+                "session_id": "cli_session_a",
+                "parent_task_id": "task_parent_a"
+            })
+            .to_string()
+        ],
+    )
+    .unwrap();
+    drop(db);
+
+    let event = publish_event(
+        &state,
+        "task-thread-context",
+        "planner_finished",
+        json!({"round_no": 1}),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(event["thread_id"], "cli_thread_a");
+    assert_eq!(event["session_id"], "cli_session_a");
+    assert_eq!(event["parent_task_id"], "task_parent_a");
+}
+
+#[test]
+fn event_context_rejects_unbounded_or_non_machine_refs() {
+    let state = state();
+    let event = publish_event(
+        &state,
+        "task-unsafe-context",
+        "task_goal",
+        json!({
+            "thread_id": "thread with spaces",
+            "session_id": "session/with/slashes"
+        }),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(event["thread_id"].is_null());
+    assert!(event["session_id"].is_null());
+}
+
+#[test]
 fn invalid_event_kind_is_rejected() {
     let state = state();
     assert!(publish_event(&state, "task-a", "Tool Started", json!({})).is_err());

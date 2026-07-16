@@ -195,13 +195,19 @@ pub(super) fn session_resume_json(session_id: &str, body: &Value) -> Value {
 pub(super) struct SessionStore {
     #[serde(default)]
     sessions: BTreeMap<String, StoredSession>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    latest_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct StoredSession {
     session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    thread_id: Option<String>,
     #[serde(default)]
     task_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    current_task_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     active_goal_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -214,6 +220,163 @@ pub(super) struct StoredSession {
     archived: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     forked_from: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ChatThreadState {
+    pub(crate) thread_id: String,
+    pub(crate) session_id: String,
+    pub(crate) current_task_id: Option<String>,
+    pub(crate) task_ids: Vec<String>,
+    pub(crate) last_event_seq: u64,
+}
+
+pub(crate) fn load_or_create_chat_thread(
+    requested_thread_id: Option<&str>,
+    force_new: bool,
+) -> Result<ChatThreadState> {
+    let mut store = load_session_store()?;
+    let generated_id = format!("cli_thread_{}", uuid::Uuid::new_v4().simple());
+    let state = session_store_select_chat_thread(
+        &mut store,
+        requested_thread_id,
+        force_new,
+        &generated_id,
+    )?;
+    save_session_store(&store)?;
+    Ok(state)
+}
+
+pub(crate) fn record_chat_task(state: &mut ChatThreadState, task_id: &str) -> Result<()> {
+    let mut store = load_session_store()?;
+    session_store_record_chat_task(&mut store, state, task_id)?;
+    save_session_store(&store)
+}
+
+pub(crate) fn record_chat_cursor(state: &mut ChatThreadState, cursor: u64) -> Result<()> {
+    let mut store = load_session_store()?;
+    session_store_record_chat_cursor(&mut store, state, cursor)?;
+    save_session_store(&store)
+}
+
+pub(super) fn session_store_select_chat_thread(
+    store: &mut SessionStore,
+    requested_thread_id: Option<&str>,
+    force_new: bool,
+    generated_id: &str,
+) -> Result<ChatThreadState> {
+    let requested = requested_thread_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if requested.is_some_and(|value| !valid_cli_thread_ref(value)) {
+        anyhow::bail!("chat_thread_id_invalid");
+    }
+    let selected_id = if force_new {
+        generated_id
+    } else if let Some(requested) = requested {
+        requested
+    } else {
+        store
+            .latest_session_id
+            .as_deref()
+            .filter(|session_id| {
+                store
+                    .sessions
+                    .get(*session_id)
+                    .is_some_and(|session| !session.archived && session.thread_id.is_some())
+            })
+            .unwrap_or(generated_id)
+    };
+    if !valid_cli_thread_ref(selected_id) {
+        anyhow::bail!("chat_thread_id_invalid");
+    }
+    let entry = store
+        .sessions
+        .entry(selected_id.to_string())
+        .or_insert_with(|| StoredSession {
+            session_id: selected_id.to_string(),
+            thread_id: Some(selected_id.to_string()),
+            ..StoredSession::default()
+        });
+    if entry.archived || entry.thread_id.is_none() {
+        entry.archived = false;
+        entry.thread_id = Some(selected_id.to_string());
+    }
+    store.latest_session_id = Some(selected_id.to_string());
+    Ok(chat_thread_state(entry))
+}
+
+pub(super) fn session_store_record_chat_task(
+    store: &mut SessionStore,
+    state: &mut ChatThreadState,
+    task_id: &str,
+) -> Result<()> {
+    let task_id = task_id.trim();
+    if !valid_cli_task_ref(task_id) {
+        anyhow::bail!("chat_task_id_invalid");
+    }
+    let entry = store
+        .sessions
+        .get_mut(&state.session_id)
+        .ok_or_else(|| anyhow::anyhow!("chat_session_missing"))?;
+    if entry.task_ids.last().map(String::as_str) != Some(task_id) {
+        entry.task_ids.push(task_id.to_string());
+    }
+    entry.current_task_id = Some(task_id.to_string());
+    entry.latest_event_seq = Some("0".to_string());
+    store.latest_session_id = Some(state.session_id.clone());
+    state.current_task_id = Some(task_id.to_string());
+    state.task_ids = entry.task_ids.clone();
+    state.last_event_seq = 0;
+    Ok(())
+}
+
+pub(super) fn session_store_record_chat_cursor(
+    store: &mut SessionStore,
+    state: &mut ChatThreadState,
+    cursor: u64,
+) -> Result<()> {
+    let entry = store
+        .sessions
+        .get_mut(&state.session_id)
+        .ok_or_else(|| anyhow::anyhow!("chat_session_missing"))?;
+    entry.latest_event_seq = Some(cursor.to_string());
+    store.latest_session_id = Some(state.session_id.clone());
+    state.last_event_seq = cursor;
+    Ok(())
+}
+
+fn chat_thread_state(session: &StoredSession) -> ChatThreadState {
+    ChatThreadState {
+        thread_id: session
+            .thread_id
+            .clone()
+            .unwrap_or_else(|| session.session_id.clone()),
+        session_id: session.session_id.clone(),
+        current_task_id: session.current_task_id.clone(),
+        task_ids: session.task_ids.clone(),
+        last_event_seq: session
+            .latest_event_seq
+            .as_deref()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0),
+    }
+}
+
+fn valid_cli_thread_ref(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':'))
+}
+
+fn valid_cli_task_ref(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
 }
 
 pub(super) fn session_store_upsert_summary(store: &mut SessionStore, summary: &Value) -> Value {
@@ -236,7 +399,10 @@ pub(super) fn session_store_upsert_summary(store: &mut SessionStore, summary: &V
         .and_then(|session| session.forked_from.clone());
     let session = StoredSession {
         session_id: session_id.clone(),
+        thread_id: string_at(summary, "/thread_id"),
         task_ids: string_array_at(summary, "/task_ids"),
+        current_task_id: string_at(summary, "/current_task_id")
+            .or_else(|| string_array_at(summary, "/task_ids").last().cloned()),
         active_goal_id: string_at(summary, "/active_goal_id"),
         workspace_root: string_at(summary, "/workspace_root"),
         latest_checkpoint_id: string_at(summary, "/latest_checkpoint_id"),
@@ -248,6 +414,7 @@ pub(super) fn session_store_upsert_summary(store: &mut SessionStore, summary: &V
         forked_from: previous_forked_from,
     };
     store.sessions.insert(session_id.clone(), session);
+    store.latest_session_id = Some(session_id.clone());
     json!({
         "operation": "session_store_upsert",
         "status": "ok",
@@ -521,6 +688,7 @@ fn session_store_projection(store: &SessionStore) -> Value {
         .collect::<Vec<_>>();
     json!({
         "session_count": sessions.len(),
+        "latest_session_id": store.latest_session_id,
         "sessions": sessions,
     })
 }
@@ -528,7 +696,9 @@ fn session_store_projection(store: &SessionStore) -> Value {
 fn stored_session_json(session: &StoredSession) -> Value {
     json!({
         "session_id": session.session_id.clone(),
+        "thread_id": session.thread_id.clone(),
         "task_ids": session.task_ids.clone(),
+        "current_task_id": session.current_task_id.clone(),
         "active_goal_id": session.active_goal_id.clone(),
         "workspace_root": session.workspace_root.clone(),
         "latest_checkpoint_id": session.latest_checkpoint_id.clone(),

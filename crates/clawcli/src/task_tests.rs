@@ -1,6 +1,6 @@
 use super::{
-    async_final_result_value, result_text_from_result_json, resume_task_payload, TaskResumeRequest,
-    TaskStatusView,
+    async_final_result_value, result_text_from_result_json, resume_task_payload,
+    threaded_ask_payload, TaskResumeRequest, TaskStatusView,
 };
 
 #[test]
@@ -140,4 +140,18 @@ fn resume_payload_only_carries_explicit_approval_grant() {
     );
     assert_eq!(approved["approval_request_id"], "approval-1");
     assert_eq!(approved["approve"], true);
+}
+
+#[test]
+fn threaded_ask_payload_binds_thread_and_only_adds_resume_for_followups() {
+    let first = threaded_ask_payload("inspect", "thread-1", "session-1", None);
+    assert_eq!(first["thread_id"], "thread-1");
+    assert_eq!(first["session_id"], "session-1");
+    assert_eq!(first["source"], "clawcli_chat");
+    assert!(first.get("resume_task_id").is_none());
+    assert!(first.get("resume_trigger").is_none());
+
+    let followup = threaded_ask_payload("continue", "thread-1", "session-1", Some("task-previous"));
+    assert_eq!(followup["resume_task_id"], "task-previous");
+    assert_eq!(followup["resume_trigger"], "user_followup");
 }

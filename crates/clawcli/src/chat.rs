@@ -1,77 +1,196 @@
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 
-use crate::task;
+use crate::{commands, events, output, task};
 
-const POLL_INTERVAL_MS: u64 = 800;
-const TERMINAL_STATUS: &[&str] = &["succeeded", "failed", "canceled"];
+const POLL_FALLBACK_INTERVAL_MS: u64 = 800;
 
-pub(crate) fn run_chat(base_url: &str, key: &str) -> Result<()> {
-    println!("clawcli chat mode (type a message, empty line or 'exit' to quit)");
-    println!("---");
-    let mut rl = rustyline::DefaultEditor::new().context("rustyline init (is stdin a TTY?)")?;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ChatControl<'a> {
+    Exit,
+    New,
+    Detach,
+    Cancel,
+    Status,
+    Attach(&'a str),
+    Unknown(&'a str),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FollowOutcome {
+    Terminal,
+    Background,
+    StreamEnded,
+}
+
+pub(crate) fn run_chat(
+    base_url: &str,
+    key: &str,
+    requested_thread_id: Option<&str>,
+    force_new: bool,
+    jsonl_output: bool,
+) -> Result<()> {
+    let mut thread = commands::load_or_create_chat_thread(requested_thread_id, force_new)?;
+    print_thread_binding(&thread);
+    let mut editor = rustyline::DefaultEditor::new().context("chat_readline_init_failed")?;
     loop {
-        let line = match rl.readline("> ") {
-            Ok(s) => s,
+        let line = match editor.readline("> ") {
+            Ok(line) => line,
             Err(rustyline::error::ReadlineError::Eof) => break,
             Err(rustyline::error::ReadlineError::Interrupted) => break,
-            Err(e) => {
-                eprintln!("readline: {}", e);
-                break;
-            }
+            Err(error) => return Err(error).context("chat_readline_failed"),
         };
         let text = line.trim();
         if text.is_empty() {
-            break;
+            continue;
         }
-        if text.eq_ignore_ascii_case("exit") || text.eq_ignore_ascii_case("quit") {
-            break;
-        }
-        let task_id = match task::submit_ask(base_url, key, text) {
-            Ok(id) => id,
-            Err(e) => {
-                eprintln!("submit failed: {}", e);
-                continue;
+        if let Some(control) = chat_control(text) {
+            match control {
+                ChatControl::Exit | ChatControl::Detach => break,
+                ChatControl::New => {
+                    thread = commands::load_or_create_chat_thread(None, true)?;
+                    print_thread_binding(&thread);
+                }
+                ChatControl::Cancel => {
+                    if let Some(task_id) = thread.current_task_id.as_deref() {
+                        let body = task::cancel_task_by_id(base_url, key, task_id)?;
+                        output::print_json_pretty(&body);
+                    } else {
+                        println!("error_code=chat_task_missing");
+                    }
+                }
+                ChatControl::Status => {
+                    if let Some(task_id) = thread.current_task_id.as_deref() {
+                        let status = task::get_task_status(base_url, key, task_id)?;
+                        output::print_task_status(&status, false, &events::EventFilters::default());
+                    } else {
+                        println!("error_code=chat_task_missing");
+                    }
+                }
+                ChatControl::Attach(task_id) => {
+                    commands::record_chat_task(&mut thread, task_id)?;
+                    follow_and_render_task(base_url, key, &mut thread, jsonl_output)?;
+                }
+                ChatControl::Unknown(command) => {
+                    println!("error_code=chat_command_unknown command={command}");
+                }
             }
-        };
-        let mut wait_tick = 0usize;
-        loop {
-            let dots = match wait_tick % 4 {
-                0 => ".",
-                1 => "..",
-                2 => "...",
-                _ => "",
-            };
-            print!("\rWaiting for clawd reply{dots:<3}");
-            std::io::Write::flush(&mut std::io::stdout()).context("flush stdout")?;
-            wait_tick += 1;
-            std::thread::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS));
-            let task = match task::get_task_status(base_url, key, &task_id) {
-                Ok(t) => t,
-                Err(e) => {
-                    print!("\r{:<48}\r", "");
-                    std::io::Write::flush(&mut std::io::stdout()).context("flush stdout")?;
-                    eprintln!("get task failed: {}", e);
-                    break;
-                }
-            };
-            if TERMINAL_STATUS.contains(&task.status.as_str()) {
-                print!("\r{:<48}\r", "");
-                std::io::Write::flush(&mut std::io::stdout()).context("flush stdout")?;
-                if let Some(ref t) = task.result_text {
-                    println!("{}\n", t);
-                }
-                if let Some(ref e) = task.error_text {
-                    eprintln!("error: {}\n", e);
-                }
-                if task.status == "failed"
-                    && task.result_text.is_none()
-                    && task.error_text.is_none()
-                {
-                    println!("task_failed_without_details\n");
-                }
-                break;
-            }
+            continue;
         }
+
+        let task_id = task::submit_thread_ask(
+            base_url,
+            key,
+            text,
+            &thread.thread_id,
+            &thread.session_id,
+            thread.current_task_id.as_deref(),
+        )?;
+        commands::record_chat_task(&mut thread, &task_id)?;
+        println!("task_id={task_id}");
+        follow_and_render_task(base_url, key, &mut thread, jsonl_output)?;
     }
     Ok(())
 }
+
+fn follow_and_render_task(
+    base_url: &str,
+    key: &str,
+    thread: &mut commands::ChatThreadState,
+    jsonl_output: bool,
+) -> Result<()> {
+    let task_id = thread
+        .current_task_id
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("chat_task_missing"))?;
+    let mut cursor = thread.last_event_seq;
+    let followed = events::follow_task_events(base_url, key, &task_id, cursor, |raw_event| {
+        if let Some(seq) = raw_event.get("seq").and_then(serde_json::Value::as_u64) {
+            cursor = cursor.max(seq);
+        }
+        if jsonl_output {
+            println!("{}", serde_json::to_string(raw_event)?);
+        } else if let Some(event) = events::task_event_line_from_value(raw_event) {
+            println!("event: {}", event.line);
+        }
+        Ok(!matches!(
+            follow_outcome(raw_event),
+            Some(FollowOutcome::Terminal | FollowOutcome::Background)
+        ))
+    });
+    commands::record_chat_cursor(thread, cursor)?;
+
+    if let Err(error) = followed {
+        eprintln!("error_code=chat_event_stream_failed detail={error}");
+        wait_with_poll_fallback(base_url, key, &task_id)?;
+    }
+    let status = task::get_task_status(base_url, key, &task_id)?;
+    output::print_task_status(&status, false, &events::EventFilters::default());
+    Ok(())
+}
+
+fn wait_with_poll_fallback(base_url: &str, key: &str, task_id: &str) -> Result<()> {
+    loop {
+        let status = task::get_task_status(base_url, key, task_id)?;
+        if status.is_terminal() || status.is_background_waiting() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(POLL_FALLBACK_INTERVAL_MS));
+    }
+}
+
+pub(super) fn chat_control(input: &str) -> Option<ChatControl<'_>> {
+    let mut parts = input.split_whitespace();
+    let command = parts.next()?;
+    if !command.starts_with('/') {
+        return None;
+    }
+    let argument = parts.next();
+    if parts.next().is_some() {
+        return Some(ChatControl::Unknown(command));
+    }
+    Some(match (command, argument) {
+        ("/exit", None) => ChatControl::Exit,
+        ("/new", None) => ChatControl::New,
+        ("/detach", None) => ChatControl::Detach,
+        ("/cancel", None) => ChatControl::Cancel,
+        ("/status", None) => ChatControl::Status,
+        ("/attach", Some(task_id)) => ChatControl::Attach(task_id),
+        _ => ChatControl::Unknown(command),
+    })
+}
+
+fn follow_outcome(event: &serde_json::Value) -> Option<FollowOutcome> {
+    let event_type = event
+        .get("event_kind")
+        .or_else(|| event.get("event_type"))
+        .and_then(serde_json::Value::as_str)?;
+    if event_type == "task_final" {
+        return Some(FollowOutcome::Terminal);
+    }
+    let state = event
+        .pointer("/payload/execution_state")
+        .or_else(|| event.pointer("/payload/state"))
+        .and_then(serde_json::Value::as_str);
+    if matches!(
+        state,
+        Some("background" | "waiting" | "needs_user" | "needs_confirmation")
+    ) {
+        return Some(FollowOutcome::Background);
+    }
+    Some(FollowOutcome::StreamEnded)
+}
+
+fn print_thread_binding(thread: &commands::ChatThreadState) {
+    println!("thread_id={}", thread.thread_id);
+    println!("session_id={}", thread.session_id);
+    if let Some(task_id) = thread.current_task_id.as_deref() {
+        println!("current_task_id={task_id}");
+    }
+    println!("event_cursor={}", thread.last_event_seq);
+}
+
+#[cfg(test)]
+#[path = "chat_tests.rs"]
+mod tests;
