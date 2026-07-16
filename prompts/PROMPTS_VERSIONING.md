@@ -6,7 +6,6 @@
 ## 1. 适用范围
 
 * **必须**带版本号的 prompt（核心审计基线）：
-  * `intent_normalizer_prompt.md`
   * `chat_response_prompt.md`
   * `single_plan_execution_prompt.md`
   * `loop_incremental_plan_prompt.md`

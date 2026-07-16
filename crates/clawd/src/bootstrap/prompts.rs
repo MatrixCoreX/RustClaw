@@ -16,19 +16,11 @@ use crate::{llm_vendor_name, AppState};
 ///   会经过 [`prompt_layers::resolve_prompt_rel_path_for_vendor`] 解析到具体磁盘文件 / manifest 拼层。
 /// - `label` 是日志/告警里给运维看的人类可读名字。
 ///
-/// 列表与 `crates/clawd/src/{main.rs,intent_router.rs,agent_engine.rs,semantic_judge.rs,
+/// 列表与 `crates/clawd/src/{main.rs,agent_engine.rs,semantic_judge.rs,
 /// agent_engine/observed_output.rs,skills/builtin.rs,memory/service.rs,schedule_service.rs,
 /// ask_flow.rs}` 里 `include_str!` 的兜底常量一一对应；若新增 prompt 兜底常量请同步追加这里
 /// 或显式标注「不参与启动校验」。
 const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
-    (
-        "prompts/intent_normalizer_prompt.md",
-        "intent_normalizer (routing)",
-    ),
-    (
-        "prompts/contract_repair_judge_prompt.md",
-        "contract_repair_judge (routing)",
-    ),
     (
         "prompts/clarify_question_prompt.md",
         "clarify_question (routing)",
