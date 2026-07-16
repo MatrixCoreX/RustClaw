@@ -632,6 +632,28 @@ fn trace_json_projects_coding_evidence_as_machine_event() {
     }));
 
     let trace = journal.to_trace_json();
+    let progress_events = trace
+        .pointer("/event_stream")
+        .and_then(Value::as_array)
+        .expect("event stream");
+    let workspace_diff = progress_events
+        .iter()
+        .find(|event| event["event_type"] == "workspace_diff")
+        .expect("workspace diff event");
+    assert_eq!(workspace_diff["payload"]["diff_summary_count"], 1);
+    assert_eq!(workspace_diff["payload"]["changed_files"][0], "src/lib.rs");
+    let verification = progress_events
+        .iter()
+        .find(|event| event["event_type"] == "verification")
+        .expect("verification event");
+    assert_eq!(verification["payload"]["status"], "failed");
+    assert_eq!(verification["payload"]["failure_kinds"][0], "test");
+    let retry = progress_events
+        .iter()
+        .find(|event| event["event_type"] == "retry")
+        .expect("retry event");
+    assert_eq!(retry["payload"]["retry_count"], 1);
+
     let coding_checkpoints = trace
         .pointer("/event_stream")
         .and_then(Value::as_array)

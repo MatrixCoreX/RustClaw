@@ -190,6 +190,7 @@ pub(super) fn task_event_stream_json(journal: &TaskJournal) -> Vec<Value> {
         }
     }
     if coding_evidence.has_signals() {
+        append_coding_progress_events(&mut seq, &mut events, &coding_evidence);
         append_coding_checkpoint_events(&mut seq, &mut events, &coding_evidence);
         events.push(task_event_json(
             &mut seq,
@@ -534,6 +535,61 @@ fn coding_verification_status(signals: &CodingEvidenceSignals) -> &'static str {
     }
 }
 
+fn append_coding_progress_events(
+    seq: &mut u64,
+    events: &mut Vec<Value>,
+    signals: &CodingEvidenceSignals,
+) {
+    let evidence_refs = signals.evidence_refs.iter().cloned().collect::<Vec<_>>();
+    if !signals.diff_summaries.is_empty() {
+        events.push(task_event_json(
+            seq,
+            "workspace_diff",
+            json!({
+                "schema_version": 1,
+                "evidence_refs": evidence_refs,
+                "changed_files": signals.changed_files.iter().cloned().collect::<Vec<_>>(),
+                "diff_summary_count": signals.diff_summaries.len(),
+                "diff_summaries": signals.diff_summaries,
+                "workspace_checkpoint_ids": signals.workspace_checkpoint_ids.iter().cloned().collect::<Vec<_>>(),
+                "patch_ids": signals.patch_ids.iter().cloned().collect::<Vec<_>>(),
+                "mutation_ids": signals.mutation_ids.iter().cloned().collect::<Vec<_>>(),
+            }),
+        ));
+    }
+    if !signals.changed_files.is_empty()
+        || !signals.verification_commands.is_empty()
+        || !signals.failures.is_empty()
+    {
+        events.push(task_event_json(
+            seq,
+            "verification",
+            json!({
+                "schema_version": 1,
+                "evidence_refs": evidence_refs,
+                "status": coding_verification_status(signals),
+                "verification_commands": signals.verification_commands.iter().cloned().collect::<Vec<_>>(),
+                "failure_count": signals.failures.len(),
+                "failure_kinds": signals.verification_failure_kinds.iter().cloned().collect::<Vec<_>>(),
+                "workspace_checkpoint_ids": signals.workspace_checkpoint_ids.iter().cloned().collect::<Vec<_>>(),
+                "patch_ids": signals.patch_ids.iter().cloned().collect::<Vec<_>>(),
+                "mutation_ids": signals.mutation_ids.iter().cloned().collect::<Vec<_>>(),
+            }),
+        ));
+    }
+    if signals.retry_count > 0 {
+        events.push(task_event_json(
+            seq,
+            "retry",
+            json!({
+                "schema_version": 1,
+                "evidence_refs": evidence_refs,
+                "retry_count": signals.retry_count,
+            }),
+        ));
+    }
+}
+
 fn append_coding_checkpoint_events(
     seq: &mut u64,
     events: &mut Vec<Value>,
@@ -866,10 +922,14 @@ fn collect_diff_summary_fields(
         let Some(value) = map.get(key).and_then(bounded_diff_summary_value) else {
             continue;
         };
-        signals.diff_summaries.push(json!({
+        let summary = json!({
             "field": key,
             "value": value,
-        }));
+        });
+        if signals.diff_summaries.contains(&summary) {
+            continue;
+        }
+        signals.diff_summaries.push(summary);
         record_evidence_ref(signals, evidence_ref);
         if signals.diff_summaries.len() >= 16 {
             return;
