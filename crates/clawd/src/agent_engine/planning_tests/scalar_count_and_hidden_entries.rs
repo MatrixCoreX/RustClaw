@@ -1405,8 +1405,7 @@ fn archive_unpack_semantic_kind_without_capability_ref_stays_non_actionable() {
 
 #[test]
 fn explicit_service_command_is_preserved_as_run_cmd() {
-    let mut state = test_state_with_enabled_skills(&["service_control", "run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["执行命令 ".to_string()];
+    let state = test_state_with_enabled_skills(&["service_control", "run_cmd"]);
     let mut route = route_result(
         crate::AskMode::act_plain(),
         true,

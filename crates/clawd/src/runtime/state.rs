@@ -49,6 +49,13 @@ pub(crate) struct LlmPromptBucket {
     pub(crate) prompt_truncated_bytes_total: u64,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(crate) struct LlmCallSequenceEntry {
+    pub(crate) call_index: u64,
+    pub(crate) prompt_label: String,
+    pub(crate) prompt_bytes: usize,
+}
+
 pub(crate) struct SkillViewsSnapshot {
     pub(crate) registry: Option<Arc<SkillsRegistry>>,
     pub(crate) skills_list: Arc<HashSet<String>>,
@@ -249,8 +256,6 @@ impl PolicyConfig {
             allow_sudo: false,
             persona_prompt: Arc::new(RwLock::new(String::new())),
             command_intent: CommandIntentRuntime {
-                all_result_suffixes: Vec::new(),
-                execute_prefixes: Vec::new(),
                 standalone_commands: Vec::new(),
                 default_locale: locale.to_string(),
                 verify_enforce_enabled: false,
@@ -353,6 +358,9 @@ pub(crate) struct TaskMetricsRegistry {
     /// 标签由 [`crate::llm_gateway::classify_prompt_source`] 从 `prompt_source` 抽出。
     pub(crate) llm_by_prompt_per_task:
         Arc<Mutex<HashMap<String, HashMap<String, LlmPromptBucket>>>>,
+    /// Ordered, machine-only metadata for measuring calls before the planner.
+    /// Prompt and response text are intentionally not retained here.
+    pub(crate) llm_call_sequence_per_task: Arc<Mutex<HashMap<String, Vec<LlmCallSequenceEntry>>>>,
     /// Phase 0.4: 缓存 `run_intent_normalizer` 产出的 `schedule_intent`，
     /// 让后续 `schedule.compile` 技能在 `text` 与归一化后的原始输入一致时
     /// 直接复用，不再重跑一次 `schedule_intent_prompt` LLM 调用。
@@ -935,12 +943,29 @@ impl AppState {
 
     /// Phase 1.5: 累计一次 LLM 调用，并按 prompt label 分桶记录。
     /// `label` 由 [`crate::llm_gateway::classify_prompt_source`] 从 `prompt_source` 抽出。
-    pub(crate) fn note_task_llm_call_with_label(&self, task_id: &str, label: &str) {
-        {
+    pub(crate) fn note_task_llm_call_with_label_and_prompt_size(
+        &self,
+        task_id: &str,
+        label: &str,
+        prompt_bytes: usize,
+    ) {
+        let call_index = {
             let mut guard = self.metrics.llm_calls_per_task.lock().unwrap();
             let counter = guard.entry(task_id.to_string()).or_insert(0);
             *counter = counter.saturating_add(1);
-        }
+            *counter
+        };
+        self.metrics
+            .llm_call_sequence_per_task
+            .lock()
+            .unwrap()
+            .entry(task_id.to_string())
+            .or_default()
+            .push(LlmCallSequenceEntry {
+                call_index,
+                prompt_label: label.to_string(),
+                prompt_bytes,
+            });
         let mut guard = self.metrics.llm_by_prompt_per_task.lock().unwrap();
         let bucket = guard
             .entry(task_id.to_string())
@@ -1118,6 +1143,16 @@ impl AppState {
             .unwrap_or_default()
     }
 
+    pub(crate) fn task_llm_call_sequence(&self, task_id: &str) -> Vec<LlmCallSequenceEntry> {
+        self.metrics
+            .llm_call_sequence_per_task
+            .lock()
+            .unwrap()
+            .get(task_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// Phase 1.3: 在每次真正发起 LLM 调用前做预算检查。
     /// 超过任一阈值就返回 `Some(reason)`，调用方应立即短路。
     /// 阈值刻意给得宽松（40 次 / 180 秒），只用于兜底异常放大场景。
@@ -1154,6 +1189,11 @@ impl AppState {
             .remove(task_id);
         self.metrics
             .llm_by_prompt_per_task
+            .lock()
+            .unwrap()
+            .remove(task_id);
+        self.metrics
+            .llm_call_sequence_per_task
             .lock()
             .unwrap()
             .remove(task_id);

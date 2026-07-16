@@ -202,10 +202,10 @@ mod value_string_list;
 use action_route_locator_artifact::*;
 use concrete_respond_structural_observation::*;
 use config_guard_capability_repair::*;
+#[cfg(test)]
+pub(in crate::agent_engine) use configured_command_prefix::explicit_command_segment;
+pub(in crate::agent_engine) use configured_command_prefix::explicit_machine_syntax_command_segment;
 use configured_command_prefix::*;
-pub(in crate::agent_engine) use configured_command_prefix::{
-    explicit_command_segment, explicit_execution_command_segment,
-};
 use direct_observed_finalize_support::*;
 use directory_entry_group_locator::executed_step_is_successful_text_read;
 #[cfg(test)]

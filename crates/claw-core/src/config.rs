@@ -1033,8 +1033,6 @@ pub struct MemoryConfig {
     pub embedding_batch_size: usize,
     #[serde(default = "default_memory_reindex_on_startup")]
     pub reindex_on_startup: bool,
-    #[serde(default)]
-    pub rules: MemoryRulesConfig,
 }
 
 impl Default for MemoryConfig {
@@ -1092,30 +1090,6 @@ impl Default for MemoryConfig {
             embedding_version: default_memory_embedding_version(),
             embedding_batch_size: default_memory_embedding_batch_size(),
             reindex_on_startup: default_memory_reindex_on_startup(),
-            rules: MemoryRulesConfig::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct MemoryRulesConfig {
-    #[serde(default = "default_memory_rule_assistant_ack_skip")]
-    pub assistant_ack_skip: Vec<String>,
-    #[serde(default = "default_memory_rule_instruction_markers")]
-    pub instruction_markers: Vec<String>,
-    #[serde(default = "default_memory_rule_injection_markers")]
-    pub injection_markers: Vec<String>,
-    #[serde(default = "default_memory_rule_salience_boost_markers")]
-    pub salience_boost_markers: Vec<String>,
-}
-
-impl Default for MemoryRulesConfig {
-    fn default() -> Self {
-        Self {
-            assistant_ack_skip: default_memory_rule_assistant_ack_skip(),
-            instruction_markers: default_memory_rule_instruction_markers(),
-            injection_markers: default_memory_rule_injection_markers(),
-            salience_boost_markers: default_memory_rule_salience_boost_markers(),
         }
     }
 }

@@ -587,8 +587,7 @@ fn locatorless_inline_structured_payload_does_not_require_external_locator() {
 
 #[test]
 fn locatorless_raw_command_output_still_allows_execution() {
-    let mut state = test_state_with_root(make_temp_root("locatorless_raw_command"));
-    state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
+    let state = test_state_with_root(make_temp_root("locatorless_raw_command"));
     let mut route = executable_filename_route();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
@@ -612,8 +611,7 @@ fn locatorless_raw_command_output_still_allows_execution() {
 
 #[test]
 fn locatorless_explicit_command_uses_policy_evidence_without_semantic_enum() {
-    let mut state = test_state_with_root(make_temp_root("locatorless_explicit_command_no_enum"));
-    state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
+    let state = test_state_with_root(make_temp_root("locatorless_explicit_command_no_enum"));
     let mut route = executable_filename_route();
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
@@ -638,7 +636,6 @@ fn locatorless_explicit_command_uses_policy_evidence_without_semantic_enum() {
 #[test]
 fn locatorless_raw_command_sequence_output_still_allows_execution() {
     let mut state = test_state_with_root(make_temp_root("locatorless_raw_command_sequence"));
-    state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string(), "whoami".to_string()];
     let mut route = executable_filename_route();
     route.route_reason = "command_payload_requires_raw_output_execution".to_string();

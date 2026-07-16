@@ -605,6 +605,8 @@ mod log_analyze_with_summary_policy;
 mod log_excerpt_quantity_and_skill_policy;
 #[path = "planning_tests/missing_paths_and_multi_target_metadata.rs"]
 mod missing_paths_and_multi_target_metadata;
+#[path = "planning_tests/multilingual_machine_contracts.rs"]
+mod multilingual_machine_contracts;
 #[path = "planning_tests/nl_failure_regressions.rs"]
 mod nl_failure_regressions;
 #[path = "planning_tests/observed_finalize_followup.rs"]

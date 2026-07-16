@@ -581,7 +581,7 @@ pub(crate) async fn run_with_fallback_on_providers_with_hints(
     // 现在移到 gateway 入口，保证预算统计始终可靠。
     // Phase 1.5: 同时按 prompt label 分桶累计，task journal 里 by_prompt 维度可观测。
     let prompt_label = classify_prompt_source(prompt_source);
-    state.note_task_llm_call_with_label(&task.task_id, prompt_label);
+    state.note_task_llm_call_with_label_and_prompt_size(&task.task_id, prompt_label, prompt.len());
     state.note_task_prompt_size_with_label(&task.task_id, prompt_label, prompt.len());
     touch_llm_task_lease(state, &task.task_id, prompt_label, "call_start");
     let mut heartbeat_stop = Some(start_llm_task_lease_heartbeat(

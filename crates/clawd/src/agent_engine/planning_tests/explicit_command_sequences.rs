@@ -85,7 +85,6 @@ fn assert_empty_planner_actions_stay_empty(
 #[test]
 fn execution_failed_step_prefixed_bare_sequence_gets_multi_run_cmd_plan() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
         crate::AskMode::act_with_chat_finalizer(),
@@ -131,9 +130,8 @@ fn execution_failed_step_prefixed_bare_sequence_gets_multi_run_cmd_plan() {
 }
 
 #[test]
-fn execution_failed_step_prefixed_echo_sequence_counts_as_explicit_command_request() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
+fn natural_language_command_sequence_does_not_bypass_planner() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = route_result(
         crate::AskMode::act_with_chat_finalizer(),
         true,
@@ -144,7 +142,7 @@ fn execution_failed_step_prefixed_echo_sequence_counts_as_explicit_command_reque
     let loop_state = LoopState::new(1);
     let request = "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_67890，再执行 echo AFTER_BREAK_67890";
 
-    assert!(super::super::explicit_command_request_present(
+    assert!(!super::super::explicit_command_request_present(
         &state.policy.command_intent,
         request,
         Some(&route)
@@ -314,9 +312,8 @@ fn multi_explicit_run_cmd_plan_marks_literal_commands_without_continue_on_error(
 }
 
 #[test]
-fn explicit_configured_command_with_followup_skips_single_step_fast_path() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
+fn natural_language_command_with_followup_does_not_enter_explicit_fast_path() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     route.output_contract.requires_content_evidence = true;
@@ -324,9 +321,8 @@ fn explicit_configured_command_with_followup_skips_single_step_fast_path() {
     let request =
         "Run pwd, then run definitely_missing_command_rustclaw_english_67890, then summarize.";
 
-    assert_eq!(
-        super::super::explicit_command_segment(&state.policy.command_intent, request).as_deref(),
-        Some("pwd")
+    assert!(
+        super::super::explicit_command_segment(&state.policy.command_intent, request).is_none()
     );
     assert_empty_planner_actions_stay_empty(
         &state,
@@ -359,18 +355,17 @@ fn prefixed_path_command_with_structural_args_before_freeform_tail_is_detected()
 }
 
 #[test]
-fn explicit_configured_path_command_with_structural_args_is_preserved() {
+fn code_span_path_command_with_structural_args_is_preserved() {
     let path_env = std::env::var_os("PATH");
     if !super::super::command_token_resolves_in_path("uname", path_env.as_deref()) {
         return;
     }
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["please run ".to_string()];
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
 
     assert_eq!(
         super::super::explicit_command_segment(
             &state.policy.command_intent,
-            "please run uname -a and tell me the result",
+            "please run `uname -a` and tell me the result",
         )
         .as_deref(),
         Some("uname -a")
@@ -379,8 +374,7 @@ fn explicit_configured_path_command_with_structural_args_is_preserved() {
 
 #[test]
 fn explicit_configured_command_without_followup_keeps_single_step_fast_path() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = route_result(
         crate::AskMode::act_plain(),
         true,
@@ -405,9 +399,8 @@ fn explicit_configured_command_without_followup_keeps_single_step_fast_path() {
 }
 
 #[test]
-fn explicit_configured_command_inside_clause_is_detected() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["请执行".to_string(), "执行".to_string()];
+fn natural_language_command_inside_clause_is_left_to_planner() {
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = route_result(
         crate::AskMode::act_plain(),
         true,
@@ -418,9 +411,8 @@ fn explicit_configured_command_inside_clause_is_detected() {
     let loop_state = LoopState::new(1);
     let request = "先别管方案，请执行 pwd，只输出命令结果。";
 
-    assert_eq!(
-        super::super::explicit_command_segment(&state.policy.command_intent, request).as_deref(),
-        Some("pwd")
+    assert!(
+        super::super::explicit_command_segment(&state.policy.command_intent, request).is_none()
     );
     let normalized = normalize_explicit_planner_actions(
         &state,
@@ -438,7 +430,6 @@ fn explicit_configured_command_inside_clause_is_detected() {
 #[test]
 fn embedded_standalone_command_with_structural_args_keeps_single_step_fast_path() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
         crate::AskMode::act_plain(),
@@ -470,7 +461,6 @@ fn embedded_standalone_command_with_structural_args_keeps_single_step_fast_path(
 #[test]
 fn embedded_standalone_command_sequence_uses_configured_command_tokens() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string(), "whoami".to_string()];
     let mut route = route_result(
         crate::AskMode::act_plain(),
@@ -550,7 +540,6 @@ fn executionless_route_preserves_planner_selected_literal_command_sequence() {
 #[test]
 fn prefixed_single_command_with_format_tail_is_single_step_safe() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string(), "whoami".to_string()];
 
     assert_eq!(
@@ -566,7 +555,6 @@ fn prefixed_single_command_with_format_tail_is_single_step_safe() {
 #[test]
 fn prefixed_single_command_with_second_command_tail_is_not_single_step_safe() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string(), "whoami".to_string()];
 
     assert_eq!(
@@ -581,7 +569,6 @@ fn prefixed_single_command_with_second_command_tail_is_not_single_step_safe() {
 #[test]
 fn command_output_summary_explicit_command_plan_synthesizes_configured_sequence() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string(), "whoami".to_string()];
     let mut route = route_result(
         crate::AskMode::act_plain(),
@@ -631,7 +618,6 @@ fn command_output_summary_explicit_command_plan_synthesizes_configured_sequence(
 #[test]
 fn command_output_summary_embedded_code_span_after_run_prefix_uses_literal_command() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
         crate::AskMode::act_plain(),
@@ -678,7 +664,6 @@ fn command_output_summary_embedded_code_span_after_run_prefix_uses_literal_comma
 #[test]
 fn command_output_summary_prefixed_unknown_second_command_gets_multi_step_plan() {
     let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
         crate::AskMode::act_plain(),
@@ -812,8 +797,7 @@ fn leading_shellish_command_sequence_rejects_command_with_argument_shape() {
 
 #[test]
 fn explicit_prefixed_shellish_code_span_keeps_single_step_fast_path() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = route_result(
         crate::AskMode::act_plain(),
         true,

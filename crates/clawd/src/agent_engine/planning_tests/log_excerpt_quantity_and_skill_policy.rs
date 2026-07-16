@@ -1217,8 +1217,7 @@ fn runtime_async_job_marker_skips_preferred_skill_repair() {
 
 #[test]
 fn explicit_literal_existing_run_cmd_is_marked_before_repair_checks() {
-    let mut state = test_state_with_registry();
-    state.policy.command_intent.execute_prefixes = vec!["执行命令 ".to_string()];
+    let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
     let mut route = route_result(crate::AskMode::act_plain(), true, OutputResponseShape::Free);
     route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableListing;
@@ -1259,8 +1258,7 @@ fn explicit_literal_existing_run_cmd_is_marked_before_repair_checks() {
 
 #[test]
 fn explicit_literal_scalar_route_marks_failure_repairable() {
-    let mut state = test_state_with_registry();
-    state.policy.command_intent.execute_prefixes = vec!["执行 ".to_string()];
+    let state = test_state_with_registry();
     let loop_state = LoopState::new(1);
     let mut route = route_result(
         crate::AskMode::act_plain(),

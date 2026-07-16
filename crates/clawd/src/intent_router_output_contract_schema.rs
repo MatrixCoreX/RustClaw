@@ -16,7 +16,6 @@ pub(super) fn apply_raw_output_explicit_locator_repair(
     output_contract: &mut IntentOutputContract,
     route_reason: &str,
     request: &str,
-    command_runtime: &crate::CommandIntentRuntime,
 ) -> Option<&'static str> {
     if !output_contract.requires_content_evidence
         || output_contract.delivery_required
@@ -24,8 +23,7 @@ pub(super) fn apply_raw_output_explicit_locator_repair(
             .has_machine_marker(OutputSemanticKind::RawCommandOutput.as_str())
         || output_contract.locator_kind != OutputLocatorKind::None
         || !output_contract.locator_hint.trim().is_empty()
-        || crate::agent_engine::explicit_command_segment_for_policy(command_runtime, request)
-            .is_some()
+        || crate::agent_engine::explicit_command_segment_for_policy(request).is_some()
     {
         return None;
     }

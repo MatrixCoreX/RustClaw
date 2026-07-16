@@ -4,9 +4,9 @@ use serde_json::Value;
 use crate::{utf8_safe_prefix, AppState};
 
 use super::{
-    classify_memory_safety_flag, effective_user_key, query_recent_memories_for_chat,
-    LLM_SHORT_TERM_MEMORY_PREFIX, MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_USER,
-    MEMORY_SAFETY_FLAG_INJECTION_LIKE, RETRIEVAL_SUCCESS_STATE_FAILED,
+    effective_user_key, query_recent_memories_for_chat, LLM_SHORT_TERM_MEMORY_PREFIX,
+    MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_USER, MEMORY_SAFETY_FLAG_INJECTION_LIKE,
+    RETRIEVAL_SUCCESS_STATE_FAILED,
 };
 
 fn strip_llm_reply_memory_prefix(text: &str) -> &str {
@@ -633,28 +633,13 @@ fn query_recent_terminal_ask_turns_for_chat(
 }
 
 fn format_last_turn_full_context(
-    state: &AppState,
     user_content: &str,
     assistant_content: &str,
     max_segment_chars: usize,
     max_total_chars: usize,
 ) -> String {
-    let user_safety = classify_memory_safety_flag(user_content, &state.policy.memory);
-    let assistant_safety = classify_memory_safety_flag(assistant_content, &state.policy.memory);
-    let user_text = if state.policy.memory.safety_filter_enabled
-        && user_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE
-    {
-        "[safety_signal content omitted]".to_string()
-    } else {
-        utf8_safe_prefix(user_content.trim(), max_segment_chars).to_string()
-    };
-    let assistant_text = if state.policy.memory.safety_filter_enabled
-        && assistant_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE
-    {
-        "[safety_signal content omitted]".to_string()
-    } else {
-        utf8_safe_prefix(assistant_content.trim(), max_segment_chars).to_string()
-    };
+    let user_text = utf8_safe_prefix(user_content.trim(), max_segment_chars).to_string();
+    let assistant_text = utf8_safe_prefix(assistant_content.trim(), max_segment_chars).to_string();
     let formatted = format!(
         "[LAST_TURN_FULL]\nUser: {}\nAssistant: {}\n[/LAST_TURN_FULL]",
         user_text, assistant_text
@@ -702,22 +687,8 @@ pub(crate) fn build_recent_turns_full_context(
     let mut out = String::from("### RECENT_TURNS_FULL\n");
     for (idx, (user_text, assistant_text)) in turns.iter().enumerate() {
         let relative = -((idx as i64) + 1);
-        let user_safety = classify_memory_safety_flag(user_text, &state.policy.memory);
-        let assistant_safety = classify_memory_safety_flag(assistant_text, &state.policy.memory);
-        let user_view = if state.policy.memory.safety_filter_enabled
-            && user_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE
-        {
-            "[safety_signal content omitted]".to_string()
-        } else {
-            utf8_safe_prefix(user_text.trim(), max_segment_chars).to_string()
-        };
-        let assistant_view = if state.policy.memory.safety_filter_enabled
-            && assistant_safety == MEMORY_SAFETY_FLAG_INJECTION_LIKE
-        {
-            "[safety_signal content omitted]".to_string()
-        } else {
-            utf8_safe_prefix(assistant_text.trim(), max_segment_chars).to_string()
-        };
+        let user_view = utf8_safe_prefix(user_text.trim(), max_segment_chars).to_string();
+        let assistant_view = utf8_safe_prefix(assistant_text.trim(), max_segment_chars).to_string();
         let turn_block = format!(
             "[TURN {}]\nUser: {}\nAssistant: {}\n[/TURN]\n",
             relative, user_view, assistant_view
@@ -751,7 +722,6 @@ pub(crate) fn build_last_turn_full_context(
         query_recent_terminal_ask_turn_for_chat(state, &db, user_id, chat_id, &user_key)
     {
         return format_last_turn_full_context(
-            state,
             &user_text,
             &assistant_text,
             max_segment_chars,
@@ -785,7 +755,6 @@ pub(crate) fn build_last_turn_full_context(
         None => return "<none>".to_string(),
     };
     format_last_turn_full_context(
-        state,
         &user_content,
         &assistant_content,
         max_segment_chars,

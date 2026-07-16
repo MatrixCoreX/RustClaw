@@ -1,4 +1,4 @@
-# Language-neutral command policy shared by all configured execute prefixes.
+# Language-neutral machine command tokens for explicit command surfaces.
 
 # Shell commands that can be treated as a complete command token before a
 # free-form instruction tail after a configured execute prefix.

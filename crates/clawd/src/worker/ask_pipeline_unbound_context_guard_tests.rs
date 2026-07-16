@@ -949,7 +949,6 @@ fn unbound_model_context_target_allows_inline_csv_transform_payload() {
 #[test]
 fn unbound_model_context_target_allows_configured_raw_command_without_locator() {
     let mut state = test_state_with_root(make_temp_root("unbound_model_context_raw_command"));
-    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = executable_filename_route();
     route.resolved_intent = "Get current working directory path".to_string();

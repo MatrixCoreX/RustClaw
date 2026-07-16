@@ -194,43 +194,31 @@ pub(crate) fn load_command_intent_runtime(
         cfg.default_locale.trim().to_string()
     };
     let rules_dir = workspace_root.join(cfg.rules_dir.trim());
-    let mut all_result_suffixes = Vec::new();
-    let mut execute_prefixes = Vec::new();
     let mut standalone_commands = Vec::new();
-    for locale in ["common", "zh-CN", "en-US"] {
-        let path = rules_dir.join(format!("{locale}.toml"));
-        match std::fs::read_to_string(&path) {
-            Ok(raw) => match toml::from_str::<CommandIntentRules>(&raw) {
-                Ok(rules) => {
-                    for value in rules.result_suffixes {
-                        push_unique_trimmed(&mut all_result_suffixes, value);
-                    }
-                    for value in rules.execute_prefixes {
-                        push_unique_trimmed(&mut execute_prefixes, value);
-                    }
-                    for value in rules.standalone_commands {
-                        push_unique_trimmed(&mut standalone_commands, value);
-                    }
+    let path = rules_dir.join("common.toml");
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => match toml::from_str::<CommandIntentRules>(&raw) {
+            Ok(rules) => {
+                for value in rules.standalone_commands {
+                    push_unique_trimmed(&mut standalone_commands, value);
                 }
-                Err(err) => {
-                    warn!(
-                        "load command intent rules failed: path={} err={err}",
-                        path.display()
-                    );
-                }
-            },
+            }
             Err(err) => {
                 warn!(
-                    "read command intent rules failed: path={} err={err}",
+                    "load command intent rules failed: path={} err={err}",
                     path.display()
                 );
             }
+        },
+        Err(err) => {
+            warn!(
+                "read command intent rules failed: path={} err={err}",
+                path.display()
+            );
         }
     }
 
     CommandIntentRuntime {
-        all_result_suffixes,
-        execute_prefixes,
         standalone_commands,
         default_locale,
         verify_enforce_enabled: cfg.verify_enforce_enabled,
@@ -387,13 +375,9 @@ pub(crate) fn trim_command_text(mut s: String) -> String {
     s
 }
 
-pub(crate) fn strip_result_suffixes(command: &str, _suffixes: &[String]) -> String {
-    trim_command_text(command.trim().to_string())
-}
-
 pub(crate) fn sanitize_command_before_execute(
-    runtime: &CommandIntentRuntime,
+    _runtime: &CommandIntentRuntime,
     command: &str,
 ) -> String {
-    strip_result_suffixes(command, &runtime.all_result_suffixes)
+    trim_command_text(command.trim().to_string())
 }

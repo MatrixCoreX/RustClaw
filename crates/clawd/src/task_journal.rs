@@ -479,6 +479,8 @@ pub(crate) struct TaskJournalTaskMetrics {
     /// 取自 [`crate::AppState::task_llm_by_prompt`]。
     /// 用于在 `task_journal_summary.task_metrics.by_prompt` 暴露细分维度。
     pub(crate) by_prompt: Option<std::collections::HashMap<String, crate::LlmPromptBucket>>,
+    /// Ordered machine metadata only; prompt and response text are excluded.
+    pub(crate) llm_call_sequence: Option<Vec<crate::LlmCallSequenceEntry>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -689,6 +691,17 @@ impl TaskJournal {
         self.task_metrics.by_prompt = Some(by_prompt);
     }
 
+    pub(crate) fn record_llm_call_sequence(&mut self, sequence: Vec<crate::LlmCallSequenceEntry>) {
+        self.task_metrics.llm_call_sequence = Some(sequence);
+    }
+
+    pub(crate) fn record_runtime_llm_metrics(&mut self, state: &crate::AppState, task_id: &str) {
+        self.record_llm_calls_per_task(state.task_llm_call_count(task_id));
+        self.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(task_id));
+        self.record_llm_by_prompt(state.task_llm_by_prompt(task_id));
+        self.record_llm_call_sequence(state.task_llm_call_sequence(task_id));
+    }
+
     pub(crate) fn record_task_lifecycle(&mut self, lifecycle: Value) {
         if lifecycle.is_object() {
             self.task_lifecycle = Some(lifecycle);
@@ -819,6 +832,9 @@ impl TaskJournal {
         }
         if self.task_metrics.by_prompt.is_none() {
             self.task_metrics.by_prompt = other.task_metrics.by_prompt.clone();
+        }
+        if self.task_metrics.llm_call_sequence.is_none() {
+            self.task_metrics.llm_call_sequence = other.task_metrics.llm_call_sequence.clone();
         }
         if self.task_lifecycle.is_none() {
             self.task_lifecycle = other.task_lifecycle.clone();

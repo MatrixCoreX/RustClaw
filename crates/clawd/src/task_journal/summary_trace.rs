@@ -801,7 +801,42 @@ pub(super) fn task_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
             .as_ref()
             .map(|map| map.values().map(|bucket| bucket.prompt_truncation_count).sum::<u64>())
             .unwrap_or(0),
+        "frontdoor_llm": frontdoor_llm_metrics_json(metrics),
         "by_prompt": by_prompt_value,
+    })
+}
+
+fn frontdoor_llm_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
+    let sequence = metrics.llm_call_sequence.as_deref().unwrap_or_default();
+    let first_call = sequence.iter().min_by_key(|entry| entry.call_index);
+    let first_planner_call_index = sequence
+        .iter()
+        .filter(|entry| entry.prompt_label == "plan")
+        .map(|entry| entry.call_index)
+        .min();
+    let pre_planner = sequence
+        .iter()
+        .filter(|entry| {
+            first_planner_call_index
+                .map(|planner_index| entry.call_index < planner_index)
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    let mut pre_planner_labels = pre_planner
+        .iter()
+        .map(|entry| entry.prompt_label.clone())
+        .collect::<Vec<_>>();
+    pre_planner_labels.dedup();
+    json!({
+        "first_call_index": first_call.map(|entry| entry.call_index),
+        "first_prompt_label": first_call.map(|entry| entry.prompt_label.as_str()),
+        "first_planner_call_index": first_planner_call_index,
+        "pre_planner_llm_calls": pre_planner.len(),
+        "pre_planner_prompt_bytes": pre_planner
+            .iter()
+            .map(|entry| entry.prompt_bytes as u64)
+            .sum::<u64>(),
+        "pre_planner_prompt_labels": pre_planner_labels,
     })
 }
 

@@ -10,12 +10,8 @@ pub(super) fn route_can_execute_without_locator(route_result: &crate::RouteResul
         || command_payload_agent_loop_marker_present(route_result)
 }
 
-pub(super) fn raw_command_output_has_explicit_command(state: &AppState, prompt: &str) -> bool {
-    crate::agent_engine::explicit_command_segment_for_policy(
-        &state.policy.command_intent,
-        prompt.trim(),
-    )
-    .is_some()
+pub(super) fn raw_command_output_has_explicit_command(_state: &AppState, prompt: &str) -> bool {
+    crate::agent_engine::explicit_command_segment_for_policy(prompt.trim()).is_some()
 }
 
 pub(super) fn command_observation_route_has_runtime_evidence(

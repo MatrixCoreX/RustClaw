@@ -1077,9 +1077,9 @@ async fn step4b2_6_self_check_extract_outcome_reads_journal_envelope_from_result
         .unwrap();
 
     // 同步 metrics 桶（extract 也读这两个）：
-    state.note_task_llm_call_with_label(task_id, "normalizer");
-    state.note_task_llm_call_with_label(task_id, "chat");
-    state.note_task_llm_call_with_label(task_id, "chat");
+    state.note_task_llm_call_with_label_and_prompt_size(task_id, "normalizer", 100);
+    state.note_task_llm_call_with_label_and_prompt_size(task_id, "chat", 200);
+    state.note_task_llm_call_with_label_and_prompt_size(task_id, "chat", 300);
 
     let outcome = super::extract_outcome_from_state(&state, task_id).expect("extract ok");
     assert_eq!(outcome.task_id, task_id);

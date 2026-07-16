@@ -368,7 +368,7 @@ pub(crate) fn insert_memory(
         return Ok(());
     }
 
-    let safety_flag = classify_memory_safety_flag(&trimmed, &state.policy.memory);
+    let safety_flag = MEMORY_SAFETY_FLAG_NORMAL.to_string();
     let is_instructional = false;
     let memory_type = infer_memory_type(role, is_instructional, &safety_flag, write_kind);
     let salience = estimate_memory_salience(&trimmed, is_instructional, &safety_flag, write_kind);
@@ -500,13 +500,17 @@ pub(crate) async fn maybe_extract_memory_intent_with_llm(
         &now_text,
         now_ts_i64,
     )?;
-    if stats.upserted_preferences > 0 || stats.deleted_preferences > 0 || stats.ignored_actions > 0
+    if stats.upserted_preferences > 0
+        || stats.deleted_preferences > 0
+        || stats.marked_safety_signals > 0
+        || stats.ignored_actions > 0
     {
         tracing::info!(
-            "memory intent applied task_id={} upserted_preferences={} deleted_preferences={} ignored_actions={}",
+            "memory intent applied task_id={} upserted_preferences={} deleted_preferences={} marked_safety_signals={} ignored_actions={}",
             task.task_id,
             stats.upserted_preferences,
             stats.deleted_preferences,
+            stats.marked_safety_signals,
             stats.ignored_actions
         );
     }
@@ -812,13 +816,6 @@ pub(crate) fn repeated_entries_ratio(entries: &[(i64, String, String, String)]) 
     (1.0 - unique / total).clamp(0.0, 1.0)
 }
 
-fn contains_any_marker(norm_text: &str, markers: &[String]) -> bool {
-    markers.iter().any(|m| {
-        let token = m.trim();
-        !token.is_empty() && norm_text.contains(&token.to_ascii_lowercase())
-    })
-}
-
 fn should_skip_memory_write(
     content: &str,
     _role: &str,
@@ -855,14 +852,6 @@ fn is_duplicate_recent_memory(
         )
         .optional()?;
     Ok(last.is_some_and(|v| v.trim() == content.trim()))
-}
-
-fn classify_memory_safety_flag(text: &str, cfg: &MemoryConfig) -> String {
-    let norm = text.to_ascii_lowercase();
-    if contains_any_marker(&norm, &cfg.rules.injection_markers) {
-        return MEMORY_SAFETY_FLAG_INJECTION_LIKE.to_string();
-    }
-    MEMORY_SAFETY_FLAG_NORMAL.to_string()
 }
 
 fn infer_memory_type(

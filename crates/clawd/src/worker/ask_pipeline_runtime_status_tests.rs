@@ -1027,11 +1027,9 @@ fn locatorless_command_output_summary_does_not_clarify() {
 
 #[test]
 fn locatorless_raw_command_with_path_structural_args_does_not_clarify() {
-    let mut state = test_state_with_root(make_temp_root("locatorless_observation_path_command"));
-    state.policy.command_intent.execute_prefixes = vec!["please run ".to_string()];
+    let state = test_state_with_root(make_temp_root("locatorless_observation_path_command"));
     if crate::agent_engine::explicit_command_segment_for_policy(
-        &state.policy.command_intent,
-        "please run uname -a and tell me the result",
+        "please run `uname -a` and tell me the result",
     )
     .as_deref()
         != Some("uname -a")

@@ -70,22 +70,17 @@ pub(super) fn explicit_command_request_present(
     route_result.is_some_and(|route| {
         (route.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep)
             || explicit_command_plan_needs_terminal_synthesis(Some(route)))
-            && execution_failed_step_literal_command_segments(runtime, request, None).len() >= 2
+            && execution_failed_step_literal_command_segments(request, None).len() >= 2
     })
 }
 
 pub(super) fn execution_failed_step_literal_command_segments(
-    runtime: &crate::CommandIntentRuntime,
     request: &str,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> Vec<String> {
     let quoted = shellish_literal_command_segments(request, true);
     if quoted.len() >= 2 {
         return apply_conditional_step_update_execution_window(quoted, turn_analysis);
-    }
-    let prefixed = prefixed_shellish_command_segments(runtime, request, true);
-    if prefixed.len() >= 2 {
-        return apply_conditional_step_update_execution_window(prefixed, turn_analysis);
     }
     apply_conditional_step_update_execution_window(quoted, turn_analysis)
 }

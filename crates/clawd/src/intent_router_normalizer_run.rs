@@ -328,7 +328,6 @@ pub(crate) async fn run_intent_normalizer(
             &mut output_contract,
             &out.reason,
             &surface_req,
-            &state.policy.command_intent,
         );
         if raw_output_explicit_locator_repair.is_some() {
             synced_route_label = route_trace_label_from_state(
@@ -379,7 +378,6 @@ pub(crate) async fn run_intent_normalizer(
                 command_payload_declared,
             );
         let explicit_command_execution_repair = apply_explicit_command_execution_contract_repair(
-            &state.policy.command_intent,
             req,
             &out.reason,
             &mut needs_clarify,
