@@ -149,21 +149,24 @@ async fn refresh_workspace_update_versions(
     if let Some(remote_commit) = remote_commit.clone() {
         guard.remote_commit = Some(remote_commit);
     }
-    if matches!(guard.status.as_str(), "idle" | "up_to_date" | "succeeded") {
-        match (local_commit.as_deref(), remote_commit.as_deref()) {
-            (Some(local), Some(remote)) if local == remote => {
-                guard.status = "up_to_date".to_string();
-                guard.step = "already_latest".to_string();
-                guard.error = None;
-                clear_workspace_update_next_step(&mut guard);
-            }
-            (Some(_), Some(_)) => {
-                guard.status = "idle".to_string();
-                guard.step = "idle".to_string();
-                clear_workspace_update_next_step(&mut guard);
-            }
-            _ => {}
+    match (local_commit.as_deref(), remote_commit.as_deref()) {
+        (Some(local), Some(remote)) if local == remote => {
+            guard.status = "up_to_date".to_string();
+            guard.step = "already_latest".to_string();
+            guard.exit_code = None;
+            guard.stdout_tail.clear();
+            guard.stderr_tail.clear();
+            guard.error = None;
+            clear_workspace_update_next_step(&mut guard);
         }
+        (Some(_), Some(_))
+            if matches!(guard.status.as_str(), "idle" | "up_to_date" | "succeeded") =>
+        {
+            guard.status = "idle".to_string();
+            guard.step = "idle".to_string();
+            clear_workspace_update_next_step(&mut guard);
+        }
+        _ => {}
     }
     if let Some(out) = fetch_output {
         if out.exit_code != Some(0) && guard.status == "idle" {

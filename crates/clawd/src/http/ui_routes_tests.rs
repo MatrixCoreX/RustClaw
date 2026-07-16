@@ -945,3 +945,54 @@ async fn workspace_update_conflict_detection_ignores_large_unrelated_file_lists(
 
     std::fs::remove_dir_all(root).expect("remove test repository");
 }
+
+#[tokio::test]
+async fn workspace_update_refresh_clears_resolved_failure_when_upstream_matches() {
+    let root = temp_workspace_root();
+    run_workspace_update_test_git(&root, &["init"]);
+    run_workspace_update_test_git(&root, &["config", "user.name", "RustClaw Test"]);
+    run_workspace_update_test_git(&root, &["config", "user.email", "test@rustclaw.local"]);
+
+    std::fs::write(root.join("tracked.txt"), "base\n").expect("write base file");
+    run_workspace_update_test_git(&root, &["add", "tracked.txt"]);
+    run_workspace_update_test_git(&root, &["commit", "-m", "base"]);
+    let branch = run_workspace_update_test_git(&root, &["branch", "--show-current"]);
+    run_workspace_update_test_git(&root, &["config", "remote.origin.url", "."]);
+    run_workspace_update_test_git(
+        &root,
+        &[
+            "config",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ],
+    );
+    let branch_remote_key = format!("branch.{branch}.remote");
+    let branch_merge_key = format!("branch.{branch}.merge");
+    let branch_merge_ref = format!("refs/heads/{branch}");
+    run_workspace_update_test_git(&root, &["config", &branch_remote_key, "origin"]);
+    run_workspace_update_test_git(&root, &["config", &branch_merge_key, &branch_merge_ref]);
+    run_workspace_update_test_git(&root, &["fetch", "--quiet"]);
+
+    let shared = Arc::new(Mutex::new(WorkspaceUpdateStatus {
+        status: "failed".to_string(),
+        step: "pulling_latest_code".to_string(),
+        exit_code: Some(1),
+        stdout_tail: "stale stdout".to_string(),
+        stderr_tail: "stale stderr".to_string(),
+        error: Some("git path list exceeds updater item limit".to_string()),
+        next_step_key: Some("workspace_update.pull_conflict_detection_failed".to_string()),
+        ..WorkspaceUpdateStatus::default()
+    }));
+
+    let status = refresh_workspace_update_versions(&root, shared).await;
+
+    assert_eq!(status.status, "up_to_date");
+    assert_eq!(status.step, "already_latest");
+    assert_eq!(status.exit_code, None);
+    assert!(status.stdout_tail.is_empty());
+    assert!(status.stderr_tail.is_empty());
+    assert_eq!(status.error, None);
+    assert_eq!(status.next_step_key, None);
+
+    std::fs::remove_dir_all(root).expect("remove test repository");
+}
