@@ -862,7 +862,9 @@ fn planner_introduced_simple_fs_run_cmd_sequence_rewrites_to_fs_basic_lifecycle(
         .collect::<Vec<_>>();
     let effective =
         crate::agent_engine::effective_filesystem_lifecycle_output_contract_for_plan_steps(
-            &state, &route, &steps,
+            &state,
+            &route.output_contract,
+            &steps,
         )
         .expect("scratch lifecycle should upgrade execution_failed_step contract");
     assert_eq!(

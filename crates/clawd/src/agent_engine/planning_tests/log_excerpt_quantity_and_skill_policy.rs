@@ -466,7 +466,9 @@ fn scratch_filesystem_lifecycle_plan_upgrades_effective_contract() {
 
     let effective =
         crate::agent_engine::effective_filesystem_lifecycle_output_contract_for_plan_steps(
-            &state, &route, &steps,
+            &state,
+            &route.output_contract,
+            &steps,
         )
         .expect("scratch lifecycle should upgrade effective contract");
 
@@ -532,7 +534,9 @@ fn generic_path_content_scratch_lifecycle_plan_upgrades_effective_contract() {
 
     let effective =
         crate::agent_engine::effective_filesystem_lifecycle_output_contract_for_plan_steps(
-            &state, &route, &steps,
+            &state,
+            &route.output_contract,
+            &steps,
         )
         .expect("generic scratch lifecycle should upgrade effective contract");
 
@@ -673,7 +677,7 @@ fn command_output_summary_keeps_scratch_cleanup_recovery_after_prior_write() {
         crate::agent_engine::effective_filesystem_cleanup_recovery_output_contract_for_plan_steps(
             &state,
             &loop_state,
-            &route,
+            &route.output_contract,
             &steps,
         )
         .expect("scratch cleanup recovery should upgrade effective contract");
@@ -765,7 +769,7 @@ fn command_output_summary_keeps_archive_pack_cleanup_recovery() {
         crate::agent_engine::effective_filesystem_cleanup_recovery_output_contract_for_plan_steps(
             &state,
             &loop_state,
-            &route,
+            &route.output_contract,
             &steps,
         )
         .expect("archive cleanup recovery should upgrade effective contract");

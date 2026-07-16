@@ -118,7 +118,7 @@ fn verifier_gate_needs_clarification(verify_result: &crate::verifier::VerifyResu
     verify_result.issues.iter().any(|issue| {
         matches!(
             issue.kind,
-            crate::verifier::VerifyIssueKind::RouteClarifyRequired
+            crate::verifier::VerifyIssueKind::BoundaryClarifyRequired
                 | crate::verifier::VerifyIssueKind::MissingRequiredArg
         )
     })
@@ -128,7 +128,7 @@ fn verifier_gate_missing_slots(verify_result: &crate::verifier::VerifyResult) ->
     let mut slots = Vec::new();
     for issue in &verify_result.issues {
         let slot = match issue.kind {
-            crate::verifier::VerifyIssueKind::RouteClarifyRequired => {
+            crate::verifier::VerifyIssueKind::BoundaryClarifyRequired => {
                 "execution_target_or_boundary"
             }
             crate::verifier::VerifyIssueKind::MissingRequiredArg => "required_execution_argument",
@@ -208,13 +208,12 @@ pub(super) async fn prepare_round_actions(
     let effective_route_result = effective_output_contract
         .clone()
         .map(crate::RouteResult::from_planner_output_contract);
-    let verify_route_result = effective_route_result.as_ref();
     let verify_mode = verify_mode_for_state(state);
     let verify_result = crate::verifier::verify_plan(
         state,
         task,
         crate::verifier::VerifyInput {
-            route_result: verify_route_result,
+            output_contract: effective_output_contract.as_ref(),
             request_text: Some(planner_user_text),
             context_bundle_summary: agent_run_context
                 .and_then(|ctx| ctx.context_bundle_summary.as_deref()),
@@ -245,7 +244,7 @@ pub(super) async fn prepare_round_actions(
         );
     }
     let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", user_text);
-    if let Some(route_result) = verify_route_result {
+    if let Some(route_result) = effective_route_result.as_ref() {
         journal.record_route_result(route_result);
     }
     journal.record_plan_result(&plan_result);

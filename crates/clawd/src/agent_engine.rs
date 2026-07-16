@@ -93,10 +93,11 @@ use self::execution_loop::execute_actions_once;
 pub(crate) use self::filesystem_lifecycle_contract::{
     effective_filesystem_cleanup_recovery_output_contract_for_plan_steps,
     effective_filesystem_lifecycle_output_contract_for_plan_steps,
-    enrich_scratch_filesystem_cleanup_runtime_args, route_can_upgrade_scratch_filesystem_lifecycle,
+    enrich_scratch_filesystem_cleanup_runtime_args,
+    output_contract_can_upgrade_scratch_filesystem_lifecycle,
     scratch_filesystem_cleanup_recovery_action_allowed,
     scratch_filesystem_lifecycle_action_allowed, scratch_filesystem_lifecycle_observed_steps_match,
-    scratch_filesystem_lifecycle_plan_actions_match, scratch_filesystem_lifecycle_plan_steps_match,
+    scratch_filesystem_lifecycle_plan_actions_match,
 };
 use self::loop_control::{run_agent_with_loop, run_agent_with_loop_seeded};
 use self::loop_state_contract_evidence::{

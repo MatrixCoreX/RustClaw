@@ -8,7 +8,7 @@ fn ops_recipe_rewrites_combined_run_cmd_into_apply_then_validate() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -70,7 +70,7 @@ fn ops_recipe_split_does_not_infer_success_marker_from_request_text() {
             &state,
             &task,
             VerifyInput {
-                route_result: Some(&route),
+                output_contract: Some(&route.output_contract),
                 request_text: Some(
                     "Start a static HTTP server in the background, then use curl to verify that the homepage contains ops-demo-ok; when validation passes, explicitly output VALIDATION_PASSED and finish immediately.",
                 ),
@@ -119,7 +119,7 @@ fn ops_recipe_does_not_infer_http_expect_contains_marker_from_route_text() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route),
+            output_contract: Some(&route.output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -162,7 +162,7 @@ fn ops_recipe_does_not_infer_http_expect_contains_marker_from_request_text() {
             &state,
             &task,
             VerifyInput {
-                route_result: Some(&route),
+                output_contract: Some(&route.output_contract),
                 request_text: Some(
                     "First verify whether the local static HTTP service serves a homepage containing ops-repair-ok. If verification fails, repair it and verify again until it passes.",
                 ),
@@ -220,7 +220,7 @@ fn ops_recipe_repair_round_plan_stays_valid_after_failed_http_preflight() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route),
+            output_contract: Some(&route.output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -276,7 +276,7 @@ fn ops_recipe_repair_round_plan_stays_valid_after_failed_http_preflight() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route),
+            output_contract: Some(&route.output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -356,7 +356,7 @@ fn ops_recipe_service_repair_round_plan_stays_valid_after_failed_status_prefligh
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route),
+            output_contract: Some(&route.output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![inspect_step.clone()]),
@@ -415,7 +415,7 @@ fn ops_recipe_service_repair_round_plan_stays_valid_after_failed_status_prefligh
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route),
+            output_contract: Some(&route.output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -461,7 +461,7 @@ fn ops_recipe_code_change_accepts_run_cmd_build_validation_after_mutation() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -521,7 +521,7 @@ fn ops_recipe_package_change_requires_validation_after_install() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -579,7 +579,7 @@ fn ops_recipe_database_change_accepts_schema_validation_after_execute() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -664,7 +664,7 @@ fn ops_recipe_repair_round_rewrites_combined_run_cmd_plan() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route),
+            output_contract: Some(&route.output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -728,7 +728,7 @@ fn ops_recipe_apply_phase_skips_leading_validation_before_mutation() {
             &state,
             &task,
             VerifyInput {
-                route_result: Some(&route),
+                output_contract: Some(&route.output_contract),
                 request_text: Some(
                     "先验证首页是否包含 ops-repair-ok，如果失败就修复 document/nl_ops_http_demo/index.html，然后再次验证直到通过。",
                 ),

@@ -8,7 +8,7 @@ fn current_repo_scope_rejects_external_target_plan() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: Some("修复当前仓库里的 clawd 入口逻辑，不要动仓库外项目。"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -48,7 +48,7 @@ fn external_workspace_scope_requires_explicit_external_target_plan() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: Some("去当前仓库外的另一个项目修问题。"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -89,7 +89,7 @@ fn greenfield_scope_requires_creation_plan() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: Some("从零做一个新脚本并验证。"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {
@@ -129,7 +129,7 @@ fn external_workspace_scope_accepts_explicit_external_path_plan() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: Some("去另一个目录修问题，并验证通过。"),
             context_bundle_summary: None,
             plan_result: &plan_result(vec![

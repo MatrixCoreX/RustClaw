@@ -28,7 +28,7 @@ fn archive_and_db_readonly_actions_are_confirmation_exempt_from_registry() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![
@@ -76,7 +76,7 @@ fn archive_and_db_mutating_actions_still_require_confirmation() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route_result(false)),
+            output_contract: Some(&route_result(false).output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {

@@ -14,7 +14,7 @@ fn agent_loop_execution_boundary_does_not_require_legacy_output_contract() {
         &state,
         &task,
         VerifyInput {
-            route_result: Some(&route),
+            output_contract: Some(&route.output_contract),
             request_text: None,
             context_bundle_summary: None,
             plan_result: &plan_result(vec![PlanStep {

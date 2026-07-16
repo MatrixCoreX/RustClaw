@@ -2,16 +2,17 @@ use serde_json::Value;
 use std::path::{Component, Path};
 
 use crate::pipeline_types::OutputContractRef;
-use crate::{AgentAction, AppState, IntentOutputContract, PlanStep, RouteResult};
+use crate::{AgentAction, AppState, IntentOutputContract, PlanStep};
 
 use super::LoopState;
 
-pub(crate) fn route_can_upgrade_scratch_filesystem_lifecycle(route: &RouteResult) -> bool {
-    !route.needs_clarify
-        && !route.output_contract.delivery_required
-        && route.output_contract.requires_content_evidence
+pub(crate) fn output_contract_can_upgrade_scratch_filesystem_lifecycle(
+    output_contract: &IntentOutputContract,
+) -> bool {
+    !output_contract.delivery_required
+        && output_contract.requires_content_evidence
         && matches!(
-            route.effective_output_contract_semantic_kind(),
+            output_contract.semantic_kind,
             crate::OutputSemanticKind::None
                 | crate::OutputSemanticKind::CommandOutputSummary
                 | crate::OutputSemanticKind::ExecutionFailedStep
@@ -20,15 +21,15 @@ pub(crate) fn route_can_upgrade_scratch_filesystem_lifecycle(route: &RouteResult
 
 pub(crate) fn effective_filesystem_lifecycle_output_contract_for_plan_steps(
     state: &AppState,
-    route: &RouteResult,
+    output_contract: &IntentOutputContract,
     steps: &[PlanStep],
 ) -> Option<IntentOutputContract> {
-    if !route_can_upgrade_scratch_filesystem_lifecycle(route)
+    if !output_contract_can_upgrade_scratch_filesystem_lifecycle(output_contract)
         || !scratch_filesystem_lifecycle_plan_steps_match(state, steps)
     {
         return None;
     }
-    let mut output_contract = route.output_contract.clone();
+    let mut output_contract = output_contract.clone();
     output_contract.apply_output_contract_ref(OutputContractRef::new(
         crate::OutputSemanticKind::FilesystemMutationResult,
     ));
@@ -39,15 +40,15 @@ pub(crate) fn effective_filesystem_lifecycle_output_contract_for_plan_steps(
 pub(crate) fn effective_filesystem_cleanup_recovery_output_contract_for_plan_steps(
     state: &AppState,
     loop_state: &LoopState,
-    route: &RouteResult,
+    output_contract: &IntentOutputContract,
     steps: &[PlanStep],
 ) -> Option<IntentOutputContract> {
-    if !route_can_upgrade_scratch_filesystem_lifecycle(route)
+    if !output_contract_can_upgrade_scratch_filesystem_lifecycle(output_contract)
         || !scratch_filesystem_cleanup_recovery_plan_steps_match(state, loop_state, steps)
     {
         return None;
     }
-    let mut output_contract = route.output_contract.clone();
+    let mut output_contract = output_contract.clone();
     output_contract.apply_output_contract_ref(OutputContractRef::new(
         crate::OutputSemanticKind::FilesystemMutationResult,
     ));
