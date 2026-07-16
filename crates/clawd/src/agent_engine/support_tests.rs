@@ -1101,7 +1101,7 @@ fn guard_policy_defaults_to_agent_loop_authority_when_config_missing() {
         policy.effective_answer_verifier_required_evidence_scope(),
         AnswerVerifierRequiredEvidenceScope::All
     );
-    assert!(policy.answer_verifier_required_evidence_enabled_for_route(None));
+    assert!(policy.answer_verifier_required_evidence_enabled());
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1128,18 +1128,18 @@ fn registry_idempotency_guard_switches_mutate_capability_to_action_fingerprint()
     };
 
     assert_ne!(
-        action_fingerprint_for_policy(&state, &policy, &left, None),
-        action_fingerprint_for_policy(&state, &policy, &right, None)
+        action_fingerprint_for_policy(&state, &policy, &left),
+        action_fingerprint_for_policy(&state, &policy, &right)
     );
 
     policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left, None),
+        action_fingerprint_for_policy(&state, &policy, &left),
         "skill:config_edit:action:apply_config_change"
     );
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left, None),
-        action_fingerprint_for_policy(&state, &policy, &right, None)
+        action_fingerprint_for_policy(&state, &policy, &left),
+        action_fingerprint_for_policy(&state, &policy, &right)
     );
 }
 
@@ -1158,12 +1158,12 @@ fn registry_idempotency_guard_keeps_observe_capability_args_fingerprint() {
     };
 
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left, None),
+        action_fingerprint_for_policy(&state, &policy, &left),
         action_fingerprint(&state, &left)
     );
     assert_ne!(
-        action_fingerprint_for_policy(&state, &policy, &left, None),
-        action_fingerprint_for_policy(&state, &policy, &right, None)
+        action_fingerprint_for_policy(&state, &policy, &left),
+        action_fingerprint_for_policy(&state, &policy, &right)
     );
 }
 
@@ -1182,12 +1182,12 @@ fn registry_idempotency_guard_keeps_validate_capability_args_fingerprint() {
     };
 
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left, None),
+        action_fingerprint_for_policy(&state, &policy, &left),
         action_fingerprint(&state, &left)
     );
     assert_ne!(
-        action_fingerprint_for_policy(&state, &policy, &left, None),
-        action_fingerprint_for_policy(&state, &policy, &right, None)
+        action_fingerprint_for_policy(&state, &policy, &left),
+        action_fingerprint_for_policy(&state, &policy, &right)
     );
 }
 
@@ -1206,19 +1206,18 @@ fn registry_idempotency_guard_keeps_direct_run_cmd_command_args_fingerprint() {
     };
 
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left, None),
+        action_fingerprint_for_policy(&state, &policy, &left),
         action_fingerprint(&state, &left)
     );
     assert_ne!(
-        action_fingerprint_for_policy(&state, &policy, &left, None),
-        action_fingerprint_for_policy(&state, &policy, &right, None)
+        action_fingerprint_for_policy(&state, &policy, &left),
+        action_fingerprint_for_policy(&state, &policy, &right)
     );
     assert!(super::registry_idempotency_guard_attribution(
         &state,
         &policy,
         &left,
-        None,
-        &action_fingerprint_for_policy(&state, &policy, &left, None),
+        &action_fingerprint_for_policy(&state, &policy, &left),
         "registry_idempotency_repeat_completed_action",
         Some(1),
         None,
@@ -1241,12 +1240,12 @@ fn registry_idempotency_guard_keeps_system_run_cmd_command_args_fingerprint() {
     };
 
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left, None),
+        action_fingerprint_for_policy(&state, &policy, &left),
         action_fingerprint(&state, &left)
     );
     assert_ne!(
-        action_fingerprint_for_policy(&state, &policy, &left, None),
-        action_fingerprint_for_policy(&state, &policy, &right, None)
+        action_fingerprint_for_policy(&state, &policy, &left),
+        action_fingerprint_for_policy(&state, &policy, &right)
     );
 }
 
@@ -1261,20 +1260,16 @@ fn registry_idempotency_guard_keeps_action_fingerprint_without_command_args() {
     };
 
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &action, None),
+        action_fingerprint_for_policy(&state, &policy, &action),
         "skill:system_basic:action:run_cmd"
     );
 }
 
 #[test]
-fn registry_idempotency_guard_keeps_literal_execution_failed_step_run_cmd_args_fingerprint() {
+fn registry_idempotency_guard_keeps_run_cmd_args_fingerprint() {
     let state = state_with_registry(registry_governance_fixture(), &["system_basic"]);
     let mut policy = base_policy();
     policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
-    let route = route_with_contract(
-        OutputSemanticKind::ExecutionFailedStep,
-        OutputLocatorKind::None,
-    );
     let left = crate::AgentAction::CallSkill {
         skill: "system_basic".to_string(),
         args: serde_json::json!({
@@ -1293,35 +1288,23 @@ fn registry_idempotency_guard_keeps_literal_execution_failed_step_run_cmd_args_f
     };
 
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left, Some(&route)),
+        action_fingerprint_for_policy(&state, &policy, &left),
         action_fingerprint(&state, &left)
     );
     assert_ne!(
-        action_fingerprint_for_policy(&state, &policy, &left, Some(&route)),
-        action_fingerprint_for_policy(&state, &policy, &right, Some(&route))
+        action_fingerprint_for_policy(&state, &policy, &left),
+        action_fingerprint_for_policy(&state, &policy, &right)
     );
     assert!(super::registry_idempotency_guard_attribution(
         &state,
         &policy,
         &left,
-        Some(&route),
-        &action_fingerprint_for_policy(&state, &policy, &left, Some(&route)),
+        &action_fingerprint_for_policy(&state, &policy, &left),
         "registry_idempotency_repeat_completed_action",
         Some(1),
         None,
     )
     .is_none());
-
-    let non_failed_step_route =
-        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::None);
-    assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left, Some(&non_failed_step_route)),
-        action_fingerprint(&state, &left)
-    );
-    assert_ne!(
-        action_fingerprint_for_policy(&state, &policy, &left, Some(&non_failed_step_route)),
-        action_fingerprint_for_policy(&state, &policy, &right, Some(&non_failed_step_route))
-    );
 }
 
 #[test]
@@ -1333,13 +1316,12 @@ fn registry_idempotency_guard_does_not_attribute_idempotent_read_repeats() {
         skill: "fs_basic".to_string(),
         args: serde_json::json!({"action": "list_dir", "path": "/tmp/a"}),
     };
-    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action, None);
+    let fingerprint = action_fingerprint_for_policy(&state, &policy, &action);
 
     assert!(super::registry_idempotency_guard_attribution(
         &state,
         &policy,
         &action,
-        None,
         &fingerprint,
         "registry_idempotency_repeat_completed_action",
         Some(1),
@@ -1404,7 +1386,7 @@ answer_verifier_enforce_required_scope = "selected_agent_loop"
     assert!(policy
         .enabled_rollout_switches()
         .contains(&"answer_verifier_enforce_required_scope"));
-    assert!(policy.answer_verifier_required_evidence_enabled_for_route(None));
+    assert!(policy.answer_verifier_required_evidence_enabled());
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1442,33 +1424,17 @@ answer_verifier_enforce_required_scope = "all"
 }
 
 #[test]
-fn answer_verifier_required_scope_final_all_does_not_depend_on_route_class() {
+fn answer_verifier_required_scope_final_all_is_enabled() {
     let mut policy = base_policy();
     policy.answer_verifier_enforce_required_scope = AnswerVerifierRequiredEvidenceScope::All;
-    let selected_route =
-        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
-    let mut blocked_route =
-        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
-    blocked_route.risk_ceiling = RiskCeiling::High;
-
-    assert!(policy.answer_verifier_required_evidence_enabled_for_route(Some(&selected_route)));
-    assert!(policy.answer_verifier_required_evidence_enabled_for_route(Some(&blocked_route)));
-    assert!(policy.answer_verifier_required_evidence_enabled_for_route(None));
+    assert!(policy.answer_verifier_required_evidence_enabled());
 }
 
 #[test]
-fn answer_verifier_required_scope_all_enables_all_routes() {
+fn answer_verifier_required_scope_all_token_is_enabled() {
     let mut policy = base_policy();
     policy.answer_verifier_enforce_required_scope = AnswerVerifierRequiredEvidenceScope::All;
-    let selected_route =
-        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
-    let mut high_risk_route =
-        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
-    high_risk_route.risk_ceiling = RiskCeiling::High;
-
-    assert!(policy.answer_verifier_required_evidence_enabled_for_route(Some(&selected_route)));
-    assert!(policy.answer_verifier_required_evidence_enabled_for_route(Some(&high_risk_route)));
-    assert!(policy.answer_verifier_required_evidence_enabled_for_route(None));
+    assert!(policy.answer_verifier_required_evidence_enabled());
 }
 
 #[test]
@@ -1496,7 +1462,7 @@ registry_idempotency_guard_scope = "selected_agent_loop"
     assert!(policy
         .enabled_rollout_switches()
         .contains(&"registry_idempotency_guard_scope"));
-    assert!(policy.registry_idempotency_guard_enabled_for_route(None));
+    assert!(policy.registry_idempotency_guard_enabled());
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1534,15 +1500,10 @@ registry_idempotency_guard_scope = "all"
 }
 
 #[test]
-fn registry_idempotency_guard_scope_final_all_does_not_depend_on_route_class() {
+fn registry_idempotency_guard_scope_final_all_is_enabled() {
     let state = state_with_registry(registry_governance_fixture(), &["config_edit"]);
     let mut policy = base_policy();
     policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
-    let selected_route =
-        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
-    let mut blocked_route =
-        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
-    blocked_route.risk_ceiling = RiskCeiling::High;
     let left = crate::AgentAction::CallSkill {
         skill: "config_edit".to_string(),
         args: serde_json::json!({
@@ -1560,35 +1521,26 @@ fn registry_idempotency_guard_scope_final_all_does_not_depend_on_route_class() {
         }),
     };
 
-    assert!(policy.registry_idempotency_guard_enabled_for_route(Some(&selected_route)));
-    assert!(policy.registry_idempotency_guard_enabled_for_route(Some(&blocked_route)));
+    assert!(policy.registry_idempotency_guard_enabled());
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left, Some(&selected_route)),
+        action_fingerprint_for_policy(&state, &policy, &left),
         "skill:config_edit:action:apply_config_change"
     );
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left, Some(&selected_route)),
-        action_fingerprint_for_policy(&state, &policy, &right, Some(&selected_route))
+        action_fingerprint_for_policy(&state, &policy, &left),
+        action_fingerprint_for_policy(&state, &policy, &right)
     );
     assert_eq!(
-        action_fingerprint_for_policy(&state, &policy, &left, Some(&blocked_route)),
-        action_fingerprint_for_policy(&state, &policy, &right, Some(&blocked_route))
+        action_fingerprint_for_policy(&state, &policy, &left),
+        action_fingerprint_for_policy(&state, &policy, &right)
     );
 }
 
 #[test]
-fn registry_idempotency_guard_scope_all_enables_all_routes() {
+fn registry_idempotency_guard_scope_all_token_is_enabled() {
     let mut policy = base_policy();
     policy.registry_idempotency_guard_scope = RegistryIdempotencyGuardScope::All;
-    let selected_route =
-        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
-    let mut high_risk_route =
-        route_with_contract(OutputSemanticKind::StructuredKeys, OutputLocatorKind::Path);
-    high_risk_route.risk_ceiling = RiskCeiling::High;
-
-    assert!(policy.registry_idempotency_guard_enabled_for_route(Some(&selected_route)));
-    assert!(policy.registry_idempotency_guard_enabled_for_route(Some(&high_risk_route)));
-    assert!(policy.registry_idempotency_guard_enabled_for_route(None));
+    assert!(policy.registry_idempotency_guard_enabled());
 }
 
 #[test]
@@ -1626,7 +1578,7 @@ image_edit_skills = ["legacy_image_edit"]
         policy.effective_registry_idempotency_guard_scope(),
         RegistryIdempotencyGuardScope::All
     );
-    assert!(policy.registry_idempotency_guard_enabled_for_route(None));
+    assert!(policy.registry_idempotency_guard_enabled());
 
     let _ = std::fs::remove_dir_all(root);
 }

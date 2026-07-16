@@ -110,12 +110,8 @@ pub(crate) use self::user_output_path::CLAWD_USER_NAMED_OUTPUT_PATH_ARG;
 
 use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
 
-pub(crate) fn answer_verifier_enforce_required_enabled_for_route(
-    state: &AppState,
-    route_result: Option<&crate::RouteResult>,
-) -> bool {
-    load_agent_loop_guard_policy(state)
-        .answer_verifier_required_evidence_enabled_for_route(route_result)
+pub(crate) fn answer_verifier_enforce_required_enabled(state: &AppState) -> bool {
+    load_agent_loop_guard_policy(state).answer_verifier_required_evidence_enabled()
 }
 
 const AGENT_TOOL_SPEC_PATH: &str = "prompts/agent_tool_spec.md";

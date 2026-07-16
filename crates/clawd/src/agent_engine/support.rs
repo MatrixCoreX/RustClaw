@@ -141,10 +141,7 @@ impl AgentLoopGuardPolicy {
         self.answer_verifier_enforce_required_scope
     }
 
-    pub(super) fn answer_verifier_required_evidence_enabled_for_route(
-        &self,
-        _route_result: Option<&crate::RouteResult>,
-    ) -> bool {
+    pub(super) fn answer_verifier_required_evidence_enabled(&self) -> bool {
         self.effective_answer_verifier_required_evidence_scope()
             .enabled()
     }
@@ -155,10 +152,7 @@ impl AgentLoopGuardPolicy {
         self.registry_idempotency_guard_scope
     }
 
-    pub(super) fn registry_idempotency_guard_enabled_for_route(
-        &self,
-        _route_result: Option<&crate::RouteResult>,
-    ) -> bool {
+    pub(super) fn registry_idempotency_guard_enabled(&self) -> bool {
         self.effective_registry_idempotency_guard_scope().enabled()
     }
 
@@ -1316,9 +1310,8 @@ pub(super) fn action_fingerprint_for_policy(
     state: &AppState,
     policy: &AgentLoopGuardPolicy,
     action: &AgentAction,
-    route_result: Option<&crate::RouteResult>,
 ) -> String {
-    if !policy.registry_idempotency_guard_enabled_for_route(route_result) {
+    if !policy.registry_idempotency_guard_enabled() {
         return action_fingerprint(state, action);
     }
     let Some((skill_name, args)) = action_skill_and_args(action) else {
@@ -1333,12 +1326,7 @@ pub(super) fn action_fingerprint_for_policy(
     };
     let dedup_scope = registry.resolved_dedup_scope(&normalized_skill, action_token.as_deref());
     if dedup_scope == claw_core::skill_registry::RegistryDedupScope::Action {
-        if literal_execution_failed_step_run_cmd_uses_args_fingerprint(
-            &normalized_skill,
-            action_token.as_deref(),
-            args,
-            route_result,
-        ) || run_command_action_uses_args_fingerprint(
+        if run_command_action_uses_args_fingerprint(
             &normalized_skill,
             action_token.as_deref(),
             args,
@@ -1358,13 +1346,12 @@ pub(super) fn registry_idempotency_guard_attribution(
     state: &AppState,
     policy: &AgentLoopGuardPolicy,
     action: &AgentAction,
-    route_result: Option<&crate::RouteResult>,
     fingerprint: &str,
     reason_code: &str,
     repeat_count: Option<usize>,
     limit: Option<usize>,
 ) -> Option<crate::task_journal::TaskJournalRolloutAttribution> {
-    if !policy.registry_idempotency_guard_enabled_for_route(route_result) {
+    if !policy.registry_idempotency_guard_enabled() {
         return None;
     }
     let (skill_name, args) = action_skill_and_args(action)?;
@@ -1378,16 +1365,7 @@ pub(super) fn registry_idempotency_guard_attribution(
     if !once_per_task && dedup_scope != claw_core::skill_registry::RegistryDedupScope::Action {
         return None;
     }
-    if literal_execution_failed_step_run_cmd_uses_args_fingerprint(
-        &normalized_skill,
-        action_token.as_deref(),
-        args,
-        route_result,
-    ) || run_command_action_uses_args_fingerprint(
-        &normalized_skill,
-        action_token.as_deref(),
-        args,
-    ) {
+    if run_command_action_uses_args_fingerprint(&normalized_skill, action_token.as_deref(), args) {
         return None;
     }
     Some(
@@ -1429,29 +1407,6 @@ fn registry_action_token_from_args(args: &Value) -> Option<String> {
                 .collect::<String>()
         })
         .filter(|value| !value.is_empty())
-}
-
-fn literal_execution_failed_step_run_cmd_uses_args_fingerprint(
-    normalized_skill: &str,
-    action_token: Option<&str>,
-    args: &Value,
-    route_result: Option<&crate::RouteResult>,
-) -> bool {
-    let is_run_command_action = normalized_skill == "run_cmd"
-        || (normalized_skill == "system_basic" && action_token == Some("run_cmd"));
-    if !is_run_command_action {
-        return false;
-    }
-    if args
-        .get(super::CLAWD_LITERAL_COMMAND_ARG)
-        .and_then(Value::as_bool)
-        != Some(true)
-    {
-        return false;
-    }
-    route_result.is_some_and(|route| {
-        route.output_contract_marker_is(crate::OutputSemanticKind::ExecutionFailedStep)
-    })
 }
 
 fn run_command_action_uses_args_fingerprint(
