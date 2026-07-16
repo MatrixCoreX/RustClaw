@@ -153,7 +153,7 @@ pub(super) fn mark_reply_failed_after_answer_verifier_exhausted(
 }
 
 pub(super) fn try_accept_language_only_output_format_answer_verifier_gap(
-    route_result: Option<&RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) -> bool {
     let Some(route) = route_result else {
@@ -161,7 +161,6 @@ pub(super) fn try_accept_language_only_output_format_answer_verifier_gap(
     };
     if route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
-        || route.wants_file_delivery
         || !route.output_contract_is_unclassified()
         || route.output_contract.locator_kind != crate::OutputLocatorKind::None
         || !matches!(

@@ -21,7 +21,7 @@ struct HealthGatewayInstance {
 }
 
 pub(in crate::agent_engine::loop_control) fn try_recover_http_health_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) -> bool {
     let Some(route) = route_result else {
@@ -79,19 +79,11 @@ pub(in crate::agent_engine::loop_control) fn try_recover_http_health_answer_veri
     true
 }
 
-fn route_requests_http_health_recovery(route: &crate::RouteResult) -> bool {
+fn route_requests_http_health_recovery(route: &crate::answer_verifier::AnswerContract) -> bool {
     route.output_contract_marker_is_any(&[
         crate::OutputSemanticKind::CommandOutputSummary,
         crate::OutputSemanticKind::ServiceStatus,
-    ]) || (crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["browser", "http"],
-        &["open", "get", "read", "extract"],
-    ) && !crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["browser", "web"],
-        &["search"],
-    ))
+    ])
 }
 
 fn observed_http_health_finding(reply: &AskReply) -> Option<HttpHealthFinding> {

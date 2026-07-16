@@ -12,7 +12,7 @@ struct FilesystemMutationSuccessFinding {
 }
 
 pub(super) fn try_recover_filesystem_mutation_success_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) -> bool {
     let Some(route) = route_result else {

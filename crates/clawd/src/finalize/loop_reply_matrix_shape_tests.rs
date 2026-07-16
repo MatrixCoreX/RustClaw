@@ -532,14 +532,13 @@ fn matrix_file_paths_inventory_uses_paths_and_applies_selector_limit() {
 }
 
 #[test]
-fn matrix_path_list_inventory_uses_capability_shape_without_semantic_kind() {
+fn matrix_path_list_inventory_uses_planner_semantic_kind() {
     let state = test_state();
     let task = claimed_task("task-fs-path-list-inventory-capability-shape");
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
     route
         .output_contract
         .self_extension
@@ -581,14 +580,13 @@ fn matrix_path_list_inventory_uses_capability_shape_without_semantic_kind() {
 }
 
 #[test]
-fn matrix_filesystem_find_entries_capability_ref_builds_path_list_without_semantic_kind() {
+fn matrix_filesystem_find_entries_contract_builds_path_list() {
     let state = test_state();
     let task = claimed_task("task-fs-find-capability-ref-path-list");
     let mut route = free_route_result();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         ..Default::default()
@@ -859,14 +857,13 @@ fn created_archive_path_capability_requires_observed_projection_without_semantic
 }
 
 #[test]
-fn key_list_capability_shape_builds_observed_list_without_semantic_kind() {
+fn structured_keys_contract_builds_observed_list() {
     let state = test_state();
     let task = claimed_task("task-config-key-list-capability-shape");
     let mut route = free_route_result();
-    route.route_reason = "capability_ref=config.list_keys".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         ..Default::default()
@@ -1446,7 +1443,7 @@ fn matrix_shape_guard_replaces_unstructured_table_with_markdown_table() {
 }
 
 #[test]
-fn matrix_shape_guard_uses_database_capability_ref_without_semantic_kind() {
+fn matrix_shape_guard_uses_sqlite_table_listing_contract() {
     let state = test_state();
     let task = claimed_task("task-matrix-shape-guard-table-capability-ref");
     let mut route = free_route_result();
@@ -1454,8 +1451,7 @@ fn matrix_shape_guard_uses_database_capability_ref_without_semantic_kind() {
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "data/app.sqlite".to_string();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.route_reason = "capability_ref=database.list_tables".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
     let ctx = crate::agent_engine::AgentRunContext {
         route_result: Some(route),
         ..Default::default()

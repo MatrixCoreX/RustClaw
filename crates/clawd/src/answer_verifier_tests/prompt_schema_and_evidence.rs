@@ -97,13 +97,14 @@ fn backend_identity_metadata_guard_rejects_provider_identity_leak() {
 }
 
 #[test]
-fn backend_identity_metadata_guard_requires_route_marker() {
+fn backend_identity_metadata_guard_is_route_independent() {
     let state = state_with_mimo_provider();
     let route = route_with_mode();
 
-    assert!(
-        backend_identity_metadata_answer_verifier_guard(&state, &route, "MiMo-v2.5-pro",).is_none()
-    );
+    let guard = backend_identity_metadata_answer_verifier_guard(&state, &route, "MiMo-v2.5-pro")
+        .expect("provider identity must be handled for every answer contract");
+    assert!(!guard.pass);
+    assert_eq!(guard.missing_evidence_fields, vec!["identity"]);
 }
 
 #[test]

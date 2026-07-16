@@ -28,10 +28,21 @@ pub(crate) async fn verify_answer_observe_only(
     state: &AppState,
     task: &ClaimedTask,
     user_request: &str,
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> Option<AnswerVerifierOut> {
+    if let Some(identity_guard) =
+        backend_identity_metadata_answer_verifier_guard(state, route_result, candidate_answer)
+    {
+        tracing::info!(
+            task_id = %task.task_id,
+            pass = identity_guard.pass,
+            answer_incomplete_reason = %identity_guard.answer_incomplete_reason,
+            "answer_verifier_backend_identity_metadata_guard"
+        );
+        return Some(identity_guard);
+    }
     if !should_verify_answer(route_result, journal, candidate_answer) {
         return None;
     }
@@ -58,17 +69,6 @@ pub(crate) async fn verify_answer_observe_only(
             "answer_verifier_local_compound_listing_gap"
         );
         return Some(local_gap);
-    }
-    if let Some(identity_guard) =
-        backend_identity_metadata_answer_verifier_guard(state, route_result, candidate_answer)
-    {
-        tracing::info!(
-            task_id = %task.task_id,
-            pass = identity_guard.pass,
-            answer_incomplete_reason = %identity_guard.answer_incomplete_reason,
-            "answer_verifier_backend_identity_metadata_guard"
-        );
-        return Some(identity_guard);
     }
     if structural_satisfaction_can_skip_verifier(route_result, journal, candidate_answer) {
         tracing::info!(
@@ -217,12 +217,9 @@ pub(super) fn answer_verifier_user_request_for_prompt(
 
 pub(super) fn backend_identity_metadata_answer_verifier_guard(
     state: &AppState,
-    route_result: &RouteResult,
+    _route_result: &AnswerContract,
     candidate_answer: &str,
 ) -> Option<AnswerVerifierOut> {
-    if !route_reason_has_backend_identity_metadata_marker(route_result) {
-        return None;
-    }
     if candidate_answer_mentions_backend_identity_metadata(state, candidate_answer) {
         return Some(AnswerVerifierOut {
             pass: false,
@@ -244,12 +241,6 @@ pub(super) fn backend_identity_metadata_answer_verifier_guard(
         });
     }
     None
-}
-
-fn route_reason_has_backend_identity_metadata_marker(route_result: &RouteResult) -> bool {
-    route_result
-        .route_reason
-        .contains("agent_display_name_hint_backend_metadata_removed")
 }
 
 fn candidate_answer_mentions_backend_identity_metadata(
@@ -294,7 +285,7 @@ fn normalize_identity_metadata_token(value: &str) -> String {
 }
 
 pub(super) fn structural_satisfaction_can_skip_verifier(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -328,20 +319,22 @@ pub(super) fn structural_satisfaction_can_skip_verifier(
 }
 
 pub(super) fn workspace_project_summary_requires_model_verifier(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
 ) -> bool {
     if !route_result.output_contract_marker_is(crate::OutputSemanticKind::WorkspaceProjectSummary) {
         return false;
     }
-    crate::evidence_policy::final_answer_shape_for_route(route_result)
+    crate::evidence_policy::final_answer_shape_for_output_contract(&route_result.output_contract)
         .is_some_and(|shape| shape.allows_model_language())
 }
 
 pub(super) fn finalizer_summary_can_skip_answer_verifier(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route_result) else {
+    let Some(shape) = crate::evidence_policy::final_answer_shape_for_output_contract(
+        &route_result.output_contract,
+    ) else {
         return false;
     };
     if shape.allows_model_language() {
@@ -358,7 +351,7 @@ pub(super) fn finalizer_summary_can_skip_answer_verifier(
 }
 
 pub(super) fn finalizer_missing_target_can_skip_missing_evidence_gap(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     finalizer_summary_can_skip_answer_verifier(route_result, journal)
@@ -366,7 +359,7 @@ pub(super) fn finalizer_missing_target_can_skip_missing_evidence_gap(
 }
 
 pub(super) fn finalizer_account_access_error_can_skip_missing_evidence_gap(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     if !route_result.output_contract.requires_content_evidence {
@@ -384,7 +377,7 @@ pub(super) fn finalizer_account_access_error_can_skip_missing_evidence_gap(
 }
 
 pub(super) fn finalizer_terminal_blocker_can_skip_answer_verifier(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     if !route_result.output_contract.requires_content_evidence {
@@ -488,11 +481,13 @@ pub(super) fn latest_non_control_step_is_crypto_account_access_error(
 }
 
 pub(crate) fn local_missing_evidence_verifier_gap(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<AnswerVerifierOut> {
     let required_evidence_fields =
-        crate::evidence_policy::required_evidence_fields_for_route(route_result);
+        crate::evidence_policy::required_evidence_fields_for_output_contract(
+            &route_result.output_contract,
+        );
     if required_evidence_fields.is_empty() {
         return None;
     }
@@ -532,7 +527,7 @@ fn answer_verifier_blocking_missing_evidence(missing_evidence: Vec<String>) -> V
 }
 
 pub(super) fn local_missing_evidence_verifier_gap_for_answer(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> Option<AnswerVerifierOut> {
@@ -574,7 +569,7 @@ pub(super) fn local_missing_evidence_verifier_gap_for_answer(
 }
 
 fn non_path_status_observation_can_skip_path_content_gap(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     gap: &AnswerVerifierOut,
 ) -> bool {
@@ -661,7 +656,7 @@ fn status_observation_value(value: &serde_json::Value) -> bool {
 }
 
 fn config_guard_machine_payload_can_skip_answer_verifier(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -717,13 +712,10 @@ fn finalizer_grounded_machine_payload_can_skip_verifier(
 }
 
 pub(super) fn structured_machine_projection_can_skip_answer_verifier(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    if route_result.needs_clarify {
-        return false;
-    }
     if journal_grounded_local_code_strict_json_projection_can_skip_answer_verifier(
         route_result,
         journal,
@@ -752,7 +744,7 @@ pub(crate) fn post_write_content_evidence_missing_before_verifier(
 }
 
 fn journal_grounded_local_code_strict_json_projection_can_skip_answer_verifier(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -1222,7 +1214,7 @@ fn machine_projection_value_is_structured(value: &str) -> bool {
 }
 
 pub(super) fn missing_target_answer_is_grounded_in_latest_error(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
     gap: &AnswerVerifierOut,
@@ -1258,7 +1250,7 @@ fn missing_gap_allows_negative_path_evidence(gap: &AnswerVerifierOut) -> bool {
 }
 
 fn confirmed_missing_file_delivery_can_skip_answer_verifier(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {

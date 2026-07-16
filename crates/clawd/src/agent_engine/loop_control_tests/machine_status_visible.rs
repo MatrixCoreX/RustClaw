@@ -1,4 +1,4 @@
-use super::{machine_status_visible_output_format_gap, route_result};
+use super::{answer_contract, machine_status_visible_output_format_gap, route_result};
 use crate::{OutputLocatorKind, OutputResponseShape, OutputSemanticKind};
 use serde_json::json;
 
@@ -30,8 +30,9 @@ fn service_status_machine_token_visible_answer_records_output_format_gap() {
             .to_string(),
         ));
 
-    let verifier = machine_status_visible_output_format_gap(&route, &journal, "not_running")
-        .expect("visible machine status token should be an output-format gap");
+    let verifier =
+        machine_status_visible_output_format_gap(&answer_contract(&route), &journal, "not_running")
+            .expect("visible machine status token should be an output-format gap");
 
     assert_eq!(verifier.missing_evidence_fields, vec!["output_format"]);
     assert_eq!(
@@ -64,5 +65,10 @@ fn scalar_service_status_contract_keeps_exact_machine_token_answer() {
             .to_string(),
         ));
 
-    assert!(machine_status_visible_output_format_gap(&route, &journal, "not_running").is_none());
+    assert!(machine_status_visible_output_format_gap(
+        &answer_contract(&route),
+        &journal,
+        "not_running"
+    )
+    .is_none());
 }

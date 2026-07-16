@@ -3,7 +3,7 @@ use super::super::loop_control_post_write_evidence_guard::{
     post_write_content_evidence_readback_actions,
 };
 use super::{
-    answer_verifier_gap_requests_observed_content_rewrite,
+    answer_contract, answer_verifier_gap_requests_observed_content_rewrite,
     answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_summary,
     commit_answer_verifier_retry_answer, commit_local_code_strict_json_projection_after_readback,
     ok_step, post_write_content_evidence_readback_recovery_policy,
@@ -555,7 +555,7 @@ fn publishable_strict_json_projection_replaces_stale_verifier_candidate() {
     assert!(
         promote_publishable_strict_json_projection_for_verifier_candidate(
             &mut reply,
-            Some(&route),
+            Some(&answer_contract(&route)),
             &loop_state,
         )
     );
@@ -777,7 +777,7 @@ fn post_write_guard_detects_run_cmd_shell_redirection_code_write_without_inline_
     let route = route_result(OutputResponseShape::Free);
     assert!(!suppress_answer_verifier_retry_if_structurally_satisfied(
         &mut reply,
-        Some(&route)
+        Some(&answer_contract(&route))
     ));
     assert!(reply
         .task_journal
@@ -1090,9 +1090,12 @@ fn answer_verifier_retry_summary_skips_file_delivery_candidate_disambiguation() 
     });
     let mut reply = AskReply::non_llm("multiple candidates".to_string()).with_task_journal(journal);
 
-    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_none());
+    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_none());
     assert!(
-        suppress_answer_verifier_retry_if_user_locator_disambiguation(&mut reply, Some(&route))
+        suppress_answer_verifier_retry_if_user_locator_disambiguation(
+            &mut reply,
+            Some(&answer_contract(&route))
+        )
     );
     assert!(reply
         .task_journal
@@ -1126,9 +1129,12 @@ fn answer_verifier_retry_summary_skips_confirmed_missing_file_delivery() {
     )
     .with_task_journal(journal);
 
-    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_none());
+    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_none());
     assert!(
-        suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(&mut reply, Some(&route))
+        suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(
+            &mut reply,
+            Some(&answer_contract(&route))
+        )
     );
     assert!(reply
         .task_journal
@@ -1164,9 +1170,12 @@ fn confirmed_missing_file_delivery_suppresses_retry_without_legacy_delivery_inte
     let mut reply = AskReply::non_llm("definitely_missing_named_file_golden_001.txt".to_string())
         .with_task_journal(journal);
 
-    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_none());
+    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_none());
     assert!(
-        suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(&mut reply, Some(&route))
+        suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(
+            &mut reply,
+            Some(&answer_contract(&route))
+        )
     );
     assert!(reply
         .task_journal
@@ -1201,11 +1210,11 @@ fn confirmed_missing_file_delivery_does_not_suppress_success_token_claim() {
     let mut reply = AskReply::non_llm("FILE:/tmp/definitely_missing_named_file.txt".to_string())
         .with_task_journal(journal);
 
-    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_some());
+    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_some());
     assert!(
         !suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(
             &mut reply,
-            Some(&route)
+            Some(&answer_contract(&route))
         )
     );
 }
@@ -1265,9 +1274,9 @@ fn quantity_comparison_structural_answer_suppresses_false_verifier_retry() {
 
     assert!(suppress_answer_verifier_retry_if_structurally_satisfied(
         &mut reply,
-        Some(&route)
+        Some(&answer_contract(&route))
     ));
-    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_none());
+    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_none());
     assert!(reply
         .task_journal
         .as_ref()
@@ -1318,9 +1327,9 @@ fn quantity_comparison_suppression_reads_total_size_bytes() {
 
     assert!(suppress_answer_verifier_retry_if_structurally_satisfied(
         &mut reply,
-        Some(&route)
+        Some(&answer_contract(&route))
     ));
-    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_none());
+    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_none());
 }
 
 #[test]
@@ -1356,9 +1365,9 @@ fn terminal_model_answer_suppresses_output_format_only_verifier_retry() {
 
     assert!(suppress_answer_verifier_retry_if_structurally_satisfied(
         &mut reply,
-        Some(&route)
+        Some(&answer_contract(&route))
     ));
-    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_none());
+    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_none());
 }
 
 #[test]
@@ -1395,9 +1404,9 @@ fn raw_observation_output_format_gap_does_not_suppress_structural_retry() {
 
     assert!(!suppress_answer_verifier_retry_if_structurally_satisfied(
         &mut reply,
-        Some(&route)
+        Some(&answer_contract(&route))
     ));
-    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_some());
+    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_some());
 }
 
 #[test]
@@ -1428,9 +1437,9 @@ fn terminal_model_answer_does_not_suppress_non_format_evidence_gap() {
 
     assert!(!suppress_answer_verifier_retry_if_structurally_satisfied(
         &mut reply,
-        Some(&route)
+        Some(&answer_contract(&route))
     ));
-    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_some());
+    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_some());
 }
 
 #[test]
@@ -1465,7 +1474,7 @@ fn terminal_model_answer_replaces_raw_observation_before_verifier() {
 
     assert!(prefer_terminal_model_answer_for_verifier_candidate(
         &mut reply,
-        Some(&route)
+        Some(&answer_contract(&route))
     ));
     assert_eq!(reply.text, answer);
 }
@@ -1506,7 +1515,7 @@ fn terminal_model_answer_does_not_replace_richer_machine_projection_with_observe
 
     assert!(!prefer_terminal_model_answer_for_verifier_candidate(
         &mut reply,
-        Some(&route)
+        Some(&answer_contract(&route))
     ));
     assert_eq!(reply.text, observed_projection);
 }
@@ -1553,7 +1562,7 @@ fn terminal_model_answer_does_not_replace_single_machine_projection_with_observe
 
     assert!(!prefer_terminal_model_answer_for_verifier_candidate(
         &mut reply,
-        Some(&route)
+        Some(&answer_contract(&route))
     ));
     assert_eq!(reply.text, observed_projection);
 }
@@ -1612,9 +1621,9 @@ fn permission_denied_content_access_suppresses_missing_evidence_retry() {
 
     assert!(suppress_answer_verifier_retry_if_structurally_satisfied(
         &mut reply,
-        Some(&route)
+        Some(&answer_contract(&route))
     ));
-    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_none());
+    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_none());
     assert!(!reply.should_fail_task);
 }
 
@@ -1677,9 +1686,9 @@ fn file_token_delivery_suppresses_list_count_verifier_retry_when_grounded() {
 
     assert!(suppress_answer_verifier_retry_if_structurally_satisfied(
         &mut reply,
-        Some(&route)
+        Some(&answer_contract(&route))
     ));
-    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_none());
+    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_none());
 
     let _ = std::fs::remove_file(&file);
     let _ = std::fs::remove_dir_all(&root);
@@ -1739,9 +1748,9 @@ fn file_token_delivery_does_not_suppress_when_token_is_not_grounded() {
 
     assert!(!suppress_answer_verifier_retry_if_structurally_satisfied(
         &mut reply,
-        Some(&route)
+        Some(&answer_contract(&route))
     ));
-    assert!(answer_verifier_retry_summary(&reply, Some(&route)).is_some());
+    assert!(answer_verifier_retry_summary(&reply, Some(&answer_contract(&route))).is_some());
 
     let _ = std::fs::remove_file(&observed);
     let _ = std::fs::remove_file(&ungrounded);

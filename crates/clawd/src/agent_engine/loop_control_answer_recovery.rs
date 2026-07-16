@@ -25,7 +25,7 @@ use terminal_format::terminal_model_output_format_gap_satisfies_contract;
 
 pub(super) fn answer_verifier_retry_summary<'a>(
     reply: &'a AskReply,
-    route_result: Option<&RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
 ) -> Option<&'a crate::task_journal::TaskJournalAnswerVerifierSummary> {
     if reply_final_status_is_clarify(reply) {
         return None;
@@ -76,7 +76,7 @@ fn reply_failure_is_recoverable_answer_verifier_gap(
 
 pub(super) fn suppress_answer_verifier_retry_if_structurally_satisfied(
     reply: &mut AskReply,
-    route_result: Option<&RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
 ) -> bool {
     if !answer_verifier_gap_is_structurally_satisfied(reply, route_result) {
         return false;
@@ -100,7 +100,7 @@ pub(super) fn suppress_answer_verifier_retry_if_structurally_satisfied(
 
 pub(super) fn suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(
     reply: &mut AskReply,
-    route_result: Option<&RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
 ) -> bool {
     let Some(summary) = reply
         .task_journal
@@ -126,7 +126,7 @@ pub(super) fn suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(
 
 pub(super) fn suppress_answer_verifier_retry_if_user_locator_disambiguation(
     reply: &mut AskReply,
-    route_result: Option<&RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
 ) -> bool {
     let Some(summary) = reply
         .task_journal
@@ -164,7 +164,7 @@ fn mark_answer_verifier_recovery_success(
 
 fn answer_verifier_gap_requires_user_locator_disambiguation(
     reply: &AskReply,
-    route_result: Option<&RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     summary: &crate::task_journal::TaskJournalAnswerVerifierSummary,
 ) -> bool {
     if !summary.high_confidence_retry_gap() {
@@ -195,7 +195,7 @@ fn answer_verifier_gap_requires_user_locator_disambiguation(
 
 fn answer_verifier_gap_has_confirmed_missing_file_delivery(
     reply: &AskReply,
-    route_result: Option<&RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     summary: &crate::task_journal::TaskJournalAnswerVerifierSummary,
 ) -> bool {
     if !summary.high_confidence_retry_gap() {
@@ -311,7 +311,7 @@ fn step_has_non_unique_file_search_candidates(
 
 pub(super) fn answer_verifier_gap_is_structurally_satisfied(
     reply: &AskReply,
-    route_result: Option<&RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
 ) -> bool {
     let Some(summary) = reply
         .task_journal
@@ -353,8 +353,14 @@ pub(super) fn answer_verifier_gap_is_structurally_satisfied(
         reply.task_journal.as_ref(),
         final_user_answer_candidate(reply),
     ) {
+        let answer_contract = crate::answer_verifier::AnswerContract::new(
+            &route.request_text,
+            route.output_contract.clone(),
+        );
         return crate::answer_verifier::structurally_satisfies_answer_contract(
-            route, journal, answer,
+            &answer_contract,
+            journal,
+            answer,
         );
     }
     false
@@ -362,7 +368,7 @@ pub(super) fn answer_verifier_gap_is_structurally_satisfied(
 
 pub(super) fn terminal_content_access_blocker_reply_satisfies_contract(
     reply: &AskReply,
-    route: &RouteResult,
+    route: &crate::answer_verifier::AnswerContract,
 ) -> bool {
     if !route.output_contract.requires_content_evidence {
         return false;
@@ -584,7 +590,7 @@ pub(super) fn try_recover_log_analyze_answer_verifier_gap(
 }
 
 pub(super) fn try_recover_structured_count_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     user_text: &str,
     reply: &mut AskReply,
 ) -> bool {
@@ -614,7 +620,7 @@ pub(super) fn try_recover_structured_count_answer_verifier_gap(
 }
 
 pub(super) fn try_recover_structured_search_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     user_text: &str,
     reply: &mut AskReply,
 ) -> bool {
@@ -665,16 +671,7 @@ pub(super) fn try_recover_structured_search_answer_verifier_gap(
     true
 }
 
-pub(super) fn try_recover_rss_news_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
-    reply: &mut AskReply,
-) -> bool {
-    let Some(route) = route_result else {
-        return false;
-    };
-    if !route_is_rss_news_fetch(route) {
-        return false;
-    }
+pub(super) fn try_recover_rss_news_answer_verifier_gap(reply: &mut AskReply) -> bool {
     let Some(verifier) = reply
         .task_journal
         .as_ref()
@@ -685,13 +682,11 @@ pub(super) fn try_recover_rss_news_answer_verifier_gap(
     if !verifier.high_confidence_retry_gap() || !rss_verifier_requests_source_grounding(verifier) {
         return false;
     }
-    if !reply.task_journal.as_ref().is_some_and(|journal| {
-        crate::task_journal::evidence_coverage_for_output_contract(
-            &route.effective_output_contract(),
-            journal,
-        )
-        .is_complete()
-    }) {
+    if !reply
+        .task_journal
+        .as_ref()
+        .is_some_and(journal_output_contract_evidence_is_complete)
+    {
         return false;
     }
     let items = observed_rss_news_items(reply);
@@ -706,26 +701,13 @@ pub(super) fn try_recover_rss_news_answer_verifier_gap(
     true
 }
 
-pub(super) fn try_preserve_rss_source_hosts_from_structured_evidence(
-    route_result: Option<&crate::RouteResult>,
-    reply: &mut AskReply,
-) -> bool {
-    let Some(route) = route_result else {
-        return false;
-    };
-    if !route_is_rss_news_fetch(route) {
-        return false;
-    }
+pub(super) fn try_preserve_rss_source_hosts_from_structured_evidence(reply: &mut AskReply) -> bool {
     if !reply.task_journal.as_ref().is_some_and(|journal| {
         journal
             .answer_verifier_summary
             .as_ref()
             .is_none_or(|verifier| verifier.pass)
-            && crate::task_journal::evidence_coverage_for_output_contract(
-                &route.effective_output_contract(),
-                journal,
-            )
-            .is_complete()
+            && journal_output_contract_evidence_is_complete(journal)
     }) {
         return false;
     }
@@ -739,6 +721,18 @@ pub(super) fn try_preserve_rss_source_hosts_from_structured_evidence(
         items.len()
     );
     true
+}
+
+fn journal_output_contract_evidence_is_complete(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    journal
+        .output_contract
+        .as_ref()
+        .is_some_and(|output_contract| {
+            crate::task_journal::evidence_coverage_for_output_contract(output_contract, journal)
+                .is_complete()
+        })
 }
 
 pub(super) fn apply_rss_news_items_answer(reply: &mut AskReply, items: &[RssNewsItem]) {
@@ -755,7 +749,7 @@ pub(super) fn apply_rss_news_items_answer(reply: &mut AskReply, items: &[RssNews
 }
 
 pub(super) fn route_allows_structured_search_recovery(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
 ) -> bool {
     let Some(route) = route_result else {
         return false;
@@ -768,7 +762,7 @@ pub(super) fn route_allows_structured_search_recovery(
 }
 
 pub(super) fn try_recover_document_heading_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) -> bool {
     if !route_result.is_some_and(route_allows_document_heading_recovery) {
@@ -826,18 +820,11 @@ pub(super) fn try_recover_document_heading_answer_verifier_gap(
     true
 }
 
-pub(super) fn route_allows_document_heading_recovery(route: &crate::RouteResult) -> bool {
-    if route.output_contract.response_shape != crate::OutputResponseShape::Scalar {
-        return false;
-    }
-    if route.output_contract_marker_is(crate::OutputSemanticKind::DocumentHeading) {
-        return true;
-    }
-    route.output_contract_is_unclassified()
-        && route.output_contract.requires_content_evidence
-        && !route.output_contract.locator_hint.trim().is_empty()
-        && route
-            .has_route_reason_machine_marker("session_alias_locator_prebound_from_current_request")
+pub(super) fn route_allows_document_heading_recovery(
+    route: &crate::answer_verifier::AnswerContract,
+) -> bool {
+    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+        && route.output_contract_marker_is(crate::OutputSemanticKind::DocumentHeading)
 }
 
 pub(super) fn observed_markdown_heading(reply: &AskReply) -> Option<String> {
@@ -938,7 +925,7 @@ pub(super) fn strip_read_range_line_prefix(line: &str) -> &str {
 }
 
 pub(super) fn try_recover_content_excerpt_summary_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) -> bool {
     let Some(route) = route_result else {
@@ -1012,7 +999,7 @@ pub(super) fn try_recover_content_excerpt_summary_answer_verifier_gap(
 }
 
 pub(super) fn try_recover_latest_synthesis_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) -> bool {
     let Some(route) = route_result else {
@@ -1082,7 +1069,7 @@ struct TerminalAnswerCandidate {
 }
 
 fn latest_recoverable_terminal_answer(
-    route: &crate::RouteResult,
+    route: &crate::answer_verifier::AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     reply: &AskReply,
 ) -> Option<TerminalAnswerCandidate> {
@@ -1124,13 +1111,17 @@ fn terminal_answer_candidate_from_step(
 }
 
 fn latest_terminal_candidate_can_recover_answer_gap(
-    route: &crate::RouteResult,
+    route: &crate::answer_verifier::AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     reply: &AskReply,
     candidate: &TerminalAnswerCandidate,
 ) -> bool {
+    let answer_contract = crate::answer_verifier::AnswerContract::new(
+        &route.request_text,
+        route.output_contract.clone(),
+    );
     if crate::answer_verifier::structurally_satisfies_answer_contract(
-        route,
+        &answer_contract,
         journal,
         &candidate.answer,
     ) {
@@ -1155,7 +1146,7 @@ fn latest_terminal_candidate_can_recover_answer_gap(
 }
 
 fn compound_observation_terminal_candidate_can_recover_answer_gap(
-    route: &crate::RouteResult,
+    route: &crate::answer_verifier::AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     reply: &AskReply,
     candidate: &TerminalAnswerCandidate,
@@ -1169,7 +1160,9 @@ fn compound_observation_terminal_candidate_can_recover_answer_gap(
         )
 }
 
-fn route_allows_compound_terminal_retry_recovery(route: &crate::RouteResult) -> bool {
+fn route_allows_compound_terminal_retry_recovery(
+    route: &crate::answer_verifier::AnswerContract,
+) -> bool {
     if route.output_contract.delivery_required
         || !matches!(
             route.output_contract.response_shape,
@@ -1178,7 +1171,7 @@ fn route_allows_compound_terminal_retry_recovery(route: &crate::RouteResult) -> 
     {
         return false;
     }
-    crate::evidence_policy::final_answer_shape_for_route(route)
+    crate::evidence_policy::final_answer_shape_for_output_contract(&route.output_contract)
         .map(crate::evidence_policy::FinalAnswerShape::allows_model_language)
         .unwrap_or(true)
 }
@@ -1256,16 +1249,18 @@ fn terminal_candidate_is_structurally_richer_than_current_reply(
             || candidate_lines > current_lines.saturating_add(1))
 }
 
-fn route_requires_structural_terminal_recovery(route: &crate::RouteResult) -> bool {
-    crate::evidence_policy::final_answer_shape_for_route(route)
+fn route_requires_structural_terminal_recovery(
+    route: &crate::answer_verifier::AnswerContract,
+) -> bool {
+    crate::evidence_policy::final_answer_shape_for_output_contract(&route.output_contract)
         .is_some_and(|shape| !shape.allows_model_language())
 }
 
 fn route_allows_latest_synthesis_retry_recovery(
-    route: &crate::RouteResult,
+    route: &crate::answer_verifier::AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    if !crate::evidence_policy::final_answer_shape_for_route(route)
+    if !crate::evidence_policy::final_answer_shape_for_output_contract(&route.output_contract)
         .is_some_and(|shape| shape.allows_model_language())
     {
         return false;
@@ -1285,7 +1280,7 @@ fn route_allows_latest_synthesis_retry_recovery(
 }
 
 fn route_allows_latest_respond_retry_recovery(
-    route: &crate::RouteResult,
+    route: &crate::answer_verifier::AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     if route.output_contract.delivery_required
@@ -1319,7 +1314,9 @@ fn route_allows_latest_respond_retry_recovery(
     })
 }
 
-pub(super) fn route_allows_synthesis_recovery(route: &crate::RouteResult) -> bool {
+pub(super) fn route_allows_synthesis_recovery(
+    route: &crate::answer_verifier::AnswerContract,
+) -> bool {
     if route.output_contract_marker_is_any(&[
         crate::OutputSemanticKind::ContentExcerptSummary,
         crate::OutputSemanticKind::ContentExcerptWithSummary,
@@ -1331,7 +1328,7 @@ pub(super) fn route_allows_synthesis_recovery(route: &crate::RouteResult) -> boo
 }
 
 pub(super) fn try_recover_generic_path_content_read_range_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) -> bool {
     let Some(route) = route_result else {
@@ -1373,7 +1370,7 @@ pub(super) fn try_recover_generic_path_content_read_range_answer_verifier_gap(
 }
 
 pub(super) fn try_recover_structured_scalar_output_format_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) -> bool {
     let Some(route) = route_result else {
@@ -1428,13 +1425,13 @@ pub(super) fn try_recover_structured_scalar_output_format_answer_verifier_gap(
 }
 
 pub(super) fn try_recover_machine_kv_summary_output_format_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) -> bool {
     let Some(route) = route_result else {
         return false;
     };
-    if route.output_contract.delivery_required || route.wants_file_delivery {
+    if route.output_contract.delivery_required {
         return false;
     }
     let Some(journal) = reply.task_journal.as_ref() else {
@@ -1609,14 +1606,6 @@ pub(super) fn collect_json_scalar_values(value: &serde_json::Value, values: &mut
         }
         serde_json::Value::Null => {}
     }
-}
-
-fn route_is_rss_news_fetch(route: &crate::RouteResult) -> bool {
-    crate::machine_capability_ref::route_has_capability_action(
-        route,
-        &["rss"],
-        &["latest", "news", "fetch", "feed"],
-    )
 }
 
 pub(super) fn rss_verifier_requests_source_grounding(

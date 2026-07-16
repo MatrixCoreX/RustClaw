@@ -13,41 +13,27 @@ use super::{
     structural_satisfaction_can_skip_verifier, structurally_satisfies_answer_contract,
 };
 
-fn route_with_mode() -> crate::RouteResult {
-    crate::RouteResult {
-        resolved_intent: "test intent".to_string(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "test".to_string(),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    }
+fn route_with_mode() -> crate::answer_verifier::AnswerContract {
+    crate::answer_verifier::AnswerContract::new(
+        "test intent",
+        crate::IntentOutputContract::default(),
+    )
 }
 
 #[test]
-fn verifier_contract_markers_do_not_require_semantic_enum() {
+fn verifier_contract_markers_require_planner_semantic_contract() {
     let mut route = route_with_mode();
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-
-    route.route_reason = "file_paths".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
     assert!(strict_list_route_allows_observed_subset(&route));
 
-    route.route_reason = "scalar_path_only".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     assert!(route_contract_marker_is_scalar_path_only(&route));
 }
 
-fn backend_identity_guard_route() -> crate::RouteResult {
-    let mut route = route_with_mode();
-    route.route_reason = "agent_display_name_hint_backend_metadata_removed".to_string();
-    route
+fn backend_identity_guard_route() -> crate::answer_verifier::AnswerContract {
+    route_with_mode()
 }
 
 #[test]
@@ -65,7 +51,6 @@ fn unclassified_freeform_response_skips_answer_verifier() {
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
-    route.wants_file_delivery = false;
     let journal =
         crate::task_journal::TaskJournal::for_task("task-1", "ask", "direct response request");
 
@@ -84,7 +69,6 @@ fn unclassified_terminal_respond_step_skips_answer_verifier() {
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
-    route.wants_file_delivery = false;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-1", "ask", "direct response request");
     journal
@@ -105,13 +89,11 @@ fn unclassified_terminal_respond_step_skips_answer_verifier() {
 #[test]
 fn planner_plain_terminal_answer_only_skips_answer_verifier() {
     let mut route = route_with_mode();
-    route.route_reason = "".to_string();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
-    route.wants_file_delivery = false;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-terminal-answer",
         "ask",
@@ -135,13 +117,11 @@ fn planner_plain_terminal_answer_only_skips_answer_verifier() {
 #[test]
 fn planner_plain_answer_with_tool_observation_still_uses_answer_verifier() {
     let mut route = route_with_mode();
-    route.route_reason = "execution_with_observed_tool".to_string();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
-    route.wants_file_delivery = false;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-tool-answer", "ask", "summarize result");
     journal
@@ -158,12 +138,10 @@ fn planner_plain_answer_with_tool_observation_still_uses_answer_verifier() {
 #[test]
 fn grounded_machine_kv_projection_skips_answer_verifier() {
     let mut route = route_with_mode();
-    route.route_reason = "execution_with_observed_tool".to_string();
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
     route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
     route.output_contract.locator_hint = "AGENTS.md".to_string();
-    route.wants_file_delivery = false;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-machine-kv-projection-skip",
         "ask",
@@ -186,24 +164,26 @@ fn grounded_machine_kv_projection_skips_answer_verifier() {
 }
 
 #[test]
-fn pure_chat_agent_loop_backend_identity_marker_still_uses_answer_verifier() {
+fn unclassified_chat_does_not_require_model_answer_verifier() {
     let mut route = backend_identity_guard_route();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
     route.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route.output_contract.locator_hint.clear();
-    route.wants_file_delivery = false;
     let journal =
         crate::task_journal::TaskJournal::for_task("task-1", "ask", "identity response request");
 
-    assert!(should_verify_answer(&route, &journal, "candidate response"));
+    assert!(!should_verify_answer(
+        &route,
+        &journal,
+        "candidate response"
+    ));
 }
 
 #[test]
 fn tool_discovery_context_only_route_skips_answer_verifier() {
     let mut route = route_with_mode();
-    route.route_reason = "tool_discovery".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ToolDiscovery;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
@@ -222,7 +202,6 @@ fn tool_discovery_context_only_route_skips_answer_verifier() {
 #[test]
 fn non_tool_discovery_contract_marker_still_uses_answer_verifier() {
     let mut route = route_with_mode();
-    route.route_reason = "content_excerpt_summary".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
@@ -236,7 +215,6 @@ fn non_tool_discovery_contract_marker_still_uses_answer_verifier() {
 #[test]
 fn output_contract_marker_verification_does_not_depend_on_route_trace() {
     let mut route = route_with_mode();
-    route.route_reason = "content_excerpt_summary".to_string();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
@@ -690,7 +668,6 @@ fn should_verify_answer_skips_permission_denied_terminal_finalizer() {
 #[test]
 fn should_verify_answer_skips_grounded_structured_machine_projection() {
     let mut route = route_with_mode();
-    route.route_reason = "generated_file_path_report".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
     route.output_contract.requires_content_evidence = true;
@@ -822,7 +799,7 @@ fn local_compound_listing_gap_rejects_answer_that_drops_observed_names() {
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
-    route.resolved_intent = "selector_limit=3; summarize listed content".to_string();
+    route.request_text = "selector_limit=3; summarize listed content".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-compound-list", "ask", "prompt");
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -880,7 +857,7 @@ fn local_compound_listing_gap_accepts_answer_with_observed_names() {
     let mut route = route_with_mode();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.requires_content_evidence = true;
-    route.resolved_intent = "selector_limit=3; summarize listed content".to_string();
+    route.request_text = "selector_limit=3; summarize listed content".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-compound-list-ok", "ask", "prompt");
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -927,7 +904,7 @@ fn local_compound_listing_gap_applies_to_directory_purpose_summary() {
     let mut route = route_with_mode();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.requires_content_evidence = true;
-    route.resolved_intent = "selector_limit=3; summarize purpose".to_string();
+    route.request_text = "selector_limit=3; summarize purpose".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-dir-purpose-gap", "ask", "prompt");
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -984,7 +961,7 @@ fn directory_purpose_summary_structurally_satisfies_listing_content_answer() {
     let mut route = route_with_mode();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.requires_content_evidence = true;
-    route.resolved_intent = "selector_limit=3; summarize purpose".to_string();
+    route.request_text = "selector_limit=3; summarize purpose".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-dir-purpose-ok", "ask", "prompt");
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -1036,7 +1013,7 @@ fn compound_listing_gap_respects_requested_numeric_limit() {
     let mut route = route_with_mode();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.requires_content_evidence = true;
-    route.resolved_intent = "selector_limit=2; summarize purpose".to_string();
+    route.request_text = "selector_limit=2; summarize purpose".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-dir-purpose-limit", "ask", "prompt");
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -1084,7 +1061,7 @@ fn directory_purpose_summary_line_count_number_is_not_listing_limit() {
     let mut route = route_with_mode();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.requires_content_evidence = true;
-    route.resolved_intent = "summarize directory and keep answer within 5 lines".to_string();
+    route.request_text = "summarize directory and keep answer within 5 lines".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-dir-purpose-line-count", "ask", "prompt");
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -1137,7 +1114,7 @@ fn content_excerpt_summary_line_count_number_is_not_listing_limit() {
     let mut route = route_with_mode();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
     route.output_contract.requires_content_evidence = true;
-    route.resolved_intent = "summarize observed content and keep answer within 5 lines".to_string();
+    route.request_text = "summarize observed content and keep answer within 5 lines".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-content-summary-line-count",
         "ask",
@@ -1190,8 +1167,7 @@ fn unbounded_directory_purpose_summary_does_not_require_all_listing_names() {
     let mut route = route_with_mode();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.requires_content_evidence = true;
-    route.resolved_intent =
-        "summarize workspace organization from top-level directories".to_string();
+    route.request_text = "summarize workspace organization from top-level directories".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-dir-purpose-unbounded", "ask", "prompt");
     journal.push_step_result(&crate::executor::StepExecutionResult {
@@ -1239,7 +1215,7 @@ fn workspace_project_summary_inventory_names_do_not_skip_model_language_verifier
     let mut route = route_with_mode();
     route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
     route.output_contract.requires_content_evidence = true;
-    route.resolved_intent =
+    route.request_text =
         "summarize current workspace organization from top-level directories".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-workspace-summary-inventory",

@@ -1,7 +1,7 @@
 use super::*;
 
 pub(in crate::answer_verifier) fn scalar_field_value_gap_is_grounded_in_structured_read(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
     gap: &AnswerVerifierOut,
@@ -15,7 +15,9 @@ pub(in crate::answer_verifier) fn scalar_field_value_gap_is_grounded_in_structur
     {
         return false;
     }
-    let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route) else {
+    let Some(shape) =
+        crate::evidence_policy::final_answer_shape_for_output_contract(&route.output_contract)
+    else {
         return false;
     };
     if shape.class() != crate::evidence_policy::FinalAnswerShapeClass::ScalarValue

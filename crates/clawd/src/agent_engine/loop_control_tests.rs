@@ -1,5 +1,5 @@
 use super::{
-    answer_contract_route_result_for_reply, answer_verifier_gap_has_observed_content_evidence,
+    answer_contract_for_reply, answer_verifier_gap_has_observed_content_evidence,
     answer_verifier_gap_requests_observed_content_rewrite,
     answer_verifier_output_format_machine_payload_gap, answer_verifier_retry_budget_available,
     answer_verifier_retry_summary, apply_structured_respond_clarify_to_loop_state,
@@ -90,43 +90,37 @@ fn route_result(shape: OutputResponseShape) -> RouteResult {
     }
 }
 
+fn answer_contract(route: &RouteResult) -> crate::answer_verifier::AnswerContract {
+    crate::answer_verifier::AnswerContract::new(
+        &route.resolved_intent,
+        route.output_contract.clone(),
+    )
+}
+
 #[test]
-fn answer_contract_route_result_prefers_journal_effective_route() {
-    let original_route = route_result(OutputResponseShape::Free);
-    let mut effective_route = original_route.clone();
-    effective_route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
-    effective_route.output_contract.locator_kind = OutputLocatorKind::None;
-    effective_route.output_contract.locator_hint.clear();
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(original_route),
-        execution_recipe_hint: None,
-        execution_recipe_plan_hint: None,
-        turn_analysis: None,
-        boundary_envelope: None,
-        context_bundle_summary: None,
-        session_alias_bindings: Vec::new(),
-        auto_locator_path: None,
-        original_user_request: None,
-        user_request: None,
-        cross_turn_recent_execution_context: None,
-    };
+fn answer_contract_for_reply_uses_journal_output_contract() {
+    let mut output_contract = IntentOutputContract::default();
+    output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    output_contract.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-effective-route",
         "ask",
         "probe service status",
     );
-    journal.record_output_contract(&effective_route.effective_output_contract());
+    journal.record_output_contract(&output_contract);
     let reply = AskReply::non_llm("ok".to_string()).with_task_journal(journal);
 
-    let selected = answer_contract_route_result_for_reply(Some(&agent_run_context), &reply)
-        .expect("selected route");
+    let selected =
+        answer_contract_for_reply("probe service status", &reply).expect("answer contract");
 
     assert_eq!(
-        selected.effective_output_contract_semantic_kind(),
+        selected.output_contract.semantic_kind,
         OutputSemanticKind::ServiceStatus
     );
     assert_eq!(
-        crate::evidence_policy::required_evidence_fields_for_route(&selected),
+        crate::evidence_policy::required_evidence_fields_for_output_contract(
+            &selected.output_contract,
+        ),
         vec!["field_value".to_string()]
     );
 }
@@ -290,7 +284,7 @@ fn structured_search_verifier_exhaustion_recovers_with_full_candidate_list() {
     route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
 
     assert!(try_recover_structured_search_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         "Find files named README under the current repo.",
         &mut reply
     ));
@@ -342,7 +336,7 @@ fn structured_search_recovery_does_not_override_directory_purpose_summary() {
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
 
     assert!(!try_recover_structured_search_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         "List top-level toml files and explain them briefly.",
         &mut reply
     ));
@@ -390,7 +384,7 @@ fn structured_count_verifier_exhaustion_recovers_with_count_inventory() {
         .with_task_journal(journal);
 
     assert!(try_recover_structured_count_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         "先数一下 scripts 目录直接有多少个子项",
         &mut reply
     ));
@@ -410,7 +404,7 @@ fn structured_count_verifier_exhaustion_recovers_with_count_inventory() {
 #[test]
 fn rss_news_verifier_exhaustion_recovers_with_structured_sources() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::RssNewsFetch;
     route.resolved_intent = "capability_ref=rss.latest_news category=general".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-rss", "ask", "prompt");
@@ -436,10 +430,7 @@ fn rss_news_verifier_exhaustion_recovers_with_structured_sources() {
         AskReply::non_llm("BBC; New York Times; incorrect synthesized source labels".to_string())
             .with_task_journal(journal);
 
-    assert!(try_recover_rss_news_answer_verifier_gap(
-        Some(&route),
-        &mut reply
-    ));
+    assert!(try_recover_rss_news_answer_verifier_gap(&mut reply));
 
     assert!(!reply.should_fail_task);
     assert_eq!(reply.messages, vec![reply.text.clone()]);
@@ -463,7 +454,7 @@ fn rss_news_verifier_exhaustion_recovers_with_structured_sources() {
 #[test]
 fn rss_news_passed_verifier_preserves_observed_source_hosts() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::RssNewsFetch;
     route.resolved_intent = "capability_ref=rss.latest_news category=general".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::None;
     let mut journal = crate::task_journal::TaskJournal::for_task("task-rss", "ask", "prompt");
@@ -490,7 +481,6 @@ fn rss_news_passed_verifier_preserves_observed_source_hosts() {
     .with_task_journal(journal);
 
     assert!(try_preserve_rss_source_hosts_from_structured_evidence(
-        Some(&route),
         &mut reply
     ));
 
@@ -552,7 +542,7 @@ fn content_excerpt_summary_verifier_exhaustion_recovers_with_synthesis_output() 
         .with_task_journal(journal);
 
     assert!(try_recover_content_excerpt_summary_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -607,7 +597,7 @@ fn workspace_project_summary_verifier_exhaustion_recovers_with_synthesis_output(
         AskReply::non_llm("failed exploratory answer".to_string()).with_task_journal(journal);
 
     assert!(try_recover_content_excerpt_summary_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -657,7 +647,7 @@ fn workspace_project_summary_verifier_exhaustion_does_not_recover_unsupported_cl
         AskReply::non_llm("failed exploratory answer".to_string()).with_task_journal(journal);
 
     assert!(!try_recover_content_excerpt_summary_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 }
@@ -706,7 +696,10 @@ fn generic_path_content_verifier_exhaustion_does_not_recover_raw_read_range_exce
         .with_task_journal(journal);
 
     assert!(
-        !try_recover_generic_path_content_read_range_answer_verifier_gap(Some(&route), &mut reply)
+        !try_recover_generic_path_content_read_range_answer_verifier_gap(
+            Some(&answer_contract(&route)),
+            &mut reply
+        )
     );
 
     assert!(!reply.should_fail_task);
@@ -764,7 +757,10 @@ fn structured_scalar_output_format_gap_recovers_quoted_observed_value() {
             .with_task_journal(journal);
 
     assert!(
-        try_recover_structured_scalar_output_format_answer_verifier_gap(Some(&route), &mut reply)
+        try_recover_structured_scalar_output_format_answer_verifier_gap(
+            Some(&answer_contract(&route)),
+            &mut reply
+        )
     );
     assert_eq!(reply.text, "rustclaw");
     assert_eq!(reply.messages, vec!["rustclaw"]);
@@ -814,7 +810,10 @@ fn machine_kv_summary_output_format_gap_recovers_from_observed_read_range_token(
     let mut reply = AskReply::non_llm("prose answer".to_string()).with_task_journal(journal);
 
     assert!(
-        try_recover_machine_kv_summary_output_format_answer_verifier_gap(Some(&route), &mut reply)
+        try_recover_machine_kv_summary_output_format_answer_verifier_gap(
+            Some(&answer_contract(&route)),
+            &mut reply
+        )
     );
     assert_eq!(
         reply.text,
@@ -864,7 +863,10 @@ fn machine_kv_summary_output_format_gap_requires_observed_non_flag_value() {
     let mut reply = AskReply::non_llm("prose answer".to_string()).with_task_journal(journal);
 
     assert!(
-        !try_recover_machine_kv_summary_output_format_answer_verifier_gap(Some(&route), &mut reply)
+        !try_recover_machine_kv_summary_output_format_answer_verifier_gap(
+            Some(&answer_contract(&route)),
+            &mut reply
+        )
     );
     assert_eq!(reply.text, "prose answer");
 }
@@ -912,7 +914,7 @@ fn document_heading_verifier_gap_recovers_heading_scalar_from_read_range_evidenc
         .with_task_journal(journal);
 
     assert!(try_recover_document_heading_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -935,13 +937,11 @@ fn document_heading_verifier_gap_recovers_heading_scalar_from_read_range_evidenc
 }
 
 #[test]
-fn alias_prebound_scalar_output_format_gap_recovers_markdown_heading() {
+fn planner_document_heading_contract_recovers_markdown_heading() {
     let mut route = route_result(OutputResponseShape::Scalar);
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::DocumentHeading;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_hint = "docs/release_checklist.md".to_string();
-    route.route_reason =
-        "session_alias_locator_prebound_from_current_request; machine_alias_binding".to_string();
 
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-1",
@@ -988,7 +988,7 @@ fn alias_prebound_scalar_output_format_gap_recovers_markdown_heading() {
     .with_task_journal(journal);
 
     assert!(try_recover_document_heading_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -1033,7 +1033,7 @@ fn language_only_output_format_gap_keeps_best_model_answer_success() {
         .with_task_journal(journal);
 
     assert!(try_accept_language_only_output_format_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -1088,7 +1088,7 @@ fn language_only_output_format_gap_prefers_latest_terminal_answer_over_stale_tex
         .with_task_journal(journal);
 
     assert!(try_accept_language_only_output_format_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -1169,7 +1169,7 @@ fn latest_terminal_recovery_rejects_structured_visible_rewrite_gap() {
         .with_task_journal(journal);
 
     assert!(!try_recover_latest_synthesis_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
     assert_eq!(reply.text, "failed");
@@ -1238,7 +1238,7 @@ fn latest_terminal_recovery_uses_latest_terminal_for_non_structured_gap() {
         .with_task_journal(journal);
 
     assert!(try_recover_latest_synthesis_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
     assert_eq!(reply.text, stale_answer);
@@ -1254,9 +1254,9 @@ fn latest_terminal_recovery_uses_latest_terminal_for_non_structured_gap() {
 }
 
 #[test]
-fn http_health_browser_open_extract_capability_gap_recovers_with_structured_status_line() {
+fn http_health_service_status_contract_recovers_with_structured_status_line() {
     let mut route = route_result(OutputResponseShape::Free);
-    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
     route.output_contract.locator_kind = OutputLocatorKind::Url;
     route.output_contract.locator_hint = "http://127.0.0.1:8787/v1/health".to_string();
     route.resolved_intent =
@@ -1314,7 +1314,7 @@ fn http_health_browser_open_extract_capability_gap_recovers_with_structured_stat
         AskReply::non_llm("bad generated health summary".to_string()).with_task_journal(journal);
 
     assert!(try_recover_http_health_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply,
     ));
 
@@ -1397,7 +1397,7 @@ fn http_health_command_summary_gap_recovers_with_structured_status_line() {
         AskReply::non_llm("bad generated health summary".to_string()).with_task_journal(journal);
 
     assert!(try_recover_http_health_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply,
     ));
 
@@ -1497,7 +1497,7 @@ fn http_health_command_summary_gap_prefers_latest_language_synthesis() {
         AskReply::non_llm("bad generated health summary".to_string()).with_task_journal(journal);
 
     assert!(try_recover_http_health_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply,
     ));
 

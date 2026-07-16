@@ -1,13 +1,13 @@
 use super::*;
 
-pub(super) fn route_requires_single_file_delivery(route: &RouteResult) -> bool {
+pub(super) fn route_requires_single_file_delivery(route: &AnswerContract) -> bool {
     matches!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::FileToken
     ) || matches!(
         route.output_contract.delivery_intent,
         crate::OutputDeliveryIntent::FileSingle
-    ) || (route.wants_file_delivery
+    ) || (route.output_contract.delivery_required
         && !matches!(
             route.output_contract.delivery_intent,
             crate::OutputDeliveryIntent::DirectoryBatchFiles
@@ -163,7 +163,7 @@ pub(super) fn raw_command_answer_is_exact_successful_observation(
 }
 
 pub(super) fn raw_bounded_read_answer_is_exact_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -189,7 +189,7 @@ pub(super) fn raw_bounded_read_answer_is_exact_successful_observation(
 }
 
 pub(super) fn raw_bounded_read_value_matches_route(
-    route: &RouteResult,
+    route: &AnswerContract,
     value: &serde_json::Value,
 ) -> bool {
     if route.output_contract.locator_kind != crate::OutputLocatorKind::Path {
@@ -296,7 +296,7 @@ pub(super) fn step_can_supply_verifier_prompt_observation(
 }
 
 pub(super) fn step_can_supply_verifier_observation_for_route(
-    route: &RouteResult,
+    route: &AnswerContract,
     step: &crate::task_journal::TaskJournalStepTrace,
 ) -> bool {
     if !step_can_supply_verifier_observation(step) {
@@ -304,7 +304,6 @@ pub(super) fn step_can_supply_verifier_observation_for_route(
     }
     if !route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
-        && !route.wants_file_delivery
         && crate::task_journal::step_reads_text_content(step)
     {
         return false;
@@ -322,7 +321,7 @@ pub(super) fn is_synthesis_or_verifier_step(
 }
 
 pub(super) fn existence_with_path_answer_is_grounded_in_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -392,7 +391,7 @@ pub(super) fn path_fact_candidates(fact: &serde_json::Value) -> Vec<String> {
 }
 
 pub(super) fn structured_keys_answer_is_grounded_in_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -447,7 +446,7 @@ pub(super) fn structured_keys_from_output(output: &str) -> Option<Vec<String>> {
 }
 
 pub(super) fn execution_failed_step_answer_is_grounded_in_failed_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -587,7 +586,7 @@ pub(super) fn key_answer_tokens(text: &str) -> Vec<String> {
 }
 
 pub(super) fn scalar_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -601,7 +600,7 @@ pub(super) fn scalar_answer_is_grounded_in_successful_observation(
 }
 
 pub(super) fn scalar_answer_value_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -704,7 +703,7 @@ pub(super) fn successful_observed_evidence_items(
 }
 
 pub(super) fn successful_observed_evidence_items_for_route(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> Vec<serde_json::Value> {
     let mut items = Vec::new();
@@ -727,17 +726,18 @@ pub(super) fn successful_observed_evidence_items_for_route(
     items
 }
 
-pub(super) fn route_requires_strict_extractor_eligibility(route: &RouteResult) -> bool {
-    crate::evidence_policy::final_answer_shape_for_route(route).is_some_and(|shape| {
-        matches!(
-            shape.class(),
-            crate::evidence_policy::FinalAnswerShapeClass::ScalarValue
-                | crate::evidence_policy::FinalAnswerShapeClass::StrictList
-                | crate::evidence_policy::FinalAnswerShapeClass::Table
-                | crate::evidence_policy::FinalAnswerShapeClass::SinglePath
-                | crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact
-        )
-    })
+pub(super) fn route_requires_strict_extractor_eligibility(route: &AnswerContract) -> bool {
+    crate::evidence_policy::final_answer_shape_for_output_contract(&route.output_contract)
+        .is_some_and(|shape| {
+            matches!(
+                shape.class(),
+                crate::evidence_policy::FinalAnswerShapeClass::ScalarValue
+                    | crate::evidence_policy::FinalAnswerShapeClass::StrictList
+                    | crate::evidence_policy::FinalAnswerShapeClass::Table
+                    | crate::evidence_policy::FinalAnswerShapeClass::SinglePath
+                    | crate::evidence_policy::FinalAnswerShapeClass::DeliveryArtifact
+            )
+        })
 }
 
 pub(super) fn observed_evidence_is_strict_shape_eligible(evidence: &serde_json::Value) -> bool {
@@ -748,7 +748,7 @@ pub(super) fn observed_evidence_is_strict_shape_eligible(evidence: &serde_json::
 }
 
 pub(super) fn step_can_supply_strict_evidence_for_route(
-    route: &RouteResult,
+    route: &AnswerContract,
     step: &crate::task_journal::TaskJournalStepTrace,
 ) -> bool {
     if !route_requires_strict_extractor_eligibility(route) {
@@ -773,7 +773,7 @@ pub(super) fn observed_scalar_values_from_evidence_map(
 }
 
 pub(super) fn observed_scalar_values_from_evidence_map_for_route(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> BTreeSet<String> {
     let mut values = BTreeSet::new();
@@ -799,7 +799,7 @@ pub(super) fn observed_single_path_values_from_evidence_map(
 }
 
 pub(super) fn observed_single_path_values_from_evidence_map_for_route(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> BTreeSet<String> {
     let mut paths = BTreeSet::new();
@@ -827,7 +827,7 @@ pub(super) fn observed_strict_list_items_from_evidence_map(
 }
 
 pub(super) fn observed_strict_list_items_from_evidence_map_for_route(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> BTreeSet<String> {
     let mut items = BTreeSet::new();
@@ -860,7 +860,7 @@ pub(super) fn observed_table_cells_from_evidence_map(
 }
 
 pub(super) fn observed_table_cells_from_evidence_map_for_route(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> BTreeSet<String> {
     let mut cells = BTreeSet::new();

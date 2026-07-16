@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) fn local_compound_listing_answer_verifier_gap(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> Option<AnswerVerifierOut> {
@@ -102,7 +102,7 @@ pub(in crate::answer_verifier) fn value_is_directory_structure_observation(
 }
 
 pub(in crate::answer_verifier) fn observed_inventory_names_for_contract(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> Option<Vec<String>> {
     let mut names = latest_observed_inventory_names(journal)?;
@@ -113,7 +113,7 @@ pub(in crate::answer_verifier) fn observed_inventory_names_for_contract(
 }
 
 pub(in crate::answer_verifier) fn requested_listing_name_limit(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
 ) -> Option<usize> {
     route_result
         .output_contract
@@ -123,8 +123,7 @@ pub(in crate::answer_verifier) fn requested_listing_name_limit(
         .and_then(|limit| usize::try_from(limit).ok())
         .filter(|limit| *limit > 0)
         .or_else(|| {
-            contract_hint_selector_limit(&route_result.resolved_intent)
-                .or_else(|| contract_hint_selector_limit(&route_result.route_reason))
+            contract_hint_selector_limit(&route_result.request_text)
                 .and_then(|limit| usize::try_from(limit).ok())
                 .filter(|limit| *limit > 0)
         })

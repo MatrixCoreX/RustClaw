@@ -21,18 +21,17 @@ use runtime::{
 };
 pub(crate) use runtime::{
     action_matches_policy_tokens, action_trace_for_output_contract, bundled_contract_matrix,
-    capability_ref_action_policy_for_route, compact_prompt_line_for_route,
+    capability_ref_action_policy_for_route, compact_prompt_line_for_output_contract,
     final_answer_shape_for_output_contract, final_answer_shape_for_route, fnv1a_hex,
     required_evidence_for_output_contract, runtime_contract_snapshot_for_output_contract,
-    trace_snapshot_for_output_contract, trace_snapshot_for_route,
+    trace_snapshot_for_output_contract,
 };
 #[cfg(test)]
 pub(crate) use runtime::{
     action_policy_for_output_contract, action_policy_for_route, action_trace_for_route,
     allowed_action_refs_for_route, available_action_refs_from_registry,
-    bundled_contract_matrix_result, compact_prompt_line_for_output_contract,
-    parse_contract_matrix_source, preferred_action_refs_for_route,
-    runtime_contract_snapshot_for_route,
+    bundled_contract_matrix_result, compact_prompt_line_for_route, parse_contract_matrix_source,
+    preferred_action_refs_for_route, runtime_contract_snapshot_for_route, trace_snapshot_for_route,
 };
 #[cfg(test)]
 use runtime::{collect_action_tokens, collect_external_observation_admission_errors};

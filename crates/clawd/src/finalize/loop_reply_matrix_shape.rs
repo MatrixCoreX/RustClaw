@@ -126,7 +126,15 @@ pub(super) fn evidence_policy_candidate_satisfies_final_shape(
         candidate,
         crate::task_journal::TaskJournalFinalStatus::Success,
     );
-    crate::answer_verifier::structurally_satisfies_answer_contract(route, &journal, candidate)
+    let answer_contract = crate::answer_verifier::AnswerContract::new(
+        &route.resolved_intent,
+        route.output_contract.clone(),
+    );
+    crate::answer_verifier::structurally_satisfies_answer_contract(
+        &answer_contract,
+        &journal,
+        candidate,
+    )
 }
 
 pub(super) fn synthetic_task_for_evidence_policy_shape_check(task_id: &str) -> ClaimedTask {

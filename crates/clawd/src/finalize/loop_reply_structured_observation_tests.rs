@@ -50,8 +50,16 @@ fn scalar_path_only_matrix_answer_projects_ambiguous_find_name_candidates() {
         &answer,
         crate::task_journal::TaskJournalFinalStatus::Success,
     );
+    let answer_contract = crate::answer_verifier::AnswerContract::new(
+        &route.resolved_intent,
+        route.output_contract.clone(),
+    );
     assert!(
-        crate::answer_verifier::structurally_satisfies_answer_contract(&route, &journal, &answer)
+        crate::answer_verifier::structurally_satisfies_answer_contract(
+            &answer_contract,
+            &journal,
+            &answer,
+        )
     );
     assert_eq!(summary.format_ok, Some(true));
 }

@@ -1,5 +1,14 @@
 use super::*;
 
+fn answer_contract_from_route(
+    route: &crate::RouteResult,
+) -> crate::answer_verifier::AnswerContract {
+    crate::answer_verifier::AnswerContract::new(
+        &route.resolved_intent,
+        route.output_contract.clone(),
+    )
+}
+
 #[test]
 fn git_status_text_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-git-state", "ask", "检查仓库状态");
@@ -1603,7 +1612,11 @@ fn db_schema_version_action_evidence_overrides_stale_existence_route_contract() 
 
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
     assert!(
-        crate::answer_verifier::local_missing_evidence_verifier_gap(&route, &journal).is_none(),
+        crate::answer_verifier::local_missing_evidence_verifier_gap(
+            &answer_contract_from_route(&route),
+            &journal,
+        )
+        .is_none(),
         "schema_version action evidence should not be blocked by stale existence route contract"
     );
 }
@@ -1615,7 +1628,7 @@ fn runtime_status_action_evidence_overrides_generic_path_route_contract() {
         "ask",
         "current working directory",
     );
-    let mut route = crate::RouteResult {
+    let route = crate::RouteResult {
         resolved_intent: String::new(),
         needs_clarify: false,
         clarify_question: String::new(),
@@ -1686,12 +1699,17 @@ fn runtime_status_action_evidence_overrides_generic_path_route_contract() {
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage.evidence_expression.is_none());
     assert!(
-        crate::answer_verifier::local_missing_evidence_verifier_gap(&route, &journal).is_none(),
+        crate::answer_verifier::local_missing_evidence_verifier_gap(
+            &answer_contract_from_route(&route),
+            &journal,
+        )
+        .is_none(),
         "runtime_status action evidence should not be blocked by generic path route contract"
     );
 
-    route.route_reason = "legacy_generic_path_content".to_string();
-    assert!(
-        crate::answer_verifier::local_missing_evidence_verifier_gap(&route, &journal).is_none()
-    );
+    assert!(crate::answer_verifier::local_missing_evidence_verifier_gap(
+        &answer_contract_from_route(&route),
+        &journal,
+    )
+    .is_none());
 }

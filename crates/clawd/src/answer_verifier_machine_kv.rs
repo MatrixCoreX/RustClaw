@@ -1,10 +1,10 @@
 pub(super) fn requested_machine_kv_projection_can_skip_answer_verifier(
-    route_result: &crate::RouteResult,
+    route_result: &super::AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
     let contract = route_result.effective_output_contract();
-    if contract.delivery_required || route_result.wants_file_delivery {
+    if contract.delivery_required {
         return false;
     }
     let candidate = candidate_answer.trim();
@@ -18,7 +18,7 @@ pub(super) fn requested_machine_kv_projection_can_skip_answer_verifier(
     crate::machine_kv_projection::requested_machine_kv_summary_from_observation_inputs(
         [
             journal.input_text.as_str(),
-            route_result.resolved_intent.as_str(),
+            route_result.request_text.as_str(),
         ],
         &observed_texts,
     )

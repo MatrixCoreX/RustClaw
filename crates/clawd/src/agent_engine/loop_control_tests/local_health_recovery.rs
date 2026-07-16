@@ -44,7 +44,7 @@ fn local_health_verifier_gap_recovers_with_machine_fields() {
     let mut reply = AskReply::non_llm("incomplete".to_string()).with_task_journal(journal);
 
     assert!(try_recover_local_health_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -161,7 +161,7 @@ fn local_health_verifier_gap_recovers_from_loop_state_raw_outputs() {
 
     assert!(
         try_recover_local_health_answer_verifier_gap_from_loop_state(
-            Some(&route),
+            Some(&answer_contract(&route)),
             &loop_state,
             &mut reply
         )
@@ -221,7 +221,7 @@ fn local_health_recovery_ignores_user_visible_json_text() {
     let mut reply = AskReply::non_llm("incomplete".to_string()).with_task_journal(journal);
 
     assert!(!try_recover_local_health_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
     assert_eq!(reply.text, "incomplete");

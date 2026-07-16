@@ -11,7 +11,6 @@ fn single_file_delivery_rejects_token_mixed_with_prose() {
     std::fs::write(&file, "ok").expect("write temp file");
 
     let mut route = route_with_mode();
-    route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -290,13 +289,12 @@ fn git_repository_state_one_sentence_accepts_stable_state_fields() {
 }
 
 #[test]
-fn git_status_capability_ref_answer_is_structurally_grounded_without_semantic_kind() {
+fn git_repository_state_contract_answer_is_structurally_grounded() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::GitRepositoryState;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.route_reason = "capability_ref=git.status".to_string();
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-git-status-capability-ref",
         "ask",
@@ -605,11 +603,10 @@ fn service_status_port_answer_uses_complete_successful_socket_observation() {
 }
 
 #[test]
-fn service_status_capability_ref_port_answer_is_grounded_without_semantic_kind() {
+fn service_status_contract_port_answer_is_grounded() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.route_reason = "capability_ref=service.status".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-service-ports-capability-ref",
         "ask",
@@ -785,12 +782,11 @@ fn matrix_file_path_list_shape_allows_grounded_filtered_subset() {
 }
 
 #[test]
-fn filesystem_find_entries_capability_ref_path_list_is_grounded_without_semantic_kind() {
+fn file_paths_contract_path_list_is_grounded() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.route_reason = "capability_ref=filesystem.find_entries".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-fs-path-capability-ref", "ask", "find");
     journal
@@ -907,8 +903,7 @@ fn matrix_table_shape_uses_observed_evidence_map_cells() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.route_reason = "capability_ref=database.list_tables".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-table-evidence",
         "ask",
@@ -944,8 +939,7 @@ fn matrix_table_shape_uses_run_cmd_results_as_table_cells() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.route_reason = "capability_ref=database.list_tables".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-matrix-table-run-cmd",
         "ask",
@@ -1026,12 +1020,11 @@ fn archive_unpack_summary_is_satisfied_by_observed_destination_path() {
 }
 
 #[test]
-fn archive_unpack_capability_ref_summary_is_grounded_without_semantic_kind() {
+fn archive_unpack_contract_summary_is_grounded() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.route_reason = "capability_ref=archive.unpack".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveUnpack;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-archive-unpack-capability-ref",
         "ask",

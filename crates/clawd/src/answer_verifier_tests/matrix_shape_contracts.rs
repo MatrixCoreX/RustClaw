@@ -207,7 +207,6 @@ fn matrix_table_shape_requires_markdown_table_answer() {
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
     route.output_contract.locator_hint = "data/app.sqlite".to_string();
-    route.route_reason = "capability_ref=database.list_tables".to_string();
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-matrix-table", "ask", "list tables");
     journal

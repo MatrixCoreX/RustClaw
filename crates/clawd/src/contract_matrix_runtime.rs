@@ -51,6 +51,7 @@ pub(crate) struct ContractActionPolicy {
 }
 
 impl ContractActionPolicy {
+    #[cfg(test)]
     pub(crate) fn is_allowed(&self) -> bool {
         self.decision == ActionPolicyDecision::Allowed
     }
@@ -98,6 +99,7 @@ fn bundled_skills_registry() -> Option<&'static SkillsRegistry> {
         .ok()
 }
 
+#[cfg(test)]
 pub(crate) fn compact_prompt_line_for_route(route: &RouteResult) -> Option<String> {
     if let Some(line) = compact_prompt_line_for_route_capability_ref(route) {
         return Some(line);
@@ -106,6 +108,7 @@ pub(crate) fn compact_prompt_line_for_route(route: &RouteResult) -> Option<Strin
     compact_prompt_line_for_output_contract(&output_contract)
 }
 
+#[cfg(test)]
 fn compact_prompt_line_for_route_capability_ref(route: &RouteResult) -> Option<String> {
     let capability_refs = crate::machine_capability_ref::route_capability_ref_tokens(route);
     if capability_refs.is_empty() {
@@ -294,6 +297,7 @@ fn final_answer_shape_override_for_output_contract(
     None
 }
 
+#[cfg(test)]
 pub(crate) fn trace_snapshot_for_route(route: &RouteResult) -> Option<Value> {
     let output_contract = route.effective_output_contract();
     trace_snapshot_for_output_contract_with_route_reason(

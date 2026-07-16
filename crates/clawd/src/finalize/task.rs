@@ -691,11 +691,15 @@ pub(crate) async fn finalize_ask_result(
                 let answer_verifier = if answer_is_existing_file_delivery_token {
                     None
                 } else {
+                    let answer_contract = crate::answer_verifier::AnswerContract::new(
+                        prompt,
+                        route_result.output_contract.clone(),
+                    );
                     crate::answer_verifier::verify_answer_observe_only(
                         state,
                         task,
                         prompt,
-                        route_result,
+                        &answer_contract,
                         &journal,
                         &answer_text,
                     )
