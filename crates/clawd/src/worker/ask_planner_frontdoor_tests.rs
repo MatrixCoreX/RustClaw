@@ -67,33 +67,7 @@ async fn migration_fixtures_keep_semantics_inside_planner_and_make_zero_frontdoo
         .await
         .unwrap_or_else(|err| panic!("fixture {} failed: {err}", fixture.name));
 
-        assert_eq!(
-            prepared.route_result.resolved_intent,
-            prepared.planner_user_request
-        );
-        assert_eq!(
-            prepared.route_result.route_reason,
-            "agent_loop_semantic_authority"
-        );
-        assert!(!prepared.route_result.needs_clarify);
-        assert!(prepared.route_result.clarify_question.is_empty());
-        assert_eq!(
-            prepared.route_result.risk_ceiling,
-            crate::RiskCeiling::Unknown
-        );
-        assert_eq!(
-            prepared.route_result.resume_behavior,
-            crate::ResumeBehavior::None
-        );
-        assert_eq!(
-            prepared.route_result.schedule_kind,
-            crate::ScheduleKind::None
-        );
-        assert!(!prepared.route_result.wants_file_delivery);
-        assert!(prepared
-            .route_result
-            .output_contract
-            .semantic_kind_is_unclassified());
+        assert!(!prepared.planner_user_request.trim().is_empty());
         assert_eq!(prepared.turn_boundary_envelope.task_id, task.task_id);
         assert_eq!(
             prepared.turn_boundary_envelope.raw_chars,

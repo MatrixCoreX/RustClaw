@@ -7,7 +7,6 @@ use crate::{AppState, ClaimedTask};
 pub(super) struct PreparedAskFlow {
     pub(super) context_bundle_summary: String,
     pub(super) memory_trace: Option<Value>,
-    pub(super) route_result: crate::RouteResult,
     pub(super) turn_boundary_envelope: crate::turn_boundary_envelope::TurnBoundaryEnvelope,
     pub(super) auto_locator_path: Option<String>,
     pub(super) planner_user_request: String,
@@ -38,7 +37,6 @@ pub(super) async fn prepare_ask_flow(
     Ok(PreparedAskFlow {
         context_bundle_summary: prepared_execution.context_bundle.summary(),
         memory_trace: prepared_execution.context_bundle.memory_trace(),
-        route_result: prepared_routing.route_result,
         turn_boundary_envelope: prepared_routing.turn_boundary_envelope,
         auto_locator_path: None,
         planner_user_request: prepared_routing.planner_user_request,
@@ -57,7 +55,7 @@ pub(super) fn build_agent_run_context_from_prepared_flow(
         value => Some(value.to_string()),
     };
     crate::agent_engine::AgentRunContext {
-        route_result: Some(prepared_flow.route_result.clone()),
+        route_result: None,
         execution_recipe_hint: None,
         execution_recipe_plan_hint: None,
         turn_analysis: None,

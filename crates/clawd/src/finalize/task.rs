@@ -422,24 +422,6 @@ pub(crate) async fn run_direct_classifier_reply(
     .map_err(|e| e.to_string())
 }
 
-fn should_use_answer_route_result(
-    initial: &crate::RouteResult,
-    answer_route: &crate::RouteResult,
-    answer_journal: &crate::task_journal::TaskJournal,
-) -> bool {
-    let answer_is_clarify = answer_journal.final_status.is_some_and(|status| {
-        matches!(status, crate::task_journal::TaskJournalFinalStatus::Clarify)
-    });
-    if answer_is_clarify && answer_route.needs_clarify && !initial.needs_clarify {
-        return true;
-    }
-    let answer_has_execution_trace = !answer_journal.rounds.is_empty()
-        || !answer_journal.step_results.is_empty()
-        || answer_journal.plan_result.is_some()
-        || answer_journal.verify_result.is_some();
-    answer_has_execution_trace
-}
-
 fn answer_verifier_recovery_already_terminal(journal: &crate::task_journal::TaskJournal) -> bool {
     journal.final_status.is_some_and(|status| {
         matches!(status, crate::task_journal::TaskJournalFinalStatus::Success)
@@ -448,6 +430,14 @@ fn answer_verifier_recovery_already_terminal(journal: &crate::task_journal::Task
             .final_stop_signal
             .as_deref()
             .is_some_and(crate::task_journal::is_answer_verifier_recovered_terminal_stop_signal)
+}
+
+fn planner_route_result_for_finalization(
+    answer_journal: Option<&crate::task_journal::TaskJournal>,
+) -> crate::RouteResult {
+    answer_journal
+        .and_then(|journal| journal.route_result.clone())
+        .unwrap_or_else(crate::RouteResult::planner_output_contract_unavailable)
 }
 
 fn turn_analysis_requires_machine_summary(
@@ -518,7 +508,6 @@ pub(crate) async fn finalize_ask_result(
     context_bundle_summary: &str,
     memory_trace: Option<&Value>,
     resolved_prompt_for_execution: &str,
-    route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::turn_context::TurnAnalysis>,
     fuzzy_locator_suggestions: &[String],
     clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
@@ -539,11 +528,9 @@ pub(crate) async fn finalize_ask_result(
     if let Some(turn_analysis) = turn_analysis {
         journal.record_turn_analysis(turn_analysis);
     }
-    journal.record_route_result(route_result);
     journal.record_context_bundle_summary(format!(
-        "{} needs_clarify={} resolved_prompt={}",
+        "{} resolved_prompt={}",
         context_bundle_summary,
-        route_result.is_clarify_gate(),
         crate::truncate_for_log(resolved_prompt_for_execution)
     ));
     if let Some(memory_trace) = memory_trace {
@@ -560,20 +547,12 @@ pub(crate) async fn finalize_ask_result(
                 );
                 return Ok(());
             }
-            let mut effective_route_result = route_result.clone();
             if let Some(answer_journal) = answer.task_journal.as_ref() {
                 journal.merge_from(answer_journal);
-                if let Some(answer_route_result) = answer_journal.route_result.as_ref() {
-                    if should_use_answer_route_result(
-                        route_result,
-                        answer_route_result,
-                        answer_journal,
-                    ) {
-                        effective_route_result = answer_route_result.clone();
-                        journal.record_route_result(&effective_route_result);
-                    }
-                }
             }
+            let effective_route_result =
+                planner_route_result_for_finalization(answer.task_journal.as_ref());
+            journal.record_route_result(&effective_route_result);
             let route_result = &effective_route_result;
             let mut semantic_clarify = route_result.is_clarify_gate()
                 || answer
@@ -1113,6 +1092,9 @@ pub(crate) async fn finalize_ask_result(
             state.clear_task_llm_call_count(&task.task_id);
         }
         Err(err_text) => {
+            let effective_route_result = crate::RouteResult::planner_output_contract_unavailable();
+            journal.record_route_result(&effective_route_result);
+            let route_result = &effective_route_result;
             if err_text == crate::agent_engine::TASK_CANCELED_ERR
                 || !repo::is_task_still_running(state, &task.task_id)?
             {

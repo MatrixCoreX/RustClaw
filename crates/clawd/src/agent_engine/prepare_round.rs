@@ -205,39 +205,11 @@ pub(super) async fn prepare_round_actions(
         crate::truncate_for_log(&plan_result.planner_notes),
         crate::truncate_for_log(&plan_result.raw_plan_text)
     );
-    let original_route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
-    let effective_output_contract = plan_result.output_contract.clone().or_else(|| {
-        original_route_result.and_then(|route| {
-            crate::agent_engine::service_probe_contract::effective_service_probe_output_contract_for_plan_steps(
-                state,
-                route,
-                &plan_result.steps,
-            )
-            .or_else(|| {
-                crate::agent_engine::effective_filesystem_lifecycle_output_contract_for_plan_steps(
-                    state,
-                    route,
-                    &plan_result.steps,
-                )
-            })
-            .or_else(|| {
-                crate::agent_engine::effective_filesystem_cleanup_recovery_output_contract_for_plan_steps(
-                    state,
-                    loop_state,
-                    route,
-                    &plan_result.steps,
-                )
-            })
-        })
-    });
-    let effective_route_result = original_route_result.map(|route| {
-        let mut route = route.clone();
-        if let Some(output_contract) = effective_output_contract.as_ref() {
-            route.output_contract = output_contract.clone();
-        }
-        route
-    });
-    let verify_route_result = effective_route_result.as_ref().or(original_route_result);
+    let effective_output_contract = plan_result.output_contract.clone();
+    let effective_route_result = effective_output_contract
+        .clone()
+        .map(crate::RouteResult::from_planner_output_contract);
+    let verify_route_result = effective_route_result.as_ref();
     let verify_mode = verify_mode_for_state(state);
     let verify_result = crate::verifier::verify_plan(
         state,

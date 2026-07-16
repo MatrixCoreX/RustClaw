@@ -54,7 +54,7 @@ REQUIRED_DECISION_IDS = {
     "turn_boundary_envelope",
     "execution_context_materialization",
     "explicit_schedule_direct_text_boundary",
-    "neutral_agent_loop_frontdoor",
+    "boundary_only_agent_loop_frontdoor",
     "agent_loop_semantic_entry",
 }
 

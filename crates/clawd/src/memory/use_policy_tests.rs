@@ -3,7 +3,7 @@ use super::{
     decide_skill_memory_use_policy, filter_structured_memory_context, ChatMemoryContextHint,
     MemoryUseDecision, MemoryUseProfile, PlannerMemoryContextHint,
 };
-use crate::memory::retrieval::{MemoryContextMode, RetrievedMemoryItem, StructuredMemoryContext};
+use crate::memory::retrieval::{RetrievedMemoryItem, StructuredMemoryContext};
 use crate::runtime::AppState;
 use crate::task_context_builder::ExecutionContextBudgetTier;
 
@@ -113,7 +113,6 @@ fn chat_memory_pure_direct_answer_omits_long_term_and_assistant_results() {
     let decision = decide_chat_memory_use_policy(
         &state,
         ExecutionContextBudgetTier::Full,
-        "",
         false,
         1200,
         ChatMemoryContextHint::Default,
@@ -147,7 +146,6 @@ fn chat_memory_active_session_allows_bounded_recent_context_only() {
     let decision = decide_chat_memory_use_policy(
         &state,
         ExecutionContextBudgetTier::Full,
-        "",
         true,
         1200,
         ChatMemoryContextHint::Default,
@@ -168,40 +166,11 @@ fn chat_memory_active_session_allows_bounded_recent_context_only() {
 }
 
 #[test]
-fn chat_memory_standalone_freeform_clarify_loop_context_is_disabled() {
-    let state = AppState::test_default_with_fixture_provider();
-    let decision = decide_chat_memory_use_policy(
-        &state,
-        ExecutionContextBudgetTier::Full,
-        "standalone_freeform_clarify_loop_context",
-        false,
-        1200,
-        ChatMemoryContextHint::Default,
-    );
-    assert_eq!(decision.profile, MemoryUseProfile::Disabled);
-    assert_eq!(decision.mode, MemoryContextMode::Chat);
-    assert!(!decision.include_preferences);
-    assert!(!decision.include_relevant_facts);
-    assert!(!decision.include_knowledge_docs);
-    assert_eq!(
-        decision.reason,
-        "standalone_freeform_clarify_loop_context_uses_current_request_only"
-    );
-
-    let filtered = filter_structured_memory_context(full_context(), &decision);
-    assert!(filtered.preferences.is_empty());
-    assert!(filtered.relevant_facts.is_empty());
-    assert!(filtered.knowledge_docs.is_empty());
-    assert!(filtered.recalled_recent.is_empty());
-}
-
-#[test]
 fn chat_memory_current_request_only_disables_indexed_memory_and_preferences() {
     let state = AppState::test_default_with_fixture_provider();
     let decision = decide_chat_memory_use_policy(
         &state,
         ExecutionContextBudgetTier::Full,
-        "",
         false,
         1200,
         ChatMemoryContextHint::CurrentRequestOnly,
@@ -227,7 +196,6 @@ fn chat_memory_active_task_context_only_disables_indexed_memory() {
     let decision = decide_chat_memory_use_policy(
         &state,
         ExecutionContextBudgetTier::Full,
-        "",
         true,
         1200,
         ChatMemoryContextHint::ActiveTaskContextOnly,

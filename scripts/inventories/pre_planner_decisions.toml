@@ -68,14 +68,14 @@ ordinary_semantic_authority = false
 terminal_before_planner = true
 
 [[decisions]]
-id = "neutral_agent_loop_frontdoor"
+id = "boundary_only_agent_loop_frontdoor"
 path = "crates/clawd/src/worker/ask_planner_frontdoor.rs"
-symbols = ["prepare_planner_owned_ask_routing", "agent_loop_semantic_authority"]
-owner_category = "target_semantic_owner"
+symbols = ["prepare_planner_owned_ask_routing", "TurnBoundaryEnvelope::from_claimed_task"]
+owner_category = "context_boundary"
 input_fields = ["raw_request", "turn_boundary_envelope"]
-output_fields = ["neutral_route_context", "planner_user_request"]
+output_fields = ["turn_boundary_envelope", "planner_user_request"]
 disposition = "retain_boundary"
-ordinary_semantic_authority = true
+ordinary_semantic_authority = false
 terminal_before_planner = false
 
 [[decisions]]

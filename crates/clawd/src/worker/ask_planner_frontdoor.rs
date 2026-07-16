@@ -5,7 +5,6 @@ use tracing::info;
 use crate::{AppState, ClaimedTask};
 
 pub(super) struct PreparedAskRouting {
-    pub(super) route_result: crate::RouteResult,
     pub(super) turn_boundary_envelope: crate::turn_boundary_envelope::TurnBoundaryEnvelope,
     pub(super) planner_user_request: String,
 }
@@ -42,22 +41,6 @@ pub(super) async fn prepare_planner_owned_ask_routing(
             crate::skills::task_allows_path_outside_workspace(state, Some(task)),
             crate::skills::task_allows_sudo(state, Some(task)),
         );
-    let route_result = crate::RouteResult {
-        resolved_intent: planner_user_request.clone(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: "agent_loop_semantic_authority".to_string(),
-        #[cfg(test)]
-        visible_skill_candidates: state.planner_available_skills_for_task(task),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-
     info!(
         "{} planner_owned_frontdoor task_id={} attachment_count={} explicit_locator_count={} explicit_command={} raw_chars={}",
         crate::highlight_tag("routing"),
@@ -69,7 +52,6 @@ pub(super) async fn prepare_planner_owned_ask_routing(
     );
 
     Ok(PreparedAskRouting {
-        route_result,
         turn_boundary_envelope,
         planner_user_request,
     })

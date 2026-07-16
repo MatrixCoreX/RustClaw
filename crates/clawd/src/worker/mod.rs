@@ -403,7 +403,6 @@ pub(crate) async fn process_ask_task(
         &prepared_flow.context_bundle_summary,
         prepared_flow.memory_trace.as_ref(),
         &prepared_flow.resolved_prompt_for_execution,
-        &prepared_flow.route_result,
         None,
         &[],
         None,

@@ -439,6 +439,9 @@ pub(crate) async fn finalize_loop_reply(
     mut loop_state: LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<AskReply, String> {
+    let effective_agent_run_context =
+        effective_agent_run_context_for_finalization(agent_run_context, &loop_state);
+    let agent_run_context = effective_agent_run_context.as_ref();
     // §3.3 Stage 3.2 invariant：进入 LOOP REPLY finalize 子层时，
     // ask_state 必须处于 Executing 或 Finalizing 之一。Executing 表示
     // agent loop 刚跑完一轮、本函数即将做最后归约；Finalizing 表示
@@ -1837,6 +1840,20 @@ pub(crate) async fn finalize_loop_reply(
     Ok(AskReply::non_llm(final_text)
         .with_messages(delivery_deduped)
         .with_task_journal(journal))
+}
+
+fn effective_agent_run_context_for_finalization(
+    agent_run_context: Option<&AgentRunContext>,
+    loop_state: &LoopState,
+) -> Option<AgentRunContext> {
+    if agent_run_context.is_none() && loop_state.route_policy_context.is_none() {
+        return None;
+    }
+    let mut context = agent_run_context.cloned().unwrap_or_default();
+    if let Some(contract) = loop_state.route_policy_context.as_ref() {
+        context.route_result = Some(contract.clone());
+    }
+    Some(context)
 }
 
 #[cfg(test)]

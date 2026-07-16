@@ -1,7 +1,7 @@
 use super::build_agent_run_context_from_prepared_flow;
 
 #[test]
-fn planner_context_keeps_neutral_route_and_raw_request() {
+fn planner_context_keeps_raw_request_without_pre_planner_route() {
     let task = crate::ClaimedTask {
         task_id: "task-runtime-context".to_string(),
         user_id: 1,
@@ -16,20 +16,6 @@ fn planner_context_keeps_neutral_route_and_raw_request() {
     let flow = super::PreparedAskFlow {
         context_bundle_summary: "summary".to_string(),
         memory_trace: None,
-        route_result: crate::RouteResult {
-            resolved_intent: "raw request".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "agent_loop_semantic_authority".to_string(),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract::default(),
-        },
         turn_boundary_envelope:
             crate::turn_boundary_envelope::TurnBoundaryEnvelope::from_claimed_task(
                 &task,
@@ -54,13 +40,7 @@ fn planner_context_keeps_neutral_route_and_raw_request() {
         Some("raw request")
     );
     assert_eq!(context.user_request.as_deref(), Some("raw request"));
-    assert_eq!(
-        context
-            .route_result
-            .as_ref()
-            .map(|route| route.route_reason.as_str()),
-        Some("agent_loop_semantic_authority")
-    );
+    assert!(context.route_result.is_none());
     assert!(context.turn_analysis.is_none());
     assert!(context.auto_locator_path.is_none());
 }
