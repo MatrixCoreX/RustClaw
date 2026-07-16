@@ -2,7 +2,7 @@ use super::{
     collect_whitelisted_env_pairs, crypto_recoverable_i18n_error_key, extract_task_request_text,
     is_crypto_account_access_error, is_missing_target_skill_error, is_recoverable_skill_error,
     parse_policy_block_error, parse_structured_skill_error, policy_block_default_text,
-    policy_block_error, request_reply_language, skill_error_machine_observation,
+    policy_block_error, request_reply_language, run_safe_command, skill_error_machine_observation,
     skill_runner_env_strict_enabled, structured_skill_error_from_parts,
     structured_skill_error_string, task_allows_path_outside_workspace, task_allows_sudo,
     task_request_locale_tag, RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX,
@@ -116,6 +116,16 @@ fn install_registry_from_toml(state: &mut AppState, root: &Path, toml: &str, ena
         registry: Some(Arc::new(registry)),
         skills_list: Arc::new(enabled),
     });
+}
+
+fn allow_test_skills(state: &mut AppState, skills: &[&str]) {
+    let mut config = ToolsConfig::default();
+    config.allow = skills
+        .iter()
+        .map(|skill| format!("skill:{skill}"))
+        .collect();
+    state.skill_rt.tools_policy =
+        Arc::new(ToolsPolicy::from_config(&config).expect("test tools policy"));
 }
 
 fn make_echo_skill_runner(root: &Path) -> PathBuf {
@@ -337,6 +347,7 @@ external_kind = "prompt_bundle"
 "#,
         &["external_prompt_fixture"],
     );
+    allow_test_skills(&mut state, &["external_prompt_fixture"]);
     let task = test_task(json!({"kind": "run_skill"}));
 
     let err = super::run_skill_with_runner_outcome(
@@ -926,6 +937,7 @@ async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
     let temp = TempDirGuard::new("skill_memory_echo_runner");
     let mut state = test_state("zh-CN");
     install_real_registry(&mut state);
+    allow_test_skills(&mut state, &["photo_organize"]);
     state.skill_rt.skill_runner_path = make_echo_skill_runner(temp.path());
     state.skill_rt.workspace_root = temp.path().to_path_buf();
     state.skill_rt.skill_timeout_seconds = 5;
@@ -1727,21 +1739,26 @@ fn policy_block_default_text_returns_machine_payload() {
 // 显式 source map 验证白名单语义本身。
 
 #[test]
-fn skill_env_strict_off_when_env_unset_or_empty() {
+fn skill_env_strict_defaults_on_and_accepts_explicit_opt_out() {
     let _guard = STRICT_ENV_TEST_LOCK.lock().expect("strict env test lock");
     // 暂存 + 清掉避免邻测污染
     let prev = std::env::var_os("RUSTCLAW_SKILL_ENV_STRICT");
     std::env::remove_var("RUSTCLAW_SKILL_ENV_STRICT");
-    assert!(!skill_runner_env_strict_enabled(), "默认应 OFF");
+    assert!(skill_runner_env_strict_enabled(), "default must be ON");
 
     std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", "");
-    assert!(!skill_runner_env_strict_enabled(), "空字符串视为 OFF");
+    assert!(
+        skill_runner_env_strict_enabled(),
+        "empty value keeps default ON"
+    );
 
-    std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", "0");
-    assert!(!skill_runner_env_strict_enabled(), "\"0\" 视为 OFF");
-
-    std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", "false");
-    assert!(!skill_runner_env_strict_enabled(), "\"false\" 视为 OFF");
+    for val in ["0", "false", "FALSE", "off", "no"] {
+        std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", val);
+        assert!(
+            !skill_runner_env_strict_enabled(),
+            "RUSTCLAW_SKILL_ENV_STRICT={val:?} must opt out"
+        );
+    }
 
     // 恢复
     match prev {
@@ -1830,5 +1847,36 @@ fn whitelist_constant_does_not_include_obvious_secrets_or_clawd_specific_keys() 
             !SKILL_RUNNER_ENV_WHITELIST.contains(&needle),
             "{needle} 不能进白名单 —— 必须走 secrets broker 或 clawd 显式 env 注入"
         );
+    }
+}
+
+#[tokio::test]
+async fn run_cmd_does_not_inherit_undeclared_parent_secret() {
+    let _guard = STRICT_ENV_TEST_LOCK.lock().expect("strict env test lock");
+    let strict_before = std::env::var_os("RUSTCLAW_SKILL_ENV_STRICT");
+    let secret_before = std::env::var_os("RUSTCLAW_TEST_PARENT_SECRET");
+    std::env::remove_var("RUSTCLAW_SKILL_ENV_STRICT");
+    std::env::set_var("RUSTCLAW_TEST_PARENT_SECRET", "must-not-reach-child");
+
+    let output = run_safe_command(
+        Path::new("."),
+        "printf '%s' \"${RUSTCLAW_TEST_PARENT_SECRET-unset}\"",
+        256,
+        5,
+        5,
+        1024,
+        false,
+    )
+    .await
+    .expect("bounded run_cmd");
+    assert_eq!(output, "unset");
+
+    match strict_before {
+        Some(value) => std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", value),
+        None => std::env::remove_var("RUSTCLAW_SKILL_ENV_STRICT"),
+    }
+    match secret_before {
+        Some(value) => std::env::set_var("RUSTCLAW_TEST_PARENT_SECRET", value),
+        None => std::env::remove_var("RUSTCLAW_TEST_PARENT_SECRET"),
     }
 }

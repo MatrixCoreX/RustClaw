@@ -434,6 +434,7 @@ pub(super) async fn run_safe_command_detailed(
     }
 
     let mut cmd = Command::new("bash");
+    crate::skills::apply_skill_runner_env_isolation(&mut cmd);
     cmd.arg("-lc").arg(command);
     cmd.current_dir(cwd)
         .stdin(std::process::Stdio::null())
@@ -717,6 +718,7 @@ pub(super) async fn start_async_command(
         ))
     })?;
     let mut cmd = Command::new("bash");
+    crate::skills::apply_skill_runner_env_isolation(&mut cmd);
     cmd.arg(&run_script_path)
         .current_dir(cwd)
         .stdin(std::process::Stdio::null())

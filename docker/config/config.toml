@@ -385,16 +385,18 @@ endpoint = ""
 note = "placeholder"
 
 # 用途/Purpose: 工具执行白名单/黑名单与权限配置.
-# 建议修改/Recommended change: 生产环境建议收紧 allow/deny 与 sudo.
-# 风险/Risk: 当前 `allow=*` + `allow_sudo=true` 权限非常高，误调用风险显著.
+# 建议修改/Recommended change: 只在明确需要时扩展 allow 或开启高权限开关.
+# 风险/Risk: 扩展到 `allow=["*"]`、sudo 或工作区外路径会显著放大误调用影响.
 [tools]
-allow = ["*"]
-allow_path_outside_workspace = true
-allow_sudo = true
+allow = []
+allow_path_outside_workspace = false
+allow_sudo = false
 cmd_timeout_seconds = 60
+cmd_idle_timeout_seconds = 60
+cmd_max_output_bytes = 8000
 deny = []
 max_cmd_length = 2400
-profile = "full"
+profile = "coding"
 
 # 用途/Purpose: 按模型提供商细化工具 allow/deny 覆盖.
 # 建议修改/Recommended change: 可改，建议用于高风险提供商最小权限化.

@@ -374,7 +374,7 @@ pub(super) fn default_worker_running_recovery_check_interval_seconds() -> u64 {
 }
 
 pub(super) fn default_tools_profile() -> String {
-    "full".to_string()
+    "coding".to_string()
 }
 
 pub(super) fn default_telegram_quick_result_wait_seconds() -> u64 {
