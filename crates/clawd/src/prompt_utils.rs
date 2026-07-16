@@ -5,30 +5,16 @@ use serde_json::{json, Value};
 
 use crate::AppState;
 
-#[cfg(test)]
-#[path = "prompt_utils_contract_repair_judge.rs"]
-mod contract_repair_judge;
 #[path = "prompt_utils_json_repair.rs"]
 mod json_repair;
-#[cfg(test)]
-#[path = "prompt_utils_output_contract.rs"]
-mod output_contract;
 #[path = "prompt_utils_schema.rs"]
 mod schema_validation;
-#[cfg(test)]
-use contract_repair_judge::canonicalize_contract_repair_judge_object;
 #[cfg(test)]
 pub(crate) use json_repair::{balance_unclosed_brackets, dedupe_json_object_keys};
 pub(crate) use json_repair::{
     extract_agent_action_objects, extract_first_json_object_any, extract_first_json_value_any,
     extract_json_object, is_agent_action_type_token, parse_llm_json_raw_or_any,
     parse_llm_json_raw_or_any_with_repair, repair_invalid_json_escapes,
-};
-#[cfg(test)]
-use output_contract::{
-    canonicalize_output_contract, normalize_output_contract_delivery_intent,
-    normalize_output_contract_locator_kind, normalize_output_contract_semantic_kind,
-    normalize_schema_token_for_contract,
 };
 use schema_validation::validate_schema_value;
 
@@ -93,9 +79,6 @@ pub(crate) fn log_prompt_render_with_version(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PromptSchemaId {
-    IntentNormalizer,
-    #[cfg(test)]
-    ContractRepairJudge,
     AnswerVerifier,
     UserResponseContractValidator,
     PlanResult,
@@ -110,9 +93,6 @@ pub(crate) enum PromptSchemaId {
 impl PromptSchemaId {
     fn as_str(self) -> &'static str {
         match self {
-            Self::IntentNormalizer => "intent_normalizer",
-            #[cfg(test)]
-            Self::ContractRepairJudge => "contract_repair_judge",
             Self::AnswerVerifier => "answer_verifier",
             Self::UserResponseContractValidator => "user_response_contract_validator",
             Self::PlanResult => "plan_result",
@@ -130,9 +110,6 @@ impl PromptSchemaId {
             serde_json::from_str(raw).expect("prompt schema must be valid JSON")
         }
 
-        static INTENT_NORMALIZER: OnceLock<Value> = OnceLock::new();
-        #[cfg(test)]
-        static CONTRACT_REPAIR_JUDGE: OnceLock<Value> = OnceLock::new();
         static ANSWER_VERIFIER: OnceLock<Value> = OnceLock::new();
         static USER_RESPONSE_CONTRACT_VALIDATOR: OnceLock<Value> = OnceLock::new();
         static PLAN_RESULT: OnceLock<Value> = OnceLock::new();
@@ -144,17 +121,6 @@ impl PromptSchemaId {
         static RUN_CMD_SUGGESTION: OnceLock<Value> = OnceLock::new();
 
         match self {
-            Self::IntentNormalizer => INTENT_NORMALIZER.get_or_init(|| {
-                parse_schema(include_str!(
-                    "../../../prompts/schemas/intent_normalizer.schema.json"
-                ))
-            }),
-            #[cfg(test)]
-            Self::ContractRepairJudge => CONTRACT_REPAIR_JUDGE.get_or_init(|| {
-                parse_schema(include_str!(
-                    "../../../prompts/schemas/contract_repair_judge.schema.json"
-                ))
-            }),
             Self::AnswerVerifier => ANSWER_VERIFIER.get_or_init(|| {
                 parse_schema(include_str!(
                     "../../../prompts/schemas/answer_verifier.schema.json"
@@ -368,34 +334,9 @@ fn canonicalize_plan_result_object(mut map: serde_json::Map<String, Value>) -> (
 }
 
 fn canonicalize_schedule_intent_schema_object(
-    mut map: serde_json::Map<String, Value>,
+    map: serde_json::Map<String, Value>,
 ) -> (Value, bool) {
-    let mut normalized = false;
-    if let Some(Value::Object(mut intent)) = map.remove("schedule_intent") {
-        for (outer_key, inner_key) in [
-            ("schedule_kind", "kind"),
-            ("timezone", "timezone"),
-            ("raw", "raw"),
-            ("reason", "reason"),
-            ("needs_clarify", "needs_clarify"),
-            ("clarify_question", "clarify_question"),
-            ("confidence", "confidence"),
-        ] {
-            if !intent.contains_key(inner_key) {
-                if let Some(value) = map.remove(outer_key) {
-                    intent.insert(inner_key.to_string(), value);
-                }
-            }
-        }
-        if !intent.contains_key("raw") {
-            if let Some(value) = map.remove("resolved_user_intent") {
-                intent.insert("raw".to_string(), value);
-            }
-        }
-        map = intent;
-        normalized = true;
-    }
-    canonicalize_schedule_intent_fields(map, normalized)
+    canonicalize_schedule_intent_fields(map, false)
 }
 
 fn canonicalize_schedule_intent_fields(
@@ -591,119 +532,6 @@ fn schema_scalar_text(value: &Value) -> String {
 
 fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value, bool) {
     match (schema_id, value) {
-        (PromptSchemaId::IntentNormalizer, Value::Object(mut map)) => {
-            let mut normalized = false;
-            if map.remove("decision").is_some() {
-                normalized = true;
-            }
-            let allowed_top_level_keys = [
-                "boundary_envelope",
-                "resolved_user_intent",
-                "resume_behavior",
-                "schedule_kind",
-                "wants_file_delivery",
-                "should_refresh_long_term_memory",
-                "agent_display_name_hint",
-                "needs_clarify",
-                "clarify_question",
-                "reason",
-                "confidence",
-                "schedule_intent",
-                "output_contract",
-                "execution_recipe",
-                "turn_type",
-                "target_task_policy",
-                "should_interrupt_active_run",
-                "state_patch",
-                "attachment_processing_required",
-            ];
-            for key in map.keys().cloned().collect::<Vec<_>>() {
-                if !allowed_top_level_keys.contains(&key.as_str()) {
-                    map.remove(&key);
-                    normalized = true;
-                }
-            }
-            if !matches!(map.get("boundary_envelope"), Some(Value::Object(_))) {
-                map.insert(
-                    "boundary_envelope".to_string(),
-                    json!({
-                        "schema_version": crate::turn_boundary_envelope::TURN_BOUNDARY_ENVELOPE_SCHEMA_VERSION,
-                        "raw_chars": 0,
-                        "language_hint": null,
-                        "schedule_intent": null,
-                        "attachment_refs": [],
-                        "explicit_locators": [],
-                        "active_task_reference": null,
-                        "session_binding": null,
-                        "safety_budget_hint": null,
-                    }),
-                );
-                normalized = true;
-            }
-            let mut execution_recipe_locator_hint: Option<Value> = None;
-            let mut execution_recipe_self_extension: Option<Value> = None;
-            if let Some(Value::Object(execution_recipe)) = map.get_mut("execution_recipe") {
-                let allowed_keys = ["kind", "profile", "target_scope"];
-                let mut stray_fields = Vec::new();
-                for key in execution_recipe.keys().cloned().collect::<Vec<_>>() {
-                    if allowed_keys.contains(&key.as_str()) {
-                        continue;
-                    }
-                    if let Some(value) = execution_recipe.remove(&key) {
-                        stray_fields.push((key, value));
-                        normalized = true;
-                    }
-                }
-                for (field, value) in stray_fields {
-                    if field.contains("locator_hint") {
-                        execution_recipe_locator_hint.get_or_insert(value);
-                        continue;
-                    }
-                    if field.contains("self_extension") {
-                        execution_recipe_self_extension.get_or_insert(value);
-                        continue;
-                    }
-                }
-            }
-            if execution_recipe_locator_hint.is_some() || execution_recipe_self_extension.is_some()
-            {
-                match map.get_mut("output_contract") {
-                    Some(Value::Object(output_contract)) => {
-                        if let Some(locator_hint) = execution_recipe_locator_hint {
-                            let needs_locator_hint = output_contract
-                                .get("locator_hint")
-                                .and_then(|v| v.as_str())
-                                .map(str::trim)
-                                .map(str::is_empty)
-                                .unwrap_or(true);
-                            if needs_locator_hint {
-                                output_contract.insert("locator_hint".to_string(), locator_hint);
-                            }
-                        }
-                        if let Some(self_extension) = execution_recipe_self_extension {
-                            output_contract
-                                .entry("self_extension".to_string())
-                                .or_insert(self_extension);
-                        }
-                    }
-                    Some(_) => {}
-                    None => {
-                        let mut output_contract = serde_json::Map::new();
-                        if let Some(locator_hint) = execution_recipe_locator_hint {
-                            output_contract.insert("locator_hint".to_string(), locator_hint);
-                        }
-                        if let Some(self_extension) = execution_recipe_self_extension {
-                            output_contract.insert("self_extension".to_string(), self_extension);
-                        }
-                        map.insert(
-                            "output_contract".to_string(),
-                            Value::Object(output_contract),
-                        );
-                    }
-                }
-            }
-            (Value::Object(map), normalized)
-        }
         (PromptSchemaId::PlanResult, Value::Array(steps)) => {
             let (steps, _) = canonicalize_plan_steps_value(Value::Array(steps));
             (json!({ "steps": steps }), true)
@@ -711,10 +539,6 @@ fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value,
         (PromptSchemaId::PlanResult, Value::Object(map)) => canonicalize_plan_result_object(map),
         (PromptSchemaId::ScheduleIntent, Value::Object(map)) => {
             canonicalize_schedule_intent_schema_object(map)
-        }
-        #[cfg(test)]
-        (PromptSchemaId::ContractRepairJudge, Value::Object(map)) => {
-            canonicalize_contract_repair_judge_object(map)
         }
         (_, value) => (value, false),
     }

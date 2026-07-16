@@ -109,17 +109,9 @@ pub(crate) async fn execute_builtin_skill_for_task(
     }
     ensure_only_keys(map, &["action", "text"])?;
     let text = required_string(map, "text")?;
-    // Phase 0.4: 优先复用 normalizer 已经解析好的 schedule_intent，避免
-    // 同一次 ask 流里对同一段文本再触发一次 LLM；只有 cache miss 或文本
-    // 与 normalizer 原始输入不一致时才回退到 `parse_schedule_intent`。
-    let intent =
-        if let Some(cached) = state.take_task_schedule_intent_if_matches(&task.task_id, text) {
-            cached
-        } else {
-            crate::schedule_service::parse_schedule_intent(state, task, text)
-                .await
-                .ok_or_else(|| "schedule intent not detected".to_string())?
-        };
+    let intent = crate::schedule_service::parse_schedule_intent(state, task, text)
+        .await
+        .ok_or_else(|| "schedule_intent_not_detected".to_string())?;
     serde_json::to_string(&intent).map_err(|e| format!("serialize schedule intent failed: {e}"))
 }
 

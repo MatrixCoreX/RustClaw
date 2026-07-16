@@ -335,7 +335,7 @@ impl WorkerConfig {
 }
 
 /// P2.1 Stage 2 — `TaskMetricsRegistry` 簇：per-task LLM 计数 / 耗时 /
-/// by-prompt 分桶 / schedule_intent 复用缓存。
+/// by-prompt 分桶 / ordered call sequence。
 ///
 /// 拆分动机：Phase 1.5 加 `llm_by_prompt_per_task` 一个字段就要改 12
 /// 处 fixture——这正是 P2.1 想根治的痛点。集中后 `TaskMetricsRegistry`
@@ -353,7 +353,7 @@ pub(crate) struct TaskMetricsRegistry {
     /// Phase 1.5: per-task 的 LLM 调用按 prompt label 分桶累计（次数 + 耗时）。
     /// 与 `llm_calls_per_task` / `llm_elapsed_per_task` 是同一份数据的不同维度：
     /// 总量用前两个表，而"哪个 prompt 把额度烧光了"用这个表。诊断用。
-    /// 外层 key = task_id；内层 key = label（如 `normalizer` / `plan` /
+    /// 外层 key = task_id；内层 key = label（如 `plan` /
     /// `plan_repair` / `chat` / `delivery_classifier` / `observed` / `nl2cmd`...）。
     /// 标签由 [`crate::llm_gateway::classify_prompt_source`] 从 `prompt_source` 抽出。
     pub(crate) llm_by_prompt_per_task:
@@ -361,12 +361,6 @@ pub(crate) struct TaskMetricsRegistry {
     /// Ordered, machine-only metadata for measuring calls before the planner.
     /// Prompt and response text are intentionally not retained here.
     pub(crate) llm_call_sequence_per_task: Arc<Mutex<HashMap<String, Vec<LlmCallSequenceEntry>>>>,
-    /// Phase 0.4: 缓存 `run_intent_normalizer` 产出的 `schedule_intent`，
-    /// 让后续 `schedule.compile` 技能在 `text` 与归一化后的原始输入一致时
-    /// 直接复用，不再重跑一次 `schedule_intent_prompt` LLM 调用。
-    /// Key = task_id；Value = (归一化后的原始 user_request, 解析结果)。
-    pub(crate) task_schedule_intent_cache:
-        Arc<Mutex<HashMap<String, (String, crate::ScheduleIntentOutput)>>>,
 }
 
 pub(crate) fn build_skill_views(
@@ -485,26 +479,6 @@ pub(crate) fn reload_skill_views(state: &AppState) -> Result<ReloadSkillViewsRes
         execution_skills_count: execution_count,
         planner_visible_count: planner_count,
     })
-}
-
-/// schedule.compile 技能的 text 归一化：trim + lowercase + 折叠内部空白。
-/// 与缓存匹配时用同一函数，避免因"用户输入末尾有换行/多一个空格"导致误 miss。
-pub(crate) fn normalize_schedule_compile_text(text: &str) -> String {
-    let lowered = text.trim().to_lowercase();
-    let mut out = String::with_capacity(lowered.len());
-    let mut prev_whitespace = false;
-    for ch in lowered.chars() {
-        if ch.is_whitespace() {
-            if !prev_whitespace && !out.is_empty() {
-                out.push(' ');
-            }
-            prev_whitespace = true;
-        } else {
-            out.push(ch);
-            prev_whitespace = false;
-        }
-    }
-    out
 }
 
 #[derive(Debug, Serialize)]
@@ -1197,53 +1171,6 @@ impl AppState {
             .lock()
             .unwrap()
             .remove(task_id);
-        self.metrics
-            .task_schedule_intent_cache
-            .lock()
-            .unwrap()
-            .remove(task_id);
-    }
-
-    /// 把 normalizer 解析出的 `schedule_intent` 缓存起来，键入 `task_id` 与
-    /// 对应的归一化原始文本。仅在 normalizer 实际返回了 schedule_intent 时调用。
-    pub(crate) fn cache_task_schedule_intent(
-        &self,
-        task_id: &str,
-        user_request: &str,
-        intent: &crate::ScheduleIntentOutput,
-    ) {
-        let normalized = normalize_schedule_compile_text(user_request);
-        if normalized.is_empty() {
-            return;
-        }
-        self.metrics
-            .task_schedule_intent_cache
-            .lock()
-            .unwrap()
-            .insert(task_id.to_string(), (normalized, intent.clone()));
-    }
-
-    /// 若 `skill_text` 归一化后与缓存的 normalizer 输入一致则返回复用的解析结果，
-    /// 否则返回 None，调用方应回退到 `parse_schedule_intent` 走完整的 LLM 链路。
-    pub(crate) fn take_task_schedule_intent_if_matches(
-        &self,
-        task_id: &str,
-        skill_text: &str,
-    ) -> Option<crate::ScheduleIntentOutput> {
-        let normalized = normalize_schedule_compile_text(skill_text);
-        if normalized.is_empty() {
-            return None;
-        }
-        let mut guard = self.metrics.task_schedule_intent_cache.lock().unwrap();
-        let cached_text_matches = guard
-            .get(task_id)
-            .map(|(cached, _)| cached == &normalized)
-            .unwrap_or(false);
-        if cached_text_matches {
-            guard.remove(task_id).map(|(_, intent)| intent)
-        } else {
-            None
-        }
     }
 
     pub(crate) fn get_skills_registry(&self) -> Option<Arc<SkillsRegistry>> {

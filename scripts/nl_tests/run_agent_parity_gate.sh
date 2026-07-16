@@ -394,8 +394,6 @@ echo "AGENT_PARITY_GATE_STEP agent_architecture_boundary_contracts"
 {
   python3 "${ROOT_DIR}/scripts/check_boundary_envelope_schema.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_boundary_envelope_schema.py"
-  python3 "${ROOT_DIR}/scripts/check_intent_normalizer_boundary_schema.py" --self-test
-  python3 "${ROOT_DIR}/scripts/check_intent_normalizer_boundary_schema.py"
   python3 "${ROOT_DIR}/scripts/check_planner_no_pre_llm_deterministic_fast_path.py" --self-test
   python3 "${ROOT_DIR}/scripts/check_planner_no_pre_llm_deterministic_fast_path.py"
   python3 "${ROOT_DIR}/scripts/check_capability_resolver_registry_only.py" --self-test

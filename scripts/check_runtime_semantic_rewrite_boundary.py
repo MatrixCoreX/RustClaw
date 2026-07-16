@@ -61,6 +61,26 @@ REMOVED_SEMANTIC_FRONTDOOR_GLOBS: tuple[str, ...] = (
     "agent_engine/migration_class*.rs",
 )
 
+REMOVED_SEMANTIC_RESOURCE_FILES: tuple[Path, ...] = (
+    SRC_ROOT / "prompt_utils_contract_repair_judge.rs",
+    SRC_ROOT / "prompt_utils_output_contract.rs",
+    ROOT / "prompts/layers/overlays/intent_normalizer_prompt.md",
+    ROOT / "prompts/layers/overlays/contract_repair_judge_prompt.md",
+    ROOT / "prompts/schemas/intent_normalizer.schema.json",
+    ROOT / "prompts/schemas/contract_repair_judge.schema.json",
+    ROOT / "scripts/check_intent_normalizer_boundary_schema.py",
+    ROOT / "scripts/runtime_semantic_rewrite_prompt_schema_guards.py",
+)
+
+REMOVED_SEMANTIC_RESOURCE_TOKENS: tuple[tuple[Path, str], ...] = (
+    (SRC_ROOT / "prompt_utils.rs", "IntentNormalizer"),
+    (SRC_ROOT / "prompt_utils.rs", "ContractRepairJudge"),
+    (ROOT / "crates/clawd/src/bootstrap/prompts.rs", "intent_normalizer_prompt.md"),
+    (ROOT / "crates/clawd/src/bootstrap/prompts.rs", "contract_repair_judge_prompt.md"),
+    (ROOT / "prompts/layers/manifest.toml", "intent_normalizer_prompt.md"),
+    (ROOT / "prompts/layers/manifest.toml", "contract_repair_judge_prompt.md"),
+)
+
 
 def removed_frontdoor_finding(path: Path, pattern: str) -> Finding:
     return Finding(
@@ -69,6 +89,34 @@ def removed_frontdoor_finding(path: Path, pattern: str) -> Finding:
         "removed_semantic_frontdoor_file_present",
         f"obsolete semantic frontdoor file matches {pattern}",
     )
+
+
+def scan_removed_semantic_resources() -> list[Finding]:
+    findings: list[Finding] = []
+    for path in REMOVED_SEMANTIC_RESOURCE_FILES:
+        if path.is_file():
+            findings.append(
+                Finding(
+                    rel(path),
+                    1,
+                    "removed_semantic_resource_present",
+                    "obsolete normalizer/contract-repair resource must stay deleted",
+                )
+            )
+    for path, token in REMOVED_SEMANTIC_RESOURCE_TOKENS:
+        if not path.is_file():
+            continue
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if token in line:
+                findings.append(
+                    Finding(
+                        rel(path),
+                        line_no,
+                        "removed_semantic_resource_registered",
+                        f"obsolete semantic resource token is registered: {token}",
+                    )
+                )
+    return findings
 
 
 def scan_planner_frontdoor_terminal_shape() -> list[Finding]:
@@ -104,6 +152,7 @@ def scan_repo() -> list[Finding]:
         findings.extend(scan_legacy_runtime_semantic_outputs(rel_path, text))
 
     findings.extend(scan_planner_frontdoor_terminal_shape())
+    findings.extend(scan_removed_semantic_resources())
     findings.extend(scan_removed_lightweight_preclassification())
     findings.extend(scan_journal_output_contract_ref_boundary())
     findings.extend(scan_static_capability_compat_boundary())
@@ -147,6 +196,7 @@ def run_self_test() -> int:
     assert blocked_file.path.endswith("intent_router_self_test.rs")
 
     assert not scan_planner_frontdoor_terminal_shape()
+    assert not scan_removed_semantic_resources()
     assert not scan_removed_lightweight_preclassification()
     print("SELF_TEST_OK")
     return 0

@@ -41,10 +41,6 @@ ANSWER_VERIFIER_PROMPT_EVIDENCE_BLOCKS_FILE = (
     SRC_ROOT / "answer_verifier_runtime/prompt_evidence_blocks.rs"
 )
 VERIFIER_FILE = SRC_ROOT / "verifier.rs"
-PROMPT_UTILS_OUTPUT_CONTRACT_FILE = SRC_ROOT / "prompt_utils_output_contract.rs"
-PROMPT_UTILS_CONTRACT_REPAIR_JUDGE_FILE = (
-    SRC_ROOT / "prompt_utils_contract_repair_judge.rs"
-)
 EXECUTION_RECIPE_SCHEMA_FILES: tuple[Path, ...] = (
     SRC_ROOT / "intent_router_execution_recipe_schema.rs",
     SRC_ROOT / "intent_router_execution_recipe_contract.rs",
@@ -732,25 +728,6 @@ def scan_observed_output_contract_marker_payload() -> list[Finding]:
     return findings
 
 
-def scan_prompt_utils_output_contract_registry_bridge_tokens() -> list[Finding]:
-    return scan_token_list_text(
-        rel(PROMPT_UTILS_OUTPUT_CONTRACT_FILE),
-        PROMPT_UTILS_OUTPUT_CONTRACT_FILE.read_text(encoding="utf-8"),
-        FORBIDDEN_REGISTRY_BRIDGE_MACHINE_TOKENS
-        + (
-            "web_page_summary",
-            "web_search_summary",
-            "weather_query",
-            "market_quote",
-            "image_understanding",
-            "photo_organization",
-            "publishing_preview",
-            "rss_news_fetch",
-        ),
-        "prompt_utils_output_contract_registry_bridge_token",
-    )
-
-
 def scan_execution_recipe_registry_bridge_tokens() -> list[Finding]:
     findings: list[Finding] = []
     for path in EXECUTION_RECIPE_SCHEMA_FILES:
@@ -1088,86 +1065,6 @@ def scan_runtime_status_recipe_contract_marker() -> list[Finding]:
                 1,
                 "runtime_status_recipe_semantic_kind_reader",
                 "runtime status recipe must not read legacy output_contract.semantic_kind",
-            )
-        )
-    return findings
-
-
-def scan_prompt_utils_contract_repair_judge_marker_only() -> list[Finding]:
-    rel_path = rel(PROMPT_UTILS_CONTRACT_REPAIR_JUDGE_FILE)
-    return scan_prompt_utils_contract_repair_judge_marker_only_text(
-        rel_path, PROMPT_UTILS_CONTRACT_REPAIR_JUDGE_FILE.read_text(encoding="utf-8")
-    )
-
-
-def scan_prompt_utils_contract_repair_judge_marker_only_text(
-    rel_path: str, text: str
-) -> list[Finding]:
-    findings: list[Finding] = []
-    if '.get("contract_marker")' not in text:
-        findings.append(
-            Finding(
-                rel_path,
-                1,
-                "contract_repair_judge_contract_marker_missing",
-                "contract repair judge should read output_contract.contract_marker",
-            )
-        )
-    if 'contract.get("semantic_kind")' in text or '.or_else(|| contract.get("semantic_kind"))' in text:
-        findings.append(
-            Finding(
-                rel_path,
-                1,
-                "contract_repair_judge_semantic_kind_fallback",
-                "contract repair judge must not fall back to legacy output_contract.semantic_kind",
-            )
-        )
-    if 'decision == "planner_execute"' in text:
-        findings.append(
-            Finding(
-                rel_path,
-                1,
-                "contract_repair_judge_planner_execute_decision_gate",
-                "contract repair judge apply inference must use machine fields, not legacy decision=planner_execute",
-            )
-        )
-    return findings
-
-
-def scan_prompt_utils_output_contract_marker_only() -> list[Finding]:
-    rel_path = rel(PROMPT_UTILS_OUTPUT_CONTRACT_FILE)
-    text = PROMPT_UTILS_OUTPUT_CONTRACT_FILE.read_text(encoding="utf-8")
-    fn_start = text.find("pub(super) fn canonicalize_output_contract(")
-    if fn_start < 0:
-        return [
-            Finding(
-                rel_path,
-                1,
-                "prompt_utils_output_contract_canonicalizer_missing",
-                "missing canonicalize_output_contract",
-            )
-        ]
-    fn_end = text.find("\nfn ", fn_start + 1)
-    body = text[fn_start : fn_end if fn_end >= 0 else len(text)]
-    findings: list[Finding] = []
-    if '"contract_marker"' not in body:
-        findings.append(
-            Finding(
-                rel_path,
-                1,
-                "prompt_utils_output_contract_marker_missing",
-                "output contract canonicalizer should preserve contract_marker",
-            )
-        )
-    for line_no, line in enumerate(body.splitlines(), start=1):
-        if '"semantic_kind"' not in line:
-            continue
-        findings.append(
-            Finding(
-                rel_path,
-                line_no,
-                "prompt_utils_output_contract_semantic_kind_field",
-                line.strip(),
             )
         )
     return findings

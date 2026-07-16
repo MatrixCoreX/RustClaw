@@ -217,7 +217,6 @@ the artifact must contain `RUNTIME_SEMANTIC_REWRITE_BOUNDARY_CHECK findings=0`,
 `OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_CHECK findings=0`.
 It also writes `agent_architecture_boundary_contracts.txt` from
 `scripts/check_boundary_envelope_schema.py --self-test`,
-`scripts/check_intent_normalizer_boundary_schema.py --self-test`,
 `scripts/check_planner_no_pre_llm_deterministic_fast_path.py --self-test`,
 `scripts/check_capability_resolver_registry_only.py --self-test`,
 `scripts/check_finalizer_boundary.py --self-test`, and
@@ -225,7 +224,6 @@ It also writes `agent_architecture_boundary_contracts.txt` from
 checks. `gate_summary.env` records
 `agent_architecture_boundary_contracts=1`, and the artifact must contain
 `BOUNDARY_ENVELOPE_SCHEMA_CHECK findings=0`,
-`INTENT_NORMALIZER_BOUNDARY_SCHEMA_CHECK findings=0`,
 `PLANNER_PRE_LLM_DETERMINISTIC_FAST_PATH_CHECK strict_tests=false findings=0`,
 `CAPABILITY_RESOLVER_REGISTRY_ONLY_CHECK findings=0`,
 `FINALIZER_BOUNDARY_CHECK ok`, and
@@ -443,7 +441,6 @@ For `semantic_boundary_contracts.txt`, the required content includes
 `OUTPUT_SEMANTIC_KIND_WRITE_BOUNDARY_CHECK findings=0`.
 For `agent_architecture_boundary_contracts.txt`, the required content includes
 `BOUNDARY_ENVELOPE_SCHEMA_CHECK findings=0`,
-`INTENT_NORMALIZER_BOUNDARY_SCHEMA_CHECK findings=0`,
 `PLANNER_PRE_LLM_DETERMINISTIC_FAST_PATH_CHECK strict_tests=false findings=0`,
 `CAPABILITY_RESOLVER_REGISTRY_ONLY_CHECK findings=0`,
 `FINALIZER_BOUNDARY_CHECK ok`, and
