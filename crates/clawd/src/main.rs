@@ -123,12 +123,12 @@ pub(crate) use output_paths::ensure_default_file_path;
 pub(crate) use pipeline_types::{
     plan_step_from_agent_action, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
     OutputResponseShape, OutputScalarCountTargetKind, OutputSemanticKind, PlanKind, PlanResult,
-    PlanStep, RiskCeiling, RouteReasonMarkers, RouteResult, ScheduleKind,
+    PlanStep, RouteReasonMarkers, RouteResult, ScheduleKind,
 };
 #[cfg(test)]
 pub(crate) use pipeline_types::{
-    OutputListSelector, OutputScalarCountFilter, ResumeBehavior, SelfExtensionContract,
-    SelfExtensionMode, SelfExtensionTrigger,
+    OutputListSelector, OutputScalarCountFilter, ResumeBehavior, RiskCeiling,
+    SelfExtensionContract, SelfExtensionMode, SelfExtensionTrigger,
 };
 pub(crate) use prompt_utils::{
     extract_first_json_value_any, log_prompt_render, log_prompt_render_with_version,

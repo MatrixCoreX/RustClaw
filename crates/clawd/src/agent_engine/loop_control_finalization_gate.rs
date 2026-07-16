@@ -2,10 +2,10 @@ use super::*;
 
 pub(super) fn promote_publishable_strict_json_projection_for_verifier_candidate(
     reply: &mut AskReply,
-    route_result: Option<&RouteResult>,
+    answer_contract: Option<&crate::answer_verifier::AnswerContract>,
     loop_state: &LoopState,
 ) -> bool {
-    let Some(route_result) = route_result else {
+    let Some(answer_contract) = answer_contract else {
         return false;
     };
     if loop_state
@@ -36,9 +36,9 @@ pub(super) fn promote_publishable_strict_json_projection_for_verifier_candidate(
         let Some(journal) = reply.task_journal.as_ref() else {
             return false;
         };
-        !crate::answer_verifier::should_verify_answer(route_result, journal, answer)
+        !crate::answer_verifier::should_verify_answer(answer_contract, journal, answer)
             || crate::answer_verifier::structurally_satisfies_answer_contract(
-                route_result,
+                answer_contract,
                 journal,
                 answer,
             )
@@ -156,13 +156,13 @@ pub(super) async fn attach_answer_verifier_if_missing(
     state: &AppState,
     task: &ClaimedTask,
     user_text: &str,
-    route_result: Option<&RouteResult>,
+    answer_contract: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) {
     if reply.should_fail_task || reply_final_status_is_clarify(reply) {
         return;
     }
-    let Some(route_result) = route_result else {
+    let Some(answer_contract) = answer_contract else {
         return;
     };
     let Some(journal) = reply.task_journal.as_mut() else {
@@ -172,7 +172,7 @@ pub(super) async fn attach_answer_verifier_if_missing(
         return;
     }
     if let Some(answer_verifier) =
-        machine_status_visible_output_format_gap(route_result, journal, &reply.text)
+        machine_status_visible_output_format_gap(answer_contract, journal, &reply.text)
     {
         journal.record_answer_verifier_summary(answer_verifier);
         return;
@@ -181,7 +181,7 @@ pub(super) async fn attach_answer_verifier_if_missing(
         state,
         task,
         user_text,
-        route_result,
+        answer_contract,
         journal,
         &reply.text,
     )
@@ -191,14 +191,15 @@ pub(super) async fn attach_answer_verifier_if_missing(
     }
 }
 
-pub(super) fn answer_contract_route_result_for_reply(
-    agent_run_context: Option<&AgentRunContext>,
+pub(super) fn answer_contract_for_reply(
+    user_text: &str,
     reply: &AskReply,
-) -> Option<RouteResult> {
+) -> Option<crate::answer_verifier::AnswerContract> {
     reply
         .task_journal
         .as_ref()
         .and_then(|journal| journal.output_contract.clone())
-        .map(RouteResult::from_planner_output_contract)
-        .or_else(|| agent_run_context.and_then(|ctx| ctx.route_result.clone()))
+        .map(|output_contract| {
+            crate::answer_verifier::AnswerContract::new(user_text, output_contract)
+        })
 }

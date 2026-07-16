@@ -68,7 +68,7 @@ pub(in crate::agent_engine::loop_control) async fn try_rewrite_answer_verifier_g
     state: &AppState,
     task: &ClaimedTask,
     user_text: &str,
-    route_result: Option<&RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
     reply: &mut AskReply,
 ) -> bool {
@@ -76,7 +76,6 @@ pub(in crate::agent_engine::loop_control) async fn try_rewrite_answer_verifier_g
         return false;
     };
     if route.output_contract.delivery_required
-        || route.wants_file_delivery
         || !verifier.high_confidence_retry_gap()
         || !verifier.should_retry
     {
@@ -109,11 +108,13 @@ pub(in crate::agent_engine::loop_control) async fn try_rewrite_answer_verifier_g
     else {
         return false;
     };
+    let answer_contract =
+        crate::answer_verifier::AnswerContract::new(user_text, route.output_contract.clone());
     if let Some(retry_verifier) = crate::answer_verifier::verify_answer_observe_only(
         state,
         task,
         user_text,
-        route,
+        &answer_contract,
         &journal_snapshot,
         &retried_answer,
     )

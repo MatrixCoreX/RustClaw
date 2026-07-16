@@ -275,7 +275,7 @@ fn archive_pack_scalar_contract_returns_created_archive_path() {
 }
 
 #[test]
-fn archive_pack_scalar_contract_accepts_route_marker_without_semantic_enum() {
+fn archive_pack_scalar_contract_uses_planner_semantic_kind() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -283,15 +283,11 @@ fn archive_pack_scalar_contract_accepts_route_marker_without_semantic_enum() {
         "archive_path=/tmp/rustclaw-workspace/tmp/nl_archive_case.zip\nexit=0\n",
     ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route_result.route_reason = "contract:archive_pack".to_string();
+    route_result.output_contract.semantic_kind = OutputSemanticKind::ArchivePack;
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.locator_kind = OutputLocatorKind::Path;
     route_result.output_contract.locator_hint =
         "scripts/skill_calls | tmp/nl_archive_case.zip".to_string();
-    assert_eq!(
-        route_result.output_contract.semantic_kind,
-        OutputSemanticKind::None
-    );
     let agent_run_context = AgentRunContext {
         route_result: Some(route_result),
         ..AgentRunContext::default()

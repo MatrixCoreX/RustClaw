@@ -436,7 +436,7 @@ fn direct_scalar_lists_sqlite_table_names_when_names_only_contract_is_scalar() {
 }
 
 #[test]
-fn direct_scalar_lists_sqlite_table_names_from_route_marker_without_semantic_enum() {
+fn direct_scalar_lists_sqlite_table_names_from_planner_contract() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
         "step_1",
@@ -444,15 +444,11 @@ fn direct_scalar_lists_sqlite_table_names_from_route_marker_without_semantic_enu
         r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
     ));
     let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
-    route_result.route_reason = "contract:sqlite_table_names_only".to_string();
+    route_result.output_contract.semantic_kind = OutputSemanticKind::SqliteTableNamesOnly;
     route_result.output_contract.requires_content_evidence = true;
     route_result.output_contract.locator_kind = OutputLocatorKind::Path;
     route_result.output_contract.locator_hint =
         "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
-    assert_eq!(
-        route_result.output_contract.semantic_kind,
-        OutputSemanticKind::None
-    );
     let agent_run_context = AgentRunContext {
         route_result: Some(route_result),
         ..AgentRunContext::default()

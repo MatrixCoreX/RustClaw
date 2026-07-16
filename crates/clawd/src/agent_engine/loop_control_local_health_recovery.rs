@@ -36,7 +36,7 @@ impl LocalHealthFinding {
 }
 
 pub(super) fn try_recover_local_health_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) -> bool {
     let Some(route) = route_result else {
@@ -63,7 +63,7 @@ pub(super) fn try_recover_local_health_answer_verifier_gap(
 }
 
 pub(super) fn try_recover_local_health_answer_verifier_gap_from_loop_state(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     loop_state: &LoopState,
     reply: &mut AskReply,
 ) -> bool {
@@ -120,7 +120,7 @@ fn apply_local_health_recovery(reply: &mut AskReply, finding: &LocalHealthFindin
     info!("answer_verifier_retry_exhausted_recovered_with_local_health_fields");
 }
 
-fn route_allows_local_health_recovery(route: &crate::RouteResult) -> bool {
+fn route_allows_local_health_recovery(route: &crate::answer_verifier::AnswerContract) -> bool {
     route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && !matches!(

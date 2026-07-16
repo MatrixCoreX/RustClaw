@@ -1,13 +1,12 @@
 use super::*;
 
 #[test]
-fn filesystem_count_entries_capability_ref_verifies_scalar_without_semantic_kind() {
+fn planner_scalar_count_contract_verifies_scalar() {
     let mut route = route_with_mode();
-    route.resolved_intent = "capability_ref=filesystem.count_entries".to_string();
-    route.route_reason = "capability_ref=filesystem.count_entries".to_string();
+    route.request_text = "capability_ref=filesystem.count_entries".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
 
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-count-entries-capability",
@@ -31,10 +30,9 @@ fn filesystem_count_entries_capability_ref_verifies_scalar_without_semantic_kind
 }
 
 #[test]
-fn system_runtime_status_capability_ref_verifies_scalar_without_semantic_kind() {
+fn planner_scalar_runtime_contract_verifies_scalar() {
     let mut route = route_with_mode();
-    route.resolved_intent = "capability_ref=system.runtime_status".to_string();
-    route.route_reason = "capability_ref=system.runtime_status".to_string();
+    route.request_text = "capability_ref=system.runtime_status".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -69,10 +67,9 @@ fn system_runtime_status_capability_ref_verifies_scalar_without_semantic_kind() 
 }
 
 #[test]
-fn config_read_field_capability_ref_verifies_scalar_without_semantic_kind() {
+fn planner_scalar_config_field_contract_verifies_scalar() {
     let mut route = route_with_mode();
-    route.resolved_intent = "capability_ref=config.read_field".to_string();
-    route.route_reason = "capability_ref=config.read_field".to_string();
+    route.request_text = "capability_ref=config.read_field".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
@@ -109,10 +106,9 @@ fn config_read_field_capability_ref_verifies_scalar_without_semantic_kind() {
 }
 
 #[test]
-fn system_extract_field_capability_ref_verifies_scalar_without_semantic_kind() {
+fn planner_scalar_extracted_field_contract_verifies_scalar() {
     let mut route = route_with_mode();
-    route.resolved_intent = "capability_ref=system_basic.extract_field".to_string();
-    route.route_reason = "capability_ref=system_basic.extract_field".to_string();
+    route.request_text = "capability_ref=system_basic.extract_field".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.semantic_kind = crate::OutputSemanticKind::None;

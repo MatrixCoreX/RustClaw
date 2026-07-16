@@ -18,13 +18,13 @@ struct RecentArtifactInventory {
 }
 
 pub(super) fn try_recover_recent_artifacts_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) -> bool {
     let Some(route) = route_result else {
         return false;
     };
-    if !route_allows_recent_artifacts_recovery(route) {
+    if !route_allows_recent_artifacts_recovery(&route.output_contract) {
         return false;
     }
     let Some(verifier) = reply
@@ -47,7 +47,7 @@ pub(super) fn try_recover_recent_artifacts_answer_verifier_gap(
     let Some(mut inventory) = observed_recent_artifact_inventory(reply) else {
         return false;
     };
-    apply_recent_artifact_route_selector(route, &mut inventory);
+    apply_recent_artifact_selector(&route.output_contract, &route.request_text, &mut inventory);
     if inventory.entries.is_empty() {
         return false;
     }
@@ -69,10 +69,10 @@ pub(super) fn try_recover_recent_artifacts_answer_verifier_gap(
     true
 }
 
-fn route_allows_recent_artifacts_recovery(route: &crate::RouteResult) -> bool {
-    route.output_contract.requires_content_evidence
-        && !route.output_contract.delivery_required
-        && route.output_contract_marker_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
+fn route_allows_recent_artifacts_recovery(output_contract: &crate::IntentOutputContract) -> bool {
+    output_contract.requires_content_evidence
+        && !output_contract.delivery_required
+        && output_contract.semantic_kind_is(crate::OutputSemanticKind::RecentArtifactsJudgment)
 }
 
 fn observed_recent_artifact_inventory(reply: &AskReply) -> Option<RecentArtifactInventory> {
@@ -90,13 +90,17 @@ pub(super) fn recent_artifacts_inventory_observation_can_finalize(
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> bool {
-    if !route_allows_recent_artifacts_recovery(route) {
+    if !route_allows_recent_artifacts_recovery(&route.output_contract) {
         return false;
     }
     let Some(mut inventory) = observed_recent_artifact_inventory_from_loop_state(loop_state) else {
         return false;
     };
-    apply_recent_artifact_route_selector(route, &mut inventory);
+    apply_recent_artifact_selector(
+        &route.output_contract,
+        &route.resolved_intent,
+        &mut inventory,
+    );
     !inventory.entries.is_empty()
 }
 
@@ -114,11 +118,12 @@ fn observed_recent_artifact_inventory_from_loop_state(
         .next()
 }
 
-fn apply_recent_artifact_route_selector(
-    route: &crate::RouteResult,
+fn apply_recent_artifact_selector(
+    output_contract: &crate::IntentOutputContract,
+    request_text: &str,
     inventory: &mut RecentArtifactInventory,
 ) {
-    match recent_artifact_selector_target_kind(route) {
+    match recent_artifact_selector_target_kind(output_contract, request_text) {
         crate::OutputScalarCountTargetKind::Any => {}
         crate::OutputScalarCountTargetKind::File => {
             inventory.entries.retain(|entry| entry.kind == "file");
@@ -129,21 +134,20 @@ fn apply_recent_artifact_route_selector(
                 .retain(|entry| matches!(entry.kind.as_str(), "dir" | "directory"));
         }
     }
-    if let Some(limit) = recent_artifact_selector_limit(route) {
+    if let Some(limit) = recent_artifact_selector_limit(output_contract, request_text) {
         inventory.entries.truncate(limit);
     }
 }
 
 fn recent_artifact_selector_target_kind(
-    route: &crate::RouteResult,
+    output_contract: &crate::IntentOutputContract,
+    request_text: &str,
 ) -> crate::OutputScalarCountTargetKind {
-    let selector = &route.output_contract.self_extension.list_selector;
+    let selector = &output_contract.self_extension.list_selector;
     if selector.target_kind_specified {
         return selector.target_kind;
     }
-    selector_target_kind_machine_token(route.resolved_intent.as_str())
-        .or_else(|| selector_target_kind_machine_token(route.route_reason.as_str()))
-        .unwrap_or_default()
+    selector_target_kind_machine_token(request_text).unwrap_or_default()
 }
 
 fn selector_target_kind_machine_token(text: &str) -> Option<crate::OutputScalarCountTargetKind> {
@@ -157,16 +161,17 @@ fn selector_target_kind_machine_token(text: &str) -> Option<crate::OutputScalarC
         })
 }
 
-fn recent_artifact_selector_limit(route: &crate::RouteResult) -> Option<usize> {
-    route
-        .output_contract
+fn recent_artifact_selector_limit(
+    output_contract: &crate::IntentOutputContract,
+    request_text: &str,
+) -> Option<usize> {
+    output_contract
         .self_extension
         .list_selector
         .limit
         .and_then(|limit| usize::try_from(limit).ok())
         .filter(|limit| *limit > 0)
-        .or_else(|| selector_limit_machine_token(route.resolved_intent.as_str()))
-        .or_else(|| selector_limit_machine_token(route.route_reason.as_str()))
+        .or_else(|| selector_limit_machine_token(request_text))
 }
 
 fn selector_limit_machine_token(text: &str) -> Option<usize> {

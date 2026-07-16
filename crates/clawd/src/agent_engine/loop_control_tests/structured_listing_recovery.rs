@@ -53,7 +53,7 @@ fn structured_listing_recovery_projects_complete_names_by_kind_for_workspace_sum
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
 
     assert!(try_recover_structured_listing_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -83,7 +83,7 @@ fn structured_listing_recovery_uses_planner_listing_evidence_without_route_seman
     let route = route_result(OutputResponseShape::Free);
 
     assert!(try_recover_structured_listing_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -121,7 +121,7 @@ fn structured_listing_recovery_accepts_directory_lookup_legacy_delivery_flags_fr
         AskReply::non_llm("listing was incomplete".to_string()).with_task_journal(journal);
 
     assert!(try_recover_structured_listing_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -145,7 +145,7 @@ fn structured_listing_recovery_does_not_override_artifact_file_delivery() {
         AskReply::non_llm("FILE delivery still missing".to_string()).with_task_journal(journal);
 
     assert!(!try_recover_structured_listing_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
     assert_eq!(reply.text, "FILE delivery still missing");
@@ -178,7 +178,7 @@ fn structured_listing_recovery_does_not_override_workspace_summary_with_content_
     route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
 
     assert!(!try_recover_structured_listing_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 

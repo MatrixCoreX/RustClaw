@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn evidence_policy_strict_list_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -47,7 +47,7 @@ pub(super) fn evidence_policy_strict_list_answer_is_grounded_in_successful_obser
     })
 }
 
-fn strict_list_selector_limit(route: &RouteResult) -> Option<usize> {
+fn strict_list_selector_limit(route: &AnswerContract) -> Option<usize> {
     route
         .output_contract
         .self_extension
@@ -57,60 +57,44 @@ fn strict_list_selector_limit(route: &RouteResult) -> Option<usize> {
         .filter(|value| *value > 0)
 }
 
-pub(super) fn strict_list_route_allows_observed_subset(route: &RouteResult) -> bool {
+pub(super) fn strict_list_route_allows_observed_subset(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::FilePaths)
         || route_contract_marker_is(route, crate::OutputSemanticKind::DirectoryNames)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["filesystem", "fs", "fs_basic"],
-            &["find_entries"],
-        )
 }
 
-fn route_contract_marker_is(route: &RouteResult, semantic_kind: crate::OutputSemanticKind) -> bool {
+fn route_contract_marker_is(
+    route: &AnswerContract,
+    semantic_kind: crate::OutputSemanticKind,
+) -> bool {
     route.output_contract_marker_is(semantic_kind)
 }
 
-pub(super) fn route_contract_marker_is_scalar_path_only(route: &RouteResult) -> bool {
+pub(super) fn route_contract_marker_is_scalar_path_only(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::ScalarPathOnly)
 }
 
-fn route_contract_marker_is_service_status(route: &RouteResult) -> bool {
+fn route_contract_marker_is_service_status(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::ServiceStatus)
-        || crate::machine_capability_ref::route_has_capability_namespace(
-            route,
-            &["service", "service_control", "system", "health"],
-        )
 }
 
-fn route_contract_marker_is_archive_unpack(route: &RouteResult) -> bool {
+fn route_contract_marker_is_archive_unpack(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::ArchiveUnpack)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["archive"],
-            &["unpack"],
-        )
 }
 
-fn route_contract_marker_is_git_repository_state(route: &RouteResult) -> bool {
+fn route_contract_marker_is_git_repository_state(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::GitRepositoryState)
-        || crate::machine_capability_ref::route_has_capability_action_name(
-            route,
-            &["git", "git_basic"],
-            &["status"],
-        )
 }
 
-fn route_contract_marker_is_hidden_entries_check(route: &RouteResult) -> bool {
+fn route_contract_marker_is_hidden_entries_check(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::HiddenEntriesCheck)
 }
 
-fn route_contract_marker_is_directory_names(route: &RouteResult) -> bool {
+fn route_contract_marker_is_directory_names(route: &AnswerContract) -> bool {
     route_contract_marker_is(route, crate::OutputSemanticKind::DirectoryNames)
 }
 
 pub(super) fn evidence_policy_table_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -129,7 +113,7 @@ pub(super) fn evidence_policy_table_answer_is_grounded_in_successful_observation
 }
 
 fn sqlite_empty_table_answer_is_grounded(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -169,7 +153,7 @@ fn sqlite_empty_table_answer_is_grounded(
 }
 
 pub(super) fn evidence_policy_single_path_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -198,7 +182,7 @@ pub(super) fn evidence_policy_single_path_answer_is_grounded_in_successful_obser
 }
 
 pub(super) fn evidence_policy_delivery_artifact_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -221,7 +205,7 @@ pub(super) fn candidate_answer_has_grounded_existing_plain_path(
 }
 
 pub(super) fn archive_unpack_summary_answer_is_grounded_in_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -240,7 +224,7 @@ pub(super) fn archive_unpack_summary_answer_is_grounded_in_observation(
 }
 
 pub(super) fn git_repository_state_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -309,7 +293,7 @@ pub(super) fn schema_field_value<'a>(candidate: &'a str, prefix: &str) -> Option
 }
 
 pub(super) fn service_status_port_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -332,7 +316,7 @@ pub(super) fn service_status_port_answer_is_grounded_in_successful_observation(
 }
 
 pub(super) fn observed_service_status_ports(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> BTreeSet<u16> {
     let mut ports = BTreeSet::new();
@@ -358,7 +342,7 @@ pub(super) fn candidate_service_status_ports(candidate_answer: &str) -> BTreeSet
 }
 
 pub(super) fn health_check_diagnostic_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -609,7 +593,7 @@ pub(super) fn parse_port_number(raw: &str) -> Option<u16> {
 }
 
 pub(super) fn observed_archive_unpack_destination_paths(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> BTreeSet<String> {
     let mut paths = observed_single_path_values_from_evidence_map_for_route(route, journal);
@@ -742,7 +726,7 @@ pub(super) fn strict_single_path_answer(answer: &str) -> Option<String> {
 }
 
 pub(super) fn observed_single_path_values(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> BTreeSet<String> {
     let mut paths = observed_single_path_values_from_evidence_map_for_route(route, journal);
@@ -933,7 +917,7 @@ pub(super) fn markdown_table_separator_row(cells: &[String]) -> bool {
 }
 
 pub(super) fn observed_table_cells(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> BTreeSet<String> {
     let mut cells = observed_table_cells_from_evidence_map_for_route(route, journal);
@@ -1057,7 +1041,7 @@ pub(super) fn strip_list_marker(raw: &str) -> String {
 }
 
 pub(super) fn strict_list_item_variants_for_route(
-    route: &RouteResult,
+    route: &AnswerContract,
     item: &str,
     observed_item: bool,
 ) -> Vec<String> {
@@ -1138,7 +1122,7 @@ pub(super) fn normalize_strict_list_item(item: &str) -> String {
 }
 
 pub(super) fn observed_strict_list_items(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> Vec<String> {
     let mut items = observed_strict_list_items_from_evidence_map_for_route(route, journal);

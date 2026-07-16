@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn terminal_model_output_format_gap_satisfies_contract(
     reply: &AskReply,
-    route: &RouteResult,
+    route: &crate::answer_verifier::AnswerContract,
 ) -> bool {
     if !route_allows_terminal_model_answer(route) {
         return false;
@@ -41,7 +41,7 @@ pub(super) fn terminal_model_output_format_gap_satisfies_contract(
 
 pub(in crate::agent_engine::loop_control) fn prefer_terminal_model_answer_for_verifier_candidate(
     reply: &mut AskReply,
-    route: Option<&RouteResult>,
+    route: Option<&crate::answer_verifier::AnswerContract>,
 ) -> bool {
     let Some(route) = route else {
         return false;
@@ -94,7 +94,7 @@ pub(in crate::agent_engine::loop_control) fn prefer_terminal_model_answer_for_ve
 }
 
 fn finalizer_accepts_terminal_model_answer(
-    route: &RouteResult,
+    route: &crate::answer_verifier::AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
     let Some(finalizer) = journal.finalizer_summary.as_ref() else {
@@ -110,11 +110,11 @@ fn finalizer_accepts_terminal_model_answer(
             || finalizer.used_evidence_ids_count > 0)
 }
 
-fn route_allows_terminal_model_answer(route: &RouteResult) -> bool {
-    if route.output_contract.delivery_required || route.wants_file_delivery {
+fn route_allows_terminal_model_answer(route: &crate::answer_verifier::AnswerContract) -> bool {
+    if route.output_contract.delivery_required {
         return false;
     }
-    crate::evidence_policy::final_answer_shape_for_route(route)
+    crate::evidence_policy::final_answer_shape_for_output_contract(&route.output_contract)
         .map(crate::evidence_policy::FinalAnswerShape::allows_model_language)
         .unwrap_or_else(|| {
             matches!(

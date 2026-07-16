@@ -90,7 +90,7 @@ fn fs_search_file_paths_contract_filters_with_structured_pattern() {
 }
 
 #[test]
-fn fs_search_file_paths_contract_accepts_route_marker_without_semantic_enum() {
+fn fs_search_file_paths_contract_uses_planner_semantic_kind() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -98,11 +98,10 @@ fn fs_search_file_paths_contract_accepts_route_marker_without_semantic_enum() {
             r#"{"action":"find_name","pattern":"execution_intent","count":8,"results":["crates/clawd/src/agent_engine/planning.rs","docs/planning_deterministic_guardrails_audit.md","plan/execution_intent_routing_repair_plan_20260509_已完成.md","prompts/layers/overlays/plan_repair_prompt.md"],"root":""}"#,
         ));
     let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-    route.route_reason = "contract:file_paths".to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
     route.resolved_intent = "machine contract only".to_string();
     route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.locator_hint = "/home/guagua/rustclaw/plan".to_string();
-    assert_eq!(route.output_contract.semantic_kind, OutputSemanticKind::None);
     let agent_run_context = AgentRunContext {
         route_result: Some(route),
         ..AgentRunContext::default()

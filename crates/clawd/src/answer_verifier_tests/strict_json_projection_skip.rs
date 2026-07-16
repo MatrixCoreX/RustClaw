@@ -122,7 +122,6 @@ fn should_verify_answer_skips_post_readback_strict_json_projection_observation()
 #[test]
 fn should_verify_answer_skips_readback_only_local_code_projection_with_validation() {
     let mut route = route_with_mode();
-    route.route_reason = "structured_locator_contract_repair; execution_recipe_target_locator_preserved_for_agent_loop".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -210,7 +209,6 @@ fn should_verify_answer_rejects_unresolved_strict_json_projection_observation() 
 #[test]
 fn should_verify_answer_skips_publishable_code_projection_when_route_shape_is_not_strict() {
     let mut route = route_with_mode();
-    route.route_reason = "structured_locator_contract_repair; execution_recipe_target_locator_preserved_for_agent_loop".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
@@ -279,7 +277,6 @@ fn should_verify_answer_skips_publishable_code_projection_when_route_shape_is_no
 #[test]
 fn should_verify_answer_keeps_verifier_for_publishable_code_projection_without_readback() {
     let mut route = route_with_mode();
-    route.route_reason = "structured_locator_contract_repair; execution_recipe_target_locator_preserved_for_agent_loop".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
     route.output_contract.requires_content_evidence = false;
     route.output_contract.delivery_required = false;
@@ -318,7 +315,6 @@ fn should_verify_answer_keeps_verifier_for_publishable_code_projection_without_r
 #[test]
 fn post_write_content_gap_defers_early_verifier_until_readback_exists() {
     let mut route = route_with_mode();
-    route.route_reason = "structured_locator_contract_repair; execution_recipe_target_locator_preserved_for_agent_loop".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;
@@ -364,7 +360,6 @@ fn post_write_content_gap_defers_early_verifier_until_readback_exists() {
 #[test]
 fn post_write_content_gap_ignores_pre_write_readback() {
     let mut route = route_with_mode();
-    route.route_reason = "structured_locator_contract_repair; execution_recipe_target_locator_preserved_for_agent_loop".to_string();
     route.output_contract.response_shape = crate::OutputResponseShape::Strict;
     route.output_contract.requires_content_evidence = true;
     route.output_contract.delivery_required = false;

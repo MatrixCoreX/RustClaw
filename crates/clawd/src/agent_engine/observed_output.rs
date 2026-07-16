@@ -466,7 +466,15 @@ fn evidence_policy_direct_candidate_satisfies_contract(
             finished_at: 0,
         });
     }
-    crate::answer_verifier::structurally_satisfies_answer_contract(route, &journal, candidate)
+    let answer_contract = crate::answer_verifier::AnswerContract::new(
+        &route.resolved_intent,
+        route.output_contract.clone(),
+    );
+    crate::answer_verifier::structurally_satisfies_answer_contract(
+        &answer_contract,
+        &journal,
+        candidate,
+    )
 }
 
 fn latest_observation_lacks_required_content_evidence(

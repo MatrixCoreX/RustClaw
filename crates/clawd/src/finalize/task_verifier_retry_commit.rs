@@ -21,11 +21,13 @@ pub(super) async fn try_commit_answer_verifier_retry_answer(
         return false;
     }
 
+    let answer_contract =
+        crate::answer_verifier::AnswerContract::new(prompt, route_result.output_contract.clone());
     let retry_verifier = crate::answer_verifier::verify_answer_observe_only(
         state,
         task,
         prompt,
-        route_result,
+        &answer_contract,
         journal,
         &retried_answer,
     )

@@ -1,11 +1,13 @@
 use super::*;
 
 pub(super) fn evidence_policy_scalar_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route) else {
+    let Some(shape) =
+        crate::evidence_policy::final_answer_shape_for_output_contract(&route.output_contract)
+    else {
         return false;
     };
     if shape.class() != crate::evidence_policy::FinalAnswerShapeClass::ScalarValue {
@@ -31,7 +33,7 @@ pub(super) fn evidence_policy_scalar_answer_is_grounded_in_successful_observatio
 }
 
 pub(super) fn count_summary_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
     allow_single_observed_scalar: bool,
@@ -64,7 +66,7 @@ pub(super) fn count_summary_answer_is_grounded_in_successful_observation(
 }
 
 pub(super) fn quantity_comparison_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -97,7 +99,7 @@ pub(super) struct ObservedScalarValue {
 }
 
 pub(super) fn recent_scalar_equality_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -298,7 +300,7 @@ pub(super) struct ObservedPathSize {
 }
 
 pub(super) fn directory_purpose_summary_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -322,7 +324,7 @@ pub(super) fn directory_purpose_summary_answer_is_grounded_in_successful_observa
 }
 
 pub(super) fn workspace_project_summary_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -345,7 +347,7 @@ pub(super) fn workspace_project_summary_answer_is_grounded_in_successful_observa
 }
 
 pub(super) fn recent_artifacts_judgment_answer_is_grounded_in_successful_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -372,7 +374,7 @@ pub(super) fn recent_artifacts_judgment_answer_is_grounded_in_successful_observa
 }
 
 pub(super) fn observed_recent_artifact_answer_names(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     content_names: &BTreeSet<String>,
 ) -> Vec<String> {
@@ -422,7 +424,7 @@ pub(super) fn recent_artifact_name_matches_content_name(name: &str, content_name
 }
 
 pub(super) fn directory_purpose_summary_listing_content_answer_is_grounded(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -769,7 +771,7 @@ pub(super) fn scalar_answer_is_strict_for_shape(
 }
 
 pub(super) fn markdown_heading_answer_is_grounded_in_read_observation(
-    route: &RouteResult,
+    route: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {

@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) fn try_recover_structured_listing_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) -> bool {
     if !route_allows_structured_listing_recovery(route_result, reply) {
@@ -53,7 +53,7 @@ pub(crate) fn try_recover_structured_listing_answer_verifier_gap(
 }
 
 fn route_allows_structured_listing_recovery(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &AskReply,
 ) -> bool {
     let Some(route) = route_result else {
@@ -91,7 +91,7 @@ fn route_allows_structured_listing_recovery(
         .any(|finding| finding.total_len() > 0)
 }
 
-fn route_requires_artifact_delivery(route: &crate::RouteResult) -> bool {
+fn route_requires_artifact_delivery(route: &crate::answer_verifier::AnswerContract) -> bool {
     matches!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::FileToken

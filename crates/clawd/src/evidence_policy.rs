@@ -7,21 +7,17 @@
 
 pub(crate) use crate::contract_matrix::{
     action_matches_policy_tokens, action_trace_for_output_contract,
-    capability_ref_action_policy_for_route, compact_prompt_line_for_route,
+    capability_ref_action_policy_for_route, compact_prompt_line_for_output_contract,
     final_answer_shape_for_output_contract, final_answer_shape_for_route, fnv1a_hex,
     required_evidence_for_output_contract, runtime_contract_snapshot_for_output_contract,
-    trace_snapshot_for_output_contract, trace_snapshot_for_route, ActionPolicyDecision, ActionRef,
-    EvidenceExpression, FailureAttribution, FinalAnswerShape, FinalAnswerShapeClass,
+    trace_snapshot_for_output_contract, ActionPolicyDecision, ActionRef, EvidenceExpression,
+    FailureAttribution, FinalAnswerShape, FinalAnswerShapeClass,
 };
 
 pub(crate) use crate::task_contract::{
     TaskDeliveryShape as EvidenceDeliveryShape, TaskOperation as EvidenceOperation,
     TaskTargetObject as EvidenceTargetObject,
 };
-
-pub(crate) fn evidence_policy_context_prompt_line_for_route(route: &crate::RouteResult) -> String {
-    crate::task_contract::evidence_policy_context_prompt_line_for_route(route)
-}
 
 pub(crate) fn evidence_expression_for_output_contract(
     output_contract: &crate::IntentOutputContract,

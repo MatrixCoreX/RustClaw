@@ -1,11 +1,10 @@
 use super::*;
 
 #[test]
-fn service_control_capability_ref_port_answer_is_grounded_without_semantic_kind() {
+fn service_status_contract_grounds_port_answer() {
     let mut route = route_with_mode();
     route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.route_reason = "capability_ref=service_control.status".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
     let mut journal = crate::task_journal::TaskJournal::for_task(
         "task-service-control-ports-capability-ref",
         "ask",

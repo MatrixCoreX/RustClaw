@@ -1,54 +1,12 @@
 use std::collections::BTreeSet;
 
-use crate::{AppState, ClaimedTask, RouteResult};
+use crate::{AppState, ClaimedTask};
 use serde::Deserialize;
 
 const ANSWER_VERIFIER_PROMPT_LOGICAL_PATH: &str = "prompts/answer_verifier_prompt.md";
 const MAX_VERIFIER_STEPS: usize = 8;
 const DEFAULT_RETRY_INSTRUCTION: &str =
     "retry_policy=use_observed_evidence_and_original_contract;repeat_rejected_answer=false";
-const OUTPUT_CONTRACT_ROUTE_MARKERS: &[&str] = &[
-    "content_excerpt_summary",
-    "content_excerpt_with_summary",
-    "scalar_count",
-    "scalar_path_only",
-    "file_basename",
-    "raw_command_output",
-    "command_output_summary",
-    "file_names",
-    "directory_names",
-    "directory_entry_groups",
-    "file_paths",
-    "existence_with_path",
-    "existence_with_path_summary",
-    "hidden_entries_check",
-    "execution_failed_step",
-    "generated_file_delivery",
-    "generated_file_path_report",
-    "filesystem_mutation_result",
-    "recent_scalar_equality_check",
-    "quantity_comparison",
-    "recent_artifacts_judgment",
-    "directory_purpose_summary",
-    "workspace_project_summary",
-    "git_commit_subject",
-    "git_repository_state",
-    "structured_keys",
-    "config_validation",
-    "config_mutation",
-    "config_risk_assessment",
-    "sqlite_table_listing",
-    "sqlite_table_names_only",
-    "sqlite_database_kind_judgment",
-    "sqlite_schema_version",
-    "archive_list",
-    "archive_read",
-    "archive_pack",
-    "archive_unpack",
-    "service_status",
-    "tool_discovery",
-];
-
 #[path = "answer_verifier_control_envelope.rs"]
 mod answer_verifier_control_envelope;
 #[path = "answer_verifier_delivery_raw.rs"]
@@ -73,6 +31,46 @@ pub(crate) use answer_verifier_runtime::{
     post_write_content_evidence_missing_before_verifier, verify_answer_observe_only,
 };
 use answer_verifier_scalar::*;
+
+#[derive(Debug, Clone)]
+pub(crate) struct AnswerContract {
+    pub(crate) request_text: String,
+    pub(crate) output_contract: crate::IntentOutputContract,
+}
+
+impl AnswerContract {
+    pub(crate) fn new(
+        request_text: impl Into<String>,
+        output_contract: crate::IntentOutputContract,
+    ) -> Self {
+        Self {
+            request_text: request_text.into(),
+            output_contract,
+        }
+    }
+
+    pub(crate) fn output_contract_marker_is(
+        &self,
+        semantic_kind: crate::OutputSemanticKind,
+    ) -> bool {
+        self.output_contract.semantic_kind_is(semantic_kind)
+    }
+
+    pub(crate) fn output_contract_marker_is_any(
+        &self,
+        semantic_kinds: &[crate::OutputSemanticKind],
+    ) -> bool {
+        self.output_contract.semantic_kind_is_any(semantic_kinds)
+    }
+
+    pub(crate) fn output_contract_is_unclassified(&self) -> bool {
+        self.output_contract.semantic_kind_is_unclassified()
+    }
+
+    pub(crate) fn effective_output_contract(&self) -> crate::IntentOutputContract {
+        self.output_contract.clone()
+    }
+}
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 pub(crate) struct AnswerVerifierOut {
@@ -120,12 +118,12 @@ impl AnswerVerifierOut {
 }
 
 pub(crate) fn should_verify_answer(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     answer_text: &str,
 ) -> bool {
     let candidate = answer_text.trim();
-    if candidate.is_empty() || route_result.needs_clarify {
+    if candidate.is_empty() {
         return false;
     }
     if matches!(
@@ -146,9 +144,6 @@ pub(crate) fn should_verify_answer(
     if structured_machine_projection_can_skip_answer_verifier(route_result, journal, candidate) {
         return false;
     }
-    if route_reason_has_backend_identity_metadata_marker(route_result) {
-        return true;
-    }
     evidence_policy_requires_observation(route_result)
         || !journal.step_results.is_empty()
         || route_has_output_contract_marker(route_result)
@@ -162,39 +157,37 @@ fn terminal_answer_has_no_tool_observations(journal: &crate::task_journal::TaskJ
     })
 }
 
-fn route_reason_has_backend_identity_metadata_marker(route_result: &RouteResult) -> bool {
-    route_result.has_route_reason_machine_marker("agent_display_name_hint_backend_metadata_removed")
+fn route_has_output_contract_marker(route_result: &AnswerContract) -> bool {
+    !route_result.output_contract.semantic_kind_is_unclassified()
 }
 
-fn route_has_output_contract_marker(route_result: &RouteResult) -> bool {
-    OUTPUT_CONTRACT_ROUTE_MARKERS
-        .iter()
-        .any(|marker| route_result.has_route_reason_machine_marker(marker))
-}
-
-fn evidence_policy_requires_observation(route_result: &RouteResult) -> bool {
+fn evidence_policy_requires_observation(route_result: &AnswerContract) -> bool {
     route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
-        || !crate::evidence_policy::required_evidence_fields_for_route(route_result).is_empty()
+        || !crate::evidence_policy::required_evidence_fields_for_output_contract(
+            &route_result.output_contract,
+        )
+        .is_empty()
 }
 
-fn context_only_tool_discovery_answer_can_skip_answer_verifier(route_result: &RouteResult) -> bool {
-    route_result.has_route_reason_machine_marker("tool_discovery")
+fn context_only_tool_discovery_answer_can_skip_answer_verifier(
+    route_result: &AnswerContract,
+) -> bool {
+    route_result
+        .output_contract
+        .semantic_kind_is(crate::OutputSemanticKind::ToolDiscovery)
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
-        && !route_result.wants_file_delivery
         && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
         && route_result.output_contract.locator_hint.trim().is_empty()
 }
 
 fn terminal_answer_only_can_skip_answer_verifier(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
 ) -> bool {
-    !route_reason_has_backend_identity_metadata_marker(route_result)
-        && !route_result.output_contract.requires_content_evidence
+    !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
-        && !route_result.wants_file_delivery
         && !route_has_output_contract_marker(route_result)
         && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
         && route_result.output_contract.locator_hint.trim().is_empty()
@@ -202,7 +195,7 @@ fn terminal_answer_only_can_skip_answer_verifier(
 }
 
 pub(crate) fn structurally_satisfies_answer_contract(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -269,7 +262,9 @@ pub(crate) fn structurally_satisfies_answer_contract(
     ) {
         return true;
     }
-    if let Some(shape) = crate::evidence_policy::final_answer_shape_for_route(route_result) {
+    if let Some(shape) = crate::evidence_policy::final_answer_shape_for_output_contract(
+        &route_result.output_contract,
+    ) {
         if shape.class() == crate::evidence_policy::FinalAnswerShapeClass::ScalarValue {
             return evidence_policy_scalar_answer_is_grounded_in_successful_observation(
                 route_result,

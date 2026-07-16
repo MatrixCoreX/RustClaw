@@ -932,8 +932,7 @@ pub(super) async fn run_agent_with_loop_seeded(
             agent_run_context,
         )
         .await?;
-        let answer_contract_route_result =
-            answer_contract_route_result_for_reply(agent_run_context, &reply);
+        let answer_contract = answer_contract_for_reply(user_text, &reply);
         promote_local_code_projection_from_machine_evidence_for_verifier_candidate(
             &mut reply,
             user_text,
@@ -942,13 +941,10 @@ pub(super) async fn run_agent_with_loop_seeded(
         );
         promote_publishable_strict_json_projection_for_verifier_candidate(
             &mut reply,
-            answer_contract_route_result.as_ref(),
+            answer_contract.as_ref(),
             &pre_finalize_loop_state,
         );
-        prefer_terminal_model_answer_for_verifier_candidate(
-            &mut reply,
-            answer_contract_route_result.as_ref(),
-        );
+        prefer_terminal_model_answer_for_verifier_candidate(&mut reply, answer_contract.as_ref());
         enforce_post_write_content_evidence_guard(&mut reply);
         enforce_code_mutation_validation_success_guard(&mut reply);
         let mut pre_verifier_recovery_loop_state = pre_finalize_loop_state.clone();
@@ -972,17 +968,17 @@ pub(super) async fn run_agent_with_loop_seeded(
             state,
             task,
             user_text,
-            answer_contract_route_result.as_ref(),
+            answer_contract.as_ref(),
             &mut reply,
         )
         .await;
         enforce_post_write_content_evidence_guard(&mut reply);
         enforce_code_mutation_validation_success_guard(&mut reply);
-        let route_result = answer_contract_route_result.as_ref();
+        let route_result = answer_contract.as_ref();
         suppress_answer_verifier_retry_if_structurally_satisfied(&mut reply, route_result);
         suppress_answer_verifier_retry_if_user_locator_disambiguation(&mut reply, route_result);
         suppress_answer_verifier_retry_if_confirmed_missing_file_delivery(&mut reply, route_result);
-        if try_preserve_rss_source_hosts_from_structured_evidence(route_result, &mut reply) {
+        if try_preserve_rss_source_hosts_from_structured_evidence(&mut reply) {
             return Ok(reply);
         }
         if try_recover_document_heading_answer_verifier_gap(route_result, &mut reply) {
@@ -1171,7 +1167,7 @@ pub(super) async fn run_agent_with_loop_seeded(
             ) {
                 return Ok(reply);
             }
-            if try_recover_rss_news_answer_verifier_gap(route_result, &mut reply) {
+            if try_recover_rss_news_answer_verifier_gap(&mut reply) {
                 return Ok(reply);
             }
             if try_recover_document_heading_answer_verifier_gap(route_result, &mut reply) {

@@ -3,16 +3,19 @@ use serde_json::json;
 use super::*;
 
 pub(in crate::answer_verifier) fn evidence_policy_context_prompt_block(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
 ) -> String {
-    crate::evidence_policy::evidence_policy_context_prompt_line_for_route(route_result)
+    crate::evidence_policy::compact_prompt_line_for_output_contract(&route_result.output_contract)
+        .unwrap_or_default()
 }
 
 pub(in crate::answer_verifier) fn output_contract_prompt_block(
-    route_result: &RouteResult,
+    route_result: &AnswerContract,
 ) -> String {
     let evidence_policy_trace = verifier_evidence_policy_prompt_trace(route_result);
-    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_route(route_result);
+    let final_answer_shape = crate::evidence_policy::final_answer_shape_for_output_contract(
+        &route_result.output_contract,
+    );
     serde_json::to_string_pretty(&json!({
         "response_shape": route_result.output_contract.response_shape.as_str(),
         "final_answer_shape": final_answer_shape.map(crate::evidence_policy::FinalAnswerShape::as_str),
@@ -27,8 +30,11 @@ pub(in crate::answer_verifier) fn output_contract_prompt_block(
     .unwrap_or_else(|_| "{}".to_string())
 }
 
-fn verifier_evidence_policy_prompt_trace(route_result: &RouteResult) -> Option<serde_json::Value> {
-    let mut trace = crate::evidence_policy::trace_snapshot_for_route(route_result)?;
+fn verifier_evidence_policy_prompt_trace(
+    route_result: &AnswerContract,
+) -> Option<serde_json::Value> {
+    let mut trace =
+        crate::evidence_policy::trace_snapshot_for_output_contract(&route_result.output_contract)?;
     if let Some(obj) = trace.as_object_mut() {
         obj.remove("contract_marker");
         obj.remove("semantic_kind");
@@ -40,8 +46,10 @@ fn verifier_evidence_policy_prompt_trace(route_result: &RouteResult) -> Option<s
         obj.insert(
             "compact_line".to_string(),
             serde_json::Value::String(
-                crate::evidence_policy::compact_prompt_line_for_route(route_result)
-                    .unwrap_or_default(),
+                crate::evidence_policy::compact_prompt_line_for_output_contract(
+                    &route_result.output_contract,
+                )
+                .unwrap_or_default(),
             ),
         );
     }

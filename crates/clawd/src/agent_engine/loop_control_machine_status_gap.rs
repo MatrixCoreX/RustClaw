@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::RouteResult;
+use crate::answer_verifier::AnswerContract;
 
 pub(super) fn answer_verifier_output_format_machine_payload_gap(
     verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
@@ -68,17 +68,24 @@ fn machine_projection_field_key(key: &str) -> bool {
 }
 
 fn visible_answer_is_observed_machine_status_token(
-    route_result: &RouteResult,
+    answer_contract: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     reply_text: &str,
 ) -> bool {
     if matches!(
-        route_result.output_contract.response_shape,
+        answer_contract.output_contract.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
     ) {
         return false;
     }
-    if !super::route_requires_direct_candidate_for_observed_stop(route_result) {
+    if !answer_contract
+        .output_contract
+        .semantic_kind_is(crate::OutputSemanticKind::ServiceStatus)
+        || !crate::evidence_policy::final_answer_shape_for_output_contract(
+            &answer_contract.output_contract,
+        )
+        .is_some_and(|shape| shape.allows_model_language())
+    {
         return false;
     }
     let token = reply_text.trim();
@@ -151,19 +158,22 @@ fn machine_status_field_key(key: &str) -> bool {
 }
 
 pub(super) fn machine_status_visible_output_format_gap(
-    route_result: &RouteResult,
+    answer_contract: &AnswerContract,
     journal: &crate::task_journal::TaskJournal,
     reply_text: &str,
 ) -> Option<crate::answer_verifier::AnswerVerifierOut> {
-    visible_answer_is_observed_machine_status_token(route_result, journal, reply_text).then(|| {
-        crate::answer_verifier::AnswerVerifierOut {
-            pass: false,
-            missing_evidence_fields: vec!["output_format".to_string()],
-            answer_incomplete_reason: "machine_status_token_visible".to_string(),
-            should_retry: true,
-            retry_instruction: "render_observed_machine_status_as_user_visible_answer".to_string(),
-            confidence: 0.9,
-        }
-        .normalized()
-    })
+    visible_answer_is_observed_machine_status_token(answer_contract, journal, reply_text).then(
+        || {
+            crate::answer_verifier::AnswerVerifierOut {
+                pass: false,
+                missing_evidence_fields: vec!["output_format".to_string()],
+                answer_incomplete_reason: "machine_status_token_visible".to_string(),
+                should_retry: true,
+                retry_instruction: "render_observed_machine_status_as_user_visible_answer"
+                    .to_string(),
+                confidence: 0.9,
+            }
+            .normalized()
+        },
+    )
 }

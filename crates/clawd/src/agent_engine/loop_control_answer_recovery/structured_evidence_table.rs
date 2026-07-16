@@ -1,13 +1,13 @@
 use super::*;
 
 pub(in crate::agent_engine::loop_control) fn try_recover_structured_evidence_table_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
+    route_result: Option<&crate::answer_verifier::AnswerContract>,
     reply: &mut AskReply,
 ) -> bool {
     let Some(route) = route_result else {
         return false;
     };
-    if route.output_contract.delivery_required || route.wants_file_delivery {
+    if route.output_contract.delivery_required {
         return false;
     }
     let Some(journal) = reply.task_journal.as_ref() else {

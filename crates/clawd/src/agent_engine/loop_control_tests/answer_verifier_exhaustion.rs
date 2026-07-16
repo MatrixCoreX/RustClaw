@@ -117,7 +117,7 @@ fn answer_verifier_exhaustion_recovers_latest_contractual_synthesis() {
     let mut reply = AskReply::non_llm("previous candidate".to_string()).with_task_journal(journal);
 
     assert!(try_recover_latest_synthesis_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -182,7 +182,7 @@ fn latest_synthesis_recovery_rejects_post_write_failed_validation() {
     let mut reply = AskReply::non_llm("previous candidate".to_string()).with_task_journal(journal);
 
     assert!(!try_recover_latest_synthesis_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
     assert_eq!(reply.text, "previous candidate");
@@ -252,7 +252,7 @@ fn answer_verifier_exhaustion_recovers_multi_source_terminal_answer_for_free_rou
     let mut reply = AskReply::non_llm(table_only.to_string()).with_task_journal(journal);
 
     assert!(try_recover_latest_synthesis_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -284,7 +284,7 @@ fn structured_count_recovery_returns_machine_fields_without_language_template() 
     let mut reply = AskReply::non_llm("old count answer".to_string()).with_task_journal(journal);
 
     assert!(try_recover_structured_count_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         "数一下 docs 下面有多少项",
         &mut reply,
     ));
@@ -326,7 +326,7 @@ fn structured_search_recovery_returns_machine_candidates_without_language_templa
     let mut reply = AskReply::non_llm("README".to_string()).with_task_journal(journal);
 
     assert!(try_recover_structured_search_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         "找 README 文件",
         &mut reply,
     ));
@@ -378,7 +378,7 @@ fn answer_verifier_exhaustion_recovers_filesystem_mutation_success_payload() {
     .with_task_journal(journal);
 
     assert!(try_recover_filesystem_mutation_success_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -447,7 +447,7 @@ fn answer_verifier_exhaustion_recovers_latest_terminal_respond_after_retry() {
         AskReply::non_llm("answer verifier fallback".to_string()).with_task_journal(journal);
 
     assert!(try_recover_latest_synthesis_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -522,7 +522,7 @@ fn answer_verifier_exhaustion_recovers_structured_archive_db_table() {
     .with_task_journal(journal);
 
     assert!(try_recover_structured_evidence_table_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -598,7 +598,7 @@ fn answer_verifier_exhaustion_does_not_recover_unstructured_terminal_for_field_v
     let mut reply = AskReply::non_llm("previous candidate".to_string()).with_task_journal(journal);
 
     assert!(!try_recover_latest_synthesis_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
     assert_eq!(reply.text, "previous candidate");
@@ -638,7 +638,7 @@ fn answer_verifier_exhaustion_does_not_recover_same_rejected_terminal_respond() 
     let mut reply = AskReply::non_llm(rejected_answer.to_string()).with_task_journal(journal);
 
     assert!(!try_recover_latest_synthesis_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 }

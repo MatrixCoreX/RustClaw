@@ -32,7 +32,7 @@ fn recent_artifacts_verifier_gap_recovers_from_inventory_metadata() {
     let mut reply = AskReply::non_llm("incomplete".to_string()).with_task_journal(journal);
 
     assert!(try_recover_recent_artifacts_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 
@@ -108,7 +108,7 @@ fn recent_artifacts_verifier_gap_ignores_visible_text_inventory_metadata() {
     let mut reply = AskReply::non_llm("incomplete".to_string()).with_task_journal(journal);
 
     assert!(!try_recover_recent_artifacts_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
     assert_eq!(reply.text, "incomplete");
@@ -160,7 +160,7 @@ fn recent_artifacts_verifier_gap_recovery_respects_selector_limit_and_target_kin
     let mut reply = AskReply::non_llm("incomplete".to_string()).with_task_journal(journal);
 
     assert!(try_recover_recent_artifacts_answer_verifier_gap(
-        Some(&route),
+        Some(&answer_contract(&route)),
         &mut reply
     ));
 

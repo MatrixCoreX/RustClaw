@@ -11,7 +11,6 @@ fn grounded_file_token_satisfies_file_delivery_contract_before_llm_verifier() {
     std::fs::write(&file, "ok").expect("write temp file");
 
     let mut route = route_with_mode();
-    route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -62,7 +61,6 @@ fn grounded_file_token_uses_path_token_from_write_text_output() {
     std::fs::write(&file, "generic delivery case").expect("write temp file");
 
     let mut route = route_with_mode();
-    route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -94,7 +92,6 @@ fn grounded_file_token_uses_path_token_from_write_text_output() {
 #[test]
 fn confirmed_missing_file_delivery_skips_model_verifier() {
     let mut route = route_with_mode();
-    route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -144,7 +141,6 @@ fn confirmed_missing_file_delivery_skips_model_verifier() {
 #[test]
 fn matrix_delivery_artifact_shape_rejects_raw_command_summary_answer() {
     let mut route = route_with_mode();
-    route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -179,7 +175,6 @@ fn matrix_delivery_artifact_shape_accepts_grounded_plain_path() {
     std::fs::write(&file, "ok").expect("write temp file");
 
     let mut route = route_with_mode();
-    route.wants_file_delivery = true;
     route.output_contract.delivery_required = true;
     route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
     route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
