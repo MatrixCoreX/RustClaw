@@ -86,7 +86,9 @@ pub(crate) use self::filesystem_lifecycle_contract::{
     enrich_scratch_filesystem_cleanup_runtime_args,
     scratch_filesystem_lifecycle_observed_steps_match,
 };
-use self::loop_control::{run_agent_with_loop, run_agent_with_loop_seeded};
+use self::loop_control::{
+    run_agent_with_loop, run_agent_with_loop_direct_plan, run_agent_with_loop_seeded,
+};
 use self::loop_state_contract_evidence::{
     active_plan_file_targets_for_loop_seed, boundary_observation_needs_clarify_for_loop_seed,
     contract_repair_candidate_evidence_for_loop_seed,
@@ -108,7 +110,7 @@ use self::support::{
 };
 pub(crate) use self::user_output_path::CLAWD_USER_NAMED_OUTPUT_PATH_ARG;
 
-use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
+use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask, PlanKind, PlanResult};
 
 pub(crate) fn answer_verifier_enforce_required_enabled(state: &AppState) -> bool {
     load_agent_loop_guard_policy(state).answer_verifier_required_evidence_enabled()
@@ -1016,6 +1018,68 @@ pub(crate) async fn run_agent_with_tools_seeded(
         .await;
     }
     Ok(AskReply::non_llm(String::new()))
+}
+
+pub(crate) fn direct_capability_plan(
+    state: &AppState,
+    capability: &str,
+    args: Value,
+) -> PlanResult {
+    let requested = AgentAction::CallCapability {
+        capability: capability.to_string(),
+        args,
+    };
+    let (resolved, resolution) =
+        crate::capability_resolver::resolve_capability_action_with_record_for_state(
+            state,
+            capability,
+            match &requested {
+                AgentAction::CallCapability { args, .. } => args.clone(),
+                _ => Value::Null,
+            },
+        );
+    let mut actions = vec![resolved.unwrap_or(requested)];
+    actions.push(AgentAction::SynthesizeAnswer {
+        evidence_refs: Vec::new(),
+    });
+    let raw_plan = json!({
+        "plan_source": "direct_capability",
+        "capability": capability,
+        "resolution": {
+            "owner_layer": resolution.owner_layer,
+            "reason_code": resolution.reason_code,
+            "outcome": resolution.outcome,
+            "source": resolution.source,
+            "resolved_ref": resolution.resolved_ref,
+            "planner_kind": resolution.planner_kind,
+        }
+    })
+    .to_string();
+    self::planning_actions::build_plan_result_with_notes(
+        &format!("capability:{capability}"),
+        &raw_plan,
+        PlanKind::Single,
+        &actions,
+        "direct_capability",
+    )
+}
+
+pub(crate) async fn run_agent_with_tools_direct_plan(
+    state: &AppState,
+    task: &ClaimedTask,
+    request_envelope: &str,
+    agent_run_context: Option<AgentRunContext>,
+    initial_plan: &PlanResult,
+) -> Result<AskReply, String> {
+    run_agent_with_loop_direct_plan(
+        state,
+        task,
+        &initial_plan.goal,
+        request_envelope,
+        agent_run_context.as_ref(),
+        initial_plan,
+    )
+    .await
 }
 
 #[cfg(test)]

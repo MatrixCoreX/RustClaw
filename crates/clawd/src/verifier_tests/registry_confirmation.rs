@@ -1,6 +1,6 @@
 use super::*;
 
-fn workspace_registry_state() -> AppState {
+pub(super) fn workspace_registry_state() -> AppState {
     let state = AppState::test_default_with_fixture_provider();
     let registry_path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");

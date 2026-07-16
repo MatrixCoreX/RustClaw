@@ -13,6 +13,7 @@ mod async_poll_executor;
 mod channels;
 mod locator;
 mod resume_replay_executor;
+pub(crate) mod run_capability;
 mod run_skill_finalize;
 mod runtime_support;
 
@@ -370,6 +371,9 @@ pub(crate) async fn process_ask_task(
     task: &crate::ClaimedTask,
     payload: &mut Value,
 ) -> anyhow::Result<()> {
+    if run_capability::is_direct_capability_payload(payload) {
+        return run_capability::process_run_capability_task(state, task, payload).await;
+    }
     crate::log_ask_transition(
         state,
         &task.task_id,
