@@ -80,6 +80,43 @@ pub(crate) fn run_session_resume(
     Ok(())
 }
 
+pub(crate) fn run_session_continue_latest(
+    base_url: &str,
+    key: &str,
+    message: &str,
+    json_output: bool,
+) -> Result<()> {
+    let mut store = load_session_store()?;
+    let mut thread = session_store_select_latest_chat_thread(&store)?;
+    let source_task_id = thread.current_task_id.clone();
+    let task_id = task::submit_thread_ask(
+        base_url,
+        key,
+        message,
+        &thread.thread_id,
+        &thread.session_id,
+        source_task_id.as_deref(),
+    )?;
+    session_store_record_chat_task(&mut store, &mut thread, &task_id)?;
+    save_session_store(&store)?;
+    let summary = json!({
+        "operation": "session_continue_latest",
+        "session_id": thread.session_id,
+        "thread_id": thread.thread_id,
+        "source_task_id": source_task_id,
+        "task_id": task_id,
+        "event_cursor": thread.last_event_seq,
+    });
+    if json_output {
+        output::print_json_pretty(&summary);
+    } else {
+        println!("session_id={}", thread.session_id);
+        println!("thread_id={}", thread.thread_id);
+        println!("task_id={task_id}");
+    }
+    Ok(())
+}
+
 pub(crate) fn run_session_archive(session_id: &str, json_output: bool) -> Result<()> {
     let mut store = load_session_store()?;
     let summary = session_store_archive_json(&mut store, session_id);
@@ -304,6 +341,21 @@ pub(super) fn session_store_select_chat_thread(
     }
     store.latest_session_id = Some(selected_id.to_string());
     Ok(chat_thread_state(entry))
+}
+
+pub(super) fn session_store_select_latest_chat_thread(
+    store: &SessionStore,
+) -> Result<ChatThreadState> {
+    let session_id = store
+        .latest_session_id
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("chat_session_latest_missing"))?;
+    let session = store
+        .sessions
+        .get(session_id)
+        .filter(|session| !session.archived && session.thread_id.is_some())
+        .ok_or_else(|| anyhow::anyhow!("chat_session_latest_missing"))?;
+    Ok(chat_thread_state(session))
 }
 
 pub(super) fn session_store_record_chat_task(

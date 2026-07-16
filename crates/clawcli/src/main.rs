@@ -584,6 +584,13 @@ enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Continue the latest locally persisted chat thread with a new turn.
+    ContinueLatest {
+        #[arg(required = true, num_args = 1..)]
+        message: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Mark a locally saved task session archived.
     Archive {
         session_id: String,
@@ -932,6 +939,10 @@ fn main() -> Result<()> {
                 let k = key.as_deref().ok_or_else(auth::key_required_error)?;
                 let message = (!message.is_empty()).then(|| message.join(" "));
                 commands::run_session_resume(base_url, k, session_id, message.as_deref(), *json)
+            }
+            SessionCommand::ContinueLatest { message, json } => {
+                let k = key.as_deref().ok_or_else(auth::key_required_error)?;
+                commands::run_session_continue_latest(base_url, k, &message.join(" "), *json)
             }
             SessionCommand::Archive { session_id, json } => {
                 commands::run_session_archive(session_id, *json)
@@ -1422,7 +1433,15 @@ mod tests {
             .get_subcommands()
             .map(|subcommand| subcommand.get_name().to_string())
             .collect::<std::collections::BTreeSet<_>>();
-        for required in ["list", "show", "resume", "archive", "delete", "fork"] {
+        for required in [
+            "list",
+            "show",
+            "resume",
+            "continue-latest",
+            "archive",
+            "delete",
+            "fork",
+        ] {
             assert!(session_names.contains(required), "missing {required}");
         }
 
@@ -1599,6 +1618,26 @@ mod tests {
                 assert!(json);
             }
             _ => panic!("expected session resume"),
+        }
+
+        match Cli::try_parse_from([
+            "clawcli",
+            "session",
+            "continue-latest",
+            "continue",
+            "work",
+            "--json",
+        ])
+        .expect("parse latest session continuation")
+        .cmd
+        {
+            Some(Command::Session {
+                command: SessionCommand::ContinueLatest { message, json },
+            }) => {
+                assert_eq!(message, vec!["continue".to_string(), "work".to_string()]);
+                assert!(json);
+            }
+            _ => panic!("expected latest session continuation"),
         }
 
         match Cli::try_parse_from(["clawcli", "session", "archive", "task-1", "--json"])
