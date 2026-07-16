@@ -581,6 +581,30 @@ pub(crate) struct RouteResult {
 }
 
 impl RouteResult {
+    pub(crate) fn from_planner_output_contract(output_contract: IntentOutputContract) -> Self {
+        Self {
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "planner_output_contract_v1".to_string(),
+            #[cfg(test)]
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            wants_file_delivery: output_contract.delivery_required,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract,
+        }
+    }
+
+    pub(crate) fn planner_output_contract_unavailable() -> Self {
+        let mut route = Self::from_planner_output_contract(IntentOutputContract::default());
+        route.route_reason = "planner_output_contract_unavailable".to_string();
+        route
+    }
+
     pub(crate) fn has_route_reason_machine_marker(&self, marker: &str) -> bool {
         RouteReasonMarkers::new(&self.route_reason).has_machine_marker(marker)
     }

@@ -220,7 +220,6 @@ fn side_effect_free_freeform_topic_clarify_replans_without_publishing_question()
     let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
     let mut route = route_result(OutputResponseShape::Free);
     route.risk_ceiling = RiskCeiling::Low;
-    route.route_reason = "standalone_freeform_clarify_loop_context".to_string();
     route.output_contract.requires_content_evidence = false;
     route.output_contract.locator_kind = OutputLocatorKind::None;
     route.output_contract.delivery_intent = OutputDeliveryIntent::None;
@@ -711,7 +710,7 @@ fn inconsistent_locator_clarify_without_route_boundary_replans_then_finishes_as_
 }
 
 #[test]
-fn deferred_agent_loop_locator_clarify_does_not_recover_into_plan_file_read() {
+fn planner_locator_contract_does_not_recover_clarify_into_plan_file_read() {
     let plan = plan_result_with_raw_and_steps(
         "{}",
         vec![crate::PlanStep {
@@ -732,9 +731,8 @@ fn deferred_agent_loop_locator_clarify_does_not_recover_into_plan_file_read() {
     let intent = structured_respond_terminal_intent_from_plan(&plan).expect("structured intent");
     let mut route = route_result(OutputResponseShape::OneSentence);
     route.risk_ceiling = RiskCeiling::Low;
-    route.route_reason = "standalone_freeform_clarify_loop_context".to_string();
     route.output_contract.requires_content_evidence = false;
-    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
     route.output_contract.delivery_required = false;
     route.output_contract.delivery_intent = OutputDeliveryIntent::None;
     let mut loop_state = LoopState::new(2);

@@ -212,20 +212,10 @@ pub(crate) fn decide_planner_memory_use_policy(
 pub(crate) fn decide_chat_memory_use_policy(
     state: &AppState,
     budget_tier: ExecutionContextBudgetTier,
-    route_reason: &str,
     has_active_session_state: bool,
     chat_memory_budget_chars: usize,
     context_hint: ChatMemoryContextHint,
 ) -> MemoryUseDecision {
-    if route_reason
-        .split(';')
-        .any(|part| part.trim() == "standalone_freeform_clarify_loop_context")
-    {
-        return MemoryUseDecision::disabled(
-            MemoryContextMode::Chat,
-            "standalone_freeform_clarify_loop_context_uses_current_request_only",
-        );
-    }
     let prompt_cap = state.policy.memory.prompt_max_chars.max(384);
     let max_chars = match budget_tier {
         ExecutionContextBudgetTier::Full => chat_memory_budget_chars.max(384).min(prompt_cap),

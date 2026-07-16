@@ -510,7 +510,6 @@ pub(crate) fn build_agent_loop_task_context_bundle(
     let chat_memory_decision = memory::use_policy::decide_chat_memory_use_policy(
         state,
         budget_tier,
-        "agent_loop_semantic_authority",
         has_active_session_state,
         chat_memory_budget_chars,
         memory::use_policy::ChatMemoryContextHint::Default,

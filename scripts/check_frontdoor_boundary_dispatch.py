@@ -36,6 +36,12 @@ FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("route_gate_dispatch", re.compile(r"\broute_gate_kind\b")),
     ("route_trace_dispatch", re.compile(r"\broute_trace_decision\b")),
     ("legacy_pipeline_call", re.compile(r"\bprepare_ask_pipeline\s*\(")),
+    ("route_result_construction", re.compile(r"\bRouteResult\b")),
+    ("route_result_field", re.compile(r"\broute_result\b")),
+    ("output_contract_construction", re.compile(r"\bIntentOutputContract\b")),
+    ("semantic_llm_gateway", re.compile(r"\bllm_gateway\b")),
+    ("semantic_llm_fallback", re.compile(r"\brun_with_fallback")),
+    ("intent_normalizer_call", re.compile(r"\brun_intent_normalizer\s*\(")),
 )
 
 REQUIRED_DISPATCH_TOKENS = (
@@ -51,7 +57,8 @@ REQUIRED_PREPARE_TOKENS = (
 REQUIRED_FRONTDOOR_TOKENS = (
     "TurnBoundaryEnvelope::from_claimed_task",
     "explicit_machine_syntax_command_segment",
-    "agent_loop_semantic_authority",
+    "planner_user_request",
+    "turn_boundary_envelope",
 )
 
 
@@ -148,6 +155,18 @@ def run_self_test() -> int:
         REQUIRED_DISPATCH_TOKENS,
     )
     assert any("chat_gate_dispatch" in finding for finding in forbidden)
+    valid_frontdoor = " ".join(REQUIRED_FRONTDOOR_TOKENS)
+    assert scan_body(
+        "frontdoor.rs", 1, valid_frontdoor, REQUIRED_FRONTDOOR_TOKENS
+    ) == []
+    route_construction = scan_body(
+        "frontdoor.rs",
+        1,
+        f"{valid_frontdoor}\nlet route_result = RouteResult {{}};",
+        REQUIRED_FRONTDOOR_TOKENS,
+    )
+    assert any("route_result_construction" in finding for finding in route_construction)
+    assert any("route_result_field" in finding for finding in route_construction)
     assert any(path.name == "ask_pipeline.rs" for path in DELETED_FRONTDOOR_FILES)
     print("SELF_TEST_OK")
     return 0

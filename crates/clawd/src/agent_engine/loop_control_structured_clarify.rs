@@ -393,9 +393,6 @@ fn planner_locator_clarify_has_no_route_boundary(
     if route.needs_clarify || route.wants_file_delivery {
         return false;
     }
-    if route.has_route_reason_machine_marker("standalone_freeform_clarify_loop_context") {
-        return false;
-    }
     let contract = &route.output_contract;
     if contract.delivery_required
         || contract.delivery_intent != crate::OutputDeliveryIntent::None

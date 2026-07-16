@@ -14,13 +14,13 @@ use super::{
     finalize_ask_checkpointed, journal_has_checkpointed_nonterminal_lifecycle,
     journal_has_missing_file_search_evidence, machine_payload_observed_facts,
     non_failure_final_status, normalize_existing_file_delivery_token_answer,
-    promote_verified_terminal_answer_after_verifier_pass,
+    planner_route_result_for_finalization, promote_verified_terminal_answer_after_verifier_pass,
     record_answer_verifier_required_evidence_rollout_attribution,
     recover_answer_verifier_gap_with_deterministic_machine_evidence,
     recover_requested_machine_kv_summary_final_answer, resume_context_has_directory_lookup_failure,
     resume_context_path_batch_facts_are_missing_only,
     resume_failure_is_unbound_path_lookup_clarify_result,
-    should_reinsert_execution_summaries_for_delivery, should_use_answer_route_result,
+    should_reinsert_execution_summaries_for_delivery,
 };
 
 use serde_json::json;
@@ -65,6 +65,34 @@ fn route_result() -> crate::RouteResult {
         agent_display_name_hint: String::new(),
         output_contract: crate::IntentOutputContract::default(),
     }
+}
+
+#[test]
+fn finalization_uses_planner_contract_from_answer_journal() {
+    let mut route = route_result();
+    route.route_reason = "planner_output_contract_v1".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.delivery_required = true;
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+    journal.record_route_result(&route);
+
+    let selected = planner_route_result_for_finalization(Some(&journal));
+
+    assert_eq!(selected.route_reason, "planner_output_contract_v1");
+    assert_eq!(
+        selected.output_contract.response_shape,
+        crate::OutputResponseShape::FileToken
+    );
+    assert!(selected.output_contract.delivery_required);
+}
+
+#[test]
+fn finalization_uses_machine_fallback_when_planner_contract_is_unavailable() {
+    let selected = planner_route_result_for_finalization(None);
+
+    assert_eq!(selected.route_reason, "planner_output_contract_unavailable");
+    assert!(selected.output_contract.semantic_kind_is_unclassified());
+    assert!(!selected.output_contract.delivery_required);
 }
 
 // ensure_journal_task_metrics_* tests 已搬移到 finalize/journal.rs（Stage 3.1）。
@@ -1462,61 +1490,6 @@ fn journal_missing_file_search_evidence_detects_not_found_probe() {
             ..Default::default()
         });
     assert!(journal_has_missing_file_search_evidence(Some(&journal)));
-}
-
-#[test]
-fn answer_route_result_overrides_initial_chat_when_execution_trace_exists() {
-    let initial = route_result();
-    let answer_route = route_result();
-    let mut answer_journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-    answer_journal.record_plan_result(&crate::PlanResult {
-        plan_kind: crate::PlanKind::Single,
-        goal: "inspect project".to_string(),
-        planner_notes: String::new(),
-        raw_plan_text: String::new(),
-        missing_slots: Vec::new(),
-        needs_confirmation: false,
-        output_contract: None,
-        steps: Vec::new(),
-    });
-
-    assert!(should_use_answer_route_result(
-        &initial,
-        &answer_route,
-        &answer_journal
-    ));
-}
-
-#[test]
-fn answer_route_result_does_not_override_chat_without_execution_trace() {
-    let initial = route_result();
-    let answer_route = route_result();
-    let answer_journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-
-    assert!(!should_use_answer_route_result(
-        &initial,
-        &answer_route,
-        &answer_journal
-    ));
-}
-
-#[test]
-fn answer_route_result_overrides_initial_chat_for_clarify_journal() {
-    let initial = route_result();
-    let mut answer_route = route_result();
-    answer_route.needs_clarify = true;
-    answer_route.clarify_question = "Which file should I send?".to_string();
-    answer_route.wants_file_delivery = true;
-    answer_route.output_contract.delivery_required = true;
-    answer_route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    let mut answer_journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-    answer_journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Clarify);
-
-    assert!(should_use_answer_route_result(
-        &initial,
-        &answer_route,
-        &answer_journal
-    ));
 }
 
 #[test]

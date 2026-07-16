@@ -152,10 +152,14 @@ pub(crate) fn build_from_loop_state(
         final_status,
         finalizer_summary.as_ref(),
     );
+    if let Some(route_result) = loop_state
+        .route_policy_context
+        .as_ref()
+        .or_else(|| agent_run_context.and_then(|context| context.route_result.as_ref()))
+    {
+        journal.record_route_result(route_result);
+    }
     if let Some(ctx) = agent_run_context {
-        if let Some(route_result) = ctx.route_result.as_ref() {
-            journal.record_route_result(route_result);
-        }
         if let Some(context_summary) = ctx.context_bundle_summary.as_deref() {
             journal.record_context_bundle_summary(context_summary.to_string());
         }
