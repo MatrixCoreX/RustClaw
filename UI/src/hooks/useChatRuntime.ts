@@ -8,7 +8,7 @@ import {
   fileToChatAttachment,
   formatVisionResultText,
 } from "../lib/chat-attachments";
-import { sleep } from "../lib/display-format";
+import { followTaskEventStream } from "../lib/task-event-stream";
 import { extractTaskText } from "../lib/task-result";
 import type {
   ApiResponse,
@@ -691,18 +691,8 @@ export function useChatRuntime({
         updatedAt: Date.now(),
       }));
 
-      let finalResult: TaskQueryResponse | null = null;
-      for (let i = 0; i < 90; i += 1) {
-        const current = await fetchTaskById(submittedTaskId);
-        if (["succeeded", "failed", "canceled", "timeout"].includes(current.status)) {
-          finalResult = current;
-          break;
-        }
-        await sleep(1200);
-      }
-      if (!finalResult) {
-        throw new Error(t("轮询超时：任务仍在运行，请稍后在任务查询区查看。", "Polling timed out: the task is still running. Check it later in the task query area."));
-      }
+      await followTaskEventStream(apiFetch, submittedTaskId, () => {});
+      const finalResult = await fetchTaskById(submittedTaskId);
       onTaskResult(submittedTaskId, finalResult);
       updateChatThreadById(submitThreadId, (thread) => ({
         ...thread,

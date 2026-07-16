@@ -360,6 +360,9 @@ pub(crate) struct TaskMetricsRegistry {
     /// Ordered, machine-only metadata for measuring calls before the planner.
     /// Prompt and response text are intentionally not retained here.
     pub(crate) llm_call_sequence_per_task: Arc<Mutex<HashMap<String, Vec<LlmCallSequenceEntry>>>>,
+    /// Live task-event wakeups. Event payloads and replay state live in SQLite; this registry only
+    /// wakes connected consumers, so the default test fixture remains lightweight.
+    pub(crate) task_event_notifier: crate::task_event_transport::TaskEventNotifier,
 }
 
 pub(crate) fn build_skill_views(

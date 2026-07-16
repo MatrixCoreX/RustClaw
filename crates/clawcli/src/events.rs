@@ -1,4 +1,9 @@
 use std::collections::BTreeMap;
+use std::io::{BufRead, BufReader};
+
+use anyhow::{Context, Result};
+
+use crate::client;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TaskEventLine {
@@ -135,6 +140,82 @@ pub(crate) fn task_event_lines(data: &serde_json::Value) -> Vec<TaskEventLine> {
         events.extend(worker_events.iter().filter_map(lifecycle_worker_event_line));
     }
     events
+}
+
+pub(crate) fn task_event_line_from_value(event: &serde_json::Value) -> Option<TaskEventLine> {
+    task_event_line(event)
+}
+
+pub(crate) fn follow_task_events<F>(
+    base_url: &str,
+    key: &str,
+    task_id: &str,
+    cursor: u64,
+    mut on_event: F,
+) -> Result<()>
+where
+    F: FnMut(&serde_json::Value) -> Result<bool>,
+{
+    let url = format!(
+        "{}/tasks/{}/events?cursor={}",
+        client::base_v1(base_url),
+        task_id,
+        cursor
+    );
+    let response = client::make_stream_client()?
+        .get(url)
+        .header("x-rustclaw-key", key)
+        .header("accept", "text/event-stream")
+        .header("last-event-id", cursor.to_string())
+        .send()
+        .context("open task event stream failed")?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().unwrap_or_default();
+        anyhow::bail!("task event stream returned {status}: {body}");
+    }
+    consume_sse(BufReader::new(response), &mut on_event)
+}
+
+fn consume_sse<R, F>(mut reader: R, on_event: &mut F) -> Result<()>
+where
+    R: BufRead,
+    F: FnMut(&serde_json::Value) -> Result<bool>,
+{
+    let mut line = String::new();
+    let mut data_lines = Vec::new();
+    loop {
+        line.clear();
+        let read = reader.read_line(&mut line)?;
+        if read == 0 {
+            emit_sse_data(&mut data_lines, on_event)?;
+            return Ok(());
+        }
+        let line = line.trim_end_matches(['\r', '\n']);
+        if line.is_empty() {
+            if !emit_sse_data(&mut data_lines, on_event)? {
+                return Ok(());
+            }
+            continue;
+        }
+        if let Some(data) = line.strip_prefix("data:") {
+            data_lines.push(data.strip_prefix(' ').unwrap_or(data).to_string());
+        }
+    }
+}
+
+fn emit_sse_data<F>(data_lines: &mut Vec<String>, on_event: &mut F) -> Result<bool>
+where
+    F: FnMut(&serde_json::Value) -> Result<bool>,
+{
+    if data_lines.is_empty() {
+        return Ok(true);
+    }
+    let data = data_lines.join("\n");
+    data_lines.clear();
+    let value: serde_json::Value =
+        serde_json::from_str(&data).context("parse task SSE event JSON")?;
+    on_event(&value)
 }
 
 fn lifecycle_worker_event_line(event: &serde_json::Value) -> Option<TaskEventLine> {

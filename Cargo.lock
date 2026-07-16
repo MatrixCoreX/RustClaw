@@ -577,6 +577,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "claw-core",
+ "futures-util",
  "r2d2",
  "r2d2_sqlite",
  "regex",

@@ -253,8 +253,9 @@ pub(crate) fn run_events(
     subagent_id: Option<&str>,
     async_job_id: Option<&str>,
     jsonl_output: bool,
+    follow: bool,
+    cursor: u64,
 ) -> Result<()> {
-    let task = task::get_task_status(base_url, key, task_id)?;
     let event_filters = EventFilters::from_parts(
         event_types,
         checkpoint_id,
@@ -262,6 +263,26 @@ pub(crate) fn run_events(
         subagent_id,
         async_job_id,
     );
+    if follow {
+        return crate::events::follow_task_events(base_url, key, task_id, cursor, |raw_event| {
+            let terminal = raw_event
+                .get("event_kind")
+                .or_else(|| raw_event.get("event_type"))
+                .and_then(serde_json::Value::as_str)
+                == Some("task_final");
+            if let Some(event) = crate::events::task_event_line_from_value(raw_event) {
+                if event_filters.matches(&event) {
+                    if jsonl_output {
+                        println!("{}", serde_json::to_string(raw_event)?);
+                    } else {
+                        println!("event: {}", event.line);
+                    }
+                }
+            }
+            Ok(!terminal)
+        });
+    }
+    let task = task::get_task_status(base_url, key, task_id)?;
     let events = output::filtered_events(&task, &event_filters);
     for line in task_event_output_lines(&task, events, jsonl_output)? {
         println!("{line}");
@@ -311,6 +332,8 @@ pub(crate) fn run_logs(
         subagent_id,
         async_job_id,
         jsonl_output,
+        false,
+        0,
     )
 }
 

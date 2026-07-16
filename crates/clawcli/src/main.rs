@@ -159,6 +159,12 @@ enum Command {
         event_filters: EventFilterArgs,
         #[arg(long)]
         jsonl: bool,
+        /// Follow the resumable live event stream until a terminal event.
+        #[arg(long)]
+        follow: bool,
+        /// Resume after this event sequence id.
+        #[arg(long, default_value_t = 0)]
+        cursor: u64,
     },
 
     /// Print task event stream through the task API, without reading raw clawd logs.
@@ -995,6 +1001,8 @@ fn main() -> Result<()> {
             task_id,
             event_filters,
             jsonl,
+            follow,
+            cursor,
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
             commands::run_events(
@@ -1007,6 +1015,8 @@ fn main() -> Result<()> {
                 event_filters.subagent_id.as_deref(),
                 event_filters.async_job_id.as_deref(),
                 *jsonl,
+                *follow,
+                *cursor,
             )
         }
         Command::Logs {

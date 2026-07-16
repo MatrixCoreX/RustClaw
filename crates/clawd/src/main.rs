@@ -82,6 +82,7 @@ mod system_health;
 mod task_admin_routes;
 mod task_context_builder;
 mod task_contract;
+mod task_event_transport;
 mod task_journal;
 mod task_lifecycle;
 mod turn_boundary_envelope;
@@ -769,6 +770,14 @@ async fn main() -> anyhow::Result<()> {
     let api = Router::new()
         .merge(http::ui_routes::build_ui_router())
         .route("/tasks", post(submit_task))
+        .route(
+            "/tasks/:task_id/events",
+            get(http::task_events::stream_task_events),
+        )
+        .route(
+            "/tasks/:task_id/events/artifacts/:artifact_id",
+            get(http::task_events::get_task_event_artifact),
+        )
         .route("/classifiers/direct", post(classify_direct))
         .route("/memory", get(get_memory_overview))
         .route("/memory/recent", get(list_memory_recent_handler))
@@ -812,6 +821,7 @@ async fn main() -> anyhow::Result<()> {
                 ])
                 .allow_headers([
                     axum::http::header::CONTENT_TYPE,
+                    axum::http::HeaderName::from_static("last-event-id"),
                     axum::http::HeaderName::from_static("x-rustclaw-key"),
                 ]),
         );
@@ -1071,6 +1081,22 @@ async fn submit_task(
         "task_submit accepted call_id={} task_id={} kind={} user_id={} chat_id={}",
         task_id, task_id, kind, effective_user_id, effective_chat_id
     );
+    if let Err(err) = task_event_transport::publish_event(
+        &state,
+        &call_id,
+        "task_submitted",
+        json!({
+            "kind": kind,
+            "channel": channel,
+            "task_status": "queued",
+        }),
+    ) {
+        warn!(
+            "task submit event publish failed task_id={} error={}",
+            task_id,
+            truncate_for_log(&err.to_string())
+        );
+    }
 
     api_ok(SubmitTaskResponse { task_id })
 }

@@ -48,6 +48,7 @@ fn trace_json_includes_pollable_machine_event_stream() {
             "task_lifecycle",
             "task_goal",
             "agent_round",
+            "planner_finished",
             "tool_started",
             "tool_step",
             "tool_finished",
@@ -57,62 +58,111 @@ fn trace_json_includes_pollable_machine_event_stream() {
     );
     assert_eq!(events[0].get("seq").and_then(Value::as_u64), Some(1));
     assert_eq!(
-        events[3].pointer("/payload/phase").and_then(Value::as_str),
+        events[4].pointer("/payload/phase").and_then(Value::as_str),
         Some("started")
     );
     assert_eq!(
-        events[3]
+        events[4]
             .pointer("/payload/evidence_ref")
             .and_then(Value::as_str),
         Some("step_1")
     );
     assert_eq!(
-        events[4].pointer("/payload/status").and_then(Value::as_str),
+        events[5].pointer("/payload/status").and_then(Value::as_str),
         Some("ok")
     );
     assert_eq!(
-        events[4]
+        events[5]
             .pointer("/payload/action_kind")
             .and_then(Value::as_str),
         Some("call_capability")
     );
     assert_eq!(
-        events[4]
+        events[5]
             .pointer("/payload/requested_capability")
             .and_then(Value::as_str),
         Some("filesystem.list_entries")
     );
     assert_eq!(
-        events[4]
+        events[5]
             .pointer("/payload/resolved_tool_or_skill")
             .and_then(Value::as_str),
         Some("fs_basic")
     );
     assert_eq!(
-        events[4]
+        events[5]
             .pointer("/payload/resolution_source")
             .and_then(Value::as_str),
         Some("capability_resolver")
     );
     assert_eq!(
-        events[4]
+        events[5]
             .pointer("/payload/artifact_ref_count")
             .and_then(Value::as_u64),
         Some(1)
     );
     assert_eq!(
-        events[4]
+        events[5]
             .pointer("/payload/artifact_refs/0/ref")
             .and_then(Value::as_str),
         Some("reports/out.txt")
     );
     assert_eq!(
-        events[5].pointer("/payload/phase").and_then(Value::as_str),
+        events[6].pointer("/payload/phase").and_then(Value::as_str),
         Some("finished")
     );
     assert_eq!(
-        events[5].pointer("/payload/status").and_then(Value::as_str),
+        events[6].pointer("/payload/status").and_then(Value::as_str),
         Some("ok")
+    );
+}
+
+#[test]
+fn event_stream_exposes_planner_verifier_and_permission_machine_events() {
+    let mut journal = TaskJournal::for_task("task-plan-events", "ask", "inspect");
+    journal.rounds.push(TaskJournalRoundTrace {
+        round_no: 2,
+        goal: "inspect".to_string(),
+        plan_result: Some(test_plan(
+            crate::PlanKind::Incremental,
+            vec![test_plan_step(
+                "step_1",
+                "call_capability",
+                "filesystem.list_entries",
+                json!({"path":"."}),
+            )],
+        )),
+        verify_result: Some(TaskJournalVerifySummary {
+            mode: crate::verifier::VerifyMode::Enforce,
+            approved: false,
+            permission_decision: json!({
+                "schema_version": 1,
+                "decision": "require_confirmation",
+            }),
+            needs_confirmation: true,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let events = journal.event_stream_snapshot();
+    let planner = events
+        .iter()
+        .find(|event| event["event_type"] == "planner_finished")
+        .unwrap();
+    assert_eq!(planner["payload"]["round_no"], 2);
+    assert_eq!(planner["payload"]["step_count"], 1);
+    let verification = events
+        .iter()
+        .find(|event| event["event_type"] == "plan_verification")
+        .unwrap();
+    assert_eq!(verification["payload"]["approved"], false);
+    let permission = events
+        .iter()
+        .find(|event| event["event_type"] == "permission_request")
+        .unwrap();
+    assert_eq!(
+        permission["payload"]["decision"]["decision"],
+        "require_confirmation"
     );
 }
 

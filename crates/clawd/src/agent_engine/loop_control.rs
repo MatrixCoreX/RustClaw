@@ -645,6 +645,7 @@ async fn run_agent_round(
     )
     .await?;
     push_round_trace(loop_state, goal, &prepared_round);
+    crate::task_event_transport::publish_loop_state_snapshot(state, task, user_text, loop_state);
     record_agent_loop_decision_envelope_output_vars(loop_state, &prepared_round.plan_result);
     if !loop_state
         .output_vars
