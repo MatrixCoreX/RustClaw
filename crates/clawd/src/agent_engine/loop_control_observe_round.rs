@@ -1,50 +1,49 @@
 use serde_json::Value;
 
-use crate::{agent_engine::LoopState, AgentAction, RouteResult};
+use crate::{agent_engine::LoopState, AgentAction, IntentOutputContract};
 
 pub(in crate::agent_engine) fn observation_round_needs_planner(
-    route_result: &RouteResult,
+    output_contract: &IntentOutputContract,
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
     loop_state.round_no < loop_state.max_rounds
-        && observe_only_round_should_continue(route_result, loop_state, actions)
+        && observe_only_round_should_continue(output_contract, loop_state, actions)
 }
 
 pub(super) fn read_observe_round_should_continue(
-    route_result: &RouteResult,
+    output_contract: &IntentOutputContract,
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
-    observe_only_round_should_continue(route_result, loop_state, actions)
+    observe_only_round_should_continue(output_contract, loop_state, actions)
         && actions.iter().any(action_reads_text_content)
 }
 
 pub(in crate::agent_engine) fn observe_only_round_should_continue(
-    route_result: &RouteResult,
+    output_contract: &IntentOutputContract,
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
     !super::has_discussion_followup_action(actions)
         && !super::has_authoritative_delivery(loop_state)
-        && !bounded_read_observe_only_round_can_finalize(route_result, loop_state, actions)
+        && !bounded_read_observe_only_round_can_finalize(output_contract, loop_state, actions)
         && actions_are_observe_only_machine_steps(actions)
 }
 
 fn bounded_read_observe_only_round_can_finalize(
-    route_result: &RouteResult,
+    output_contract: &IntentOutputContract,
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
-    let contract = route_result.effective_output_contract();
-    if contract.delivery_required
-        || !route_result.output_contract_is_unclassified()
+    if output_contract.delivery_required
+        || !output_contract.semantic_kind_is_unclassified()
         || !matches!(
-            contract.response_shape,
+            output_contract.response_shape,
             crate::OutputResponseShape::Free | crate::OutputResponseShape::Strict
         )
         || !matches!(
-            contract.locator_kind,
+            output_contract.locator_kind,
             crate::OutputLocatorKind::Path
                 | crate::OutputLocatorKind::Filename
                 | crate::OutputLocatorKind::CurrentWorkspace

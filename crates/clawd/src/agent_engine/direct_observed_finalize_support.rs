@@ -322,8 +322,9 @@ pub(super) fn append_synthesize_for_observation_only_terminal_answer(
     let Some(route_result) = route_result else {
         return actions;
     };
+    let output_contract = route_result.effective_output_contract();
     if crate::agent_engine::loop_control::observation_round_needs_planner(
-        route_result,
+        &output_contract,
         loop_state,
         &actions,
     ) {

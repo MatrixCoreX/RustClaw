@@ -48,6 +48,12 @@ pub(crate) fn operation_for_route(route: &crate::RouteResult) -> EvidenceOperati
     crate::task_contract::operation_for_route(route)
 }
 
+pub(crate) fn operation_for_output_contract(
+    output_contract: &crate::IntentOutputContract,
+) -> EvidenceOperation {
+    crate::task_contract::operation_for_output_contract(output_contract)
+}
+
 pub(crate) fn required_evidence_fields_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> Vec<String> {
@@ -61,6 +67,12 @@ pub(crate) fn required_evidence_fields_for_route(route: &crate::RouteResult) -> 
 #[allow(dead_code)]
 pub(crate) fn target_object_for_route(route: &crate::RouteResult) -> EvidenceTargetObject {
     crate::task_contract::target_object_for_route(route)
+}
+
+pub(crate) fn target_object_for_output_contract(
+    output_contract: &crate::IntentOutputContract,
+) -> EvidenceTargetObject {
+    crate::task_contract::target_object_for_output_contract(output_contract)
 }
 
 pub(crate) fn target_locators_for_route(route: &crate::RouteResult) -> Vec<String> {

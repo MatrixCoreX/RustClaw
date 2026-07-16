@@ -164,7 +164,7 @@ impl AgentLoopGuardPolicy {
 
     pub(super) fn budget_profile_for_context(
         recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
-        route_result: Option<&crate::RouteResult>,
+        output_contract: Option<&crate::IntentOutputContract>,
     ) -> LoopBudgetProfile {
         if matches!(
             recipe.kind,
@@ -173,18 +173,18 @@ impl AgentLoopGuardPolicy {
             return LoopBudgetProfile::OpsClosedLoop;
         }
 
-        let Some(route) = route_result else {
+        let Some(output_contract) = output_contract else {
             return LoopBudgetProfile::General;
         };
-        let operation = crate::evidence_policy::operation_for_route(route);
-        let target_object = crate::evidence_policy::target_object_for_route(route);
+        let operation = crate::evidence_policy::operation_for_output_contract(output_contract);
+        let target_object =
+            crate::evidence_policy::target_object_for_output_contract(output_contract);
         let required_evidence_fields =
-            crate::evidence_policy::required_evidence_fields_for_route(route);
-        let evidence_required = route.output_contract.requires_content_evidence
-            || route.output_contract.delivery_required
+            crate::evidence_policy::required_evidence_fields_for_output_contract(output_contract);
+        let evidence_required = output_contract.requires_content_evidence
+            || output_contract.delivery_required
             || !required_evidence_fields.is_empty();
-        if route.output_contract.delivery_required
-            || route.wants_file_delivery
+        if output_contract.delivery_required
             || matches!(
                 operation,
                 crate::evidence_policy::EvidenceOperation::Write
@@ -231,9 +231,9 @@ impl AgentLoopGuardPolicy {
     pub(super) fn adjusted_for_context(
         &self,
         recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
-        route_result: Option<&crate::RouteResult>,
+        output_contract: Option<&crate::IntentOutputContract>,
     ) -> Self {
-        let profile = Self::budget_profile_for_context(recipe, route_result);
+        let profile = Self::budget_profile_for_context(recipe, output_contract);
         let overrides = self.overrides_for_profile(profile);
         let mut policy = self.clone();
         if let Some(max_steps) = overrides.max_steps {

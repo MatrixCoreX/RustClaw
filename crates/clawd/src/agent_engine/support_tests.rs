@@ -1689,7 +1689,7 @@ fn ops_closed_loop_policy_uses_override_budget() {
 }
 
 #[test]
-fn route_contract_selects_grounded_summary_budget() {
+fn planner_contract_selects_grounded_summary_budget() {
     let policy = base_policy();
     let recipe = ExecutionRecipeRuntimeState::default();
     let route = route_with_contract(
@@ -1698,17 +1698,17 @@ fn route_contract_selects_grounded_summary_budget() {
     );
 
     assert_eq!(
-        AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route)),
+        AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route.output_contract)),
         LoopBudgetProfile::GroundedSummary
     );
-    let adjusted = policy.adjusted_for_context(recipe, Some(&route));
+    let adjusted = policy.adjusted_for_context(recipe, Some(&route.output_contract));
     assert_eq!(adjusted.max_rounds, 4);
     assert_eq!(adjusted.max_tool_calls, 16);
     assert_eq!(adjusted.no_progress_limit, 2);
 }
 
 #[test]
-fn route_contract_budget_does_not_depend_on_legacy_route_trace() {
+fn planner_contract_budget_does_not_depend_on_legacy_route_trace() {
     let recipe = ExecutionRecipeRuntimeState::default();
     let route = route_with_contract(
         OutputSemanticKind::CommandOutputSummary,
@@ -1716,7 +1716,7 @@ fn route_contract_budget_does_not_depend_on_legacy_route_trace() {
     );
 
     assert_eq!(
-        AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route)),
+        AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route.output_contract)),
         LoopBudgetProfile::GroundedSummary
     );
 }
@@ -1734,10 +1734,10 @@ fn workspace_delivery_contract_selects_multi_step_budget() {
     route.output_contract.response_shape = OutputResponseShape::FileToken;
 
     assert_eq!(
-        AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route)),
+        AgentLoopGuardPolicy::budget_profile_for_context(recipe, Some(&route.output_contract)),
         LoopBudgetProfile::MultiStepWorkspace
     );
-    let adjusted = policy.adjusted_for_context(recipe, Some(&route));
+    let adjusted = policy.adjusted_for_context(recipe, Some(&route.output_contract));
     assert_eq!(adjusted.max_rounds, 6);
     assert_eq!(adjusted.max_steps, 56);
     assert_eq!(adjusted.max_tool_calls, 24);

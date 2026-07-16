@@ -8,7 +8,6 @@ pub(super) struct PreparedRoundActions {
     pub(super) plan_result: PlanResult,
     pub(super) verify_result: crate::verifier::VerifyResult,
     pub(super) effective_output_contract: Option<crate::IntentOutputContract>,
-    pub(super) effective_route_result: Option<crate::RouteResult>,
 }
 
 fn build_round_verify_summary(
@@ -205,9 +204,6 @@ pub(super) async fn prepare_round_actions(
         crate::truncate_for_log(&plan_result.raw_plan_text)
     );
     let effective_output_contract = plan_result.output_contract.clone();
-    let effective_route_result = effective_output_contract
-        .clone()
-        .map(crate::RouteResult::from_planner_output_contract);
     let verify_mode = verify_mode_for_state(state);
     let verify_result = crate::verifier::verify_plan(
         state,
@@ -244,9 +240,6 @@ pub(super) async fn prepare_round_actions(
         );
     }
     let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", user_text);
-    if let Some(route_result) = effective_route_result.as_ref() {
-        journal.record_route_result(route_result);
-    }
     journal.record_plan_result(&plan_result);
     journal.record_verify_result(&verify_result);
     let context_summary = agent_run_context
@@ -301,7 +294,6 @@ pub(super) async fn prepare_round_actions(
         plan_result,
         verify_result,
         effective_output_contract,
-        effective_route_result,
     })
 }
 

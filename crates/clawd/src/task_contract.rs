@@ -369,9 +369,15 @@ pub(crate) fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
     if let Some(target) = target_object_for_capability_ref(route) {
         return target;
     }
-    let semantic_kind = route.effective_output_contract_semantic_kind();
+    target_object_for_output_contract(&route.effective_output_contract())
+}
+
+pub(crate) fn target_object_for_output_contract(
+    output_contract: &crate::IntentOutputContract,
+) -> TaskTargetObject {
+    let semantic_kind = output_contract.semantic_kind;
     if semantic_kind.is_normalizer_schema_capability_bridge() {
-        return target_object_for_locator_kind(route.output_contract.locator_kind);
+        return target_object_for_locator_kind(output_contract.locator_kind);
     }
     match semantic_kind {
         OutputSemanticKind::ServiceStatus => return TaskTargetObject::Service,
@@ -380,7 +386,7 @@ pub(crate) fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
         OutputSemanticKind::CommandOutputSummary => return TaskTargetObject::System,
         _ => {}
     }
-    target_object_for_locator_kind(route.output_contract.locator_kind)
+    target_object_for_locator_kind(output_contract.locator_kind)
 }
 
 fn target_object_for_locator_kind(locator_kind: OutputLocatorKind) -> TaskTargetObject {
@@ -449,9 +455,15 @@ pub(crate) fn operation_for_route(route: &RouteResult) -> TaskOperation {
     if let Some(operation) = operation_for_capability_ref(route) {
         return operation;
     }
-    let semantic_kind = route.effective_output_contract_semantic_kind();
+    operation_for_output_contract(&route.effective_output_contract())
+}
+
+pub(crate) fn operation_for_output_contract(
+    output_contract: &crate::IntentOutputContract,
+) -> TaskOperation {
+    let semantic_kind = output_contract.semantic_kind;
     if semantic_kind.is_normalizer_schema_capability_bridge() {
-        return operation_for_unclassified_route(route);
+        return operation_for_unclassified_output_contract(output_contract);
     }
     match semantic_kind {
         OutputSemanticKind::RawCommandOutput => TaskOperation::Run,
@@ -483,17 +495,19 @@ pub(crate) fn operation_for_route(route: &RouteResult) -> TaskOperation {
             TaskOperation::Validate
         }
         OutputSemanticKind::ExecutionFailedStep => TaskOperation::Validate,
-        OutputSemanticKind::None => operation_for_unclassified_route(route),
-        _ => operation_for_unclassified_route(route),
+        OutputSemanticKind::None => operation_for_unclassified_output_contract(output_contract),
+        _ => operation_for_unclassified_output_contract(output_contract),
     }
 }
 
-fn operation_for_unclassified_route(route: &RouteResult) -> TaskOperation {
-    if route.output_contract.delivery_required {
+fn operation_for_unclassified_output_contract(
+    output_contract: &crate::IntentOutputContract,
+) -> TaskOperation {
+    if output_contract.delivery_required {
         TaskOperation::Read
-    } else if route.output_contract.requires_content_evidence
-        || !matches!(route.output_contract.locator_kind, OutputLocatorKind::None)
-        || !route.output_contract.locator_hint.trim().is_empty()
+    } else if output_contract.requires_content_evidence
+        || !matches!(output_contract.locator_kind, OutputLocatorKind::None)
+        || !output_contract.locator_hint.trim().is_empty()
     {
         TaskOperation::Inspect
     } else {

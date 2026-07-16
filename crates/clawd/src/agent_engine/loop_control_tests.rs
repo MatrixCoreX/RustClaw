@@ -14,7 +14,6 @@ use super::{
     record_agent_loop_decision_envelope_output_vars, retry_verifier_accepts_rewritten_answer,
     should_stop_for_observed_finalize, structured_respond_terminal_intent_from_plan,
     structured_respond_terminal_intent_from_pre_loop_clarify_candidate,
-    structured_respond_terminal_intent_from_route_owned_clarify,
     suppress_answer_verifier_retry_if_confirmed_missing_file_delivery,
     suppress_answer_verifier_retry_if_structurally_satisfied,
     suppress_answer_verifier_retry_if_user_locator_disambiguation,
@@ -35,8 +34,7 @@ use super::{
     try_recover_structured_evidence_table_answer_verifier_gap,
     try_recover_structured_listing_answer_verifier_gap,
     try_recover_structured_scalar_output_format_answer_verifier_gap,
-    try_recover_structured_search_answer_verifier_gap,
-    try_replan_avoidable_side_effect_free_freeform_clarify, AgentLoopGuardPolicy, RoundOutcome,
+    try_recover_structured_search_answer_verifier_gap, AgentLoopGuardPolicy, RoundOutcome,
 };
 use crate::agent_engine::support::{
     AnswerVerifierRequiredEvidenceScope, RegistryIdempotencyGuardScope,

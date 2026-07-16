@@ -316,6 +316,7 @@ fn should_stop_for_observed_finalize(
     let Some(route_result) = route_result else {
         return false;
     };
+    let output_contract = route_result.effective_output_contract();
     if route_result.needs_clarify
         || !loop_state.has_tool_or_skill_output
         || has_authoritative_delivery(loop_state)
@@ -338,10 +339,10 @@ fn should_stop_for_observed_finalize(
         } else {
             super::observed_output::has_observed_answer_candidates(loop_state)
         };
-    if read_observe_round_should_continue(route_result, loop_state, actions) {
+    if read_observe_round_should_continue(&output_contract, loop_state, actions) {
         return false;
     }
-    if observation_round_needs_planner(route_result, loop_state, actions)
+    if observation_round_needs_planner(&output_contract, loop_state, actions)
         && !has_observed_stop_candidate
     {
         return false;
@@ -625,7 +626,7 @@ async fn run_agent_round(
     task: &ClaimedTask,
     goal: &str,
     user_text: &str,
-    policy: &AgentLoopGuardPolicy,
+    policy: &mut AgentLoopGuardPolicy,
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Result<RoundOutcome, String> {
@@ -648,15 +649,34 @@ async fn run_agent_round(
     )
     .await?;
     push_round_trace(loop_state, goal, &prepared_round);
-    let route_result = prepared_round
-        .effective_route_result
-        .as_ref()
-        .or_else(|| agent_run_context.and_then(|ctx| ctx.route_result.as_ref()));
-    record_agent_loop_decision_envelope_output_vars(
-        loop_state,
-        route_result,
-        &prepared_round.plan_result,
-    );
+    record_agent_loop_decision_envelope_output_vars(loop_state, &prepared_round.plan_result);
+    if !loop_state
+        .output_vars
+        .contains_key("agent_loop.planner_budget_profile")
+    {
+        let profile = AgentLoopGuardPolicy::budget_profile_for_context(
+            loop_state.execution_recipe,
+            prepared_round.effective_output_contract.as_ref(),
+        );
+        *policy = policy.adjusted_for_context(
+            loop_state.execution_recipe,
+            prepared_round.effective_output_contract.as_ref(),
+        );
+        loop_state.max_rounds = policy.max_rounds.max(1);
+        loop_state.output_vars.insert(
+            "agent_loop.planner_budget_profile".to_string(),
+            profile.as_str().to_string(),
+        );
+        info!(
+            "loop_planner_budget_profile task_id={} profile={} max_rounds={} max_steps={} max_tool_calls={} no_progress_limit={}",
+            task.task_id,
+            profile.as_str(),
+            policy.max_rounds,
+            policy.max_steps,
+            policy.max_tool_calls,
+            policy.no_progress_limit
+        );
+    }
     if let Some(output_contract) = prepared_round.effective_output_contract.as_ref() {
         loop_state.output_contract = Some(output_contract.clone());
         if let Some(final_answer_shape) =
@@ -672,17 +692,9 @@ async fn run_agent_round(
             );
         }
     }
-    let _budget_profile =
-        AgentLoopGuardPolicy::budget_profile_for_context(loop_state.execution_recipe, route_result);
     if let Some(intent) = structured_respond_terminal_intent_from_plan(&prepared_round.plan_result)
         .filter(|intent| intent.terminal_intent == "clarify")
         .filter(|_| actions_allow_structured_respond_terminal_intent(&prepared_round.actions))
-        .or_else(|| {
-            structured_respond_terminal_intent_from_route_owned_clarify(
-                route_result,
-                &prepared_round.actions,
-            )
-        })
         .or_else(|| {
             structured_respond_terminal_intent_from_boundary_observation_clarify(
                 loop_state,
@@ -696,25 +708,11 @@ async fn run_agent_round(
             )
         })
     {
-        if let Some(outcome) = try_replan_avoidable_side_effect_free_freeform_clarify(
+        if let Some(outcome) = try_recover_inconsistent_boundary_clarify(
             loop_state,
-            route_result,
+            prepared_round.effective_output_contract.as_ref(),
             &intent,
         ) {
-            info!(
-                "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
-                task.task_id,
-                loop_state.round_no,
-                outcome.executed_actions,
-                outcome.no_progress,
-                outcome.stop_signal.as_deref().unwrap_or(""),
-                crate::truncate_for_log(outcome.next_goal_hint.as_deref().unwrap_or(""))
-            );
-            return Ok(outcome);
-        }
-        if let Some(outcome) =
-            try_recover_inconsistent_boundary_clarify(loop_state, route_result, &intent)
-        {
             info!(
                 "loop_round_eval task_id={} round={} executed_actions={} no_progress={} stop_signal={} next_goal_hint={}",
                 task.task_id,
@@ -778,8 +776,12 @@ async fn run_agent_round(
         outcome.stop_signal = Some("observed_output_ready".to_string());
     }
     if outcome.stop_signal.is_none()
-        && route_result
-            .is_some_and(|route| observe_only_round_should_continue(route, loop_state, &actions))
+        && prepared_round
+            .effective_output_contract
+            .as_ref()
+            .is_some_and(|contract| {
+                observe_only_round_should_continue(contract, loop_state, &actions)
+            })
     {
         loop_state.has_recoverable_failure_context = true;
         loop_state.output_vars.insert(
@@ -846,10 +848,9 @@ pub(super) async fn run_agent_with_loop_seeded(
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         initial_execution_recipe_spec(goal, user_text, agent_run_context),
     );
-    let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     let budget_profile =
-        AgentLoopGuardPolicy::budget_profile_for_context(loop_state.execution_recipe, route_result);
-    let policy = base_policy.adjusted_for_context(loop_state.execution_recipe, route_result);
+        AgentLoopGuardPolicy::budget_profile_for_context(loop_state.execution_recipe, None);
+    let mut policy = base_policy.adjusted_for_context(loop_state.execution_recipe, None);
     loop_state.max_rounds = policy.max_rounds.max(1);
     base_policy.apply_recipe_runtime_overrides(&mut loop_state.execution_recipe);
     let enabled_rollout_switches = policy.enabled_rollout_switches();
@@ -896,7 +897,7 @@ pub(super) async fn run_agent_with_loop_seeded(
                 task,
                 goal,
                 user_text,
-                &policy,
+                &mut policy,
                 &mut loop_state,
                 agent_run_context,
             )
