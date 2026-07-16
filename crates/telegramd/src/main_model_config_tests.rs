@@ -82,6 +82,6 @@ fn apply_model_config_mimo_uses_expected_default_base_url() {
         .expect("mimo");
     assert_eq!(
         mimo.get("base_url").and_then(|x| x.as_str()),
-        Some("https://token-plan-sgp.xiaomimimo.com/v1")
+        Some("https://token-plan-cn.xiaomimimo.com/v1")
     );
 }

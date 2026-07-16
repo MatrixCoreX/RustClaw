@@ -109,14 +109,14 @@ test("marks mimo api format edits as unsaved", () => {
       vendors: [
         {
           name: "mimo",
-          base_url: "https://token-plan-sgp.xiaomimimo.com/v1",
+          base_url: "https://token-plan-cn.xiaomimimo.com/v1",
           api_key: "same-key",
           api_format: "openai_compat",
         },
       ],
       draftVendor: "mimo",
       draftModel: "mimo-v2.5-pro",
-      draftBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+      draftBaseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
       draftApiKey: "same-key",
       draftApiFormat: "anthropic_claude",
     }),
