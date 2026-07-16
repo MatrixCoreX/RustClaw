@@ -9,13 +9,6 @@ use super::{
 
 #[test]
 fn explicit_command_execution_repair_prevents_executionless_downgrade() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["请执行".to_string()],
-        standalone_commands: vec![],
-        default_locale: "zh-CN".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
@@ -30,8 +23,7 @@ fn explicit_command_execution_repair_prevents_executionless_downgrade() {
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
-        "请执行 git rev-parse --abbrev-ref HEAD，只输出命令结果",
+        "请执行 `git rev-parse --abbrev-ref HEAD`，只输出命令结果",
         "",
         &mut needs_clarify,
         &mut clarify_question,
@@ -61,13 +53,6 @@ fn explicit_command_execution_repair_prevents_executionless_downgrade() {
 
 #[test]
 fn explicit_command_execution_repair_preserves_directory_entry_groups_contract() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["执行 ".to_string()],
-        standalone_commands: vec!["ls".to_string()],
-        default_locale: "zh-CN".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
@@ -83,8 +68,7 @@ fn explicit_command_execution_repair_preserves_directory_entry_groups_contract()
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
-        "执行 ls scripts",
+        "执行 `ls scripts`",
         "directory_entry_groups",
         &mut needs_clarify,
         &mut clarify_question,
@@ -111,13 +95,6 @@ fn explicit_command_execution_repair_preserves_directory_entry_groups_contract()
 
 #[test]
 fn explicit_ls_selector_repair_converts_raw_command_to_directory_entry_groups() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["执行 ".to_string()],
-        standalone_commands: vec!["ls".to_string()],
-        default_locale: "zh-CN".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
@@ -133,7 +110,6 @@ fn explicit_ls_selector_repair_converts_raw_command_to_directory_entry_groups() 
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
         "执行 ls scripts，把结果按字母倒序排，只输出前 5 个",
         "selector_target_kind=any selector_limit=5 selector_sort_by=name_desc selector_include_hidden=false.",
         &mut needs_clarify,
@@ -175,13 +151,6 @@ fn explicit_ls_selector_repair_converts_raw_command_to_directory_entry_groups() 
 
 #[test]
 fn explicit_command_execution_repair_preserves_current_workspace_scalar_path_contract() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["run ".to_string()],
-        standalone_commands: vec!["pwd".to_string()],
-        default_locale: "en-US".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
@@ -196,8 +165,7 @@ fn explicit_command_execution_repair_preserves_current_workspace_scalar_path_con
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
-        "Run pwd and output only the raw result.",
+        "Run `pwd` and output only the raw result.",
         "scalar_path_only",
         &mut needs_clarify,
         &mut clarify_question,
@@ -218,13 +186,6 @@ fn explicit_command_execution_repair_preserves_current_workspace_scalar_path_con
 
 #[test]
 fn explicit_command_execution_repair_preserves_command_summary_contract() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["run ".to_string()],
-        standalone_commands: vec![],
-        default_locale: "en-US".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
@@ -239,8 +200,7 @@ fn explicit_command_execution_repair_preserves_command_summary_contract() {
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
-        "Run whoami and pwd commands, then create one signature line from those results.",
+        "Run `whoami` and `pwd`, then create one signature line from those results.",
         "",
         &mut needs_clarify,
         &mut clarify_question,
@@ -265,13 +225,6 @@ fn explicit_command_execution_repair_preserves_command_summary_contract() {
 
 #[test]
 fn explicit_command_execution_repair_keeps_raw_one_sentence_without_synthesis_marker() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["run ".to_string()],
-        standalone_commands: vec!["pwd".to_string()],
-        default_locale: "en-US".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
@@ -286,8 +239,7 @@ fn explicit_command_execution_repair_keeps_raw_one_sentence_without_synthesis_ma
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
-        "run pwd and return the observed stdout as one line.",
+        "run `pwd` and return the observed stdout as one line.",
         "",
         &mut needs_clarify,
         &mut clarify_question,
@@ -307,13 +259,6 @@ fn explicit_command_execution_repair_keeps_raw_one_sentence_without_synthesis_ma
 
 #[test]
 fn explicit_command_execution_repair_defaults_unclassified_evidence_contract_to_raw_output() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["run ".to_string()],
-        standalone_commands: vec!["pwd".to_string()],
-        default_locale: "en-US".to_string(),
-        verify_enforce_enabled: true,
-    };
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
     let mut clarify_question = String::new();
@@ -327,8 +272,7 @@ fn explicit_command_execution_repair_defaults_unclassified_evidence_contract_to_
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
-        "run pwd",
+        "run `pwd`",
         "",
         &mut needs_clarify,
         &mut clarify_question,
@@ -347,13 +291,6 @@ fn explicit_command_execution_repair_defaults_unclassified_evidence_contract_to_
 
 #[test]
 fn explicit_command_raw_contract_ignores_legacy_decision_token_without_synthesis_marker() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["run ".to_string()],
-        standalone_commands: vec![],
-        default_locale: "en-US".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::DirectAnswer;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
@@ -368,8 +305,7 @@ fn explicit_command_raw_contract_ignores_legacy_decision_token_without_synthesis
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
-        "Run pwd first, then create one reply line from the observed result.",
+        "Run `pwd` first, then create one reply line from the observed result.",
         "",
         &mut needs_clarify,
         &mut clarify_question,
@@ -389,13 +325,6 @@ fn explicit_command_raw_contract_ignores_legacy_decision_token_without_synthesis
 
 #[test]
 fn explicit_command_execution_repair_upgrades_raw_strict_with_synthesis_marker() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["执行".to_string()],
-        standalone_commands: vec![],
-        default_locale: "zh-CN".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut needs_clarify = false;
@@ -410,8 +339,7 @@ fn explicit_command_execution_repair_upgrades_raw_strict_with_synthesis_marker()
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
-        "执行 pwd，然后基于结果输出一行文本。",
+        "执行 `pwd`，然后基于结果输出一行文本。",
         "command_result_synthesis",
         &mut needs_clarify,
         &mut clarify_question,
@@ -437,13 +365,6 @@ fn explicit_command_execution_repair_upgrades_raw_strict_with_synthesis_marker()
 
 #[test]
 fn explicit_command_execution_repair_preserves_failed_step_contract() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["执行".to_string()],
-        standalone_commands: vec![],
-        default_locale: "zh-CN".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut needs_clarify = false;
@@ -456,8 +377,7 @@ fn explicit_command_execution_repair_preserves_failed_step_contract() {
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
-        "执行一个会失败的只读检查命令：cat /definitely_missing_rustclaw_contract_case，然后说明失败原因。",
+        "执行一个会失败的只读检查命令：`cat /definitely_missing_rustclaw_contract_case`，然后说明失败原因。",
         "execution_failed_step",
         &mut needs_clarify,
         &mut clarify_question,
@@ -479,13 +399,6 @@ fn explicit_command_execution_repair_preserves_failed_step_contract() {
 
 #[test]
 fn explicit_command_execution_repair_preserves_generated_file_delivery_contract() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["run ".to_string()],
-        standalone_commands: vec![],
-        default_locale: "en-US".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
@@ -503,8 +416,7 @@ fn explicit_command_execution_repair_preserves_generated_file_delivery_contract(
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
-        "Run pwd first, save one short line to worker_line_explicit.txt, then tell me the saved path.",
+        "Run `pwd` first, save one short line to worker_line_explicit.txt, then tell me the saved path.",
         "generated_file_delivery",
         &mut needs_clarify,
         &mut clarify_question,
@@ -532,13 +444,6 @@ fn explicit_command_execution_repair_preserves_generated_file_delivery_contract(
 
 #[test]
 fn explicit_command_execution_repair_preserves_generated_file_path_report_contract() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["run ".to_string()],
-        standalone_commands: vec![],
-        default_locale: "en-US".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
@@ -556,8 +461,7 @@ fn explicit_command_execution_repair_preserves_generated_file_path_report_contra
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
-        "Run pwd first, save one short line to worker_line_explicit.txt, then return the saved path.",
+        "Run `pwd` first, save one short line to worker_line_explicit.txt, then return the saved path.",
         "generated_file_path_report",
         &mut needs_clarify,
         &mut clarify_question,
@@ -585,13 +489,6 @@ fn explicit_command_execution_repair_preserves_generated_file_path_report_contra
 
 #[test]
 fn explicit_command_execution_repair_respects_pure_direct_answer_contract() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["execute".to_string()],
-        standalone_commands: vec![],
-        default_locale: "en-US".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::DirectAnswer;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut needs_clarify = false;
@@ -603,7 +500,6 @@ fn explicit_command_execution_repair_respects_pure_direct_answer_contract() {
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
         "execute ls -la: explain what this command means, do not run it",
         "",
         &mut needs_clarify,
@@ -625,13 +521,6 @@ fn explicit_command_execution_repair_respects_pure_direct_answer_contract() {
 
 #[test]
 fn explicit_command_execution_repair_ignores_quoted_replacement_payload() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["run ".to_string(), "execute ".to_string()],
-        standalone_commands: vec![],
-        default_locale: "en-US".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::PlannerExecute;
     let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
     let mut needs_clarify = false;
@@ -643,7 +532,6 @@ fn explicit_command_execution_repair_ignores_quoted_replacement_payload() {
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
         "Continue, but change the remaining step so it says `echo AFTER_PATCHED_STEP` instead.",
         "",
         &mut needs_clarify,
@@ -661,13 +549,6 @@ fn explicit_command_execution_repair_ignores_quoted_replacement_payload() {
 
 #[test]
 fn explicit_command_execution_repair_clears_spurious_clarify() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["请执行".to_string(), "执行".to_string()],
-        standalone_commands: vec![],
-        default_locale: "zh-CN".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut needs_clarify = true;
@@ -681,8 +562,7 @@ fn explicit_command_execution_repair_clears_spurious_clarify() {
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
-        "请执行 pwd，只输出命令结果",
+        "请执行 `pwd`，只输出命令结果",
         "",
         &mut needs_clarify,
         &mut clarify_question,
@@ -703,13 +583,6 @@ fn explicit_command_execution_repair_clears_spurious_clarify() {
 
 #[test]
 fn embedded_standalone_command_execution_repair_clears_spurious_clarify() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: vec![],
-        execute_prefixes: vec!["执行".to_string()],
-        standalone_commands: vec!["pwd".to_string()],
-        default_locale: "zh-CN".to_string(),
-        verify_enforce_enabled: true,
-    };
     let decision = FirstLayerDecision::Clarify;
     let mut finalize_style = crate::ActFinalizeStyle::Plain;
     let mut needs_clarify = true;
@@ -723,7 +596,6 @@ fn embedded_standalone_command_execution_repair_clears_spurious_clarify() {
     };
 
     let repair = super::apply_explicit_command_execution_contract_repair(
-        &runtime,
         "运行 pwd -P，只返回物理工作目录路径",
         "",
         &mut needs_clarify,
@@ -1078,13 +950,6 @@ fn file_delivery_contract_repair_preserves_archive_pack_contract() {
 
 #[test]
 fn raw_output_explicit_locator_repair_restores_path_for_non_command_read() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: Vec::new(),
-        execute_prefixes: vec!["run ".to_string()],
-        standalone_commands: vec!["pwd".to_string()],
-        default_locale: "zh-CN".to_string(),
-        verify_enforce_enabled: true,
-    };
     let mut contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Strict,
@@ -1099,7 +964,6 @@ fn raw_output_explicit_locator_repair_restores_path_for_non_command_read() {
         &mut contract,
         "raw_command_output",
         "读 /etc/shadow 第一行，告诉我里面是什么",
-        &runtime,
     );
 
     assert_eq!(repair, Some("raw_output_explicit_locator_contract_repair"));
@@ -1109,13 +973,6 @@ fn raw_output_explicit_locator_repair_restores_path_for_non_command_read() {
 
 #[test]
 fn raw_output_explicit_locator_repair_skips_literal_command_requests() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: Vec::new(),
-        execute_prefixes: vec!["run ".to_string()],
-        standalone_commands: vec!["pwd".to_string()],
-        default_locale: "en-US".to_string(),
-        verify_enforce_enabled: true,
-    };
     let mut contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Strict,
@@ -1129,8 +986,7 @@ fn raw_output_explicit_locator_repair_skips_literal_command_requests() {
     let repair = super::apply_raw_output_explicit_locator_repair(
         &mut contract,
         "raw_command_output",
-        "run cat /etc/shadow",
-        &runtime,
+        "run `cat /etc/shadow`",
     );
 
     assert_eq!(repair, None);
@@ -1140,13 +996,6 @@ fn raw_output_explicit_locator_repair_skips_literal_command_requests() {
 
 #[test]
 fn raw_output_explicit_locator_repair_ignores_semantic_kind_without_machine_marker() {
-    let runtime = crate::CommandIntentRuntime {
-        all_result_suffixes: Vec::new(),
-        execute_prefixes: vec!["run ".to_string()],
-        standalone_commands: vec!["pwd".to_string()],
-        default_locale: "zh-CN".to_string(),
-        verify_enforce_enabled: true,
-    };
     let mut contract = IntentOutputContract {
         exact_sentence_count: None,
         response_shape: OutputResponseShape::Strict,
@@ -1161,7 +1010,6 @@ fn raw_output_explicit_locator_repair_ignores_semantic_kind_without_machine_mark
         &mut contract,
         "",
         "读 /etc/shadow 第一行，告诉我里面是什么",
-        &runtime,
     );
 
     assert_eq!(repair, None);

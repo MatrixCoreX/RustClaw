@@ -373,22 +373,6 @@ pub(super) fn default_worker_running_recovery_check_interval_seconds() -> u64 {
     60
 }
 
-pub(super) fn default_memory_rule_assistant_ack_skip() -> Vec<String> {
-    Vec::new()
-}
-
-pub(super) fn default_memory_rule_instruction_markers() -> Vec<String> {
-    Vec::new()
-}
-
-pub(super) fn default_memory_rule_injection_markers() -> Vec<String> {
-    Vec::new()
-}
-
-pub(super) fn default_memory_rule_salience_boost_markers() -> Vec<String> {
-    Vec::new()
-}
-
 pub(super) fn default_tools_profile() -> String {
     "full".to_string()
 }

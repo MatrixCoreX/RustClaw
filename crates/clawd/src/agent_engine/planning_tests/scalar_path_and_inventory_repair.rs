@@ -819,7 +819,6 @@ async fn explicit_command_scalar_path_current_workspace_reaches_planner_path() {
     let root = TempDirGuard::new("explicit_command_scalar_current_workspace_plan_round");
     let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
-    state.policy.command_intent.execute_prefixes = vec!["执行".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let prompt = "执行 pwd，只输出当前工作目录的绝对路径";
     let task = ClaimedTask {
@@ -891,7 +890,6 @@ async fn explicit_command_scalar_path_auto_locator_conflict_reaches_planner_path
     let root = TempDirGuard::new("explicit_command_scalar_auto_locator_conflict");
     let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
     state.skill_rt.workspace_root = root.path.clone();
-    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let prompt = "Run pwd and output only the raw result.";
     let task = ClaimedTask {
@@ -1643,8 +1641,7 @@ fn single_path_metadata_facts_do_not_satisfy_multi_target_quantity_comparison() 
 
 #[test]
 fn explicit_command_planner_action_preserves_pipeline_literal() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd"]);
-    state.policy.command_intent.execute_prefixes = vec!["执行命令".to_string()];
+    let state = test_state_with_enabled_skills(&["run_cmd"]);
     let mut route = route_result(
         crate::AskMode::act_plain(),
         true,

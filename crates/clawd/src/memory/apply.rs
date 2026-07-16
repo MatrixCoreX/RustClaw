@@ -1,13 +1,17 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::intent::{MemoryAction, MemoryActionKind, MemoryActionOp, MemoryScope, MemoryTtlPolicy};
-use super::RETRIEVAL_SOURCE_PREFERENCE;
+use super::{
+    MEMORY_SAFETY_FLAG_INJECTION_LIKE, MEMORY_TYPE_SAFETY_SIGNAL, RETRIEVAL_SOURCE_MEMORY,
+    RETRIEVAL_SOURCE_PREFERENCE,
+};
 use crate::AppState;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct MemoryActionApplyStats {
     pub(crate) upserted_preferences: usize,
     pub(crate) deleted_preferences: usize,
+    pub(crate) marked_safety_signals: usize,
     pub(crate) ignored_actions: usize,
 }
 
@@ -28,6 +32,16 @@ pub(crate) fn apply_memory_actions(
                 stats.ignored_actions += 1;
             }
             MemoryActionOp::Upsert => {
+                if action.kind == MemoryActionKind::SafetySignal && action.risk.injection_like {
+                    stats.marked_safety_signals += mark_matching_user_memory_as_safety_signal(
+                        db,
+                        user_id,
+                        chat_id,
+                        user_key,
+                        &action.source.source_text,
+                    )?;
+                    continue;
+                }
                 let Some(pref) = preference_upsert_from_action(action) else {
                     stats.ignored_actions += 1;
                     continue;
@@ -55,6 +69,53 @@ pub(crate) fn apply_memory_actions(
         }
     }
     Ok(stats)
+}
+
+fn mark_matching_user_memory_as_safety_signal(
+    db: &Connection,
+    user_id: i64,
+    chat_id: i64,
+    user_key: &str,
+    source_text: &str,
+) -> anyhow::Result<usize> {
+    let source_text = source_text.trim();
+    if source_text.is_empty() {
+        return Ok(0);
+    }
+    let memory_id = db
+        .query_row(
+            "SELECT id FROM memories
+             WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3
+               AND role = 'user' AND content = ?4
+             ORDER BY id DESC LIMIT 1",
+            params![user_id, chat_id, user_key, source_text],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    let Some(memory_id) = memory_id else {
+        return Ok(0);
+    };
+    let updated = db.execute(
+        "UPDATE memories
+         SET memory_type = ?1, safety_flag = ?2, salience = 0.12, is_instructional = 0
+         WHERE id = ?3",
+        params![
+            MEMORY_TYPE_SAFETY_SIGNAL,
+            MEMORY_SAFETY_FLAG_INJECTION_LIKE,
+            memory_id
+        ],
+    )?;
+    db.execute(
+        "DELETE FROM memory_retrieval_index
+         WHERE source_kind = ?1 AND source_memory_id = ?2",
+        params![RETRIEVAL_SOURCE_MEMORY, memory_id],
+    )?;
+    let _ = db.execute(
+        "DELETE FROM memory_retrieval_index_fts
+         WHERE rowid NOT IN (SELECT id FROM memory_retrieval_index)",
+        [],
+    );
+    Ok(updated)
 }
 
 fn preference_upsert_from_action(action: &MemoryAction) -> Option<(String, String, f32, String)> {

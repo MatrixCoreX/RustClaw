@@ -902,8 +902,7 @@ fn registry_prefers_archive_basic_from_capability_ref_without_semantic_kind() {
 
 #[test]
 fn explicit_configured_command_request_rewrites_semantic_substitute_to_run_cmd() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
-    state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
+    let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     let mut route = route_result(
         crate::AskMode::act_with_chat_finalizer(),
         true,
@@ -966,9 +965,8 @@ fn explicit_configured_command_request_rewrites_semantic_substitute_to_run_cmd()
 }
 
 #[test]
-fn explicit_command_rewrite_preserves_bounded_configured_execute_prefix() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
-    state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
+fn natural_language_execute_prefix_does_not_override_planner_action() {
+    let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
     let route = route_result(
         crate::AskMode::act_with_chat_finalizer(),
         true,
@@ -997,15 +995,14 @@ fn explicit_command_rewrite_preserves_bounded_configured_execute_prefix() {
     assert!(matches!(
         &normalized[0],
         AgentAction::CallSkill { skill, args }
-            if skill == "run_cmd"
-                && args.get("command").and_then(Value::as_str) == Some("ls scripts")
+            if skill == "system_basic"
+                && args.get("action").and_then(Value::as_str) == Some("inventory_dir")
     ));
 }
 
 #[test]
 fn structured_directory_contract_keeps_safe_listing_for_explicit_command_request() {
-    let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
-    state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
+    let state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
     let mut route = route_result(
         crate::AskMode::act_with_chat_finalizer(),
         true,
@@ -1054,7 +1051,6 @@ fn structured_directory_contract_keeps_safe_listing_for_explicit_command_request
 #[test]
 fn explicit_command_extracts_configured_standalone_command_before_freeform_tail() {
     let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
-    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
 
     assert_eq!(
@@ -1078,7 +1074,6 @@ fn explicit_command_extracts_configured_standalone_command_before_freeform_tail(
 #[test]
 fn explicit_command_rewrite_preserves_configured_standalone_command_before_freeform_tail() {
     let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
-    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
         crate::AskMode::act_with_chat_finalizer(),
@@ -1118,7 +1113,6 @@ fn explicit_command_rewrite_preserves_configured_standalone_command_before_freef
 #[test]
 fn explicit_command_rewrite_corrects_narrative_run_cmd_arg_to_code_span_command() {
     let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
-    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
         crate::AskMode::act_with_chat_finalizer(),
@@ -1165,7 +1159,6 @@ fn explicit_command_rewrite_corrects_narrative_run_cmd_arg_to_code_span_command(
 #[test]
 fn scalar_path_contract_keeps_safe_path_observation_for_standalone_command() {
     let mut state = test_state_with_enabled_skills(&["run_cmd", "fs_basic"]);
-    state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
     state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
     let mut route = route_result(
         crate::AskMode::act_with_chat_finalizer(),

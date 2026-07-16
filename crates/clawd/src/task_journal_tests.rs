@@ -25,6 +25,8 @@ mod answer_verifier_envelope;
 mod event_stream_hooks;
 #[path = "task_journal_tests/failure_attribution.rs"]
 mod failure_attribution;
+#[path = "task_journal_tests/frontdoor_llm_metrics.rs"]
+mod frontdoor_llm_metrics;
 
 fn route_for_semantic(semantic_kind: crate::OutputSemanticKind) -> crate::RouteResult {
     crate::RouteResult {

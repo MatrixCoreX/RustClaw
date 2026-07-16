@@ -11,8 +11,8 @@ pub(crate) use policy::{llm_model_kind, llm_vendor_name, RateLimiter, ToolsPolic
 pub(crate) use provider_runtime::{AgentRuntimeConfig, LlmProviderRuntime};
 pub(crate) use state::{
     build_skill_views, reload_skill_views, AppState, AskStateRegistry, ChannelConfig, ClaimedTask,
-    CoreServices, LlmPromptBucket, PolicyConfig, ReloadContext, SkillRuntime, SkillViewsSnapshot,
-    TaskMetricsRegistry, WorkerConfig,
+    CoreServices, LlmCallSequenceEntry, LlmPromptBucket, PolicyConfig, ReloadContext, SkillRuntime,
+    SkillViewsSnapshot, TaskMetricsRegistry, WorkerConfig,
 };
 pub(crate) use types::{
     AgentAction, AskReply, CommandIntentRules, CommandIntentRuntime, LocalInteractionContext,

@@ -349,9 +349,7 @@ pub(crate) async fn finalize_ask_direct_success(
 ) -> Result<()> {
     let mut journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", prompt);
     journal.record_context_bundle_summary(format!("path={path_label}"));
-    journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
-    journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
-    journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
+    journal.record_runtime_llm_metrics(state, &task.task_id);
     journal.record_used_evidence_ids_count(0);
     journal.record_delivery_consistent(crate::task_journal::delivery_payload_consistent(
         answer_text,
@@ -978,9 +976,7 @@ pub(crate) async fn finalize_ask_result(
                 &mut answer_messages,
             );
             journal.record_final_answer(&answer_text);
-            journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
-            journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
-            journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
+            journal.record_runtime_llm_metrics(state, &task.task_id);
             crate::finalize::ensure_task_metrics(&mut journal, &answer_text, &answer_messages);
             if failure_reply {
                 if let Some(recovered_answer) =
@@ -1181,10 +1177,7 @@ pub(crate) async fn finalize_ask_result(
                     route_result,
                     &resume_payload,
                 ) {
-                    journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
-                    journal
-                        .record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
-                    journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
+                    journal.record_runtime_llm_metrics(state, &task.task_id);
                     journal.record_final_answer(&user_error);
                     crate::finalize::ensure_task_metrics(&mut journal, &user_error, &[]);
                     journal
@@ -1260,10 +1253,7 @@ pub(crate) async fn finalize_ask_result(
                     let mut answer_messages =
                         resume_context_execution_summary_messages(&resume_payload, prefer_english);
                     answer_messages.push(qualified_answer.clone());
-                    journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
-                    journal
-                        .record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
-                    journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
+                    journal.record_runtime_llm_metrics(state, &task.task_id);
                     journal.record_final_answer(&qualified_answer);
                     crate::finalize::ensure_task_metrics(
                         &mut journal,
@@ -1318,9 +1308,7 @@ pub(crate) async fn finalize_ask_result(
                     state.clear_task_llm_call_count(&task.task_id);
                     return Ok(());
                 }
-                journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
-                journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
-                journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
+                journal.record_runtime_llm_metrics(state, &task.task_id);
                 journal.record_final_answer(&user_error);
                 crate::finalize::ensure_task_metrics(&mut journal, &user_error, &[]);
                 journal.record_final_status(
@@ -1350,9 +1338,7 @@ pub(crate) async fn finalize_ask_result(
                 return Ok(());
             }
             let user_error = compose_ask_failure_user_message(state, task, prompt, &err_text).await;
-            journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
-            journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
-            journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
+            journal.record_runtime_llm_metrics(state, &task.task_id);
             journal.record_final_answer(&user_error);
             crate::finalize::ensure_task_metrics(&mut journal, &user_error, &[]);
             journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);

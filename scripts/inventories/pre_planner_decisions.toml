@@ -1,0 +1,256 @@
+schema_version = 1
+target_semantic_owner = "agent_loop"
+
+[[decisions]]
+id = "attachment_audio_transcription"
+path = "crates/clawd/src/worker/ask_prepare.rs"
+symbols = ["transcribe_attached_audio_for_ask"]
+owner_category = "attachment_boundary"
+input_fields = ["payload.attachments", "prompt"]
+output_fields = ["routed_prompt"]
+disposition = "retain_boundary"
+ordinary_semantic_authority = false
+terminal_before_planner = false
+
+[[decisions]]
+id = "ui_attachment_projection"
+path = "crates/clawd/src/worker/ask_prepare.rs"
+symbols = ["prompt_with_ui_attachment_context"]
+owner_category = "attachment_boundary"
+input_fields = ["payload.attachments", "routed_prompt"]
+output_fields = ["routed_prompt"]
+disposition = "retain_boundary"
+ordinary_semantic_authority = false
+terminal_before_planner = false
+
+[[decisions]]
+id = "prompt_surface_semantic_analysis"
+path = "crates/clawd/src/worker/ask_prepare.rs"
+symbols = ["analyze_prompt_surface"]
+owner_category = "semantic_authority"
+input_fields = ["routed_prompt"]
+output_fields = ["PromptSurfaceSignals"]
+disposition = "move_to_agent_loop"
+ordinary_semantic_authority = true
+terminal_before_planner = false
+
+[[decisions]]
+id = "clarify_followup_resolution"
+path = "crates/clawd/src/worker/ask_prepare.rs"
+symbols = [
+  "resolve_clarify_followup_from_session_with_surface",
+  "active_clarify_existing_workspace_locator_reply",
+  "should_probe_transcript_for_clarify_fallback_with_surface",
+]
+owner_category = "semantic_authority"
+input_fields = ["routed_prompt", "session_snapshot", "last_turn_context"]
+output_fields = ["ClarifyFollowupResolution"]
+disposition = "move_to_agent_loop"
+ordinary_semantic_authority = true
+terminal_before_planner = false
+
+[[decisions]]
+id = "active_clarify_fast_path"
+path = "crates/clawd/src/worker/ask_prepare.rs"
+symbols = ["active_clarify_locator_reply_fast_path_route"]
+owner_category = "semantic_authority"
+input_fields = ["ClarifyFollowupResolution", "session_snapshot"]
+output_fields = ["RouteResult"]
+disposition = "delete_after_migration"
+ordinary_semantic_authority = true
+terminal_before_planner = false
+
+[[decisions]]
+id = "resume_context_binding"
+path = "crates/clawd/src/worker/ask_prepare.rs"
+symbols = [
+  "explicit_resume_context_binding",
+  "active_checkpoint_resume_candidate",
+  "recent_failed_resume_candidate",
+  "binding_context_json",
+]
+owner_category = "lifecycle_boundary"
+input_fields = ["payload", "source", "task_checkpoint", "recent_failed_task"]
+output_fields = ["resume_binding", "binding_context"]
+disposition = "retain_boundary"
+ordinary_semantic_authority = false
+terminal_before_planner = false
+
+[[decisions]]
+id = "intent_normalizer_model"
+path = "crates/clawd/src/worker/ask_prepare.rs"
+symbols = ["run_intent_normalizer"]
+owner_category = "semantic_authority"
+input_fields = ["normalizer_prompt", "session_snapshot", "resume_context", "schedule_context"]
+output_fields = ["IntentNormalizerOutput"]
+disposition = "delete_after_migration"
+ordinary_semantic_authority = true
+terminal_before_planner = false
+
+[[decisions]]
+id = "explicit_machine_command_contract_repair"
+path = "crates/clawd/src/intent_router_execution_contract.rs"
+symbols = ["apply_explicit_command_execution_contract_repair", "explicit_command_segment_for_policy"]
+owner_category = "explicit_machine_command_boundary"
+input_fields = ["current_user_request", "output_contract", "route_reason"]
+output_fields = ["output_contract", "needs_clarify", "execution_finalize_style"]
+disposition = "move_to_agent_loop"
+ordinary_semantic_authority = false
+terminal_before_planner = false
+
+[[decisions]]
+id = "normalizer_route_projection"
+path = "crates/clawd/src/worker/ask_prepare.rs"
+symbols = ["route_result_from_normalizer"]
+owner_category = "semantic_authority"
+input_fields = ["IntentNormalizerOutput"]
+output_fields = ["RouteResult"]
+disposition = "delete_after_migration"
+ordinary_semantic_authority = true
+terminal_before_planner = false
+
+[[decisions]]
+id = "post_normalizer_contract_repairs"
+path = "crates/clawd/src/worker/ask_prepare.rs"
+symbols = [
+  "preserve_locator_reply_runtime_intent",
+  "repair_structured_field_target_from_prompt",
+  "repair_scalar_field_value_contract_for_locator_reply",
+  "clear_file_delivery_contract_for_filename_only",
+  "bind_ordered_entry_reference_from_active_frame",
+  "bind_content_read_to_active_delivery_target",
+]
+owner_category = "semantic_authority"
+input_fields = ["prompt", "RouteResult", "TurnAnalysis", "session_snapshot"]
+output_fields = ["RouteResult", "execution_recipe_hint"]
+disposition = "move_to_agent_loop"
+ordinary_semantic_authority = true
+terminal_before_planner = false
+
+[[decisions]]
+id = "execution_context_preparation"
+path = "crates/clawd/src/worker/ask_pipeline.rs"
+symbols = ["prepare_ask_execution_context"]
+owner_category = "context_boundary"
+input_fields = ["task", "payload", "resolved_prompt", "TurnAnalysis"]
+output_fields = ["TaskContextBundle", "recent_execution_context", "prompt_with_memory"]
+disposition = "retain_boundary"
+ordinary_semantic_authority = false
+terminal_before_planner = false
+
+[[decisions]]
+id = "boundary_safety_preflight"
+path = "crates/clawd/src/worker/ask_pipeline.rs"
+symbols = ["boundary_safety_preflight"]
+owner_category = "safety_boundary"
+input_fields = ["task", "TurnAnalysis", "session_snapshot", "RouteResult"]
+output_fields = ["risk_ceiling", "boundary_machine_hints"]
+disposition = "retain_boundary"
+ordinary_semantic_authority = false
+terminal_before_planner = false
+
+[[decisions]]
+id = "locator_and_context_preflight"
+path = "crates/clawd/src/worker/ask_pipeline.rs"
+symbols = [
+  "boundary_post_binding_locator_preflight",
+  "boundary_context_locator_preflight",
+  "workspace_root_topic_route_should_require_evidence",
+  "bare_topic_memory_expansion_route_should_defer_to_agent_loop",
+  "unbound_existing_file_delivery_route_should_defer_to_agent_loop",
+  "structured_anchor_route_requires_evidence_repair",
+]
+owner_category = "semantic_authority"
+input_fields = ["prompt", "resolved_prompt", "recent_execution_context", "RouteResult"]
+output_fields = ["RouteResult", "clarify_candidates"]
+disposition = "move_to_agent_loop"
+ordinary_semantic_authority = true
+terminal_before_planner = false
+
+[[decisions]]
+id = "auto_locator_resolution"
+path = "crates/clawd/src/worker/ask_pipeline.rs"
+symbols = ["should_attempt_auto_locator", "current_workspace_locator_resolution", "try_resolve_implicit_locator_path"]
+owner_category = "semantic_authority"
+input_fields = ["RouteResult.locator_hint", "workspace", "recent_execution_context"]
+output_fields = ["LocatorResolution"]
+disposition = "move_to_agent_loop"
+ordinary_semantic_authority = true
+terminal_before_planner = false
+
+[[decisions]]
+id = "post_route_policy"
+path = "crates/clawd/src/worker/ask_pipeline.rs"
+symbols = ["apply_post_route_policy", "apply_post_route_refinements"]
+owner_category = "semantic_authority"
+input_fields = ["RouteResult", "LocatorResolution", "prompt", "session_snapshot"]
+output_fields = ["PostRoutePolicyResult"]
+disposition = "delete_after_migration"
+ordinary_semantic_authority = true
+terminal_before_planner = false
+
+[[decisions]]
+id = "alias_state_patch_projection"
+path = "crates/clawd/src/worker/ask_pipeline.rs"
+symbols = ["apply_alias_state_patch_ack_route"]
+owner_category = "session_boundary"
+input_fields = ["TurnAnalysis.state_patch", "BoundaryEnvelope.session_binding"]
+output_fields = ["session_alias_bindings", "RouteResult"]
+disposition = "retain_boundary"
+ordinary_semantic_authority = false
+terminal_before_planner = false
+
+[[decisions]]
+id = "schedule_direct_exit"
+path = "crates/clawd/src/worker/ask_pipeline.rs"
+symbols = ["should_route_schedule_direct", "try_finalize_schedule_direct_success"]
+owner_category = "explicit_schedule_boundary"
+input_fields = ["ScheduleKind", "AskMode", "schedule_intent"]
+output_fields = ["scheduled_task", "task_finalization"]
+disposition = "move_to_agent_loop"
+ordinary_semantic_authority = false
+terminal_before_planner = true
+
+[[decisions]]
+id = "self_extension_direct_exit"
+path = "crates/clawd/src/worker/ask_pipeline.rs"
+symbols = ["maybe_handle_ask_self_extension"]
+owner_category = "semantic_authority"
+input_fields = ["resolved_prompt", "execution_user_request"]
+output_fields = ["AskReply"]
+disposition = "move_to_agent_loop"
+ordinary_semantic_authority = true
+terminal_before_planner = true
+
+[[decisions]]
+id = "alias_ack_direct_exit"
+path = "crates/clawd/src/worker/ask_pipeline.rs"
+symbols = ["alias_state_patch_ack_reply"]
+owner_category = "session_boundary"
+input_fields = ["RouteResult", "TurnAnalysis", "BoundaryEnvelope"]
+output_fields = ["AskReply"]
+disposition = "move_to_agent_loop"
+ordinary_semantic_authority = false
+terminal_before_planner = true
+
+[[decisions]]
+id = "session_binding_value_direct_exit"
+path = "crates/clawd/src/worker/ask_pipeline.rs"
+symbols = ["session_binding_value_reply"]
+owner_category = "session_boundary"
+input_fields = ["RouteResult", "BoundaryEnvelope"]
+output_fields = ["AskReply"]
+disposition = "move_to_agent_loop"
+ordinary_semantic_authority = false
+terminal_before_planner = true
+
+[[decisions]]
+id = "agent_loop_semantic_entry"
+path = "crates/clawd/src/worker/ask_pipeline.rs"
+symbols = ["agent_loop_default_entry", "run_agent_with_tools"]
+owner_category = "target_semantic_owner"
+input_fields = ["prompt_with_memory", "execution_user_request", "AgentRunContext"]
+output_fields = ["AskReply"]
+disposition = "retain_boundary"
+ordinary_semantic_authority = true
+terminal_before_planner = false

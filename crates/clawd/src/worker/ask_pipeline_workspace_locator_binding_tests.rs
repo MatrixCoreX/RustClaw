@@ -416,17 +416,11 @@ fn explicit_command_failed_step_does_not_bind_workspace_child_from_current_reque
     let root = make_temp_root("explicit_command_failed_step_workspace_child");
     let prompts_dir = root.join("prompts");
     std::fs::create_dir_all(&prompts_dir).expect("prompts dir");
-    let mut state = test_state_with_root(root);
-    state.policy.command_intent.execute_prefixes = vec!["please run ".to_string()];
-    state.policy.command_intent.standalone_commands = vec!["echo".to_string()];
-    let prompt = "please run echo prompts and tell me the failed execution step";
+    let state = test_state_with_root(root);
+    let prompt = "please run `echo prompts` and tell me the failed execution step";
     assert_eq!(
-        crate::agent_engine::explicit_command_segment_for_policy(
-            &state.policy.command_intent,
-            prompt,
-        )
-        .as_deref(),
-        Some("echo")
+        crate::agent_engine::explicit_command_segment_for_policy(prompt).as_deref(),
+        Some("echo prompts")
     );
     let expected_prompts_dir = prompts_dir
         .canonicalize()

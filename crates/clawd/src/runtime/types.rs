@@ -159,17 +159,11 @@ impl RouteGateKind {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(crate) struct CommandIntentRules {
     #[serde(default)]
-    pub(crate) execute_prefixes: Vec<String>,
-    #[serde(default)]
     pub(crate) standalone_commands: Vec<String>,
-    #[serde(default)]
-    pub(crate) result_suffixes: Vec<String>,
 }
 
 #[derive(Clone)]
 pub(crate) struct CommandIntentRuntime {
-    pub(crate) all_result_suffixes: Vec<String>,
-    pub(crate) execute_prefixes: Vec<String>,
     pub(crate) standalone_commands: Vec<String>,
     pub(crate) default_locale: String,
     pub(crate) verify_enforce_enabled: bool,

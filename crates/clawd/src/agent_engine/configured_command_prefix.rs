@@ -9,28 +9,6 @@ use configured_command_prefix_run_cmd_contract::{
     rewrite_backend_identity_metadata_respond_to_runtime_identity,
 };
 
-pub(super) fn strip_configured_command_prefix<'a>(
-    request: &'a str,
-    prefix: &str,
-) -> Option<&'a str> {
-    let request = request.trim_start();
-    let prefix = prefix.trim_start();
-    if request.is_empty() || prefix.is_empty() {
-        return None;
-    }
-    if prefix.is_ascii() {
-        let request_lower = request.to_ascii_lowercase();
-        let prefix_lower = prefix.to_ascii_lowercase();
-        request_lower
-            .starts_with(&prefix_lower)
-            .then(|| &request[prefix.len()..])
-    } else {
-        request
-            .starts_with(prefix)
-            .then(|| &request[prefix.len()..])
-    }
-}
-
 pub(super) fn trim_leading_command_delimiters(mut text: &str) -> &str {
     loop {
         text = text.trim_start();
@@ -98,60 +76,6 @@ pub(super) fn explicit_command_followup_tail(tail: &str) -> Option<&str> {
         .map(char::len_utf8)
         .unwrap_or(0);
     Some(tail[boundary + delimiter_len..].trim())
-}
-
-pub(super) fn whole_explicit_command_tail(tail: &str) -> Option<&str> {
-    let tail = trim_leading_command_separators_preserve_quotes(tail).trim();
-    if tail.is_empty() || tail.contains('\n') {
-        return None;
-    }
-    if tail
-        .chars()
-        .any(|ch| matches!(ch, '|' | ';' | '&' | '>' | '<'))
-    {
-        return Some(tail);
-    }
-    let mut tokens = tail.split_whitespace();
-    let first = tokens.next()?;
-    if tokens.clone().next().is_none() {
-        return Some(first);
-    }
-    tokens
-        .all(structural_command_argument_token)
-        .then_some(tail)
-}
-
-pub(super) fn markdown_code_span_command_segment(text: &str) -> Option<&str> {
-    let text = text.trim();
-    let rest = text.strip_prefix('`')?;
-    let close = rest.find('`')?;
-    let command = rest[..close].trim();
-    if command.is_empty() {
-        return None;
-    }
-    let suffix = rest[close + '`'.len_utf8()..].trim();
-    if suffix.chars().all(|ch| {
-        matches!(
-            ch,
-            '.' | '。' | '!' | '！' | '?' | '？' | ',' | '，' | ';' | '；'
-        )
-    }) {
-        Some(command)
-    } else {
-        None
-    }
-}
-
-pub(super) fn embedded_markdown_code_span_command_segment(text: &str) -> Option<&str> {
-    let text = text.trim();
-    let open = text.find('`')?;
-    let rest = &text[open + '`'.len_utf8()..];
-    let close = rest.find('`')?;
-    let command = rest[..close].trim();
-    if command.is_empty() || literal_command_segment_has_unresolved_template(command) {
-        return None;
-    }
-    Some(command)
 }
 
 pub(super) fn structural_command_argument_token(token: &str) -> bool {
@@ -312,11 +236,7 @@ pub(super) fn standalone_command_segment_before_freeform_tail<'a>(
     None
 }
 
-pub(super) fn path_command_segment_before_freeform_tail<'a>(tail: &'a str) -> Option<&'a str> {
-    let path_env = std::env::var_os("PATH");
-    path_command_segment_before_freeform_tail_with_path_env(tail, path_env.as_deref())
-}
-
+#[cfg(test)]
 pub(super) fn path_command_segment_before_freeform_tail_with_path_env<'a>(
     tail: &'a str,
     path_env: Option<&std::ffi::OsStr>,
@@ -392,9 +312,7 @@ pub(super) fn followup_tail_has_structured_command_payload(
 ) -> bool {
     let followup = followup.trim();
     !followup.is_empty()
-        && (configured_explicit_command_candidate(runtime, followup).is_some()
-            || embedded_configured_explicit_command_candidate(runtime, followup).is_some()
-            || embedded_standalone_command_candidate(runtime, followup).is_some()
+        && (embedded_standalone_command_candidate(runtime, followup).is_some()
             || shellish_literal_command_segment(followup).is_some()
             || leading_shellish_command_sequence_segment(followup).is_some())
 }
@@ -459,93 +377,6 @@ pub(super) fn embedded_standalone_command_candidate(
         })
         .filter_map(|(idx, _)| standalone_command_candidate_from_tail(runtime, &request[idx..]))
         .next()
-}
-
-pub(super) fn embedded_configured_explicit_command_candidate(
-    runtime: &crate::CommandIntentRuntime,
-    request: &str,
-) -> Option<ExplicitCommandCandidate> {
-    let request = request.trim();
-    if request.is_empty() {
-        return None;
-    }
-    request
-        .char_indices()
-        .filter(|(idx, _)| command_candidate_start_boundary(request, *idx))
-        .filter_map(|(idx, _)| {
-            configured_explicit_command_candidate_from_text(runtime, &request[idx..], true)
-        })
-        .next()
-}
-
-pub(super) fn configured_explicit_command_candidate_from_text(
-    runtime: &crate::CommandIntentRuntime,
-    text: &str,
-    allow_whole_tail: bool,
-) -> Option<ExplicitCommandCandidate> {
-    let text = text.trim();
-    if text.is_empty() {
-        return None;
-    }
-    runtime
-        .execute_prefixes
-        .iter()
-        .filter_map(|prefix| strip_configured_command_prefix(text, prefix))
-        .filter_map(|tail| {
-            let segment = explicit_command_segment_before_followup(tail).or_else(|| {
-                allow_whole_tail.then(|| {
-                    markdown_code_span_command_segment(tail)
-                        .or_else(|| embedded_markdown_code_span_command_segment(tail))
-                        .or_else(|| whole_explicit_command_tail(tail))
-                        .or_else(|| standalone_command_segment_before_freeform_tail(runtime, tail))
-                        .or_else(|| path_command_segment_before_freeform_tail(tail))
-                })?
-            })?;
-            let segment = markdown_code_span_command_segment(segment)
-                .or_else(|| embedded_markdown_code_span_command_segment(segment))
-                .unwrap_or(segment);
-            let command = configured_standalone_command_sequence_from_segment(runtime, segment)
-                .unwrap_or_else(|| {
-                    crate::bootstrap::config_loaders::trim_command_text(segment.to_string())
-                });
-            if command.contains('`') || literal_command_segment_has_unresolved_template(&command) {
-                return None;
-            }
-            let freeform_followup = tail.get(segment.len()..).unwrap_or_default();
-            looks_like_concrete_command_tail(&command).then(|| ExplicitCommandCandidate {
-                command,
-                single_step_safe: explicit_command_followup_tail(tail).map_or_else(
-                    || !followup_tail_has_structured_command_payload(runtime, freeform_followup),
-                    |followup| !followup_tail_has_structured_command_payload(runtime, followup),
-                ),
-            })
-        })
-        .next()
-}
-
-pub(super) fn configured_explicit_command_candidate(
-    runtime: &crate::CommandIntentRuntime,
-    request: &str,
-) -> Option<ExplicitCommandCandidate> {
-    let request = request.trim();
-    if request.is_empty() {
-        return None;
-    }
-    configured_explicit_command_candidate_from_text(runtime, request, true).or_else(|| {
-        request
-            .split(|ch| matches!(ch, ',' | '，' | ';' | '；' | '。' | '\n'))
-            .filter_map(|clause| {
-                configured_explicit_command_candidate_from_text(runtime, clause, true)
-            })
-            .next()
-    })
-}
-
-pub(super) fn configured_explicit_command_segment(
-    runtime: &crate::CommandIntentRuntime,
-    request: &str,
-) -> Option<String> {
-    configured_explicit_command_candidate(runtime, request).map(|candidate| candidate.command)
 }
 
 pub(super) fn contains_angle_placeholder_token(text: &str) -> bool {
@@ -627,71 +458,8 @@ pub(super) fn shellish_literal_command_segments(
         .collect()
 }
 
-pub(super) fn prefixed_shellish_command_segments(
-    runtime: &crate::CommandIntentRuntime,
-    request: &str,
-    allow_bare_token: bool,
-) -> Vec<String> {
-    request
-        .split(|ch| matches!(ch, ',' | '，' | ';' | '；' | '。' | '\n'))
-        .filter_map(|clause| {
-            prefixed_shellish_command_segment_from_clause(runtime, clause, allow_bare_token)
-        })
-        .collect()
-}
-
-pub(super) fn prefixed_shellish_command_segment_from_clause(
-    runtime: &crate::CommandIntentRuntime,
-    clause: &str,
-    allow_bare_token: bool,
-) -> Option<String> {
-    let clause = clause.trim();
-    if clause.is_empty() {
-        return None;
-    }
-    for (idx, _) in clause.char_indices() {
-        let tail = &clause[idx..];
-        if let Some(command) =
-            prefixed_shellish_command_segment_from_tail(runtime, tail, allow_bare_token)
-        {
-            return Some(command);
-        }
-    }
-    None
-}
-
-pub(super) fn prefixed_shellish_command_segment_from_tail(
-    runtime: &crate::CommandIntentRuntime,
-    text: &str,
-    allow_bare_token: bool,
-) -> Option<String> {
-    runtime
-        .execute_prefixes
-        .iter()
-        .filter_map(|prefix| strip_configured_command_prefix(text, prefix))
-        .filter_map(|tail| {
-            let segment = markdown_code_span_command_segment(tail)
-                .or_else(|| embedded_markdown_code_span_command_segment(tail))
-                .or_else(|| explicit_command_segment_before_followup(tail))
-                .or_else(|| whole_explicit_command_tail(tail))?;
-            let command = crate::bootstrap::config_loaders::trim_command_text(segment.to_string());
-            if literal_command_segment_has_unresolved_template(&command)
-                || command.contains('`')
-                || !looks_like_concrete_command_tail(&command)
-                || (!allow_bare_token
-                    && !command
-                        .chars()
-                        .any(|ch| matches!(ch, '|' | ';' | '&' | '>' | '<') || ch.is_whitespace()))
-            {
-                return None;
-            }
-            Some(command)
-        })
-        .next()
-}
-
 pub(super) fn shellish_literal_command_segment(request: &str) -> Option<String> {
-    shellish_literal_command_segments(request, false)
+    shellish_literal_command_segments(request, true)
         .into_iter()
         .next()
 }
@@ -758,7 +526,6 @@ pub(in crate::agent_engine) fn explicit_command_segment(
     request: &str,
 ) -> Option<String> {
     leading_shellish_command_sequence_segment(request)
-        .or_else(|| configured_explicit_command_segment(runtime, request))
         .or_else(|| {
             embedded_standalone_command_candidate(runtime, request)
                 .map(|candidate| candidate.command)
@@ -766,16 +533,11 @@ pub(in crate::agent_engine) fn explicit_command_segment(
         .or_else(|| shellish_literal_command_segment(request))
 }
 
-pub(in crate::agent_engine) fn explicit_execution_command_segment(
-    runtime: &crate::CommandIntentRuntime,
+pub(in crate::agent_engine) fn explicit_machine_syntax_command_segment(
     request: &str,
 ) -> Option<String> {
     leading_shellish_command_sequence_segment(request)
-        .or_else(|| configured_explicit_command_segment(runtime, request))
-        .or_else(|| {
-            embedded_standalone_command_candidate(runtime, request)
-                .and_then(|candidate| candidate.single_step_safe.then_some(candidate.command))
-        })
+        .or_else(|| shellish_literal_command_segment(request))
 }
 
 #[cfg(test)]
@@ -785,9 +547,6 @@ pub(super) fn explicit_command_single_step_segment(
 ) -> Option<String> {
     if let Some(command) = leading_shellish_command_sequence_segment(request) {
         return Some(command);
-    }
-    if let Some(candidate) = configured_explicit_command_candidate(runtime, request) {
-        return candidate.single_step_safe.then_some(candidate.command);
     }
     if let Some(candidate) = embedded_standalone_command_candidate(runtime, request) {
         return candidate.single_step_safe.then_some(candidate.command);
@@ -1093,13 +852,7 @@ pub(super) fn replace_explicit_command_substitute_plan_with_run_cmd(
         return actions;
     }
     let has_literal_command_sequence = exact_command.is_some()
-        || execution_failed_step_literal_command_segments(
-            &state.policy.command_intent,
-            original_user_text,
-            None,
-        )
-        .len()
-            >= 2;
+        || execution_failed_step_literal_command_segments(original_user_text, None).len() >= 2;
     let planned_verbatim_run_cmds =
         planned_run_cmds_are_verbatim_user_commands(&actions, original_user_text);
     if !has_literal_command_sequence {

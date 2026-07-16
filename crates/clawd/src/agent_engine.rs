@@ -36,18 +36,8 @@ mod subagent_runtime;
 mod support;
 mod user_output_path;
 
-pub(crate) fn explicit_command_segment_for_policy(
-    runtime: &crate::CommandIntentRuntime,
-    request: &str,
-) -> Option<String> {
-    planning::explicit_command_segment(runtime, request)
-}
-
-pub(crate) fn explicit_execution_command_segment_for_policy(
-    runtime: &crate::CommandIntentRuntime,
-    request: &str,
-) -> Option<String> {
-    planning::explicit_execution_command_segment(runtime, request)
+pub(crate) fn explicit_command_segment_for_policy(request: &str) -> Option<String> {
+    planning::explicit_machine_syntax_command_segment(request)
 }
 
 use self::arg_resolver::{

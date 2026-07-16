@@ -11,12 +11,53 @@ promotion tokens.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+import tomllib
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = ROOT / "crates/clawd/src"
+DECISION_INVENTORY_PATH = ROOT / "scripts/inventories/pre_planner_decisions.toml"
+
+OWNER_CATEGORIES = {
+    "attachment_boundary",
+    "context_boundary",
+    "explicit_machine_command_boundary",
+    "explicit_schedule_boundary",
+    "lifecycle_boundary",
+    "safety_boundary",
+    "semantic_authority",
+    "session_boundary",
+    "target_semantic_owner",
+}
+RETAINED_BOUNDARY_OWNER_CATEGORIES = {
+    "attachment_boundary",
+    "context_boundary",
+    "lifecycle_boundary",
+    "safety_boundary",
+    "session_boundary",
+    "target_semantic_owner",
+}
+DISPOSITIONS = {
+    "delete_after_migration",
+    "move_to_agent_loop",
+    "retain_boundary",
+}
+REQUIRED_DECISION_IDS = {
+    "intent_normalizer_model",
+    "explicit_machine_command_contract_repair",
+    "normalizer_route_projection",
+    "post_normalizer_contract_repairs",
+    "locator_and_context_preflight",
+    "post_route_policy",
+    "schedule_direct_exit",
+    "self_extension_direct_exit",
+    "alias_ack_direct_exit",
+    "session_binding_value_direct_exit",
+    "agent_loop_semantic_entry",
+}
 
 REMOVED_FILES = (
     "crates/clawd/src/ask_flow_pre_planner_exit.rs",
@@ -72,8 +113,94 @@ def production_rust_files() -> list[Path]:
     )
 
 
+def load_decision_inventory() -> dict:
+    return tomllib.loads(DECISION_INVENTORY_PATH.read_text(encoding="utf-8"))
+
+
+def validate_decision_inventory(data: dict) -> list[str]:
+    findings: list[str] = []
+    if data.get("schema_version") != 1:
+        findings.append("decision_inventory: schema_version_must_be_1")
+    if data.get("target_semantic_owner") != "agent_loop":
+        findings.append("decision_inventory: target_semantic_owner_must_be_agent_loop")
+    decisions = data.get("decisions")
+    if not isinstance(decisions, list):
+        return findings + ["decision_inventory: decisions_must_be_array"]
+
+    seen: set[str] = set()
+    for index, decision in enumerate(decisions):
+        prefix = f"decision_inventory[{index}]"
+        if not isinstance(decision, dict):
+            findings.append(f"{prefix}: entry_must_be_table")
+            continue
+        decision_id = decision.get("id")
+        if not isinstance(decision_id, str) or not decision_id:
+            findings.append(f"{prefix}: missing_id")
+            continue
+        prefix = f"decision_inventory:{decision_id}"
+        if decision_id in seen:
+            findings.append(f"{prefix}: duplicate_id")
+        seen.add(decision_id)
+
+        path_value = decision.get("path")
+        if not isinstance(path_value, str) or not path_value.startswith("crates/clawd/src/"):
+            findings.append(f"{prefix}: invalid_production_path")
+            continue
+        path = ROOT / path_value
+        if not path.is_file() or is_test_path(path):
+            findings.append(f"{prefix}: production_path_missing_or_test")
+            continue
+        body = path.read_text(encoding="utf-8")
+        symbols = decision.get("symbols")
+        if not isinstance(symbols, list) or not symbols:
+            findings.append(f"{prefix}: missing_symbols")
+        else:
+            for symbol in symbols:
+                if not isinstance(symbol, str) or not symbol:
+                    findings.append(f"{prefix}: invalid_symbol")
+                elif symbol not in body:
+                    findings.append(f"{prefix}: missing_symbol:{symbol}")
+
+        owner = decision.get("owner_category")
+        if owner not in OWNER_CATEGORIES:
+            findings.append(f"{prefix}: invalid_owner_category:{owner}")
+        disposition = decision.get("disposition")
+        if disposition not in DISPOSITIONS:
+            findings.append(f"{prefix}: invalid_disposition:{disposition}")
+        if (
+            disposition == "retain_boundary"
+            and owner not in RETAINED_BOUNDARY_OWNER_CATEGORIES
+        ):
+            findings.append(f"{prefix}: retained_owner_not_allowlisted:{owner}")
+        for field in ("input_fields", "output_fields"):
+            values = decision.get(field)
+            if not isinstance(values, list) or not values or not all(
+                isinstance(value, str) and value for value in values
+            ):
+                findings.append(f"{prefix}: invalid_{field}")
+        semantic = decision.get("ordinary_semantic_authority")
+        terminal = decision.get("terminal_before_planner")
+        if not isinstance(semantic, bool) or not isinstance(terminal, bool):
+            findings.append(f"{prefix}: authority_and_terminal_must_be_bool")
+        if semantic and owner != "target_semantic_owner" and disposition == "retain_boundary":
+            findings.append(f"{prefix}: ordinary_semantics_cannot_remain_boundary_owned")
+        if terminal and semantic and disposition == "retain_boundary":
+            findings.append(f"{prefix}: semantic_terminal_exit_cannot_be_retained")
+
+    for missing in sorted(REQUIRED_DECISION_IDS - seen):
+        findings.append(f"decision_inventory: missing_required_id:{missing}")
+    return findings
+
+
 def scan_repo() -> list[str]:
     findings: list[str] = []
+    if not DECISION_INVENTORY_PATH.is_file():
+        findings.append("scripts/inventories/pre_planner_decisions.toml: missing_inventory")
+    else:
+        try:
+            findings.extend(validate_decision_inventory(load_decision_inventory()))
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            findings.append(f"decision_inventory: load_failed:{exc.__class__.__name__}")
     for removed in REMOVED_FILES:
         path = ROOT / removed
         if path.exists():
@@ -101,9 +228,32 @@ def scan_repo() -> list[str]:
 def run_self_test() -> int:
     assert "direct_answer_gate_boundary_class" in FORBIDDEN_PRODUCTION_TOKENS
     assert "crates/clawd/src/ask_flow_pre_planner_exit.rs" in REMOVED_FILES
+    assert "semantic_authority" not in RETAINED_BOUNDARY_OWNER_CATEGORIES
     assert "Can answer before tool loop" in DOC_FORBIDDEN_STALE_TOKENS[
         "docs/legacy_semantic_route_inventory.md"
     ]
+    data = load_decision_inventory()
+    assert not validate_decision_inventory(data)
+    invalid = {
+        "schema_version": 1,
+        "target_semantic_owner": "agent_loop",
+        "decisions": [
+            {
+                "id": "invalid_semantic_owner",
+                "path": "crates/clawd/src/worker/ask_pipeline.rs",
+                "symbols": ["run_agent_with_tools"],
+                "owner_category": "semantic_authority",
+                "input_fields": ["prompt"],
+                "output_fields": ["route"],
+                "disposition": "retain_boundary",
+                "ordinary_semantic_authority": True,
+                "terminal_before_planner": True,
+            }
+        ],
+    }
+    invalid_findings = validate_decision_inventory(invalid)
+    assert any("ordinary_semantics_cannot_remain_boundary_owned" in item for item in invalid_findings)
+    assert any("semantic_terminal_exit_cannot_be_retained" in item for item in invalid_findings)
     print("SELF_TEST_OK")
     return 0
 
@@ -111,10 +261,15 @@ def run_self_test() -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:
         return run_self_test()
     findings = scan_repo()
+    if args.json:
+        inventory = load_decision_inventory() if DECISION_INVENTORY_PATH.is_file() else {}
+        print(json.dumps({"findings": findings, "inventory": inventory}, ensure_ascii=True, sort_keys=True))
+        return 1 if findings else 0
     print(f"PRE_PLANNER_EXIT_REMOVAL_CHECK findings={len(findings)}")
     for finding in findings:
         print(f"  - {finding}")

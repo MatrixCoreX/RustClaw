@@ -169,7 +169,7 @@ pub(crate) use runtime::{
     build_skill_views, llm_model_kind, llm_vendor_name, log_ask_transition, reload_skill_views,
     ActFinalizeStyle, AgentAction, AgentRuntimeConfig, AppState, AskMode, AskReply, AskState,
     AskStateRegistry, AskTransition, ChannelConfig, ClaimedTask, CommandIntentRules,
-    CommandIntentRuntime, CoreServices, LlmPromptBucket, LlmProviderRuntime,
+    CommandIntentRuntime, CoreServices, LlmCallSequenceEntry, LlmPromptBucket, LlmProviderRuntime,
     LocalInteractionContext, MemoryConfigFileWrapper, PolicyConfig, RateLimiter, ReloadContext,
     RouteGateKind, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime, ScheduledJobDue,
     SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry, ToolsPolicy, WhatsappDeliveryRoute,

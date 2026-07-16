@@ -49,7 +49,6 @@ pub(super) fn cleanup_executionless_finalize_trace(
 }
 
 pub(super) fn apply_explicit_command_execution_contract_repair(
-    command_runtime: &crate::CommandIntentRuntime,
     current_user_request: &str,
     route_reason: &str,
     needs_clarify: &mut bool,
@@ -58,10 +57,7 @@ pub(super) fn apply_explicit_command_execution_contract_repair(
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     let Some(explicit_command_segment) =
-        crate::agent_engine::explicit_execution_command_segment_for_policy(
-            command_runtime,
-            current_user_request,
-        )
+        crate::agent_engine::explicit_command_segment_for_policy(current_user_request)
     else {
         return None;
     };
