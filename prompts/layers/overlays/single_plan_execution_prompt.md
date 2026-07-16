@@ -36,8 +36,21 @@ __RECENT_ASSISTANT_REPLIES__
 Task:
 Return a single JSON object with this exact schema:
 {
+  "output_contract": {
+    "response_shape": "free|one_sentence|strict|scalar|file_token",
+    "exact_sentence_count": null,
+    "requires_content_evidence": false,
+    "delivery_required": false,
+    "locator_kind": "none|path|current_workspace|url|filename",
+    "delivery_intent": "none|file_single|directory_lookup|directory_batch_files",
+    "result_kind": "<machine result kind or none>"
+  },
   "steps": [ <AgentAction JSON>, ... ]
 }
+
+`output_contract` is planner-owned machine policy for the current request. Derive it from the
+requested result shape and the evidence/delivery needs of the selected capabilities. Use only the
+listed machine tokens; never copy user prose into these fields.
 
 AgentAction JSON must use one of:
 1) {"type":"call_capability","capability":"<planner_capability_name>","args":{...}}  (preferred when the contract exposes a matching `planner_capabilities` entry; runtime resolves it to the concrete tool/skill)
@@ -285,7 +298,7 @@ Rules:
 - If the user request is clearly executable, prefer a concrete execution plan over a reflective explanation of options.
 - Do not output `think` steps.
 - Do not wrap JSON in markdown fences.
-- Do not add extra top-level fields.
+- Do not add extra top-level fields beyond `output_contract` and `steps`.
 
 - When this-round execution includes successful read_file for the user-requested target, do not stop with only the raw read result and do not produce a file-not-found conclusion; add a terminal respond grounded in the observed content.
 - If successful `read_file` already returned non-empty content, do not answer with meta inability text claiming missing or unavailable content. Return a grounded summary or extraction from that observed content in the user-requested format.

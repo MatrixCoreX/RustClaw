@@ -322,11 +322,15 @@ fn canonicalize_plan_result_object(mut map: serde_json::Map<String, Value>) -> (
     let (steps, steps_normalized) = canonicalize_plan_steps_value(steps);
     normalized |= steps_normalized;
 
+    let output_contract = map.remove("output_contract");
     let planner_notes = map.remove("planner_notes");
     normalized |= !map.is_empty();
 
     let mut out = serde_json::Map::new();
     out.insert("steps".to_string(), steps);
+    if let Some(output_contract) = output_contract {
+        out.insert("output_contract".to_string(), output_contract);
+    }
     if let Some(planner_notes) = planner_notes {
         out.insert("planner_notes".to_string(), planner_notes);
     }

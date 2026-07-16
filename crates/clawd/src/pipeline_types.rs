@@ -721,6 +721,7 @@ pub(crate) struct PlanResult {
     pub(crate) goal: String,
     pub(crate) missing_slots: Vec<String>,
     pub(crate) needs_confirmation: bool,
+    pub(crate) output_contract: Option<IntentOutputContract>,
     pub(crate) steps: Vec<PlanStep>,
     pub(crate) planner_notes: String,
     pub(crate) plan_kind: PlanKind,

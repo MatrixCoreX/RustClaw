@@ -187,6 +187,7 @@ mod tests {
             goal: "missing locator".to_string(),
             missing_slots: Vec::new(),
             needs_confirmation: false,
+            output_contract: None,
             steps: vec![crate::PlanStep {
                 step_id: "step_1".to_string(),
                 action_type: "respond".to_string(),

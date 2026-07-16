@@ -189,7 +189,7 @@ pub(super) async fn prepare_round_actions(
         loop_state,
         agent_run_context.and_then(|ctx| ctx.turn_analysis.as_ref()),
         agent_run_context.and_then(|ctx| ctx.boundary_envelope.as_ref()),
-        agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
+        None,
         agent_run_context.and_then(|ctx| ctx.auto_locator_path.as_deref()),
     )
     .await?;
@@ -206,26 +206,28 @@ pub(super) async fn prepare_round_actions(
         crate::truncate_for_log(&plan_result.raw_plan_text)
     );
     let original_route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
-    let effective_output_contract = original_route_result.and_then(|route| {
-        crate::agent_engine::service_probe_contract::effective_service_probe_output_contract_for_plan_steps(
-            state,
-            route,
-            &plan_result.steps,
-        )
-        .or_else(|| {
-            crate::agent_engine::effective_filesystem_lifecycle_output_contract_for_plan_steps(
+    let effective_output_contract = plan_result.output_contract.clone().or_else(|| {
+        original_route_result.and_then(|route| {
+            crate::agent_engine::service_probe_contract::effective_service_probe_output_contract_for_plan_steps(
                 state,
                 route,
                 &plan_result.steps,
             )
-        })
-        .or_else(|| {
-            crate::agent_engine::effective_filesystem_cleanup_recovery_output_contract_for_plan_steps(
-                state,
-                loop_state,
-                route,
-                &plan_result.steps,
-            )
+            .or_else(|| {
+                crate::agent_engine::effective_filesystem_lifecycle_output_contract_for_plan_steps(
+                    state,
+                    route,
+                    &plan_result.steps,
+                )
+            })
+            .or_else(|| {
+                crate::agent_engine::effective_filesystem_cleanup_recovery_output_contract_for_plan_steps(
+                    state,
+                    loop_state,
+                    route,
+                    &plan_result.steps,
+                )
+            })
         })
     });
     let effective_route_result = original_route_result.map(|route| {

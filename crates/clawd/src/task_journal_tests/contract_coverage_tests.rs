@@ -1441,6 +1441,7 @@ fn step_trace_includes_contract_and_action_policy_for_success() {
         goal: "list file names".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps: vec![crate::PlanStep {
             step_id: "step_1".to_string(),
             action_type: "call_skill".to_string(),
@@ -1535,6 +1536,7 @@ fn db_schema_version_action_evidence_overrides_stale_existence_route_contract() 
         goal: "read sqlite schema version".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps: vec![crate::PlanStep {
             step_id: "step_1".to_string(),
             action_type: "call_tool".to_string(),
@@ -1618,6 +1620,7 @@ fn runtime_status_action_evidence_overrides_generic_path_route_contract() {
         goal: "return cwd".to_string(),
         missing_slots: Vec::new(),
         needs_confirmation: false,
+        output_contract: None,
         steps: vec![crate::PlanStep {
             step_id: "step_1".to_string(),
             action_type: "call_tool".to_string(),
