@@ -52,17 +52,3 @@ fn multilingual_visible_copy_uses_the_same_explicit_machine_syntax() {
         );
     }
 }
-
-#[test]
-fn boundary_route_never_hides_planner_capabilities() {
-    let mut route = base_route_result();
-    route.needs_clarify = true;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
-    route.route_reason = "legacy_boundary_selected_fs_only".to_string();
-
-    assert!(planner_visible_skill_scope(PlanningPromptClass::OpenPlanning, Some(&route)).is_none());
-    assert!(
-        planner_visible_skill_scope(PlanningPromptClass::LightweightExecution, Some(&route))
-            .is_none()
-    );
-}

@@ -138,10 +138,7 @@ const CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG: &str = "_clawd_literal_failure_repai
 const CLAWD_MISSING_TARGET_REPAIRABLE_ARG: &str = "_clawd_missing_target_repairable";
 pub(crate) const CLAWD_RUNTIME_ASYNC_JOB_START_ARG: &str = "_clawd_runtime_async_job_start";
 const SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/single_plan_execution_prompt.md";
-const LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/lightweight_execution_prompt.md";
 const LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
-const LIGHTWEIGHT_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str =
-    "prompts/lightweight_incremental_plan_prompt.md";
 const PLAN_REPAIR_PROMPT_LOGICAL_PATH: &str = "prompts/plan_repair_prompt.md";
 const PLANNER_ABORT_COMPACT_RETRY_PROMPT_LOGICAL_PATH: &str =
     "prompts/planner_abort_compact_retry_prompt.md";
