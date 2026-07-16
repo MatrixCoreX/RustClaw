@@ -885,6 +885,17 @@ async fn submit_task(
     headers: HeaderMap,
     Json(mut req): Json<SubmitTaskRequest>,
 ) -> (StatusCode, Json<ApiResponse<SubmitTaskResponse>>) {
+    if worker::run_capability::is_direct_capability_payload(&req.payload) {
+        if !matches!(req.kind, claw_core::types::TaskKind::Ask) {
+            return api_err::<SubmitTaskResponse>(
+                StatusCode::BAD_REQUEST,
+                "run_capability_task_kind_invalid",
+            );
+        }
+        if let Err(error) = worker::run_capability::parse_direct_capability_request(&req.payload) {
+            return api_err::<SubmitTaskResponse>(StatusCode::BAD_REQUEST, error.to_string());
+        }
+    }
     if req.user_key.is_none() {
         req.user_key = headers
             .get("x-rustclaw-key")

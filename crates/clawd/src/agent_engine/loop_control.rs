@@ -625,6 +625,7 @@ async fn run_agent_round(
     policy: &mut AgentLoopGuardPolicy,
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
+    initial_plan: Option<&crate::PlanResult>,
 ) -> Result<RoundOutcome, String> {
     info!(
         "loop_round_start task_id={} round={} max_rounds={} total_steps={} tool_calls_total={}",
@@ -642,6 +643,7 @@ async fn run_agent_round(
         policy,
         loop_state,
         agent_run_context,
+        initial_plan,
     )
     .await?;
     push_round_trace(loop_state, goal, &prepared_round);
@@ -832,6 +834,47 @@ pub(super) async fn run_agent_with_loop_seeded(
     agent_run_context: Option<&AgentRunContext>,
     resume_checkpoint: Option<&crate::task_lifecycle::TaskCheckpoint>,
 ) -> Result<AskReply, String> {
+    run_agent_with_loop_seeded_and_initial_plan(
+        state,
+        task,
+        goal,
+        user_text,
+        agent_run_context,
+        resume_checkpoint,
+        None,
+    )
+    .await
+}
+
+pub(super) async fn run_agent_with_loop_direct_plan(
+    state: &AppState,
+    task: &ClaimedTask,
+    goal: &str,
+    user_text: &str,
+    agent_run_context: Option<&AgentRunContext>,
+    initial_plan: &crate::PlanResult,
+) -> Result<AskReply, String> {
+    run_agent_with_loop_seeded_and_initial_plan(
+        state,
+        task,
+        goal,
+        user_text,
+        agent_run_context,
+        None,
+        Some(initial_plan),
+    )
+    .await
+}
+
+async fn run_agent_with_loop_seeded_and_initial_plan(
+    state: &AppState,
+    task: &ClaimedTask,
+    goal: &str,
+    user_text: &str,
+    agent_run_context: Option<&AgentRunContext>,
+    resume_checkpoint: Option<&crate::task_lifecycle::TaskCheckpoint>,
+    initial_plan: Option<&crate::PlanResult>,
+) -> Result<AskReply, String> {
     let base_policy = load_agent_loop_guard_policy(state);
     let mut loop_state = LoopState::new(base_policy.max_rounds.max(1));
     super::seed_loop_state_for_agent_run(&mut loop_state, agent_run_context, resume_checkpoint);
@@ -891,6 +934,7 @@ pub(super) async fn run_agent_with_loop_seeded(
                 &mut policy,
                 &mut loop_state,
                 agent_run_context,
+                (round == 1).then_some(initial_plan).flatten(),
             )
             .await?;
             loop_state.last_stop_signal = outcome.stop_signal.clone();

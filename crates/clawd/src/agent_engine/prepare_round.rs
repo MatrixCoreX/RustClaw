@@ -172,6 +172,7 @@ pub(super) async fn prepare_round_actions(
     policy: &AgentLoopGuardPolicy,
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
+    initial_plan: Option<&crate::PlanResult>,
 ) -> Result<PreparedRoundActions, String> {
     let planner_user_text = planner_user_text(agent_run_context, user_text);
     let effective_goal = loop_state
@@ -179,18 +180,22 @@ pub(super) async fn prepare_round_actions(
         .goal_overlay()
         .map(|overlay| format!("{goal}\n\n{overlay}"))
         .unwrap_or_else(|| goal.to_string());
-    let plan_result = super::planning::plan_round_actions(
-        state,
-        task,
-        &effective_goal,
-        planner_user_text,
-        policy,
-        loop_state,
-        agent_run_context.and_then(|ctx| ctx.turn_analysis.as_ref()),
-        agent_run_context.and_then(|ctx| ctx.boundary_envelope.as_ref()),
-        agent_run_context.and_then(|ctx| ctx.auto_locator_path.as_deref()),
-    )
-    .await?;
+    let plan_result = if let Some(initial_plan) = initial_plan {
+        initial_plan.clone()
+    } else {
+        super::planning::plan_round_actions(
+            state,
+            task,
+            &effective_goal,
+            planner_user_text,
+            policy,
+            loop_state,
+            agent_run_context.and_then(|ctx| ctx.turn_analysis.as_ref()),
+            agent_run_context.and_then(|ctx| ctx.boundary_envelope.as_ref()),
+            agent_run_context.and_then(|ctx| ctx.auto_locator_path.as_deref()),
+        )
+        .await?
+    };
     info!(
         "planner_result task_id={} round={} plan_kind={:?} goal={} step_count={} missing_slots={} needs_confirmation={} planner_notes={} raw_plan={}",
         task.task_id,

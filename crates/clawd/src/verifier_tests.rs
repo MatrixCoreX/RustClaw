@@ -1884,3 +1884,6 @@ mod registry_confirmation;
 
 #[path = "verifier_tests/agent_loop_execution_contract.rs"]
 mod agent_loop_execution_contract;
+
+#[path = "verifier_tests/direct_capability.rs"]
+mod direct_capability;
