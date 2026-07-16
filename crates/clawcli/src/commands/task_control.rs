@@ -132,7 +132,7 @@ pub(crate) fn run_resume_task(
     user_message: Option<&str>,
     constraints_json: Option<&str>,
     approval_request_id: Option<&str>,
-    approve: bool,
+    approval_decision: Option<&str>,
 ) -> Result<()> {
     let new_constraints = constraints_json
         .map(|raw| serde_json::from_str::<serde_json::Value>(raw))
@@ -148,7 +148,7 @@ pub(crate) fn run_resume_task(
             user_message,
             new_constraints,
             approval_request_id,
-            approve,
+            approval_decision,
         },
     )?;
     output::print_json_pretty(&body_with_resume_summary(body, task_id, "resume_task"));

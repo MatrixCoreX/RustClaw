@@ -306,9 +306,13 @@ enum Command {
         user_message: Option<String>,
         #[arg(long = "constraints-json")]
         constraints_json: Option<String>,
-        #[arg(long, requires = "approval_request_id")]
-        approve: bool,
-        #[arg(long = "approval-request-id", requires = "approve")]
+        #[arg(
+            long = "approval-decision",
+            value_enum,
+            requires = "approval_request_id"
+        )]
+        approval_decision: Option<ApprovalDecisionArg>,
+        #[arg(long = "approval-request-id", requires = "approval_decision")]
         approval_request_id: Option<String>,
     },
 
@@ -690,6 +694,21 @@ enum ReplayView {
     Llm,
     Tools,
     Checkpoints,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ApprovalDecisionArg {
+    ApproveOnce,
+    Deny,
+}
+
+impl ApprovalDecisionArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ApproveOnce => "approve_once",
+            Self::Deny => "deny",
+        }
+    }
 }
 
 impl ReplayView {
@@ -1282,7 +1301,7 @@ fn main() -> Result<()> {
             resume_reason,
             user_message,
             constraints_json,
-            approve,
+            approval_decision,
             approval_request_id,
         } => {
             let k = key.as_deref().ok_or_else(auth::key_required_error)?;
@@ -1295,7 +1314,7 @@ fn main() -> Result<()> {
                 user_message.as_deref(),
                 constraints_json.as_deref(),
                 approval_request_id.as_deref(),
-                *approve,
+                approval_decision.map(|decision| decision.as_str()),
             )
         }
         Command::Continue {
@@ -1845,5 +1864,51 @@ mod tests {
             }
             _ => panic!("expected session fork"),
         }
+    }
+
+    #[test]
+    fn clawcli_parses_closed_approval_decision_protocol() {
+        match Cli::try_parse_from([
+            "clawcli",
+            "resume-task",
+            "task-1",
+            "--approval-request-id",
+            "approval-1",
+            "--approval-decision",
+            "deny",
+        ])
+        .expect("parse approval denial")
+        .cmd
+        {
+            Some(Command::ResumeTask {
+                approval_request_id,
+                approval_decision,
+                ..
+            }) => {
+                assert_eq!(approval_request_id.as_deref(), Some("approval-1"));
+                assert!(matches!(approval_decision, Some(ApprovalDecisionArg::Deny)));
+            }
+            _ => panic!("expected resume-task approval decision"),
+        }
+
+        assert!(Cli::try_parse_from([
+            "clawcli",
+            "resume-task",
+            "task-1",
+            "--approval-request-id",
+            "approval-1",
+            "--approval-decision",
+            "approve",
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "clawcli",
+            "resume-task",
+            "task-1",
+            "--approve",
+            "--approval-request-id",
+            "approval-1",
+        ])
+        .is_err());
     }
 }

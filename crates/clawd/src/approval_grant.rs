@@ -7,6 +7,29 @@ use crate::{AppState, PlanStep};
 
 pub(crate) const APPROVAL_GRANT_TTL_SECONDS: i64 = 900;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ApprovalDecision {
+    ApproveOnce,
+    Deny,
+}
+
+impl ApprovalDecision {
+    pub(crate) fn parse_token(value: &str) -> Option<Self> {
+        match value.trim() {
+            "approve_once" => Some(Self::ApproveOnce),
+            "deny" => Some(Self::Deny),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_token(self) -> &'static str {
+        match self {
+            Self::ApproveOnce => "approve_once",
+            Self::Deny => "deny",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ApprovalBinding {
     pub(crate) action_fingerprint: String,
@@ -81,6 +104,7 @@ pub(crate) fn pending_approval_request_json(
         "reason_code": "explicit_approval_required",
         "reversible": false,
         "next_safe_action": "approve_exact_action_set",
+        "allowed_decisions": ["approve_once", "deny"],
     })
 }
 

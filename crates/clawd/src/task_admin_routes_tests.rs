@@ -215,11 +215,27 @@ async fn resume_failed_task_requires_and_applies_exact_approval_request() {
             user_message: None,
             new_constraints: None,
             approval_request_id: None,
-            approve: None,
+            approval_decision: None,
         }),
     )
     .await;
     assert_eq!(missing_status, StatusCode::CONFLICT);
+
+    let (invalid_status, _) = resume_task_by_id(
+        State(state.clone()),
+        auth_headers(),
+        Json(ResumeTaskByIdRequest {
+            task_id: task_id.to_string(),
+            checkpoint_id: None,
+            resume_reason: None,
+            user_message: None,
+            new_constraints: None,
+            approval_request_id: Some(request_id.to_string()),
+            approval_decision: Some("approve".to_string()),
+        }),
+    )
+    .await;
+    assert_eq!(invalid_status, StatusCode::BAD_REQUEST);
 
     let (status, Json(resp)) = resume_task_by_id(
         State(state.clone()),
@@ -231,7 +247,7 @@ async fn resume_failed_task_requires_and_applies_exact_approval_request() {
             user_message: None,
             new_constraints: None,
             approval_request_id: Some(request_id.to_string()),
-            approve: Some(true),
+            approval_decision: Some("approve_once".to_string()),
         }),
     )
     .await;
@@ -255,5 +271,49 @@ async fn resume_failed_task_requires_and_applies_exact_approval_request() {
     assert_eq!(
         stored_result["resume_context"]["approval_request"]["status"],
         "approved"
+    );
+}
+
+#[tokio::test]
+async fn resume_failed_task_can_deny_the_exact_approval_request() {
+    let task_id = "approval-route-deny";
+    let request_id = "approval-route-deny-1";
+    let state = state_with_goal_task(task_id, json!({"text": "task"}));
+    set_pending_approval(&state, task_id, request_id);
+
+    let (status, Json(resp)) = resume_task_by_id(
+        State(state.clone()),
+        auth_headers(),
+        Json(ResumeTaskByIdRequest {
+            task_id: task_id.to_string(),
+            checkpoint_id: None,
+            resume_reason: None,
+            user_message: None,
+            new_constraints: None,
+            approval_request_id: Some(request_id.to_string()),
+            approval_decision: Some("deny".to_string()),
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(resp.ok);
+    let data = resp.data.expect("response data");
+    assert_eq!(data["status"], "approval_request_denied");
+    assert_eq!(data["approval_decision"], "deny");
+
+    let db = state.core.db.get().expect("get db");
+    let (stored_status, raw_result): (String, String) = db
+        .query_row(
+            "SELECT status, result_json FROM tasks WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("select denied task");
+    let stored_result: Value = serde_json::from_str(&raw_result).expect("result json");
+    assert_eq!(stored_status, "failed");
+    assert_eq!(
+        stored_result["resume_context"]["approval_request"]["status"],
+        "denied"
     );
 }

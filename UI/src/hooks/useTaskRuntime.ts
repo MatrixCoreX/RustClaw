@@ -352,11 +352,15 @@ export function useTaskRuntime({
     }
   };
 
-  const approveTaskById = async (controlTaskId: string, approvalRequestId: string) => {
+  const decideTaskApprovalById = async (
+    controlTaskId: string,
+    approvalRequestId: string,
+    approvalDecision: "approve_once" | "deny",
+  ) => {
     const normalizedTaskId = controlTaskId.trim();
     const normalizedRequestId = approvalRequestId.trim();
     if (!normalizedTaskId || !normalizedRequestId) return;
-    setTaskControlSubmittingId(`approve:${normalizedTaskId}`);
+    setTaskControlSubmittingId(`${approvalDecision}:${normalizedTaskId}`);
     setTaskControlMessage(null);
     setTaskControlError(null);
     try {
@@ -366,14 +370,18 @@ export function useTaskRuntime({
         body: JSON.stringify({
           task_id: normalizedTaskId,
           approval_request_id: normalizedRequestId,
-          approve: true,
+          approval_decision: approvalDecision,
         }),
       });
       const body = (await res.json()) as ApiResponse<{ status?: string; task_id?: string }>;
       if (!res.ok || !body.ok) {
         throw new Error(body.error || `task approval failed (${res.status})`);
       }
-      setTaskControlMessage(t("已授权这一次操作，任务正在重新排队。", "This action was approved once and the task is queued again."));
+      setTaskControlMessage(
+        approvalDecision === "approve_once"
+          ? t("已授权这一次操作，任务正在重新排队。", "This action was approved once and the task is queued again.")
+          : t("已拒绝这一次操作，任务不会继续执行。", "This action was denied and the task will not continue."),
+      );
       await fetchActiveTasks(true);
       void queryTaskById(normalizedTaskId, false);
     } catch (err) {
@@ -605,7 +613,7 @@ export function useTaskRuntime({
     submitResumeForTask,
     cancelActiveTask,
     controlTaskById,
-    approveTaskById,
+    decideTaskApprovalById,
     controlTaskGoalById,
     submitInteractionTask,
     markTaskSubmitted,
