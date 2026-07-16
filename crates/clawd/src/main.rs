@@ -26,6 +26,7 @@ mod agent_hooks;
 mod agent_runtime_contract;
 mod answer_verifier;
 mod app_helpers;
+mod approval_grant;
 mod ask_flow;
 mod async_job_contract;
 mod bootstrap;

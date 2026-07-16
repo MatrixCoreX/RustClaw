@@ -901,6 +901,7 @@ pub(crate) async fn build_confirmation_required_resume_context(
     subtask_results: &[String],
     delivery_messages: &[String],
     detail: &str,
+    confirmation_step_ids: &[String],
 ) -> (String, serde_json::Value) {
     let completed_messages_for_ctx: Vec<String> = if delivery_messages.is_empty() {
         subtask_results.to_vec()
@@ -913,7 +914,7 @@ pub(crate) async fn build_confirmation_required_resume_context(
         .iter()
         .filter_map(crate::PlanStep::to_agent_action)
         .collect::<Vec<_>>();
-    let resume_context = json!({
+    let mut resume_context = json!({
         "resume_context_id": format!("ctx-{}", uuid::Uuid::new_v4()),
         "user_request": user_request,
         "goal": goal,
@@ -927,8 +928,18 @@ pub(crate) async fn build_confirmation_required_resume_context(
         },
         "remaining_steps": remaining_steps,
         "remaining_actions": remaining_actions,
-        "hint": "User must explicitly confirm before executing the remaining actions."
+        "message_key": "clawd.approval.explicit_confirmation_required",
+        "required_decision": crate::policy_decision::PolicyDecision::RequireConfirmation.as_token(),
     });
+    if let Some(binding) =
+        crate::approval_grant::binding_for_confirmation_steps(state, steps, confirmation_step_ids)
+    {
+        resume_context["approval_request"] = crate::approval_grant::pending_approval_request_json(
+            &task.task_id,
+            &binding,
+            crate::now_ts_u64() as i64,
+        );
+    }
     let language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
     let contract = crate::fallback::UserResponseContract::verifier_gate(

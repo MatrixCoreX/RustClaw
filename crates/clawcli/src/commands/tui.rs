@@ -97,10 +97,10 @@ pub(crate) fn run_tui(
                         base_url,
                         key,
                         task_id,
-                        None,
-                        Some("operator_tui"),
-                        None,
-                        None,
+                        task::TaskResumeRequest {
+                            resume_reason: Some("operator_tui"),
+                            ..Default::default()
+                        },
                     )?);
                 }
                 TuiCommand::Continue => {
@@ -112,10 +112,11 @@ pub(crate) fn run_tui(
                         base_url,
                         key,
                         task_id,
-                        None,
-                        Some("operator_tui_continue"),
-                        (!message.is_empty()).then_some(message),
-                        None,
+                        task::TaskResumeRequest {
+                            resume_reason: Some("operator_tui_continue"),
+                            user_message: (!message.is_empty()).then_some(message),
+                            ..Default::default()
+                        },
                     )?);
                 }
                 TuiCommand::Export => {

@@ -347,6 +347,38 @@ export function useTaskRuntime({
     }
   };
 
+  const approveTaskById = async (controlTaskId: string, approvalRequestId: string) => {
+    const normalizedTaskId = controlTaskId.trim();
+    const normalizedRequestId = approvalRequestId.trim();
+    if (!normalizedTaskId || !normalizedRequestId) return;
+    setTaskControlSubmittingId(`approve:${normalizedTaskId}`);
+    setTaskControlMessage(null);
+    setTaskControlError(null);
+    try {
+      const res = await apiFetch("/v1/tasks/resume-by-task-id", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          task_id: normalizedTaskId,
+          approval_request_id: normalizedRequestId,
+          approve: true,
+        }),
+      });
+      const body = (await res.json()) as ApiResponse<{ status?: string; task_id?: string }>;
+      if (!res.ok || !body.ok) {
+        throw new Error(body.error || `task approval failed (${res.status})`);
+      }
+      setTaskControlMessage(t("已授权这一次操作，任务正在重新排队。", "This action was approved once and the task is queued again."));
+      await fetchActiveTasks(true);
+      void queryTaskById(normalizedTaskId, false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setTaskControlError(message);
+    } finally {
+      setTaskControlSubmittingId(null);
+    }
+  };
+
   const controlTaskGoalById = async (
     operation: "edit" | "clear",
     controlTaskId: string,
@@ -539,6 +571,7 @@ export function useTaskRuntime({
     submitResumeForTask,
     cancelActiveTask,
     controlTaskById,
+    approveTaskById,
     controlTaskGoalById,
     submitInteractionTask,
     markTaskSubmitted,

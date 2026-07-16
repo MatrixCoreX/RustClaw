@@ -3,7 +3,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::Json;
 use serde_json::{json, Value};
 
-use super::{goal_by_task_id, GoalByTaskIdRequest};
+use super::{goal_by_task_id, resume_task_by_id, GoalByTaskIdRequest, ResumeTaskByIdRequest};
 
 const USER_KEY: &str = "goal-route-test-key";
 
@@ -81,6 +81,29 @@ fn stored_payload(state: &crate::AppState, task_id: &str) -> Value {
         )
         .expect("select payload");
     serde_json::from_str(&raw).expect("payload json")
+}
+
+fn set_pending_approval(state: &crate::AppState, task_id: &str, request_id: &str) {
+    let expires_at = crate::now_ts_u64().saturating_add(300);
+    let result = json!({
+        "resume_context": {
+            "approval_request": {
+                "schema_version": 1,
+                "request_id": request_id,
+                "task_id": task_id,
+                "status": "pending",
+                "action_fingerprint": "sha256:action",
+                "arguments_hash": "sha256:args",
+                "expires_at": expires_at,
+            }
+        }
+    });
+    let db = state.core.db.get().expect("get db");
+    db.execute(
+        "UPDATE tasks SET status = 'failed', result_json = ?2 WHERE task_id = ?1",
+        rusqlite::params![task_id, result.to_string()],
+    )
+    .expect("set pending approval");
 }
 
 #[tokio::test]
@@ -173,4 +196,64 @@ async fn goal_by_task_id_clears_goal_payload_through_authorized_route() {
     assert!(payload.get("goal").is_none());
     assert!(payload.get("task_goal").is_none());
     assert_eq!(payload["goal_cleared"], true);
+}
+
+#[tokio::test]
+async fn resume_failed_task_requires_and_applies_exact_approval_request() {
+    let task_id = "approval-route-task";
+    let request_id = "approval-route-1";
+    let state = state_with_goal_task(task_id, json!({"text": "task"}));
+    set_pending_approval(&state, task_id, request_id);
+
+    let (missing_status, _) = resume_task_by_id(
+        State(state.clone()),
+        auth_headers(),
+        Json(ResumeTaskByIdRequest {
+            task_id: task_id.to_string(),
+            checkpoint_id: None,
+            resume_reason: None,
+            user_message: None,
+            new_constraints: None,
+            approval_request_id: None,
+            approve: None,
+        }),
+    )
+    .await;
+    assert_eq!(missing_status, StatusCode::CONFLICT);
+
+    let (status, Json(resp)) = resume_task_by_id(
+        State(state.clone()),
+        auth_headers(),
+        Json(ResumeTaskByIdRequest {
+            task_id: task_id.to_string(),
+            checkpoint_id: None,
+            resume_reason: None,
+            user_message: None,
+            new_constraints: None,
+            approval_request_id: Some(request_id.to_string()),
+            approve: Some(true),
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(resp.ok);
+    assert_eq!(
+        resp.data.expect("response data")["status"],
+        "approval_grant_approved"
+    );
+
+    let db = state.core.db.get().expect("get db");
+    let (stored_status, raw_result): (String, String) = db
+        .query_row(
+            "SELECT status, result_json FROM tasks WHERE task_id = ?1",
+            rusqlite::params![task_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("select approved task");
+    let stored_result: Value = serde_json::from_str(&raw_result).expect("result json");
+    assert_eq!(stored_status, "queued");
+    assert_eq!(
+        stored_result["resume_context"]["approval_request"]["status"],
+        "approved"
+    );
 }

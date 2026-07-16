@@ -13,6 +13,16 @@ pub(crate) struct TaskStatusView {
     pub(crate) events: Vec<TaskEventLine>,
 }
 
+#[derive(Default)]
+pub(crate) struct TaskResumeRequest<'a> {
+    pub(crate) checkpoint_id: Option<&'a str>,
+    pub(crate) resume_reason: Option<&'a str>,
+    pub(crate) user_message: Option<&'a str>,
+    pub(crate) new_constraints: Option<Value>,
+    pub(crate) approval_request_id: Option<&'a str>,
+    pub(crate) approve: bool,
+}
+
 impl TaskStatusView {
     pub(crate) fn is_terminal(&self) -> bool {
         if let Some(state) = self.execution_state() {
@@ -328,26 +338,9 @@ pub(crate) fn resume_task_by_id(
     base_url: &str,
     key: &str,
     task_id: &str,
-    checkpoint_id: Option<&str>,
-    resume_reason: Option<&str>,
-    user_message: Option<&str>,
-    new_constraints: Option<serde_json::Value>,
+    request: TaskResumeRequest<'_>,
 ) -> Result<serde_json::Value> {
-    let mut payload = json!({ "task_id": task_id });
-    if let Some(obj) = payload.as_object_mut() {
-        if let Some(checkpoint_id) = non_empty_token(checkpoint_id) {
-            obj.insert("checkpoint_id".to_string(), json!(checkpoint_id));
-        }
-        if let Some(resume_reason) = non_empty_token(resume_reason) {
-            obj.insert("resume_reason".to_string(), json!(resume_reason));
-        }
-        if let Some(user_message) = non_empty_token(user_message) {
-            obj.insert("user_message".to_string(), json!(user_message));
-        }
-        if let Some(new_constraints) = new_constraints {
-            obj.insert("new_constraints".to_string(), new_constraints);
-        }
-    }
+    let payload = resume_task_payload(task_id, request);
     task_control_by_id(
         base_url,
         key,
@@ -355,6 +348,34 @@ pub(crate) fn resume_task_by_id(
         "resume-task",
         payload,
     )
+}
+
+fn resume_task_payload(task_id: &str, request: TaskResumeRequest<'_>) -> Value {
+    let mut payload = json!({ "task_id": task_id });
+    if let Some(obj) = payload.as_object_mut() {
+        if let Some(checkpoint_id) = non_empty_token(request.checkpoint_id) {
+            obj.insert("checkpoint_id".to_string(), json!(checkpoint_id));
+        }
+        if let Some(resume_reason) = non_empty_token(request.resume_reason) {
+            obj.insert("resume_reason".to_string(), json!(resume_reason));
+        }
+        if let Some(user_message) = non_empty_token(request.user_message) {
+            obj.insert("user_message".to_string(), json!(user_message));
+        }
+        if let Some(new_constraints) = request.new_constraints {
+            obj.insert("new_constraints".to_string(), new_constraints);
+        }
+        if let Some(approval_request_id) = non_empty_token(request.approval_request_id) {
+            obj.insert(
+                "approval_request_id".to_string(),
+                json!(approval_request_id),
+            );
+        }
+        if request.approve {
+            obj.insert("approve".to_string(), json!(true));
+        }
+    }
+    payload
 }
 
 pub(crate) fn update_goal_by_task_id(

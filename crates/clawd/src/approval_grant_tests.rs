@@ -1,0 +1,101 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
+
+use claw_core::config::{AgentConfig, ToolsConfig};
+use serde_json::json;
+
+use super::*;
+use crate::{AgentRuntimeConfig, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID};
+
+fn test_state() -> AppState {
+    let agents_by_id = HashMap::from([(
+        DEFAULT_AGENT_ID.to_string(),
+        AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
+    )]);
+    AppState {
+        core: crate::CoreServices {
+            agents_by_id: Arc::new(agents_by_id),
+            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                registry: None,
+                skills_list: Arc::new(HashSet::new()),
+            }))),
+            ..crate::CoreServices::test_default()
+        },
+        skill_rt: crate::SkillRuntime {
+            tools_policy: Arc::new(
+                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+            ),
+            ..crate::SkillRuntime::test_default()
+        },
+        policy: crate::PolicyConfig::test_default(),
+        worker: crate::WorkerConfig::test_default(),
+        metrics: crate::TaskMetricsRegistry::default(),
+        channels: crate::ChannelConfig::default(),
+        reload_ctx: crate::ReloadContext::default(),
+        ask_states: crate::AskStateRegistry::default(),
+    }
+}
+
+fn step(args: serde_json::Value) -> PlanStep {
+    PlanStep {
+        step_id: "step-1".to_string(),
+        action_type: "call_skill".to_string(),
+        skill: "write_file".to_string(),
+        args,
+        depends_on: Vec::new(),
+        why: String::new(),
+    }
+}
+
+#[test]
+fn approval_binding_is_stable_across_json_object_key_order() {
+    let state = test_state();
+    let left = step(json!({"path":"notes.txt","content":"alpha"}));
+    let right = step(json!({"content":"alpha","path":"notes.txt"}));
+    let ids = vec!["step-1".to_string()];
+
+    let left = binding_for_confirmation_steps(&state, &[left], &ids).expect("left binding");
+    let right = binding_for_confirmation_steps(&state, &[right], &ids).expect("right binding");
+
+    assert_eq!(left, right);
+}
+
+#[test]
+fn approval_binding_changes_when_arguments_change() {
+    let state = test_state();
+    let ids = vec!["step-1".to_string()];
+    let left = binding_for_confirmation_steps(
+        &state,
+        &[step(json!({"path":"notes.txt","content":"alpha"}))],
+        &ids,
+    )
+    .expect("left binding");
+    let right = binding_for_confirmation_steps(
+        &state,
+        &[step(json!({"path":"notes.txt","content":"beta"}))],
+        &ids,
+    )
+    .expect("right binding");
+
+    assert_eq!(left.action_fingerprint, right.action_fingerprint);
+    assert_ne!(left.arguments_hash, right.arguments_hash);
+}
+
+#[test]
+fn pending_request_is_task_bound_and_expiring() {
+    let binding = ApprovalBinding {
+        action_fingerprint: "sha256:action".to_string(),
+        arguments_hash: "sha256:args".to_string(),
+        action_count: 1,
+        targets: vec!["write_file".to_string()],
+    };
+    let request = pending_approval_request_json("task-1", &binding, 100);
+
+    assert_eq!(request["task_id"], "task-1");
+    assert_eq!(request["status"], "pending");
+    assert_eq!(request["issued_at"], 100);
+    assert_eq!(request["expires_at"], 100 + APPROVAL_GRANT_TTL_SECONDS);
+    assert!(request["request_id"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("approval-")));
+}

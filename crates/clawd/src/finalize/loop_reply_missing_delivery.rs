@@ -27,6 +27,12 @@ pub(super) async fn pending_confirmation_resume_payload(
         return None;
     }
     let plan = round.plan_result.as_ref()?;
+    let confirmation_step_ids = verify
+        .issues
+        .iter()
+        .filter(|issue| issue.kind == crate::verifier::VerifyIssueKind::ConfirmationRequired)
+        .map(|issue| issue.step_id.clone())
+        .collect::<Vec<_>>();
     let detail = verify
         .issues
         .iter()
@@ -43,6 +49,7 @@ pub(super) async fn pending_confirmation_resume_payload(
             &loop_state.subtask_results,
             &loop_state.delivery_messages,
             detail,
+            &confirmation_step_ids,
         )
         .await,
     )

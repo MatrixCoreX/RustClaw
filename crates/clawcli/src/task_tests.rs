@@ -1,4 +1,7 @@
-use super::{async_final_result_value, result_text_from_result_json, TaskStatusView};
+use super::{
+    async_final_result_value, result_text_from_result_json, resume_task_payload, TaskResumeRequest,
+    TaskStatusView,
+};
 
 #[test]
 fn lifecycle_summary_tokens_include_budget_snapshot() {
@@ -112,4 +115,29 @@ fn async_final_result_value_extracts_terminal_output() {
         result_text_from_result_json(&result_json).as_deref(),
         Some("ASYNC_OUTPUT_TOKEN\n")
     );
+}
+
+#[test]
+fn resume_payload_only_carries_explicit_approval_grant() {
+    let ordinary = resume_task_payload(
+        "task-1",
+        TaskResumeRequest {
+            resume_reason: Some("user_continue"),
+            ..Default::default()
+        },
+    );
+    assert_eq!(ordinary["task_id"], "task-1");
+    assert!(ordinary.get("approve").is_none());
+    assert!(ordinary.get("approval_request_id").is_none());
+
+    let approved = resume_task_payload(
+        "task-1",
+        TaskResumeRequest {
+            approval_request_id: Some(" approval-1 "),
+            approve: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(approved["approval_request_id"], "approval-1");
+    assert_eq!(approved["approve"], true);
 }

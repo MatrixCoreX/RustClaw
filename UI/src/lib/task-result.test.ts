@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildReplaySummary,
+  buildTaskApprovalRequest,
   buildTaskGoalView,
   buildTaskOutcome,
   buildTaskPermissionView,
@@ -23,6 +24,43 @@ test("extracts visible task text before falling back to error text", () => {
   };
 
   assert.equal(extractTaskText(result), "dry_run=true\noutput_path=/tmp/a.png");
+});
+
+test("builds a task-bound approval request from structured resume context", () => {
+  const result: TaskQueryResponse = {
+    task_id: "task-approval",
+    status: "failed",
+    result_json: {
+      resume_context: {
+        approval_request: {
+          schema_version: 1,
+          request_id: "approval-1",
+          task_id: "task-approval",
+          status: "pending",
+          targets: ["run_cmd", "fs_basic"],
+          action_count: 2,
+          expires_at: 1_800_000_000,
+          reversible: false,
+          effect: "mutating_or_external_action",
+          reason_code: "explicit_approval_required",
+        },
+      },
+    },
+  };
+
+  assert.deepEqual(buildTaskApprovalRequest(result), {
+    requestId: "approval-1",
+    status: "pending",
+    targets: ["run_cmd", "fs_basic"],
+    actionCount: 2,
+    expiresAt: 1_800_000_000,
+    reversible: false,
+    effect: "mutating_or_external_action",
+    reasonCode: "explicit_approval_required",
+  });
+
+  result.task_id = "another-task";
+  assert.equal(buildTaskApprovalRequest(result), null);
 });
 
 test("builds completed task outcome from machine task_outcome fields", () => {

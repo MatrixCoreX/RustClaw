@@ -1133,6 +1133,29 @@ pub(crate) fn verify_plan(
         &mut issues,
     );
 
+    let confirmation_step_ids = crate::approval_grant::confirmation_step_ids(&issues);
+    let mut approval_grant_decision = None;
+    if matches!(mode, VerifyMode::Enforce)
+        && needs_confirmation
+        && !issues
+            .iter()
+            .any(|issue| issue_blocks_in_enforce(issue.kind))
+    {
+        if let Some(binding) = crate::approval_grant::binding_for_confirmation_steps(
+            state,
+            &effective_plan_result.steps,
+            &confirmation_step_ids,
+        ) {
+            let outcome = crate::repo::consume_task_approval_grant(state, &task.task_id, &binding)
+                .unwrap_or(crate::repo::TaskApprovalConsumeOutcome::Conflict);
+            approval_grant_decision = Some(outcome.decision_json(&binding));
+            if outcome == crate::repo::TaskApprovalConsumeOutcome::Consumed {
+                issues.retain(|issue| issue.kind != VerifyIssueKind::ConfirmationRequired);
+                needs_confirmation = false;
+            }
+        }
+    }
+
     let shadow_blocked_reason = first_shadow_blocked_reason(&issues);
     let blocked_reason = if matches!(mode, VerifyMode::Enforce) {
         shadow_blocked_reason.clone()
@@ -1142,7 +1165,7 @@ pub(crate) fn verify_plan(
 
     let approved = blocked_reason.is_none();
     let approved_steps = effective_plan_result.steps.clone();
-    let permission_decision = verify_permission_decision_json(
+    let mut permission_decision = verify_permission_decision_json(
         state,
         &effective_plan_result,
         mode,
@@ -1152,6 +1175,17 @@ pub(crate) fn verify_plan(
         shadow_blocked_reason.as_deref(),
         &issues,
     );
+    if let Some(grant_decision) = approval_grant_decision {
+        if !needs_confirmation {
+            crate::approval_grant::apply_consumed_grant_to_permission_decision(
+                &mut permission_decision,
+                &confirmation_step_ids,
+                grant_decision,
+            );
+        } else {
+            permission_decision["approval_grant"] = grant_decision;
+        }
+    }
     audit_permission_decision(state, task, &permission_decision);
     let rewritten_steps = if issues
         .iter()
@@ -1205,6 +1239,9 @@ fn planner_internal_tool_is_visible(normalized_skill: &str) -> bool {
     matches!(normalized_skill, "subagent")
 }
 
+#[cfg(test)]
+#[path = "verifier_approval_tests.rs"]
+mod approval_tests;
 #[cfg(test)]
 #[path = "verifier_permission_tests.rs"]
 mod permission_tests;
