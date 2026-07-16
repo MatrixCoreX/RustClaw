@@ -112,7 +112,7 @@ auto_invocable = true
 input_schema = { type = "object", properties = { action = { type = "string" }, package = { type = "string" }, dry_run = { type = "boolean" } } }
 planner_capabilities = [
   { name = "package.detect_manager", action = "detect", effect = "observe" },
-  { name = "package.install", action = "install", effect = "mutate", required = ["package"], risk_level = "high" },
+  { name = "package.install", action = "install", effect = "mutate", required = ["package"], risk_level = "high", subprocess = true, package_install = true, privilege_escalation = false },
 ]
 
 [[skills]]
@@ -1132,6 +1132,7 @@ fn verifier_issue_kinds_expose_stable_machine_fields() {
         VerifyIssueKind::UnresolvedTemplateArg,
         VerifyIssueKind::InvalidDependsOn,
         VerifyIssueKind::ConfirmationRequired,
+        VerifyIssueKind::SandboxPolicyDenied,
         VerifyIssueKind::RiskBudgetExceeded,
         VerifyIssueKind::PrimaryFallbackConflict,
         VerifyIssueKind::BoundaryClarifyRequired,

@@ -23,8 +23,8 @@ use creation_targets::{
 use permission::{
     audit_permission_decision, context_bundle_has_redacted_workspace_child_locator,
     push_unbound_locator_boundary_clarify_issue, step_reads_path_content_under_unbound_locator,
-    validation_run_cmd_can_run_autonomously, verify_permission_decision_json,
-    workspace_filesystem_mutation_can_run_autonomously,
+    step_sandbox_denial_reason, validation_run_cmd_can_run_autonomously,
+    verify_permission_decision_json, workspace_filesystem_mutation_can_run_autonomously,
 };
 use risk_policy::high_risk_side_effect_requires_confirmation;
 use templates::{
@@ -62,6 +62,7 @@ pub(crate) enum VerifyIssueKind {
     UnresolvedTemplateArg,
     InvalidDependsOn,
     ConfirmationRequired,
+    SandboxPolicyDenied,
     RiskBudgetExceeded,
     PrimaryFallbackConflict,
     BoundaryClarifyRequired,
@@ -90,6 +91,7 @@ impl VerifyIssueKind {
             Self::UnresolvedTemplateArg => "UnresolvedTemplateArg",
             Self::InvalidDependsOn => "InvalidDependsOn",
             Self::ConfirmationRequired => "ConfirmationRequired",
+            Self::SandboxPolicyDenied => "SandboxPolicyDenied",
             Self::RiskBudgetExceeded => "RiskBudgetExceeded",
             Self::PrimaryFallbackConflict => "PrimaryFallbackConflict",
             Self::BoundaryClarifyRequired => "BoundaryClarifyRequired",
@@ -115,7 +117,7 @@ impl VerifyIssueKind {
             | Self::RecipeInspectBeforeMutateRequired
             | Self::RecipeValidationAfterMutateRequired
             | Self::RecipeTargetScopeRequired => FailureAttribution::CodeGap,
-            Self::ConfirmationRequired | Self::RiskBudgetExceeded => {
+            Self::ConfirmationRequired | Self::SandboxPolicyDenied | Self::RiskBudgetExceeded => {
                 FailureAttribution::PermissionDenied
             }
             Self::ContractActionRejected
@@ -134,6 +136,7 @@ impl VerifyIssueKind {
             Self::UnresolvedTemplateArg => "verify_unresolved_template_arg",
             Self::InvalidDependsOn => "verify_invalid_depends_on",
             Self::ConfirmationRequired => "verify_confirmation_required",
+            Self::SandboxPolicyDenied => "verify_sandbox_policy_denied",
             Self::RiskBudgetExceeded => "verify_risk_budget_exceeded",
             Self::PrimaryFallbackConflict => "verify_primary_fallback_conflict",
             Self::BoundaryClarifyRequired => "verify_boundary_clarify_required",
@@ -160,6 +163,7 @@ impl VerifyIssueKind {
             Self::UnresolvedTemplateArg => "unresolved_template_arg",
             Self::InvalidDependsOn => "invalid_depends_on",
             Self::ConfirmationRequired => "confirmation_required",
+            Self::SandboxPolicyDenied => "sandbox_policy_denied",
             Self::RiskBudgetExceeded => "risk_budget_exceeded",
             Self::PrimaryFallbackConflict => "primary_fallback_conflict",
             Self::BoundaryClarifyRequired => "boundary_clarify_required",
@@ -182,6 +186,7 @@ impl VerifyIssueKind {
             Self::UnresolvedTemplateArg => "clawd.verify.unresolved_template_arg",
             Self::InvalidDependsOn => "clawd.verify.invalid_depends_on",
             Self::ConfirmationRequired => "clawd.verify.confirmation_required",
+            Self::SandboxPolicyDenied => "clawd.verify.sandbox_policy_denied",
             Self::RiskBudgetExceeded => "clawd.verify.risk_budget_exceeded",
             Self::PrimaryFallbackConflict => "clawd.verify.primary_fallback_conflict",
             Self::BoundaryClarifyRequired => "clawd.verify.boundary_clarify_required",
@@ -408,6 +413,7 @@ fn issue_is_policy_denial(kind: VerifyIssueKind) -> bool {
         VerifyIssueKind::SkillNotVisible
             | VerifyIssueKind::CapabilityUnavailable
             | VerifyIssueKind::ConfirmationRequired
+            | VerifyIssueKind::SandboxPolicyDenied
             | VerifyIssueKind::RiskBudgetExceeded
             | VerifyIssueKind::ContractActionRejected
             | VerifyIssueKind::ContractMissing
@@ -603,6 +609,7 @@ fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
             | VerifyIssueKind::UnresolvedTemplateArg
             | VerifyIssueKind::InvalidDependsOn
             | VerifyIssueKind::PrimaryFallbackConflict
+            | VerifyIssueKind::SandboxPolicyDenied
             | VerifyIssueKind::RiskBudgetExceeded
             | VerifyIssueKind::BoundaryClarifyRequired
             | VerifyIssueKind::RecipeInspectBeforeMutateRequired
@@ -1065,7 +1072,16 @@ pub(crate) fn verify_plan(
                 &normalized_skill,
                 &step.args,
             );
-            if !safe_autonomous_creation
+            let sandbox_denial = step_sandbox_denial_reason(state, &normalized_skill, &step.args);
+            if let Some(reason) = sandbox_denial {
+                issues.push(VerifyIssue {
+                    step_id: step.step_id.clone(),
+                    kind: VerifyIssueKind::SandboxPolicyDenied,
+                    detail: format!("reason_code={reason}"),
+                    missing_fields: Vec::new(),
+                });
+            }
+            let risk_requires_confirmation = !safe_autonomous_creation
                 && !autonomous_workspace_fs_mutation
                 && !autonomous_validation_run_cmd
                 && !registry_declares_non_mutating_planner_action(
@@ -1077,8 +1093,13 @@ pub(crate) fn verify_plan(
                     &normalized_skill,
                     Some(&step.args),
                 ) || is_confirmation_like_skill(&normalized_skill)
-                    || high_risk_side_effect_requires_confirmation(effect, step_risk, &step.args))
-            {
+                    || high_risk_side_effect_requires_confirmation(effect, step_risk, &step.args));
+            let step_requires_confirmation = state.skill_rt.tools_policy.approval_required(
+                risk_requires_confirmation,
+                effective_plan_result.needs_confirmation,
+                effect.mutates || matches!(step_risk, SkillRiskLevel::High),
+            );
+            if sandbox_denial.is_none() && step_requires_confirmation {
                 needs_confirmation = true;
                 issues.push(VerifyIssue {
                     step_id: step.step_id.clone(),
@@ -1170,6 +1191,14 @@ pub(crate) fn verify_plan(
         rewritten_steps,
         issues,
     }
+}
+
+pub(crate) fn skill_sandbox_denial_reason(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &Value,
+) -> Option<&'static str> {
+    permission::step_sandbox_denial_reason(state, normalized_skill, args)
 }
 
 fn planner_internal_tool_is_visible(normalized_skill: &str) -> bool {

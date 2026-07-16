@@ -760,6 +760,9 @@ fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
             filesystem_write: Some(false),
             external_publish: Some(true),
             credential_access: Some(true),
+            subprocess: Some(false),
+            package_install: Some(false),
+            privilege_escalation: Some(false),
         }]),
         capabilities: Some(vec!["media.video".to_string()]),
     };
@@ -781,6 +784,9 @@ fn capability_items_flatten_skill_metadata_for_cli_and_ui() {
             && item.filesystem_write == Some(false)
             && item.external_publish == Some(true)
             && item.credential_access == Some(true)
+            && item.subprocess == Some(false)
+            && item.package_install == Some(false)
+            && item.privilege_escalation == Some(false)
     }));
     assert!(items.iter().any(|item| {
         item.skill_name == "video_generate"

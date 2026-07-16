@@ -256,6 +256,9 @@ export interface PlannerCapabilityPolicyItem {
   filesystem_write?: boolean | null;
   external_publish?: boolean | null;
   credential_access?: boolean | null;
+  subprocess?: boolean | null;
+  package_install?: boolean | null;
+  privilege_escalation?: boolean | null;
 }
 
 export interface SkillsResponse {

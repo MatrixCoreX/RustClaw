@@ -222,6 +222,9 @@ export function skillIsolationLabels(item: SkillListItem | undefined, lang: UiLa
     if (policy.filesystem_write) push(copy(lang, "可改文件", "Can edit files"));
     if (policy.external_publish) push(copy(lang, "可对外发布", "Can publish"));
     if (policy.credential_access) push(copy(lang, "使用密钥", "Uses keys"));
+    if (policy.subprocess) push(copy(lang, "运行子进程", "Runs subprocesses"));
+    if (policy.package_install) push(copy(lang, "安装软件包", "Installs packages"));
+    if (policy.privilege_escalation) push(copy(lang, "可能提权", "May elevate privileges"));
   }
   return labels;
 }

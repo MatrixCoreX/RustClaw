@@ -147,6 +147,15 @@ fn planner_capability_tokens(manifest: &SkillManifest) -> Vec<String> {
             if let Some(credential_access) = capability.credential_access {
                 attrs.push(format!("credential_access={credential_access}"));
             }
+            if let Some(subprocess) = capability.subprocess {
+                attrs.push(format!("subprocess={subprocess}"));
+            }
+            if let Some(package_install) = capability.package_install {
+                attrs.push(format!("package_install={package_install}"));
+            }
+            if let Some(privilege_escalation) = capability.privilege_escalation {
+                attrs.push(format!("privilege_escalation={privilege_escalation}"));
+            }
             if let Some(final_answer_shape) = capability.final_answer_shape.as_deref() {
                 if !final_answer_shape.trim().is_empty() {
                     attrs.push(format!("final_answer_shape={}", final_answer_shape.trim()));

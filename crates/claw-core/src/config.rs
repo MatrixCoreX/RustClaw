@@ -1094,10 +1094,56 @@ impl Default for MemoryConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSandboxMode {
+    ReadOnly,
+    #[default]
+    WorkspaceWrite,
+    IsolatedWorktree,
+    DangerFull,
+}
+
+impl ToolSandboxMode {
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read_only",
+            Self::WorkspaceWrite => "workspace_write",
+            Self::IsolatedWorktree => "isolated_worktree",
+            Self::DangerFull => "danger_full",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolApprovalPolicy {
+    Never,
+    #[default]
+    OnRisk,
+    OnRequest,
+    Always,
+}
+
+impl ToolApprovalPolicy {
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::OnRisk => "on_risk",
+            Self::OnRequest => "on_request",
+            Self::Always => "always",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ToolsConfig {
     #[serde(default = "default_tools_profile")]
-    pub profile: String,
+    pub access_profile: String,
+    #[serde(default)]
+    pub sandbox_mode: ToolSandboxMode,
+    #[serde(default)]
+    pub approval_policy: ToolApprovalPolicy,
     #[serde(default)]
     pub allow: Vec<String>,
     #[serde(default)]
@@ -1121,7 +1167,9 @@ pub struct ToolsConfig {
 impl Default for ToolsConfig {
     fn default() -> Self {
         Self {
-            profile: default_tools_profile(),
+            access_profile: default_tools_profile(),
+            sandbox_mode: ToolSandboxMode::default(),
+            approval_policy: ToolApprovalPolicy::default(),
             allow: Vec::new(),
             deny: Vec::new(),
             cmd_timeout_seconds: default_tool_cmd_timeout_seconds(),

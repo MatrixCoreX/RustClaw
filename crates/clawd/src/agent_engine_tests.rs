@@ -65,6 +65,9 @@ fn quick_index_includes_planner_capability_metadata() {
         filesystem_write: Some(false),
         external_publish: Some(false),
         credential_access: Some(false),
+        subprocess: Some(false),
+        package_install: Some(false),
+        privilege_escalation: Some(false),
         final_answer_shape: Some("path_list".to_string()),
     }]);
     manifest.risk_level = Some(SkillRiskLevel::Medium);

@@ -1,11 +1,13 @@
-use claw_core::config::ToolsConfig;
+use claw_core::config::{ToolApprovalPolicy, ToolSandboxMode, ToolsConfig};
 
-use super::policy::ToolsPolicy;
+use super::policy::{SandboxRequirements, ToolsPolicy};
 
 #[test]
 fn default_coding_profile_is_an_explicit_local_capability_set() {
     let config = ToolsConfig::default();
-    assert_eq!(config.profile, "coding");
+    assert_eq!(config.access_profile, "coding");
+    assert_eq!(config.sandbox_mode.as_token(), "workspace_write");
+    assert_eq!(config.approval_policy.as_token(), "on_risk");
     assert!(!config.allow_sudo);
     assert!(!config.allow_path_outside_workspace);
 
@@ -33,8 +35,98 @@ fn default_coding_profile_is_an_explicit_local_capability_set() {
 #[test]
 fn full_profile_remains_an_explicit_operator_opt_in() {
     let mut config = ToolsConfig::default();
-    config.profile = "full".to_string();
+    config.access_profile = "full".to_string();
     let policy = ToolsPolicy::from_config(&config).expect("full tools policy");
     assert!(policy.is_allowed("skill:x", None));
     assert!(policy.is_allowed("skill:service_control", None));
+}
+
+#[test]
+fn sandbox_mode_and_approval_policy_are_independent() {
+    let mut config = ToolsConfig::default();
+    config.sandbox_mode = ToolSandboxMode::ReadOnly;
+    config.approval_policy = ToolApprovalPolicy::Always;
+    let policy = ToolsPolicy::from_config(&config).expect("tools policy");
+
+    assert_eq!(policy.sandbox_mode_token(), "read_only");
+    assert_eq!(policy.approval_policy_token(), "always");
+    assert_eq!(
+        policy.sandbox_denial(SandboxRequirements {
+            mutates: true,
+            filesystem_write: true,
+            ..SandboxRequirements::default()
+        }),
+        Some("sandbox_read_only_write_denied")
+    );
+    assert!(policy.approval_required(false, false, true));
+}
+
+#[test]
+fn workspace_sandbox_separates_brokered_network_from_subprocess_access() {
+    let policy = ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy");
+    assert_eq!(
+        policy.sandbox_denial(SandboxRequirements {
+            network_access: true,
+            ..SandboxRequirements::default()
+        }),
+        None
+    );
+    assert_eq!(
+        policy.sandbox_denial(SandboxRequirements {
+            network_access: true,
+            subprocess: true,
+            ..SandboxRequirements::default()
+        }),
+        Some("sandbox_workspace_external_denied")
+    );
+    assert_eq!(
+        policy.sandbox_denial(SandboxRequirements {
+            package_install: true,
+            ..SandboxRequirements::default()
+        }),
+        Some("sandbox_workspace_privilege_denied")
+    );
+}
+
+#[test]
+fn subprocess_requires_declared_isolation_in_restrictive_modes() {
+    let mut config = ToolsConfig {
+        sandbox_mode: ToolSandboxMode::ReadOnly,
+        ..ToolsConfig::default()
+    };
+    let read_only = ToolsPolicy::from_config(&config).expect("read-only policy");
+    assert_eq!(
+        read_only.sandbox_denial(SandboxRequirements {
+            subprocess: true,
+            ..SandboxRequirements::default()
+        }),
+        Some("sandbox_read_only_subprocess_denied")
+    );
+    assert_eq!(
+        read_only.sandbox_denial(SandboxRequirements {
+            subprocess: true,
+            isolation_profile: Some("read_only"),
+            ..SandboxRequirements::default()
+        }),
+        None
+    );
+
+    config.sandbox_mode = ToolSandboxMode::IsolatedWorktree;
+    let worktree = ToolsPolicy::from_config(&config).expect("worktree policy");
+    assert_eq!(
+        worktree.sandbox_denial(SandboxRequirements {
+            subprocess: true,
+            isolation_profile: Some("local_current_workspace"),
+            ..SandboxRequirements::default()
+        }),
+        Some("sandbox_worktree_subprocess_isolation_required")
+    );
+    assert_eq!(
+        worktree.sandbox_denial(SandboxRequirements {
+            subprocess: true,
+            isolation_profile: Some("local_worktree"),
+            ..SandboxRequirements::default()
+        }),
+        None
+    );
 }

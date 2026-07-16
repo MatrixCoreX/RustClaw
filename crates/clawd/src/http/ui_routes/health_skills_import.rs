@@ -530,6 +530,9 @@ fn planner_capability_policy_items(
             filesystem_write: capability.filesystem_write,
             external_publish: capability.external_publish,
             credential_access: capability.credential_access,
+            subprocess: capability.subprocess,
+            package_install: capability.package_install,
+            privilege_escalation: capability.privilege_escalation,
         })
         .collect::<Vec<_>>();
     (!items.is_empty()).then_some(items)
@@ -588,6 +591,12 @@ struct CapabilityListItem {
     external_publish: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     credential_access: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subprocess: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package_install: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    privilege_escalation: Option<bool>,
 }
 
 fn capability_items_from_skill_items(skill_items: &[SkillListItem]) -> Vec<CapabilityListItem> {
@@ -646,6 +655,9 @@ fn capability_list_item(
         filesystem_write: policy.and_then(|item| item.filesystem_write),
         external_publish: policy.and_then(|item| item.external_publish),
         credential_access: policy.and_then(|item| item.credential_access),
+        subprocess: policy.and_then(|item| item.subprocess),
+        package_install: policy.and_then(|item| item.package_install),
+        privilege_escalation: policy.and_then(|item| item.privilege_escalation),
     }
 }
 
